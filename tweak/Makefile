@@ -70,6 +70,21 @@ SG_METALLIB_FLAGS := -O3
 $(SG_METAL_LIB): %.metallib: %.metal
 	@echo "METALC $@"
 	@xcrun -sdk $(SG_METALLIB_SDK) metal $(SG_METALLIB_FLAGS) -o $@ $<
+	@test -s $@ || { echo "METALC produced nothing: $@"; exit 1; }
+
+# The pattern rule above is not enough on its own: make only runs a rule when something
+# asks for its target, and nothing in Theos's graph asks for the .metallib — LDFLAGS is a
+# string, not a dependency. So the linker was handed a path to a file nothing had built:
+#   ld: file cannot be open()ed, errno=2 path=Sources/.../SGRMetalShaders.metallib
+#
+# before-spotifyglass-all is the hook Theos runs before it compiles or links, and it is a
+# real make target, so listing the library as its prerequisite builds it first. Ordering
+# holds because make finishes prerequisites before running the recipe.
+#
+# If a future Theos drops that hook the metallib silently stops being built and the link
+# fails on a missing file again, so the link line below prints what it is embedding.
+before-spotifyglass-all: $(SG_METAL_LIB)
+	@echo "SECTCREATE input: $(SG_METAL_LIB)"
 
 # 改shader 后要重新编,靠 .metal/.metallib 的时间戳即可,不需要在解析时删产物 ——
 # $(shell rm) 会在 make 还没决定是否重建时就把库删掉,而这一行的求值时机早于目标判断,
@@ -80,7 +95,11 @@ $(SG_METAL_LIB): %.metallib: %.metal
 #   ld: unknown file type in 'SGRMetalShaders.metallib'
 # -sectcreate 才是把任意文件塞进 Mach-O 某个 section 的正确方式,而 __TEXT,__metallib
 # 正是 -newLibraryWithURL: 在 dylib 里找 shader 的位置。
-spotifyglass_LDFLAGS += -Wl,-sectcreate,__TEXT,__metallib,$(SG_METAL_LIB)
+#
+# 路径取绝对值:ld 在链接阶段的工作目录不是 tweak/,相对路径在那里解析不到
+#   ("path=Sources/Redesigned/MetalVisualiser/SGRMetalShaders.metallib").
+SG_METAL_LIB_ABS := $(abspath $(SG_METAL_LIB))
+spotifyglass_LDFLAGS += -Wl,-sectcreate,__TEXT,__metallib,$(SG_METAL_LIB_ABS)
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
