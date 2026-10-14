@@ -99,9 +99,8 @@ jobs:
           cat > /tmp/probe.m <<'EOF'
           #import <MetalKit/MetalKit.h>
           #import <Metal/Metal.h>
-          // Do the offset-taking entry points exist? They have been the stable spelling
-          // alongside the index-only ones, so if both are gone the SDK moved these selectors
-          // and the log will say so on its own.
+          // The offset-taking spellings. If these compile and the index-only ones
+          // do not, the index-only ones are gone from this SDK.
           void ask(id<MTLRenderCommandEncoder> e, id<MTLTexture> t,
                    id<MTLSamplerState> s, const void *b) {
               [e setRenderPipelineState:(id)nil];
@@ -109,7 +108,6 @@ jobs:
               [e setFragmentBytes:b length:0 atIndex:0];
               [e setFragmentSamplerState:s offset:0 atIndex:0];
           }
-          // And the blit side.
           void askBlit(id<MTLBlitCommandEncoder> bl, id<MTLTexture> t, const void *b) {
               [bl fillRegion:MTLRegionMake2D(0,0,1,1) mipmapLevel:0 withBytes:b bytesPerRow:4];
           }
