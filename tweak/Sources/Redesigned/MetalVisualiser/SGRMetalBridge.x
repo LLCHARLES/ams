@@ -19,6 +19,9 @@
 #import "Redesigned/Player/SGRSpectrum.h"
 #import "Shared/Player/PlayerState.h"
 #import "Redesigned/MetalVisualiser/SGRMetalVisualiser.h"
+// 自己也在实现里import:头文件是这些声明的唯一来源,不一致时编译器会当场报冲突,
+// 而不是等到调用方的 .o 里才炸。
+#import "Redesigned/MetalVisualiser/SGRMetalBridge.h"
 
 static char kMetalKey;
 static __weak SGRMetalVisualiser *sg_metal;
