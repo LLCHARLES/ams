@@ -77,12 +77,15 @@ $(SG_METAL_LIB): %.metallib: %.metal
 # string, not a dependency. So the linker was handed a path to a file nothing had built:
 #   ld: file cannot be open()ed, errno=2 path=Sources/.../SGRMetalShaders.metallib
 #
-# Theos already defines before-spotifyglass-all, so this cannot be a plain `:` rule:
-#   target file 'before-spotifyglass-all' has both : and :: entries
-# A double-colon rule adds a prerequisite without redefining the target's recipe, which is
-# what is wanted — the library gets built before Theos compiles, and Theos's own recipe for
-# the hook still runs.
-before-spotifyglass-all:: $(SG_METAL_LIB)
+# internal-library-all_ is the target Theos's link rule hangs the dylib off (library.mk:
+# "internal-library-all_:: .../spotifyglass.dylib"), so listing the library here puts it
+# directly into the link's own prerequisite chain — make finishes it before ld runs.
+#
+# Double-colon, not single: Theos declares these targets too, and a single-colon rule would
+# make the target two different things at once:
+#   target file 'before-spotifyglass-all' has both : and :: entries. Stop.
+# A double-colon rule adds the prerequisite without redefining the target's recipe.
+internal-library-all_:: $(SG_METAL_LIB)
 	@echo "SECTCREATE input: $(SG_METAL_LIB)"
 
 # 改shader 后要重新编,靠 .metal/.metallib 的时间戳即可,不需要在解析时删产物 ——
