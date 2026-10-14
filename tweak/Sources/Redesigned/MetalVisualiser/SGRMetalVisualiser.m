@@ -106,8 +106,9 @@ static const float kBandsRow = 127.0f, kLevelsRow = 255.0f;
 static const NSUInteger kBlurSide = 512;
 // 没有分析结果时的电平(SGRSpectrumFloor)。
 static const float kFloorDB = SGRSpectrumFloor;
-// 频段顶端对齐:最近几秒里最响的频段落在顶部,安静的曲子也动得一样多。
-static const float kTopDB = 0.0f, kRangeDB = 30.0f;
+// 归一化的最小跨度。顶端对齐由sg_peak 自适应完成 —— 见 +levelAt,所以安静的曲子
+// 和响的曲子动得一样多。
+static const float kRangeDB = 30.0f;
 // 起落速度(秒)。快起慢落,与 PlayerVisualiser 的 kFrontUp/kFrontDown 同思路。
 static const float kRise = 0.12f, kFall = 0.5f;
 // 焦点缓动。0.14 是每帧的插值系数。
