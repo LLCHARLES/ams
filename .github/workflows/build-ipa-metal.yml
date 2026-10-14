@@ -106,6 +106,10 @@ jobs:
           echo
           echo "=== for contrast: the buffer-destination variant ==="
           grep -h "copyFromBuffer:sourceOffset:toBuffer" "$H/MTLBlitCommandEncoder.h" | sed 's/ *$//'
+          echo
+          echo "=== does Theos define the hook the Makefile attaches the metallib to? ==="
+          grep -rn "before-spotifyglass-all\|before-\$\(.*\)-all" \
+               "$THEOS/makefiles/" | head -10
 
       - name: Syntax-check the visualiser alone
         run: |
