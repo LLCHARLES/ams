@@ -13,6 +13,11 @@
 // Threading: 主线程。
 #import <UIKit/UIKit.h>
 #import <MetalKit/MetalKit.h>
+// MetalKit pulls in the view and the pipeline state, but not the command buffer, blit encoder or
+// render command encoder protocols — their selectors (setFragmentTexture:index:,
+// copyFromBuffer:…, fillRegion:…) live in these headers, so without them every call below reads
+// as an unknown selector on a bare id.
+#import <Metal/Metal.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
