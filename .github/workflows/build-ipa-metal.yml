@@ -107,15 +107,19 @@ jobs:
           grep -hn "^- (\|^@property" "$H/MTLBlitCommandEncoder.h" 2>/dev/null | head -30 || \
             ls "$H" | grep -i blit
           echo
-          echo "=== MTLTexture 的 @property 全表 ==="
-          grep -n "@property" "$H/MTLTexture.h" 2>/dev/null | head -30
+          echo "=== copyFromBuffer: 的完整签名(不截断)==="
+          awk '/copyFromBuffer:.*sourceBuffer/,/;/' "$H/MTLBlitCommandEncoder.h" | head -40
           echo
-          echo "=== MTLTexture 上的 contents / replaceRegion / didModify ==="
-          grep -n "contents\|replaceRegion\|didModifyRange\|MTLStorageModeShared" "$H/MTLTexture.h" 2>/dev/null | head -25
+          echo "=== MTLSize / MTLOrigin / id<MTLBuffer> 声明位置 ==="
+          grep -rln "MTLSize\b" "$H" 2>/dev/null | head -5
+          grep -rn "typedef.*MTLSize\|} MTLSize\|MTLSizeMake" "$H/MTLTypes.h" 2>/dev/null | head -5
           echo
-          echo "=== 哪个头文件定义了 contents ==="
-          grep -rln "void \*contents\|void\* *contents" "$H" 2>/dev/null | head
-          grep -rn "contents" "$H/MTLResource.h" 2>/dev/null | head -10
+          echo "=== MTLResource.h 是否存在 / contents 声明 ==="
+          ls "$H" | grep -i "resource\|types" | head
+          grep -n "contents" "$H/MTLResource.h" "$H/MTLTexture.h" 2>/dev/null | head -10
+          echo
+          echo "=== Metal.h 是否 include 了 MTLResource.h ==="
+          grep -n "include" "$H/Metal.h" | head -30
 
       - name: Syntax-check the visualiser alone
         run: |
