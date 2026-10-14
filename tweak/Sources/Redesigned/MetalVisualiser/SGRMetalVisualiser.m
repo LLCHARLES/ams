@@ -97,6 +97,9 @@ void SGRResetMetalSettings(void) {
 
 // 频谱纹理: 256 x 2,与二进制一致。
 static const NSUInteger kSpectrumWidth = 256, kSpectrumHeight = 2;
+// 4 字节每像素,RGBA。命名而非在数组长度处展开:一个 static 数组按常量表达式定长时,
+// clang 会把长度折进数组类型并按 GNU 扩展告警,而 -Werror 让它变成错误。
+enum { kSpectrumBytes = kSpectrumWidth * kSpectrumHeight * 4 };
 // 行0 的频段数;行1 的dB 级数。
 static const float kBandsRow = 127.0f, kLevelsRow = 255.0f;
 // Kawase ping-pong 的尺寸。半分辨率足够 —— 背景本来就是模糊的。
@@ -566,7 +569,6 @@ static float levelAt(float index) {
     // 时间与帧数
     CFTimeInterval now = CACurrentMediaTime();
     if (_lastTick == 0) _lastTick = now;
-    float dt = (float)(now - _lastTick);
     _lastTick = now;
     _u.time = (float)(now - _start);
     _frames++;
@@ -600,7 +602,7 @@ static float levelAt(float index) {
         [enc setFragmentTexture:_cover index:0];
         [enc setFragmentTexture:_previous index:1];
         [enc setFragmentTexture:_spectrum index:2];
-        [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
         // The shaders take the sampler as [[sampler(0)]]; a constexpr sampler cannot carry
         // max_anisotropy, so the host's MTLSamplerState is bound here instead.
         [enc setFragmentSamplerState:_sampler index:0];
@@ -625,7 +627,7 @@ static float levelAt(float index) {
             [enc setRenderPipelineState:pipe];
             [enc setFragmentTexture:src index:0];
             SGRSimd2 srcSize = { (float)src.width, (float)src.height };
-            [enc setFragmentBytes:&srcSize length:sizeof(srcSize) index:0];
+            [enc setFragmentBytes:/[enc setFragmentBytes:&srcSize length:sizeof(srcSize) index:0];srcSize length:sizeof(srcSize) atIndex:0];
             [enc setFragmentSamplerState:_sampler index:0];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
             [enc endEncoding];
@@ -639,7 +641,7 @@ static float levelAt(float index) {
         [enc setFragmentTexture:_blurA index:0];
         [enc setFragmentTexture:_text index:1];
         [enc setFragmentTexture:_spectrum index:2];
-        [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
         [enc setFragmentSamplerState:_sampler index:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];
@@ -657,7 +659,7 @@ static float levelAt(float index) {
 - (void)uploadSpectrum {
     if (!_spectrum) return;
 
-    static uint8_t bytes[kSpectrumWidth * kSpectrumHeight * 4];
+    static uint8_t bytes[kSpectrumBytes];
     memset(bytes, 0, sizeof(bytes));
 
     for (NSUInteger x = 0; x < 128; x++) {
