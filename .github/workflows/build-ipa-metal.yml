@@ -100,26 +100,12 @@ jobs:
           SDK="$(xcrun -sdk iphoneos --show-sdk-path)"
           H="$SDK/System/Library/Frameworks/Metal.framework/Headers"
           echo "SDK: $SDK"
-          echo "=== blit: fillRegion / copyFromBuffer / copyFromTexture ==="
-          grep -rhn "Selector: '\(fillRegion\|copyFromBuffer\|copyFromTexture\)" "$H" | sed 's/^ *//' | sort -u | head -20
+          echo "=== blit: the selector the file uses, and how the header spells it ==="
+          grep -h "copyFromBuffer:.*sourceBytesPerRow.*destinationOrigin" \
+               "$H/MTLBlitCommandEncoder.h" | sed 's/ *$//'
           echo
-          echo "=== MTLBlitCommandEncoder.h 里的方法声明 ==="
-          grep -hn "^- (\|^@property" "$H/MTLBlitCommandEncoder.h" 2>/dev/null | head -30 || \
-            ls "$H" | grep -i blit
-          echo
-          echo "=== copyFromBuffer: 的完整签名(不截断)==="
-          awk '/copyFromBuffer:.*sourceBuffer/,/;/' "$H/MTLBlitCommandEncoder.h" | head -40
-          echo
-          echo "=== MTLSize / MTLOrigin / id<MTLBuffer> 声明位置 ==="
-          grep -rln "MTLSize\b" "$H" 2>/dev/null | head -5
-          grep -rn "typedef.*MTLSize\|} MTLSize\|MTLSizeMake" "$H/MTLTypes.h" 2>/dev/null | head -5
-          echo
-          echo "=== MTLResource.h 是否存在 / contents 声明 ==="
-          ls "$H" | grep -i "resource\|types" | head
-          grep -n "contents" "$H/MTLResource.h" "$H/MTLTexture.h" 2>/dev/null | head -10
-          echo
-          echo "=== Metal.h 是否 include 了 MTLResource.h ==="
-          grep -n "include" "$H/Metal.h" | head -30
+          echo "=== for contrast: the buffer-destination variant ==="
+          grep -h "copyFromBuffer:sourceOffset:toBuffer" "$H/MTLBlitCommandEncoder.h" | sed 's/ *$//'
 
       - name: Syntax-check the visualiser alone
         run: |
