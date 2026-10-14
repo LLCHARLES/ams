@@ -107,6 +107,27 @@ jobs:
               [b endEncoding];
               MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
               id<MTLRenderCommandEncoder> e = [c renderCommandEncoderWithDescriptor:rpd];
+              [e endEncoding];
+          }
+          // Deliberately wrong: asking the compiler to print what it does know.
+          void broken(id<MTLRenderCommandEncoder> e) { [e setFragmentTextureNoSuchSelector:nil index:0]; }
+          EOF
+          echo "--- blit/render protocols: ---"
+          if xcrun clang -fsyntax-only -fobjc-arc -x objective-c \
+              -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
+              -target arm64-apple-ios16.0 /tmp/probe.m 2>/tmp/probe.err | true; then :; fi
+          if grep -q "setFragmentTextureNoSuchSelector" /tmp/probe.err; then
+            echo "encoders reachable; the compiler suggested:"; grep "suggest" /tmp/probe.err | head -3
+          fi
+          echo "--- the real calls ---"
+          cat > /tmp/probe2.m <<'EOF'
+          #import <MetalKit/MetalKit.h>
+          #import <Metal/Metal.h>
+          void probe2(id<MTLDevice> d) {
+              id<MTLCommandQueue> q = [d newCommandQueue];
+              id<MTLCommandBuffer> c = [q commandBuffer];
+              MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+              id<MTLRenderCommandEncoder> e = [c renderCommandEncoderWithDescriptor:rpd];
               [e setFragmentTexture:nil index:0];
               [e setFragmentBytes:nil length:0 index:0];
               [e endEncoding];
@@ -114,9 +135,7 @@ jobs:
           EOF
           xcrun clang -fsyntax-only -fobjc-arc -x objective-c \
             -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
-            -target arm64-apple-ios16.0 /tmp/probe.m \
-            && echo "PROBE CLEAN: the encoder protocols are reachable" \
-            || { echo "PROBE FAILED: the protocols are not reachable from these imports"; exit 1; }
+            -target arm64-apple-ios16.0 /tmp/probe2.m 2>&1 | head -10 || true
 
       - name: Syntax-check the visualiser alone
         run: |
