@@ -56,7 +56,17 @@ jobs:
           fi
 
       - name: Build
-        run: make release
+        run: |
+          set -o pipefail
+          make release 2>&1 | tee build.log
+          status=$?
+          echo "::group::error lines"
+          grep -nE "error:|fatal error|No such file|Undefined symbol|undeclared|Assertion" build.log | head -40 || echo "(no error lines found)"
+          echo "::endgroup::"
+          echo "::group::build log tail"
+          tail -80 build.log
+          echo "::endgroup::"
+          exit $status
 
       - uses: actions/upload-artifact@v5
         if: inputs.upload_method != 'filebin'

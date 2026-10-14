@@ -45,12 +45,26 @@ spotifyglass_OBJ_FILES := $(SG_AUDIO)/build/ios/libsgaudio.a
 Sources/Shared/AudioEffects/SGDSPCrossfeed.m_CFLAGS := -isystem $(SG_AUDIO)/libbs2b
 Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/eel2
 
-# The Metal visualizer's shaders (Shared/MetalVisualiser/SGRMetalShaders.metal). Theos compiles a
-# .metal into a .metallib and links it into the dylib, which is what -newDefaultLibrary reads at
-# runtime. No .m finds it by name, so it is a build input only and stays out of spotifyglass_FILES
-# above (a .metal there would reach the C compiler, which does not take it).
-SGR_METAL_SHADERS := $(wildcard Sources/Shared/MetalVisualiser/*.metal)
-spotifyglass_OBJ_FILES += $(SGR_METAL_SHADERS:.metal=.metallib)
+# The Metal visualizer's shaders (Shared/MetalVisualiser/SGRMetalShaders.metal).
+#
+# Theos has no built-in .metal rule: it compiles C/ObjC/Swift and links objects, and a
+# .metallib is not an object, so listing one under spotifyglass_OBJ_FILES does not build.
+# So the shaders are compiled here with xcrun -metal and the resulting .metallib is fed to
+# the linker with -Wl,-sectcreate,__TEXT,__metallib, which is where -newDefaultLibrary looks
+# for them at runtime. Recompiled only when the source is newer than the library.
+SG_METAL_SRC := $(wildcard Sources/Shared/MetalVisualiser/*.metal)
+SG_METAL_LIB := $(SG_METAL_SRC:.metal=.metallib)
+SG_METALLIB_FLAGS := -isysroot $(SDK_PATH) -mtlsdk_version=$(SDK_VERSION) -O3
+
+$(SG_METAL_LIB): %.metallib: %.metal
+	@echo "METALC $@"
+	@xcrun -sdk $(SDK) metal $(SG_METALLIB_FLAGS) -o $@ $<
+
+# 旧产物先删,避免改了 shader 却链进上一次的库。
+$(shell rm -f $(SG_METAL_LIB))
+
+spotifyglass_OBJ_FILES += $(SG_METAL_LIB)
+spotifyglass_LDFLAGS += -Wl,-sectcreate,__TEXT,__metallib,$(SG_METAL_LIB)
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

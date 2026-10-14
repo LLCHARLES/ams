@@ -11,6 +11,7 @@
 //
 // Threading: 主线程。渲染每帧一个 CADisplayLink,与 PlayerVisualiser 同节流:
 // 歌词页 30fps,Reduce Motion 15fps,低电量模式停。
+#import <dlfcn.h>
 #import "SGRMetalVisualiser.h"
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
@@ -239,11 +240,34 @@ static float levelAt(float index) {
     self.opaque = YES;
 }
 
+// The tweak is a dylib injected into Spotify rather than a bundle with a .metallib beside it, so
+// -newDefaultLibrary has nothing to find: it looks in the main bundle's resources. The shaders are
+// linked into this image instead (see tweak/Makefile's -sectcreate), so the library is read out of
+// this dylib. -newLibraryWithURL: on the image path is that; if the sect ever went missing it
+// returns nil here and the caller falls back rather than crashing.
+- (id<MTLLibrary>)loadShaderLibrary {
+    id<MTLLibrary> library = [_device newDefaultLibrary];
+    if (library) return library;
+
+    Dl_info info;
+    if (dladdr((const void *)self, &info) && info.dli_fname) {
+        NSString *path = [NSString stringWithUTF8String:info.dli_fname];
+        NSURL *url = [NSURL fileURLWithPath:path];
+        NSError *err = nil;
+        library = [_device newLibraryWithURL:url error:&err];
+        if (library) return library;
+        SGLog(@"metal visualiser: newLibraryWithURL failed: %@", err.localizedDescription);
+    } else {
+        SGLog(@"metal visualiser: dladdr found no path for the dylib");
+    }
+    return nil;
+}
+
 - (BOOL)buildPipelines {
     NSError *error = nil;
-    id<MTLLibrary> library = [_device newDefaultLibrary];
+    id<MTLLibrary> library = [self loadShaderLibrary];
     if (!library) {
-        SGLog(@"metal visualiser: no default library — is SGRMetalShaders.metal compiled into the bundle?");
+        SGLog(@"metal visualiser: no shader library — the .metallib did not link into the dylib");
         return NO;
     }
 
