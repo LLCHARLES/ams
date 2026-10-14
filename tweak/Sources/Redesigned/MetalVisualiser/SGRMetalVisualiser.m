@@ -329,7 +329,7 @@ static float levelAt(float index) {
 - (id<MTLTexture>)newTextureOfWidth:(NSUInteger)width
                               height:(NSUInteger)height
                               usage:(MTLTextureUsage)usage {
-    id<MTLTextureDescriptor> desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+    MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
                                                                              mipmapped:NO];
@@ -363,7 +363,7 @@ static float levelAt(float index) {
     CGImageRef source = image.CGImage;
     if (!source) { [self drawOnce]; return; }
 
-    NSUInteger side = MIN(MAX(source.width, source.height), 1024);
+    NSUInteger side = MIN(MAX((NSUInteger)CGImageGetWidth(source), (NSUInteger)CGImageGetHeight(source)), 1024);
     id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
     if (!texture) { [self drawOnce]; return; }
 
