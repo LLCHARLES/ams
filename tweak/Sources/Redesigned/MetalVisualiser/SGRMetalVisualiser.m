@@ -342,7 +342,7 @@ static float levelAt(float index) {
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
     MTLRegion region = MTLRegionMake2D(0, 0, texture.width, texture.height);
-    [blit fillRegion:region mipmapLevel:0 withBytes:&pixel bytesPerRow:4 * texture.width];
+    [blit fillRegion:region mipmapLevel:0 withBytes:&pixel bytesPerRow:(NSUInteger)(4 * texture.width)];
     [blit endEncoding];
     [cmd commit];
 }
@@ -383,7 +383,7 @@ static float levelAt(float index) {
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:side * stride options:MTLResourceStorageModeShared]
+    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:side * stride options:MTLResourceStorageModeShared]
            sourceOffset:0
       sourceBytesPerRow:stride
     sourceBytesPerImage:side * stride
@@ -480,7 +480,7 @@ static float levelAt(float index) {
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:h * stride options:MTLResourceStorageModeShared]
+    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:h * stride options:MTLResourceStorageModeShared]
            sourceOffset:0
       sourceBytesPerRow:stride
     sourceBytesPerImage:h * stride
@@ -589,7 +589,7 @@ static float levelAt(float index) {
     // Pass 1 — 主渲染进 _blurA。不能直接写 drawable: Pass 3 还要往同一张
     // drawable 上合成歌词, 先写了就被后面那遍覆盖掉。
     if (_blurA) {
-        id<MTLRenderPassDescriptor> desc = [MTLRenderPassDescriptor renderPassDescriptor];
+        MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
         desc.colorAttachments[0].texture = _blurA;
         desc.colorAttachments[0].loadAction = MTLLoadActionClear;
         desc.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -615,7 +615,7 @@ static float levelAt(float index) {
             id<MTLTexture> dst = pass == 0 ? _blurB : _blurA;
             id<MTLRenderPipelineState> pipe = pass == 0 ? _down : _up;
 
-            id<MTLRenderPassDescriptor> desc = [MTLRenderPassDescriptor renderPassDescriptor];
+            MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
             desc.colorAttachments[0].texture = dst;
             desc.colorAttachments[0].loadAction = MTLLoadActionClear;
             desc.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -684,7 +684,7 @@ static float levelAt(float index) {
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
     id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:sizeof(bytes) options:MTLResourceStorageModeShared]
+    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:sizeof(bytes) options:MTLResourceStorageModeShared]
            sourceOffset:0
       sourceBytesPerRow:kSpectrumWidth * 4
     sourceBytesPerImage:sizeof(bytes)
