@@ -21,7 +21,7 @@
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Redesigned/Kit/SGRKit.h"
-#import "Shared/MetalVisualiser/SGRMetalBridge.h"
+#import "MetalVisualiser/SGRMetalBridge.h"
 #import "Player.h"
 
 // Past the plane's edges: above for the pull that dismisses the player, below for the bounce at the end

@@ -12,13 +12,13 @@
 //
 // Threading: 主线程。
 #import "Core/SGCore.h"
-#import "Redesigned/Kit/SGRKit.h"
-#import "Redesigned/Kit/SGRBridges.h"
-#import "Redesigned/Kit/SGRField.h"
-#import "Redesigned/Player/Player.h"
-#import "Redesigned/Player/SGRSpectrum.h"
+#import "Kit/SGRKit.h"
+#import "Kit/SGRBridges.h"
+#import "Kit/SGRField.h"
+#import "Player/Player.h"
+#import "Player/SGRSpectrum.h"
 #import "Shared/Player/PlayerState.h"
-#import "Shared/MetalVisualiser/SGRMetalVisualiser.h"
+#import "Redesigned/MetalVisualiser/SGRMetalVisualiser.h"
 
 static char kMetalKey;
 static __weak SGRMetalVisualiser *sg_metal;

@@ -52,7 +52,7 @@ Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/e
 # So the shaders are compiled here with xcrun -metal and the resulting .metallib is fed to
 # the linker with -Wl,-sectcreate,__TEXT,__metallib, which is where -newDefaultLibrary looks
 # for them at runtime. Recompiled only when the source is newer than the library.
-SG_METAL_SRC := $(wildcard Sources/Shared/MetalVisualiser/*.metal)
+SG_METAL_SRC := $(wildcard Sources/Redesigned/MetalVisualiser/*.metal)
 SG_METAL_LIB := $(SG_METAL_SRC:.metal=.metallib)
 SG_METALLIB_FLAGS := -isysroot $(SDK_PATH) -mtlsdk_version=$(SDK_VERSION) -O3
 
