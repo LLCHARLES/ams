@@ -1,0 +1,664 @@
+// SGRMetalVisualiser.m
+//
+// 见 .h 的说明。
+//
+// 频谱: 读 SGRSpectrum(24 频段, Spotify 自己的输出经 Accelerate FFT),
+// 映射进 256x2 的纹理 —— 行0 是频段、行1 是 dB 级,与二进制里的布局一致。
+// 每帧上传一次 2KB,开销可忽略。
+//
+// 取色: 封面变了就重算三档配色 + 强调色。取的是 SGRPalette 的 flowColors,
+// 那是 Kit 已经算好的流动配色,和播放页其他地方一致。
+//
+// Threading: 主线程。渲染每帧一个 CADisplayLink,与 PlayerVisualiser 同节流:
+// 歌词页 30fps,Reduce Motion 15fps,低电量模式停。
+#import "SGRMetalVisualiser.h"
+#import "Core/SGCore.h"
+#import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Player/SGRSpectrum.h"
+#import "Shared/AudioEffects/AudioEffects.h"
+
+// ============================================================================
+// Uniform 桥接 —— 与 .metal 里逐字段对应
+// ============================================================================
+
+typedef struct {
+    vector_float2 resolution;
+    vector_float2 focus;
+    vector_float2 tilt;
+    vector_float4 textAspect;
+    vector_float4 color0;
+    vector_float4 color1;
+    vector_float4 color2;
+    vector_float4 accent;
+    float flowAmount;
+    float audioAmount;
+    float edgeSmooth;
+    float saturation;
+    float brightness;
+    float zoom;
+    float time;
+    uint32_t spectrumBands;
+    uint32_t _pad;
+} SGRMetalUniforms;
+
+// ============================================================================
+// 设置
+// ============================================================================
+
+// 键与 SGRFluid 的命名一致,便于用户界面复用。
+static const struct { __unsafe_unretained NSString *key; SGRMetalLimits limits; } kSettings[] = {
+    {@"spotifyglass.metal.flow",       {0,  100, 5, 50}},
+    {@"spotifyglass.metal.audio",      {0,  100, 5, 70}},
+    {@"spotifyglass.metal.blur",       {0,  100, 5, 62}},
+    {@"spotifyglass.metal.saturation", {0,  200, 10, 114}},
+    {@"spotifyglass.metal.brightness", {40, 150, 5, 96}},
+};
+enum { kSettingCount = sizeof(kSettings) / sizeof(kSettings[0]) };
+
+NSNotificationName const SGRMetalSettingsDidChangeNotification = @"spotifyglass.metalSettingsDidChange";
+
+SGRMetalLimits SGRMetalLimitsOf(SGRMetalSetting setting) {
+    return kSettings[setting].limits;
+}
+
+NSInteger SGRMetalValue(SGRMetalSetting setting) {
+    SGRMetalLimits l = kSettings[setting].limits;
+    return MIN(l.most, MAX(l.least, SGInt(kSettings[setting].key, l.standard)));
+}
+
+void SGRSetMetalValue(SGRMetalSetting setting, NSInteger value) {
+    SGRMetalLimits l = kSettings[setting].limits;
+    SGSet(kSettings[setting].key, @(MIN(l.most, MAX(l.least, value))));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:SGRMetalSettingsDidChangeNotification object:nil];
+    });
+}
+
+void SGRResetMetalSettings(void) {
+    for (int i = 0; i < kSettingCount; i++) {
+        SGRMetalLimits l = kSettings[i].limits;
+        SGSet(kSettings[i].key, @(l.standard));
+    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:SGRMetalSettingsDidChangeNotification object:nil];
+    });
+}
+
+// ============================================================================
+// 常量
+// ============================================================================
+
+// 频谱纹理: 256 x 2,与二进制一致。
+static const NSUInteger kSpectrumWidth = 256, kSpectrumHeight = 2;
+// 行0 的频段数;行1 的dB 级数。
+static const float kBandsRow = 127.0f, kLevelsRow = 255.0f;
+// Kawase ping-pong 的尺寸。半分辨率足够 —— 背景本来就是模糊的。
+static const NSUInteger kBlurSide = 512;
+// 没有分析结果时的电平(SGRSpectrumFloor)。
+static const float kFloorDB = SGRSpectrumFloor;
+// 频段顶端对齐:最近几秒里最响的频段落在顶部,安静的曲子也动得一样多。
+static const float kTopDB = 0.0f, kRangeDB = 30.0f;
+// 起落速度(秒)。快起慢落,与 PlayerVisualiser 的 kFrontUp/kFrontDown 同思路。
+static const float kRise = 0.12f, kFall = 0.5f;
+// 焦点缓动。0.14 是每帧的插值系数。
+static const float kFocusEase = 0.14f;
+
+#pragma mark - 频谱
+
+// 平滑后的 24 个频段,映射到 0..1。
+static float sg_levels[SGRSpectrumBands];
+static float sg_peak = kFloorDB;
+
+static void readSpectrum(void) {
+    float db[SGRSpectrumBands];
+    uint64_t stamp = SGRSpectrumRead(db);
+
+    // 还没有分析(暂停,或 tap 没跑),让已有的电平自己落回底。
+    static uint64_t last;
+    if (stamp == last) {
+        for (int i = 0; i < SGRSpectrumBands; i++) sg_levels[i] = MAX(kFloorDB, sg_levels[i] - 4.0f);
+        return;
+    }
+    last = stamp;
+
+    // 顶端缓慢回落,静音时保持平坦。
+    float loudest = kFloorDB;
+    for (int i = 0; i < SGRSpectrumBands; i++) loudest = MAX(loudest, db[i]);
+    sg_peak = (loudest > sg_peak) ? loudest : MAX(loudest, sg_peak - 4.0f);
+
+    // 起落:快起慢落
+    float dt = 1.0f / 60.0f;
+    for (int i = 0; i < SGRSpectrumBands; i++) {
+        float target = db[i];
+        float current = sg_levels[i];
+        float rate = (target > current) ? kRise : kFall;
+        sg_levels[i] = current + (target - current) * MIN(1.0f, dt / rate);
+    }
+}
+
+// 24 个频段 -> 0..1 的归一化电平。
+static float levelAt(float index) {
+    int i = (int)(index * (SGRSpectrumBands - 1));
+    i = MAX(0, MIN(SGRSpectrumBands - 1, i));
+    float span = MAX(kRangeDB, sg_peak - kFloorDB);
+    return MAX(0.0f, MIN(1.0f, (sg_levels[i] - (sg_peak - span)) / span));
+}
+
+#pragma mark - 视图
+
+@implementation SGRMetalVisualiser {
+    id<MTLDevice> _device;
+    id<MTLCommandQueue> _queue;
+
+    id<MTLRenderPipelineState> _present;
+    id<MTLRenderPipelineState> _down;
+    id<MTLRenderPipelineState> _up;
+    id<MTLRenderPipelineState> _composite;
+
+    id<MTLSamplerState> _sampler;
+
+    MTLTexture *_cover;
+    MTLTexture *_previous;
+    MTLTexture *_spectrum;
+    MTLTexture *_text;
+    MTLTexture *_blurA;
+    MTLTexture *_blurB;
+
+    SGRMetalUniforms _u;
+    CGPoint _focus;      // 目标,0..1
+    CGPoint _focusNow;   // 缓动后
+    CGPoint _tilt;       // 0..1
+    CFTimeInterval _start;
+    CFTimeInterval _lastTick;
+    NSInteger _frames;
+
+    UIImage *_artwork;
+    NSString *_artworkIdentity;
+    NSArray<NSString *> *_lyrics;
+    NSUInteger _textWanted;
+    UIColor *_coverAccent;
+
+    CADisplayLink *_link;
+}
+
++ (BOOL)isAvailable {
+    static BOOL available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        available = MTLCreateSystemDefaultDevice() != nil;
+        if (!available) SGLog(@"metal visualiser: no Metal device, staying on the Core Animation field");
+    });
+    return available;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!SGRMetalVisualiser.isAvailable) return nil;
+
+    _device = MTLCreateSystemDefaultDevice();
+    if (!_device) return nil;
+    _queue = [_device newCommandQueue];
+
+    self = [super initWithFrame:frame device:_device];
+    if (!self) return nil;
+
+    [self configure];
+    if (![self buildPipelines]) return nil;
+    [self buildTextures];
+
+    _start = CACurrentMediaTime();
+    _focusNow = CGPointZero;
+
+    [NSNotificationCenter.defaultCenter addObserver:self
+                                           selector:@selector(settingsChanged)
+                                               name:SGRMetalSettingsDidChangeNotification
+                                             object:nil];
+    return self;
+}
+
+- (void)dealloc {
+    [_link invalidate];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)settingsChanged {
+    // 每帧读 NSUserDefaults 也不贵,但记下来便于日后加动画。
+}
+
+#pragma mark - 配置
+
+- (void)configure {
+    self.colorPixelFormat = MTLPixelFormatBGRA8Unorm;
+    self.framebufferOnly = NO;
+    self.clearColor = MTLClearColorMake(0, 0, 0, 1);
+    self.opaque = YES;
+    self.backgroundColor = UIColor.blackColor;
+    self.paused = YES;
+    self.enableSetNeedsDisplay = NO;
+    self.preferredFramesPerSecond = 60;
+    self.userInteractionEnabled = NO;
+    self.opaque = YES;
+}
+
+- (BOOL)buildPipelines {
+    NSError *error = nil;
+    id<MTLLibrary> library = [_device newDefaultLibrary];
+    if (!library) {
+        SGLog(@"metal visualiser: no default library — is SGRMetalShaders.metal compiled into the bundle?");
+        return NO;
+    }
+
+    NSArray<NSString *> *names = @[@"chromaPresentFragment", @"kawaseDownFragment", @"kawaseUpFragment", @"compositeFragment"];
+    NSMutableArray *pipes = [NSMutableArray arrayWithCapacity:4];
+    for (NSString *frag in names) {
+        id<MTLFunction> vertex = [library newFunctionWithName:@"blitVertex"];
+        if (![frag isEqualToString:@"chromaPresentFragment"]) {
+            vertex = [library newFunctionWithName:@"blitVertex"];
+        } else {
+            vertex = [library newFunctionWithName:@"chromaPresentVertex"];
+        }
+        id<MTLFunction> fragment = [library newFunctionWithName:frag];
+        if (!fragment) {
+            SGLog(@"metal visualiser: missing %@", frag);
+            return NO;
+        }
+        MTLRenderPipelineDescriptor *desc = [MTLRenderPipelineDescriptor new];
+        desc.vertexFunction = vertex;
+        desc.fragmentFunction = fragment;
+        desc.colorAttachments[0].pixelFormat = self.colorPixelFormat;
+        id<MTLRenderPipelineState> pipe = [_device newRenderPipelineStateWithDescriptor:desc error:&error];
+        if (!pipe) {
+            SGLog(@"metal visualiser: %@: %@", frag, error.localizedDescription);
+            return NO;
+        }
+        [pipes addObject:pipe];
+    }
+    _present = pipes[0];
+    _down = pipes[1];
+    _up = pipes[2];
+    _composite = pipes[3];
+
+    MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
+    sd.minFilter = MTLSamplerMinMagFilterLinear;
+    sd.magFilter = MTLSamplerMinMagFilterLinear;
+    sd.mipFilter = MTLSamplerMipFilterLinear;
+    sd.maxAnisotropy = 8;
+    sd.sAddressMode = MTLSamplerAddressModeClampToEdge;
+    sd.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    _sampler = [_device newSamplerStateWithDescriptor:sd];
+    return _sampler != nil;
+}
+
+- (void)buildTextures {
+    _spectrum = [self textureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead];
+    _text = [self textureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead];
+    _blurA = [self textureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    _blurB = [self textureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    if (_text) [self fillTexture:_text with:0x00000000];
+}
+
+- (id<MTLTexture>)textureOfWidth:(NSUInteger)width height:(NSUInteger)height usage:MTLTextureUsage) {
+    MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+                                                                                 width:width
+                                                                                height:height
+                                                                             mipmapped:NO];
+    desc.usage = usage;
+    desc.storageMode = MTLStorageModePrivate;
+    return [_device newTextureWithDescriptor:desc];
+}
+
+- (void)fillTexture:(id<MTLTexture>)texture with:(uint32_t)pixel {
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    MTLRegion region = MTLRegionMake2D(0, 0, texture.width, texture.height);
+    [blit fillRegion:region mipmapLevel:0 withBytes:&pixel bytesPerRow:4 * texture.width];
+    [blit endEncoding];
+    [cmd commit];
+}
+
+#pragma mark - 封面
+
+- (void)setArtwork:(UIImage *)image {
+    if (image == _artwork) return;
+    _artwork = image;
+
+    if (!image) {
+        _cover = nil;
+        [self drawOnce];
+        return;
+    }
+
+    // 缩到较小再上传:背景本就要模糊,省显存也省带宽。
+    CGImageRef source = image.CGImage;
+    if (!source) { [self drawOnce]; return; }
+
+    NSUInteger side = MIN(MAX(source.width, source.height), 1024);
+    id<MTLTexture> texture = [self textureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    if (!texture) { [self drawOnce]; return; }
+
+    // 用 CoreGraphics 画到 4 字节像素,再 blit 上传。
+    NSUInteger stride = side * 4;
+    uint8_t *bytes = calloc(side * stride, 1);
+    if (!bytes) { [self drawOnce]; return; }
+
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(bytes, side, side, 8, stride, space,
+                                             kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    if (ctx) {
+        CGContextDrawImage(ctx, CGRectMake(0, 0, side, side), source);
+        CGContextRelease(ctx);
+    }
+    CGColorSpaceRelease(space);
+
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:side * stride options:MTLResourceStorageModeShared]
+           sourceOffset:0
+      sourceBytesPerRow:stride
+    sourceBytesPerImage:side * stride
+             sourceSize:MTLSizeMake(side, side, 1)
+                  to:texture
+         destinationSlice:0
+          destinationLevel:0
+         destinationOrigin:MTLOriginMake(0, 0, 0)
+          destinationSize:MTLSizeMake(side, side, 1)];
+    [blit endEncoding];
+    [cmd commit];
+    free(bytes);
+
+    _cover = texture;
+    _previous = texture;
+
+    // 配色: 用 Kit 已有的 flowColors,和播放页其他地方一致。
+    [SGRPalette paletteForImage:image request:(SGRPaletteRequest){ .flow = YES } completion:^(SGRPalette *palette) {
+        NSArray<UIColor *> *colors = palette.flowColors;
+        for (NSUInteger i = 0; i < 3 && i < colors.count; i++) {
+            CGFloat r, g, b, a;
+            [colors[i] getRed:&r green:&g blue:&b alpha:&a];
+            vector_float4 v = { r, g, b, 1.0f };
+            if (i == 0) _u.color0 = v;
+            else if (i == 1) _u.color1 = v;
+            else _u.color2 = v;
+        }
+        // 强调色取最饱和的那个(PlayerField.x 的 followCover 同样判断)。
+        UIColor *best = nil;
+        CGFloat bestSat = -1;
+        for (UIColor *color in colors) {
+            CGFloat h, s, v2, a;
+            if ([color getHue:&h saturation:&s brightness:&v2 alpha:&a] && s > bestSat) {
+                best = color;
+                bestSat = s;
+            }
+        }
+        if (best) self.accent = best;
+    }];
+
+    [self drawOnce];
+}
+
+- (void)setAccent:(UIColor *)accent {
+    _coverAccent = accent;
+    if (accent) {
+        CGFloat r, g, b, a;
+        [accent getRed:&r green:&g blue:&b alpha:&a];
+        _u.accent = (vector_float4){ r, g, b, 1.0f };
+    }
+    [self drawOnce];
+}
+
+#pragma mark - 歌词
+
+- (void)setLyrics:(NSArray<NSString *> *)lines {
+    _lyrics = lines;
+    [self drawLyricsInto:_text];
+    [self drawOnce];
+}
+
+// 歌词画进纹理: 白字 + alpha,composite 那一步按频段给它上光。
+- (void)drawLyricsInto:(id<MTLTexture>)texture {
+    if (!texture) return;
+
+    NSUInteger w = texture.width, h = texture.height;
+    NSUInteger stride = w * 4;
+    uint8_t *bytes = calloc(h * stride, 1);
+    if (!bytes) return;
+
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(bytes, w, h, 8, stride, space,
+                                             kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    if (ctx) {
+        UIGraphicsPushContext(ctx);
+        // 上面的坐标系原点在左下,而纹理采样时 y 翻转,所以这里从底部往上排。
+        CGFloat size = 34.0;
+        UIFont *font = [UIFont boldSystemFontOfSize:size];
+        NSDictionary *attrs = @{
+            NSFontAttributeName: font,
+            NSForegroundColorAttributeName: UIColor.whiteColor,
+        };
+        CGFloat line = size * 1.6;
+        CGFloat y = size;
+        for (NSString *text in _lyrics) {
+            [text drawAtPoint:CGPointMake(40, y) withAttributes:attrs];
+            y += line;
+            if (y > h) break;
+        }
+        UIGraphicsPopContext();
+        CGContextRelease(ctx);
+    }
+    CGColorSpaceRelease(space);
+
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:h * stride options:MTLResourceStorageModeShared]
+           sourceOffset:0
+      sourceBytesPerRow:stride
+    sourceBytesPerImage:h * stride
+             sourceSize:MTLSizeMake(w, h, 1)
+                  to:texture
+         destinationSlice:0
+          destinationLevel:0
+         destinationOrigin:MTLOriginMake(0, 0, 0)
+          destinationSize:MTLSizeMake(w, h, 1)];
+    [blit endEncoding];
+    [cmd commit];
+    free(bytes);
+}
+
+#pragma mark - 交互
+
+- (void)setFocusX:(CGFloat)x y:(CGFloat)y {
+    _focus = CGPointMake(MIN(1, MAX(0, x)), MIN(1, MAX(0, y)));
+}
+
+- (void)resetFocus {
+    _focus = CGPointZero;
+}
+
+- (void)setTiltX:(CGFloat)x y:(CGFloat)y {
+    _tilt = CGPointMake(MIN(1, MAX(0, x)), MIN(1, MAX(0, y)));
+}
+
+- (void)setMoving:(BOOL)moving {
+    if (_moving == moving) return;
+    _moving = moving;
+    if (moving) [self startLink];
+    else [self stopLink];
+}
+
+- (void)setPreferredFPS:(NSInteger)fps {
+    _preferredFPS = fps;
+    _link.preferredFramesPerSecond = MIN(60, MAX(15, fps));
+}
+
+#pragma mark - 渲染循环
+
+- (void)startLink {
+    if (_link) {
+        _link.paused = NO;
+        return;
+    }
+    _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+    _link.preferredFramesPerSecond = MIN(60, MAX(15, _preferredFPS));
+    [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    [_link setPaused:NO];
+}
+
+- (void)stopLink {
+    _link.paused = YES;
+}
+
+- (void)tick:(CADisplayLink *)link {
+    if (!self.window) return;
+    [self drawOnce];
+}
+
+- (void)drawOnce {
+    [self draw:self.bounds];
+}
+
+- (void)draw:(CGRect)rect {
+    id<MTLRenderPassDescriptor> drawableRPD = self.currentRenderPassDescriptor;
+    id<CAMetalDrawable> drawable = self.currentDrawable;
+    if (!drawableRPD || !drawable) return;
+
+    CGSize size = self.drawableSize;
+
+    // 尺寸
+    _u.resolution = (vector_float2){ (float)size.width, (float)size.height };
+
+    // 焦点缓动
+    _focusNow.x += (_focus.x - _focusNow.x) * kFocusEase;
+    _focusNow.y += (_focus.y - _focusNow.y) * kFocusEase;
+    _u.focus = (vector_float2){ _focusNow.x, _focusNow.y };
+    _u.tilt = (vector_float2){ _tilt.x, _tilt.y };
+
+    // 时间与帧数
+    CFTimeInterval now = CACurrentMediaTime();
+    if (_lastTick == 0) _lastTick = now;
+    float dt = (float)(now - _lastTick);
+    _lastTick = now;
+    _u.time = (float)(now - _start);
+    _frames++;
+
+    // 设置项
+    _u.flowAmount = SGRMetalValue(SGRMetalSettingFlow) / 100.0f;
+    _u.audioAmount = SGRMetalValue(SGRMetalSettingAudio) / 100.0f;
+    _u.edgeSmooth = SGRMetalValue(SGRMetalSettingBlur) / 100.0f * 0.5f;
+    _u.saturation = SGRMetalValue(SGRMetalSettingSaturation) / 100.0f;
+    _u.brightness = SGRMetalValue(SGRMetalSettingBrightness) / 100.0f;
+    _u.zoom = 1.06f;
+    _u.spectrumBands = SGRSpectrumBands;
+
+    // 频谱上传
+    readSpectrum();
+    [self uploadSpectrum];
+
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+
+    // Pass 1 — 主渲染进 _blurA。不能直接写 drawable: Pass 3 还要往同一张
+    // drawable 上合成歌词, 先写了就被后面那遍覆盖掉。
+    if (_blurA) {
+        MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+        desc.colorAttachments[0].texture = _blurA;
+        desc.colorAttachments[0].loadAction = MTLLoadActionClear;
+        desc.colorAttachments[0].storeAction = MTLStoreActionStore;
+        desc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+
+        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
+        [enc setRenderPipelineState:_present];
+        [enc setFragmentTexture:_cover index:0];
+        [enc setFragmentTexture:_previous index:1];
+        [enc setFragmentTexture:_spectrum index:2];
+        [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [enc endEncoding];
+    }
+
+    // Pass 2 — Kawase: _blurA -> _blurB(降) -> _blurA(升)
+    if (_blurA && _blurB) {
+        for (NSUInteger pass = 0; pass < 2; pass++) {
+            id<MTLTexture> src = pass == 0 ? _blurA : _blurB;
+            id<MTLTexture> dst = pass == 0 ? _blurB : _blurA;
+            id<MTLRenderPipelineState> pipe = pass == 0 ? _down : _up;
+
+            MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+            desc.colorAttachments[0].texture = dst;
+            desc.colorAttachments[0].loadAction = MTLLoadActionClear;
+            desc.colorAttachments[0].storeAction = MTLStoreActionStore;
+            desc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+
+            id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
+            [enc setRenderPipelineState:pipe];
+            [enc setFragmentTexture:src index:0];
+            vector_float2 srcSize = { (float)src.width, (float)src.height };
+            [enc setFragmentBytes:&srcSize length:sizeof(srcSize) index:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+            [enc endEncoding];
+        }
+    }
+
+    // Pass 3 — 模糊结果 + 歌词 -> 屏幕
+    {
+        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:drawableRPD];
+        [enc setRenderPipelineState:_composite];
+        [enc setFragmentTexture:_blurA index:0];
+        [enc setFragmentTexture:_text index:1];
+        [enc setFragmentTexture:_spectrum index:2];
+        [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+        [enc endEncoding];
+    }
+
+    [cmd presentDrawable:drawable];
+    [cmd commit];
+
+    _lastTick = now;
+}
+
+#pragma mark - 频谱纹理
+
+// 256 x 2:行0 是 24 个频段映射到 127 档,行1 是 dB 级映射到 255 档。
+- (void)uploadSpectrum {
+    if (!_spectrum) return;
+
+    static uint8_t bytes[kSpectrumWidth * kSpectrumHeight * 4];
+    memset(bytes, 0, sizeof(bytes));
+
+    for (NSUInteger x = 0; x < 128; x++) {
+        float t = (float)x / (float)(kBandsRow);
+        float value = levelAt(t);
+        uint8_t v = (uint8_t)(MAX(0.0f, MIN(1.0f, value)) * 255.0f);
+        bytes[x * 4 + 0] = v;
+        bytes[x * 4 + 1] = v;
+        bytes[x * 4 + 2] = v;
+        bytes[x * 4 + 3] = 255;
+    }
+
+    for (NSUInteger x = 0; x < kSpectrumWidth; x++) {
+        float t = (float)x / (float)(kLevelsRow);
+        // 行1 是一条缓升的曲线,给 shader 一个整体响度的参考。
+        float shaped = powf(MAX(0.0f, MIN(1.0f, t)), 1.0f / 2.2f) * levelAt(0.5f);
+        uint8_t v = (uint8_t)(shaped * 255.0f);
+        NSUInteger off = kSpectrumWidth * 4 + x * 4;
+        bytes[off + 0] = v;
+        bytes[off + 1] = v;
+        bytes[off + 2] = v;
+        bytes[off + 3] = 255;
+    }
+
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromBuffer:[device newBufferWithBytes:bytes length:sizeof(bytes) options:MTLResourceStorageModeShared]
+           sourceOffset:0
+      sourceBytesPerRow:kSpectrumWidth * 4
+    sourceBytesPerImage:sizeof(bytes)
+             sourceSize:MTLSizeMake(kSpectrumWidth, kSpectrumHeight, 1)
+                  to:_spectrum
+         destinationSlice:0
+          destinationLevel:0
+         destinationOrigin:MTLOriginMake(0, 0, 0)
+          destinationSize:MTLSizeMake(kSpectrumWidth, kSpectrumHeight, 1)];
+    [blit endEncoding];
+    [cmd commit];
+}
+
+@end

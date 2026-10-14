@@ -1,0 +1,259 @@
+// SGRMetalShaders.metal
+//
+// Metal 视觉器的着色器。移植自 spoti.pw 0.51.0-beta.1 的二进制规格。
+//
+// 二进制里提取到的原始结构:
+//   pipeline ×4      kawase / blend / warp / tint
+//   着色器入口       chromaPresentVertex / chromaPresentFragment
+//   Frame uniform    resolution focus tilt textAspect color0_ color1_ color2_ accent
+//   频谱纹理         256 x 2, 行0 = 127 频段, 行1 = 255 dB 级
+//   纹理输入         cover / sound / previous
+//   sampler          chromaSampler
+//
+// 流体数学(二进制原式):
+//   ((uv - focus) * resolution) / (0.5 * min(w, h))
+//
+// 频谱采样(二进制原式):
+//   p = clamp(x, 0, 1) * 127; i = min(int(p), 126); mix(a, b, p - i)
+//
+// 算法:Kawase 模糊(Kawase 2009 公开算法)—— 多级降采样 + 升采样,
+//       只用双线性采样,无可分离卷积核。逐帧实时渲染,故选它而非高斯。
+//
+// 与原实现无代码关联: 这是依据上述规格的独立实现。
+
+#include <metal_stdlib>
+using namespace metal;
+
+// ============================================================================
+// Uniform
+// ============================================================================
+
+struct Frame {
+    float2 resolution;   // 绘制目标尺寸(px)
+    float2 focus;        // 焦点 [0,1],流体中心
+    float2 tilt;         // 倾斜(陀螺仪/头动)[0,1]
+    float4 textAspect;
+    float4 color0_;
+    float4 color1_;
+    float4 color2_;
+    float4 accent;       // 强调色(取自封面)
+};
+
+struct Params {
+    float  flowAmount;    // 径向流动强度
+    float  audioAmount;   // 音频驱动强度
+    float  edgeSmooth;    // 边缘平滑
+    float  saturation;    // 饱和度增益
+    float  brightness;    // 亮度增益
+    float  zoom;          // 基础放大
+    float  time;          // 累积秒数
+    uint   spectrumBands; // 频段数
+};
+
+constexpr sampler chromaSampler(
+    filter::linear,
+    address::clamp_to_edge,
+    mip_filter::linear,
+    max_anisotropy = 8);
+
+// ============================================================================
+// 频谱采样 — 256x2
+// ============================================================================
+
+/// 行 0 = 频段,行 1 = dB 级。相邻之间线性插值。
+inline float spectrumRow(float x, int row) {
+    float maxX = (row == 0) ? 127.0 : 255.0;
+    float p = clamp(x, 0.0, 1.0) * maxX;
+    int i = min(int(p), int(maxX) - 1);
+    float4 a = chromaSampler.sample(chromaSampler, float2(float(i)     / maxX, (float)row));
+    float4 b = chromaSampler.sample(chromaSampler, float2(float(i + 1) / maxX, (float)row));
+    return mix(a.r, b.r, p - float(i));
+}
+
+inline float chromaSpectrum(float slot) {
+    return spectrumRow(slot, 0);
+}
+
+inline float chromaWave(float x) {
+    return spectrumRow(x, 1);
+}
+
+/// 整体能量,驱动画面呼吸
+inline float chromaEnergy() {
+    return chromaSpectrum(0.06) * 0.5 + chromaSpectrum(0.50) * 0.3 + chromaSpectrum(0.85) * 0.2;
+}
+
+// ============================================================================
+// 流体:以焦点为中心的径向扭曲
+// ============================================================================
+
+inline float2 chromaPoint(float2 uv, Frame frame) {
+    float2 d = (uv - frame.focus) * frame.resolution;
+    float r = 0.5 * min(frame.resolution.x, frame.resolution.y);
+    return d / max(r, 1.0);
+}
+
+inline float2 chromaTurn(float2 uv, Frame frame, Params p, float energy) {
+    float2 pt = chromaPoint(uv, frame);
+
+    // 低频能量越大,中心放大越明显
+    float breathe = 1.0 + p.audioAmount * energy * 0.22;
+
+    float2 tiltDir = (frame.tilt - 0.5) * 2.0;
+
+    // 极坐标 + 时间相位 + 径向正弦
+    float r = length(pt);
+    float a = atan2(pt.y, pt.x);
+    float swirl = sin(r * 2.4 - p.time * 1.1 + a * 0.8) * p.flowAmount * 0.06;
+
+    float2 rotated;
+    rotated.x = pt.x * cos(swirl) - pt.y * sin(swirl);
+    rotated.y = pt.x * sin(swirl) + pt.y * cos(swirl);
+
+    rotated *= breathe;
+    rotated += tiltDir * p.flowAmount * r * 0.05;
+
+    return rotated * (0.5 * min(frame.resolution.x, frame.resolution.y))
+           / frame.resolution + frame.focus;
+}
+
+// ============================================================================
+// Kawase 模糊
+// ============================================================================
+
+inline float4 kawaseDown(float2 uv, float2 halfPixel) {
+    float4 sum = float4(0.0);
+    sum += chromaSampler.sample(chromaSampler, uv + float2(-halfPixel.x, -halfPixel.y));
+    sum += chromaSampler.sample(chromaSampler, uv + float2( halfPixel.x, -halfPixel.y));
+    sum += chromaSampler.sample(chromaSampler, uv + float2(-halfPixel.x,  halfPixel.y));
+    sum += chromaSampler.sample(chromaSampler, uv + float2( halfPixel.x,  halfPixel.y));
+    return sum * 0.25;
+}
+
+inline float4 kawaseUp(float2 uv, float2 halfPixel) {
+    float2 o = halfPixel * 1.5;
+    float4 sum = float4(0.0);
+    sum += chromaSampler.sample(chromaSampler, uv) * 1.0;
+    sum += chromaSampler.sample(chromaSampler, uv + float2(-o.x, 0.0)) * 2.0;
+    sum += chromaSampler.sample(chromaSampler, uv + float2( o.x, 0.0)) * 2.0;
+    sum += chromaSampler.sample(chromaSampler, uv + float2(0.0, -o.y)) * 2.0;
+    sum += chromaSampler.sample(chromaSampler, uv + float2(0.0,  o.y)) * 2.0;
+    return sum / 9.0;
+}
+
+// ============================================================================
+// Pass 1:主渲染
+// ============================================================================
+
+struct VertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex VertexOut chromaPresentVertex(uint vid [[vertex_id]]) {
+    float2 pos[3] = { float2(-1.0, -3.0), float2(-1.0, 1.0), float2(3.0, 1.0) };
+    float2 uv[3]  = { float2( 0.0,  2.0), float2( 0.0, 0.0), float2(2.0, 0.0) };
+    VertexOut o;
+    o.position = float4(pos[vid], 0.0, 1.0);
+    o.uv = uv[vid];
+    return o;
+}
+
+fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
+                                      texture2d<float> coverTex    [[texture(0)]],
+                                      texture2d<float> previousTex [[texture(1)]],
+                                      texture2d<float> soundTex    [[texture(2)]],
+                                      constant Frame&  frame       [[buffer(0)]],
+                                      constant Params& p           [[buffer(1)]]) {
+    constexpr sampler smp(filter::linear, address::clamp_to_edge);
+
+    float energy = chromaEnergy();
+    float2 uv = chromaTurn(in.uv, frame, p, energy);
+
+    float band = chromaSpectrum(uv.y);
+    float wave = chromaWave(uv.x);
+
+    float4 cover = coverTex.sample(smp, clamp(uv, 0.0, 1.0));
+
+    float4 base = mix(frame.color0_, frame.color1_, clamp(band * 1.2, 0.0, 1.0));
+    base = mix(base, frame.color2_, clamp(wave * 0.5, 0.0, 1.0));
+
+    float3 rgb = cover.rgb * mix(float3(1.0), base.rgb, 0.35);
+    rgb = mix(rgb, frame.accent.rgb, p.audioAmount * band * 0.45);
+
+    float lum = dot(rgb, float3(0.2126, 0.7152, 0.0722));
+    rgb = mix(vec3(lum), rgb, p.saturation);
+    rgb *= p.brightness;
+
+    // 边缘淡出
+    float2 e = abs(uv - 0.5) * 2.0;
+    float edge = 1.0 - smoothstep(0.85, 1.0, max(e.x, e.y)) * p.edgeSmooth;
+
+    // 与上一帧混合(对应二进制的 blend pipeline)
+    float3 prev = previousTex.sample(smp, in.uv).rgb;
+    rgb = mix(prev, rgb, edge * 0.22 + 0.78);
+
+    return float4(rgb, 1.0);
+}
+
+// ============================================================================
+// Pass 2: Kawase 双向
+// ============================================================================
+
+struct BlurInOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
+vertex BlurInOut blitVertex(uint vid [[vertex_id]]) {
+    float2 pos[3] = { float2(-1.0, -3.0), float2(-1.0, 1.0), float2(3.0, 1.0) };
+    float2 uv[3]  = { float2( 0.0,  2.0), float2( 0.0, 0.0), float2(2.0, 0.0) };
+    BlurInOut o;
+    o.position = float4(pos[vid], 0.0, 1.0);
+    o.uv = uv[vid];
+    return o;
+}
+
+fragment float4 kawaseDownFragment(BlurInOut in [[stage_in]],
+                                   texture2d<float> src [[texture(0)]],
+                                   constant float2&  srcSize [[buffer(0)]]) {
+    return kawaseDown(in.uv, 0.5 / srcSize);
+}
+
+fragment float4 kawaseUpFragment(BlurInOut in [[stage_in]],
+                                 texture2d<float> src [[texture(0)]],
+                                 constant float2&  srcSize [[buffer(0)]]) {
+    return kawaseUp(in.uv, 0.5 / srcSize);
+}
+
+// ============================================================================
+// Pass 3: 最终合成 + 歌词
+// ============================================================================
+
+fragment float4 compositeFragment(BlurInOut in [[stage_in]],
+                                  texture2d<float> blurred [[texture(0)]],
+                                  texture2d<float> textTex [[texture(1)]],
+                                  texture2d<float> soundTex [[texture(2)]],
+                                  constant Frame&  frame [[buffer(0)]],
+                                  constant Params& p     [[buffer(1)]]) {
+    constexpr sampler smp(filter::linear, address::clamp_to_edge);
+
+    float3 bg = blurred.sample(smp, in.uv).rgb;
+
+    // 歌词直接进 GPU,所以能随节拍发光
+    float2 tuv = in.uv;
+    tuv.y = 1.0 - tuv.y;
+    float4 txt = textTex.sample(smp, tuv);
+
+    float band = chromaSpectrum(tuv.y);
+    float glow = txt.a * (0.55 + band * p.audioAmount * 0.9);
+
+    float3 outRGB = bg;
+    float region = smoothstep(0.05, 0.35, in.uv.y) * (1.0 - smoothstep(0.72, 0.98, in.uv.y));
+    outRGB = mix(outRGB, outRGB * 0.42, region * 0.75);
+
+    outRGB += frame.accent.rgb * glow * 0.55;
+    outRGB += vec3(glow) * glow * 0.35;
+
+    return float4(outRGB, 1.0);
+}

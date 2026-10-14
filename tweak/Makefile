@@ -30,7 +30,7 @@ spotifyglass_CFLAGS := -fobjc-arc -ISources -DSG_VERSION=\"$(SG_VERSION)\"
 # SG_DRIVER=1 for those, and every other build (make release, the release workflow's .deb) leaves it out.
 SG_DRIVER ?= 0
 spotifyglass_CFLAGS += -DSG_DRIVER=$(SG_DRIVER)
-spotifyglass_FRAMEWORKS := UIKit QuartzCore UniformTypeIdentifiers MediaPlayer CoreImage AudioToolbox AVFoundation CoreHaptics Accelerate CoreMotion CoreML CoreText OSLog
+spotifyglass_FRAMEWORKS := UIKit QuartzCore UniformTypeIdentifiers MediaPlayer CoreImage AudioToolbox AVFoundation CoreHaptics Accelerate CoreMotion CoreML CoreText OSLog Metal MetalKit MetalPerformanceShaders
 # zlib unpacks KuGou's KRC lyrics (Shared/LyricsSources/KuGou.m).
 spotifyglass_LIBRARIES := z
 # Runtime swizzling instead of Substrate so the dylib has no extra dependency inside the IPA.
@@ -44,6 +44,13 @@ SG_AUDIO := ../vendor/audio
 spotifyglass_OBJ_FILES := $(SG_AUDIO)/build/ios/libsgaudio.a
 Sources/Shared/AudioEffects/SGDSPCrossfeed.m_CFLAGS := -isystem $(SG_AUDIO)/libbs2b
 Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/eel2
+
+# The Metal visualizer's shaders (Shared/MetalVisualiser/SGRMetalShaders.metal). Theos compiles a
+# .metal into a .metallib and links it into the dylib, which is what -newDefaultLibrary reads at
+# runtime. No .m finds it by name, so it is a build input only and stays out of spotifyglass_FILES
+# above (a .metal there would reach the C compiler, which does not take it).
+SGR_METAL_SHADERS := $(wildcard Sources/Shared/MetalVisualiser/*.metal)
+spotifyglass_OBJ_FILES += $(SGR_METAL_SHADERS:.metal=.metallib)
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

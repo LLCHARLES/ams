@@ -21,6 +21,7 @@
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Shared/MetalVisualiser/SGRMetalBridge.h"
 #import "Player.h"
 
 // Past the plane's edges: above for the pull that dismisses the player, below for the bounce at the end
@@ -120,8 +121,12 @@ static SGRArtworkField *fieldIn(UIView *plane) {
     if (field.superview != plane) [plane addSubview:field];
     else if (plane.subviews.lastObject != field) [plane bringSubviewToFront:field];
     if (!CGRectEqualToRect(field.frame, plane.bounds)) field.frame = plane.bounds;
+    // The Metal visualiser takes the Visualizer background over when the device has Metal; with none
+    // this returns nil and PlayerVisualiser.m's hills stay on the Fluid field as they were.
+    SGRMetalBridgeAttach(plane);
     SGRPlayerMotionFieldLaidOut();
     SGRPlayerVisualiserUpdate();
+    SGRMetalBridgeUpdate();
 }
 
 - (void)backgroundViewModel:(id)model didChangeColor:(id)color playerState:(id)state {
@@ -164,6 +169,7 @@ static void publishCover(void) {
     sg_lastCover = cover;
     sg_lastCoverURI = uri;
     SGRSetNowPlayingArtwork(cover, uri, SGRArtworkQualityHigh);
+    SGRMetalBridgeSetArtwork(cover);
     static NSUInteger logged;
     if (logged++ < 3) SGLog(@"redesign player: cover %.0fx%.0f published for %@", cover.size.width, cover.size.height, uri);
 }
