@@ -98,22 +98,14 @@ jobs:
         run: |
           # Read the SDK's own declarations instead of guessing at spellings.
           SDK="$(xcrun -sdk iphoneos --show-sdk-path)"
+          H="$SDK/System/Library/Frameworks/Metal.framework/Headers"
           echo "SDK: $SDK"
-          echo "=== setFragmentTexture / setFragmentBytes / setFragmentSamplerState 声明 ==="
-          grep -rn "setFragmentTexture\|setFragmentBytes\|setFragmentSamplerState" \
-               "$SDK/System/Library/Frameworks/Metal.framework/Headers/" | head -20
+          echo "=== blit: fillRegion / copyFromBuffer / copyFromTexture ==="
+          grep -rhn "Selector: '\(fillRegion\|copyFromBuffer\|copyFromTexture\)" "$H" | sed 's/^ *//' | sort -u | head -20
           echo
-          echo "=== MTLRenderCommandEncoder 协议名列表 ==="
-          grep -rno "MTLRenderCommandEncoder[A-Za-z0-9_]*" \
-               "$SDK/System/Library/Frameworks/Metal.framework/Headers/MTLRenderCommandEncoder.h" \
-               2>/dev/null | sed 's/.*://' | sort -u | head -20
-          echo
-          echo "=== fillRegion / copyFromBuffer 声明 ==="
-          grep -rn "fillRegion\|copyFromBuffer" \
-               "$SDK/System/Library/Frameworks/Metal.framework/Headers/" | head -12
-          echo
-          echo "=== 相关协议头文件 ==="
-          ls "$SDK/System/Library/Frameworks/Metal.framework/Headers/" | grep -i "rendercommand\|blitcommand" | head
+          echo "=== MTLBlitCommandEncoder.h 里的方法声明 ==="
+          grep -hn "^- (\|^@property" "$H/MTLBlitCommandEncoder.h" 2>/dev/null | head -30 || \
+            ls "$H" | grep -i blit
 
       - name: Syntax-check the visualiser alone
         run: |

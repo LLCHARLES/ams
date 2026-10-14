@@ -156,7 +156,12 @@ static float levelAt(float index) {
 
 #pragma mark - 视图
 
+// accent's backing store is _coverAccent, not an auto-synthesised _accent: the setter is
+// written by hand so it can push the colour into the uniform block and redraw, and the
+// synthesised ivar would then sit unreferenced.
 @implementation SGRMetalVisualiser {
+    @synthesize accent = _coverAccent;
+
     id<MTLDevice> _device;
     id<MTLCommandQueue> _queue;
 
@@ -322,32 +327,38 @@ static float levelAt(float index) {
 }
 
 - (void)buildTextures {
-    _spectrum = [self newTextureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead];
-    _text = [self newTextureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead];
-    _blurA = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
-    _blurB = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
-    if (_text) [self fillTexture:_text with:0x00000000];
+    _spectrum = [self newTextureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead shared:YES];
+    _text = [self newTextureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead shared:YES];
+    _blurA = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:NO];
+    _blurB = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:NO];
 }
 
 - (id<MTLTexture>)newTextureOfWidth:(NSUInteger)width
                               height:(NSUInteger)height
-                              usage:(MTLTextureUsage)usage {
+                              usage:(MTLTextureUsage)usage
+                             shared:(BOOL)shared {
     MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
                                                                              mipmapped:NO];
     desc.usage = usage;
-    desc.storageMode = MTLStorageModePrivate;
+    // Shared storage is CPU-readable on iOS (unified memory, no managed/separate distinction),
+    // so the textures the CPU fills in are written through -contents directly. Only the two
+    // Kawase ping-pong targets stay private: nothing uploads to those.
+    desc.storageMode = shared ? MTLStorageModeShared : MTLStorageModePrivate;
     return [_device newTextureWithDescriptor:desc];
 }
 
+// Zeroes a shared texture. MTLTextureUsageShaderRead with no RenderTarget and shared storage:
+// the GPU never writes to it, so it only ever needs to start out cleared.
 - (void)fillTexture:(id<MTLTexture>)texture with:(uint32_t)pixel {
-    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
-    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    MTLRegion region = MTLRegionMake2D(0, 0, texture.width, texture.height);
-    [blit fillRegion:region mipmapLevel:0 withBytes:&pixel bytesPerRow:(NSUInteger)(4 * texture.width)];
-    [blit endEncoding];
-    [cmd commit];
+    if (!texture) return;
+    uint8_t *dst = (uint8_t *)texture.contents;
+    if (!dst) return;
+    uint32_t value = pixel | (pixel >> 8 << 8) | (pixel >> 16 << 16) | (pixel >> 24 << 24);
+    NSUInteger total = texture.width * texture.height * 4;
+    uint32_t *words = (uint32_t *)dst;
+    for (NSUInteger i = 0; i < total / 4; i++) words[i] = value;
 }
 
 #pragma mark - 封面
@@ -384,19 +395,8 @@ static float levelAt(float index) {
     }
     CGColorSpaceRelease(space);
 
-    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
-    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:side * stride options:MTLResourceStorageModeShared]
-           sourceOffset:0
-      sourceBytesPerRow:stride
-    sourceBytesPerImage:side * stride
-             sourceSize:MTLSizeMake(side, side, 1)
-                  to:texture
-         destinationSlice:0
-          destinationLevel:0
-         destinationOrigin:MTLOriginMake(0, 0, 0)
-          destinationSize:MTLSizeMake(side, side, 1)];
-    [blit endEncoding];
+    uint8_t *dst = (uint8_t *)texture.contents;
+    if (dst) memcpy(dst, bytes, side * stride);
     [cmd commit];
     free(bytes);
 
@@ -481,18 +481,8 @@ static float levelAt(float index) {
     }
     CGColorSpaceRelease(space);
 
-    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
-    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:h * stride options:MTLResourceStorageModeShared]
-           sourceOffset:0
-      sourceBytesPerRow:stride
-    sourceBytesPerImage:h * stride
-             sourceSize:MTLSizeMake(w, h, 1)
-                  to:texture
-         destinationSlice:0
-          destinationLevel:0
-         destinationOrigin:MTLOriginMake(0, 0, 0)
-          destinationSize:MTLSizeMake(w, h, 1)];
+    uint8_t *dst = (uint8_t *)texture.contents;
+    if (dst) memcpy(dst, bytes, h * stride);
     [blit endEncoding];
     [cmd commit];
     free(bytes);
@@ -684,19 +674,8 @@ static float levelAt(float index) {
         bytes[off + 3] = 255;
     }
 
-    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
-    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
-    [blit copyFromBuffer:[_device newBufferWithBytes:bytes length:sizeof(bytes) options:MTLResourceStorageModeShared]
-           sourceOffset:0
-      sourceBytesPerRow:kSpectrumWidth * 4
-    sourceBytesPerImage:sizeof(bytes)
-             sourceSize:MTLSizeMake(kSpectrumWidth, kSpectrumHeight, 1)
-                  to:_spectrum
-         destinationSlice:0
-          destinationLevel:0
-         destinationOrigin:MTLOriginMake(0, 0, 0)
-          destinationSize:MTLSizeMake(kSpectrumWidth, kSpectrumHeight, 1)];
-    [blit endEncoding];
+    uint8_t *dst = (uint8_t *)_spectrum.contents;
+    if (dst) memcpy(dst, bytes, sizeof(bytes));
     [cmd commit];
 }
 
