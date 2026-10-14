@@ -3,6 +3,10 @@ name: Build IPA (Metal visualiser)
 on:
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Branch to build from (the run checks out this, not the default branch)"
+        default: "metal-visualiser"
+        type: string
       ipa_url:
         description: "Direct link to a decrypted Spotify IPA"
         required: true
@@ -21,13 +25,24 @@ jobs:
   build:
     runs-on: macos-latest
     steps:
+      # workflow_dispatch does not move HEAD: without an explicit ref, checkout takes the
+      # repository's default branch, so a run dispatched on a feature branch builds that
+      # branch's workflow file against main's sources. This is the branch the run was asked for.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.ref || github.ref_name }}
 
       - uses: levibostian/action-hide-sensitive-inputs@v1
 
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      - name: Say which sources this run got
+        run: |
+          echo "checked out: $(git rev-parse --abbrev-ref HEAD)  $(git rev-parse --short HEAD)"
+          echo "MetalVisualiser present: $(test -d tweak/Sources/Redesigned/MetalVisualiser && echo yes || echo no)"
+          test -d tweak/Sources/Redesigned/MetalVisualiser || { echo "::error::wrong sources checked out"; exit 1; }
 
       - uses: actions/checkout@v5
         with:
