@@ -599,13 +599,13 @@ static float levelAt(float index) {
 
         id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
         [enc setRenderPipelineState:_present];
-        [enc setFragmentTexture:_cover offset:0 atIndex:0];
-        [enc setFragmentTexture:_previous offset:0 atIndex:1];
-        [enc setFragmentTexture:_spectrum offset:0 atIndex:2];
+        [enc setFragmentTexture:_cover atIndex:0];
+        [enc setFragmentTexture:_previous atIndex:1];
+        [enc setFragmentTexture:_spectrum atIndex:2];
         [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
         // The shaders take the sampler as [[sampler(0)]]; a constexpr sampler cannot carry
         // max_anisotropy, so the host's MTLSamplerState is bound here instead.
-        [enc setFragmentSamplerState:_sampler offset:0 atIndex:0];
+        [enc setFragmentSamplerState:_sampler atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];
     }
@@ -625,10 +625,10 @@ static float levelAt(float index) {
 
             id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
             [enc setRenderPipelineState:pipe];
-            [enc setFragmentTexture:src offset:0 atIndex:0];
+            [enc setFragmentTexture:src atIndex:0];
             SGRSimd2 srcSize = { (float)src.width, (float)src.height };
             [enc setFragmentBytes:&srcSize length:sizeof(srcSize) atIndex:0];
-            [enc setFragmentSamplerState:_sampler offset:0 atIndex:0];
+            [enc setFragmentSamplerState:_sampler atIndex:0];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
             [enc endEncoding];
         }
@@ -638,11 +638,11 @@ static float levelAt(float index) {
     {
         id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:drawableRPD];
         [enc setRenderPipelineState:_composite];
-        [enc setFragmentTexture:_blurA offset:0 atIndex:0];
-        [enc setFragmentTexture:_text offset:0 atIndex:1];
-        [enc setFragmentTexture:_spectrum offset:0 atIndex:2];
+        [enc setFragmentTexture:_blurA atIndex:0];
+        [enc setFragmentTexture:_text atIndex:1];
+        [enc setFragmentTexture:_spectrum atIndex:2];
         [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
-        [enc setFragmentSamplerState:_sampler offset:0 atIndex:0];
+        [enc setFragmentSamplerState:_sampler atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];
     }
