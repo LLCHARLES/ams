@@ -99,16 +99,17 @@ jobs:
           cat > /tmp/probe.m <<'EOF'
           #import <MetalKit/MetalKit.h>
           #import <Metal/Metal.h>
-          // Names that cannot exist, so the compiler prints the nearest ones it does know.
-          void ask(id<MTLRenderCommandEncoder> e, id t) {
-              [e setFragmentTextureZZZ:t index:0];
-              [e setFragmentBytesZZZ:nil length:0 index:0];
-              [e setFragmentSamplerStateZZZ:nil index:0];
-          }
-          // And these exist, which proves the protocol is reached at all.
-          void ok(id<MTLRenderCommandEncoder> e) {
+          // The offset-taking spellings. If these compile and the index-only ones
+          // do not, the index-only ones are gone from this SDK.
+          void ask(id<MTLRenderCommandEncoder> e, id<MTLTexture> t,
+                   id<MTLSamplerState> s, const void *b) {
               [e setRenderPipelineState:(id)nil];
-              [e endEncoding];
+              [e setFragmentTexture:t offset:0 atIndex:0];
+              [e setFragmentBytes:b length:0 atIndex:0];
+              [e setFragmentSamplerState:s offset:0 atIndex:0];
+          }
+          void askBlit(id<MTLBlitCommandEncoder> bl, id<MTLTexture> t, const void *b) {
+              [bl fillRegion:MTLRegionMake2D(0,0,1,1) mipmapLevel:0 withBytes:b bytesPerRow:4];
           }
           EOF
           xcrun clang -fsyntax-only -fobjc-arc -x objective-c \
