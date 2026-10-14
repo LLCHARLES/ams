@@ -164,12 +164,12 @@ static float levelAt(float index) {
 
     id<MTLSamplerState> _sampler;
 
-    __strong id<MTLTexture> *_cover;
-    __strong id<MTLTexture> *_previous;
-    __strong id<MTLTexture> *_spectrum;
-    __strong id<MTLTexture> *_text;
-    __strong id<MTLTexture> *_blurA;
-    __strong id<MTLTexture> *_blurB;
+    __strong id<MTLTexture> _cover;
+    __strong id<MTLTexture> _previous;
+    __strong id<MTLTexture> _spectrum;
+    __strong id<MTLTexture> _text;
+    __strong id<MTLTexture> _blurA;
+    __strong id<MTLTexture> _blurB;
 
     SGRMetalUniforms _u;
     CGPoint _focus;      // 目标,0..1
