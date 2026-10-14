@@ -61,26 +61,30 @@ typedef sampler SGGSampler;
 // ============================================================================
 
 /// 行 0 = 频段,行 1 = dB 级。相邻之间线性插值。
-inline float spectrumRow(float x, int row, sampler smp) {
+///
+/// The spectrum is a bound texture, so it is named here rather than reached through the sampler:
+/// a sampler filters and reads through one, it does not hold pixels. `texture2d<float>::sample`
+/// takes the texture first, then the sampler, then the coordinate.
+inline float spectrumRow(texture2d<float> spec, sampler smp, float x, int row) {
     float maxX = (row == 0) ? 127.0 : 255.0;
     float p = clamp(x, 0.0, 1.0) * maxX;
     int i = min(int(p), int(maxX) - 1);
-    float4 a = smp.sample(float2(float(i)     / maxX, (float)row));
-    float4 b = smp.sample(float2(float(i + 1) / maxX, (float)row));
+    float4 a = spec.sample(smp, float2(float(i)     / maxX, (float)row));
+    float4 b = spec.sample(smp, float2(float(i + 1) / maxX, (float)row));
     return mix(a.r, b.r, p - float(i));
 }
 
-inline float chromaSpectrum(float slot, sampler smp) {
-    return spectrumRow(slot, 0, smp);
+inline float chromaSpectrum(texture2d<float> spec, sampler smp, float slot) {
+    return spectrumRow(spec, smp, slot, 0);
 }
 
-inline float chromaWave(float x, sampler smp) {
-    return spectrumRow(x, 1, smp);
+inline float chromaWave(texture2d<float> spec, sampler smp, float x) {
+    return spectrumRow(spec, smp, x, 1);
 }
 
 /// 整体能量,驱动画面呼吸
-inline float chromaEnergy(sampler smp) {
-    return chromaSpectrum(0.06, smp) * 0.5 + chromaSpectrum(0.50, smp) * 0.3 + chromaSpectrum(0.85, smp) * 0.2;
+inline float chromaEnergy(texture2d<float> spec, sampler smp) {
+    return chromaSpectrum(spec, smp, 0.06) * 0.5 + chromaSpectrum(spec, smp, 0.50) * 0.3 + chromaSpectrum(spec, smp, 0.85) * 0.2;
 }
 
 // ============================================================================
@@ -168,11 +172,11 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
                                       constant Frame&  frame       [[buffer(0)]],
                                       constant Params& p           [[buffer(1)]],
                                       sampler           smp         [[sampler(0)]]) {
-    float energy = chromaEnergy(smp);
+    float energy = chromaEnergy(soundTex, smp);
     float2 uv = chromaTurn(in.uv, frame, p, energy);
 
-    float band = chromaSpectrum(uv.y, smp);
-    float wave = chromaWave(uv.x, smp);
+    float band = chromaSpectrum(soundTex, smp, uv.y);
+    float wave = chromaWave(soundTex, smp, uv.x);
 
     float4 cover = coverTex.sample(smp, clamp(uv, 0.0, 1.0));
 
@@ -247,7 +251,7 @@ fragment float4 compositeFragment(BlurInOut in [[stage_in]],
     tuv.y = 1.0 - tuv.y;
     float4 txt = textTex.sample(smp, tuv);
 
-    float band = chromaSpectrum(tuv.y, smp);
+    float band = chromaSpectrum(soundTex, smp, tuv.y);
     float glow = txt.a * (0.55 + band * p.audioAmount * 0.9);
 
     float3 outRGB = bg;
