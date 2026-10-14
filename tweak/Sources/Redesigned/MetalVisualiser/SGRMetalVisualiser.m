@@ -164,12 +164,12 @@ static float levelAt(float index) {
 
     id<MTLSamplerState> _sampler;
 
-    id<MTLTexture> *_cover;
-    id<MTLTexture> *_previous;
-    id<MTLTexture> *_spectrum;
-    id<MTLTexture> *_text;
-    id<MTLTexture> *_blurA;
-    id<MTLTexture> *_blurB;
+    id<MTLTexture> __strong *_cover;
+    id<MTLTexture> __strong *_previous;
+    id<MTLTexture> __strong *_spectrum;
+    id<MTLTexture> __strong *_text;
+    id<MTLTexture> __strong *_blurA;
+    id<MTLTexture> __strong *_blurB;
 
     SGRMetalUniforms _u;
     CGPoint _focus;      // 目标,0..1
@@ -256,7 +256,7 @@ static float levelAt(float index) {
     if (library) return library;
 
     Dl_info info;
-    if (dladdr((const void *)self, &info) && info.dli_fname) {
+    if (dladdr((__bridge const void *)self, &info) && info.dli_fname) {
         NSString *path = [NSString stringWithUTF8String:info.dli_fname];
         NSURL *url = [NSURL fileURLWithPath:path];
         NSError *err = nil;
@@ -307,7 +307,7 @@ static float levelAt(float index) {
     _up = pipes[2];
     _composite = pipes[3];
 
-    id<MTLSamplerDescriptor> *sd = [MTLSamplerDescriptor new];
+    MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
     sd.minFilter = MTLSamplerMinMagFilterLinear;
     sd.magFilter = MTLSamplerMinMagFilterLinear;
     sd.mipFilter = MTLSamplerMipFilterLinear;
@@ -327,7 +327,7 @@ static float levelAt(float index) {
 }
 
 - (id<MTLTexture>)textureOfWidth:(NSUInteger)width height:(NSUInteger)height usage:MTLTextureUsage) {
-    id<MTLTextureDescriptor> *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+    id<MTLTextureDescriptor> __strong *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
                                                                              mipmapped:NO];
@@ -587,7 +587,7 @@ static float levelAt(float index) {
     // Pass 1 — 主渲染进 _blurA。不能直接写 drawable: Pass 3 还要往同一张
     // drawable 上合成歌词, 先写了就被后面那遍覆盖掉。
     if (_blurA) {
-        id<MTLRenderPassDescriptor> *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+        id<MTLRenderPassDescriptor> __strong *desc = [MTLRenderPassDescriptor renderPassDescriptor];
         desc.colorAttachments[0].texture = _blurA;
         desc.colorAttachments[0].loadAction = MTLLoadActionClear;
         desc.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -613,7 +613,7 @@ static float levelAt(float index) {
             id<MTLTexture> dst = pass == 0 ? _blurB : _blurA;
             id<MTLRenderPipelineState> pipe = pass == 0 ? _down : _up;
 
-            id<MTLRenderPassDescriptor> *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+            id<MTLRenderPassDescriptor> __strong *desc = [MTLRenderPassDescriptor renderPassDescriptor];
             desc.colorAttachments[0].texture = dst;
             desc.colorAttachments[0].loadAction = MTLLoadActionClear;
             desc.colorAttachments[0].storeAction = MTLStoreActionStore;
