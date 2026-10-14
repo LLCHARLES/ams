@@ -22,15 +22,21 @@
 // Uniform 桥接 —— 与 .metal 里逐字段对应
 // ============================================================================
 
+// The uniform block, laid out to match Frame/Params in the .metal exactly: a pair of floats,
+// then four-vectors, then scalars. SIMD types are spelled out as structs rather than
+// vector_floatN so the layout does not depend on which Metal headers happen to be in scope.
+typedef struct { float x, y; } SGRSimd2;
+typedef struct { float x, y, z, w; } SGRSimd4;
+
 typedef struct {
-    vector_float2 resolution;
-    vector_float2 focus;
-    vector_float2 tilt;
-    vector_float4 textAspect;
-    vector_float4 color0;
-    vector_float4 color1;
-    vector_float4 color2;
-    vector_float4 accent;
+    SGRSimd2 resolution;
+    SGRSimd2 focus;
+    SGRSimd2 tilt;
+    SGRSimd4 textAspect;
+    SGRSimd4 color0;
+    SGRSimd4 color1;
+    SGRSimd4 color2;
+    SGRSimd4 accent;
     float flowAmount;
     float audioAmount;
     float edgeSmooth;
@@ -69,7 +75,7 @@ NSInteger SGRMetalValue(SGRMetalSetting setting) {
 
 void SGRSetMetalValue(SGRMetalSetting setting, NSInteger value) {
     SGRMetalLimits l = kSettings[setting].limits;
-    SGSet(kSettings[setting].key, @(MIN(l.most, MAX(l.least, value))));
+    SGSetInt(kSettings[setting].key, MIN(l.most, MAX(l.least, value)));
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:SGRMetalSettingsDidChangeNotification object:nil];
     });
@@ -78,7 +84,7 @@ void SGRSetMetalValue(SGRMetalSetting setting, NSInteger value) {
 void SGRResetMetalSettings(void) {
     for (int i = 0; i < kSettingCount; i++) {
         SGRMetalLimits l = kSettings[i].limits;
-        SGSet(kSettings[i].key, @(l.standard));
+        SGSetInt(kSettings[i].key, l.standard);
     }
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:SGRMetalSettingsDidChangeNotification object:nil];
@@ -158,12 +164,12 @@ static float levelAt(float index) {
 
     id<MTLSamplerState> _sampler;
 
-    MTLTexture *_cover;
-    MTLTexture *_previous;
-    MTLTexture *_spectrum;
-    MTLTexture *_text;
-    MTLTexture *_blurA;
-    MTLTexture *_blurB;
+    id<MTLTexture> *_cover;
+    id<MTLTexture> *_previous;
+    id<MTLTexture> *_spectrum;
+    id<MTLTexture> *_text;
+    id<MTLTexture> *_blurA;
+    id<MTLTexture> *_blurB;
 
     SGRMetalUniforms _u;
     CGPoint _focus;      // 目标,0..1
@@ -301,7 +307,7 @@ static float levelAt(float index) {
     _up = pipes[2];
     _composite = pipes[3];
 
-    MTLSamplerDescriptor *sd = [MTLSamplerDescriptor new];
+    id<MTLSamplerDescriptor> *sd = [MTLSamplerDescriptor new];
     sd.minFilter = MTLSamplerMinMagFilterLinear;
     sd.magFilter = MTLSamplerMinMagFilterLinear;
     sd.mipFilter = MTLSamplerMipFilterLinear;
@@ -321,7 +327,7 @@ static float levelAt(float index) {
 }
 
 - (id<MTLTexture>)textureOfWidth:(NSUInteger)width height:(NSUInteger)height usage:MTLTextureUsage) {
-    MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
+    id<MTLTextureDescriptor> *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
                                                                              mipmapped:NO];
@@ -398,7 +404,7 @@ static float levelAt(float index) {
         for (NSUInteger i = 0; i < 3 && i < colors.count; i++) {
             CGFloat r, g, b, a;
             [colors[i] getRed:&r green:&g blue:&b alpha:&a];
-            vector_float4 v = { r, g, b, 1.0f };
+            SGRSimd4 v = { r, g, b, 1.0f };
             if (i == 0) _u.color0 = v;
             else if (i == 1) _u.color1 = v;
             else _u.color2 = v;
@@ -424,7 +430,7 @@ static float levelAt(float index) {
     if (accent) {
         CGFloat r, g, b, a;
         [accent getRed:&r green:&g blue:&b alpha:&a];
-        _u.accent = (vector_float4){ r, g, b, 1.0f };
+        _u.accent = (SGRSimd4){ r, g, b, 1.0f };
     }
     [self drawOnce];
 }
@@ -547,13 +553,13 @@ static float levelAt(float index) {
     CGSize size = self.drawableSize;
 
     // 尺寸
-    _u.resolution = (vector_float2){ (float)size.width, (float)size.height };
+    _u.resolution = (SGRSimd2){ (float)size.width, (float)size.height };
 
     // 焦点缓动
     _focusNow.x += (_focus.x - _focusNow.x) * kFocusEase;
     _focusNow.y += (_focus.y - _focusNow.y) * kFocusEase;
-    _u.focus = (vector_float2){ _focusNow.x, _focusNow.y };
-    _u.tilt = (vector_float2){ _tilt.x, _tilt.y };
+    _u.focus = (SGRSimd2){ _focusNow.x, _focusNow.y };
+    _u.tilt = (SGRSimd2){ _tilt.x, _tilt.y };
 
     // 时间与帧数
     CFTimeInterval now = CACurrentMediaTime();
@@ -581,7 +587,7 @@ static float levelAt(float index) {
     // Pass 1 — 主渲染进 _blurA。不能直接写 drawable: Pass 3 还要往同一张
     // drawable 上合成歌词, 先写了就被后面那遍覆盖掉。
     if (_blurA) {
-        MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+        id<MTLRenderPassDescriptor> *desc = [MTLRenderPassDescriptor renderPassDescriptor];
         desc.colorAttachments[0].texture = _blurA;
         desc.colorAttachments[0].loadAction = MTLLoadActionClear;
         desc.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -607,7 +613,7 @@ static float levelAt(float index) {
             id<MTLTexture> dst = pass == 0 ? _blurB : _blurA;
             id<MTLRenderPipelineState> pipe = pass == 0 ? _down : _up;
 
-            MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
+            id<MTLRenderPassDescriptor> *desc = [MTLRenderPassDescriptor renderPassDescriptor];
             desc.colorAttachments[0].texture = dst;
             desc.colorAttachments[0].loadAction = MTLLoadActionClear;
             desc.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -616,7 +622,7 @@ static float levelAt(float index) {
             id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
             [enc setRenderPipelineState:pipe];
             [enc setFragmentTexture:src index:0];
-            vector_float2 srcSize = { (float)src.width, (float)src.height };
+            SGRSimd2 srcSize = { (float)src.width, (float)src.height };
             [enc setFragmentBytes:&srcSize length:sizeof(srcSize) index:0];
             [enc setFragmentSamplerState:_sampler index:0];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
