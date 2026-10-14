@@ -158,10 +158,9 @@ static float levelAt(float index) {
 
 // accent's backing store is _coverAccent, not an auto-synthesised _accent: the setter is
 // written by hand so it can push the colour into the uniform block and redraw, and the
-// synthesised ivar would then sit unreferenced.
+// synthesised ivar would then sit unreferenced. @synthesize goes after the ivar block —
+// a block declares ivars only.
 @implementation SGRMetalVisualiser {
-    @synthesize accent = _coverAccent;
-
     id<MTLDevice> _device;
     id<MTLCommandQueue> _queue;
 
@@ -195,6 +194,8 @@ static float levelAt(float index) {
 
     CADisplayLink *_link;
 }
+
+@synthesize accent = _coverAccent;
 
 + (BOOL)isAvailable {
     static BOOL available;
@@ -378,7 +379,7 @@ static float levelAt(float index) {
     if (!source) { [self drawOnce]; return; }
 
     NSUInteger side = MIN(MAX((NSUInteger)CGImageGetWidth(source), (NSUInteger)CGImageGetHeight(source)), 1024);
-    id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:YES];
     if (!texture) { [self drawOnce]; return; }
 
     // 用 CoreGraphics 画到 4 字节像素,再 blit 上传。
@@ -397,7 +398,6 @@ static float levelAt(float index) {
 
     uint8_t *dst = (uint8_t *)texture.contents;
     if (dst) memcpy(dst, bytes, side * stride);
-    [cmd commit];
     free(bytes);
 
     _cover = texture;
@@ -430,11 +430,11 @@ static float levelAt(float index) {
     [self drawOnce];
 }
 
-- (void)setAccent:(UIColor *)accent {
-    _coverAccent = accent;
-    if (accent) {
+- (void)setAccent:(UIColor *)color {
+    _coverAccent = color;
+    if (color) {
         CGFloat r, g, b, a;
-        [accent getRed:&r green:&g blue:&b alpha:&a];
+        [color getRed:&r green:&g blue:&b alpha:&a];
         _u.accent = (SGRSimd4){ r, g, b, 1.0f };
     }
     [self drawOnce];
@@ -483,8 +483,6 @@ static float levelAt(float index) {
 
     uint8_t *dst = (uint8_t *)texture.contents;
     if (dst) memcpy(dst, bytes, h * stride);
-    [blit endEncoding];
-    [cmd commit];
     free(bytes);
 }
 
@@ -676,7 +674,6 @@ static float levelAt(float index) {
 
     uint8_t *dst = (uint8_t *)_spectrum.contents;
     if (dst) memcpy(dst, bytes, sizeof(bytes));
-    [cmd commit];
 }
 
 @end

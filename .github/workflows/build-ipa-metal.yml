@@ -106,6 +106,16 @@ jobs:
           echo "=== MTLBlitCommandEncoder.h 里的方法声明 ==="
           grep -hn "^- (\|^@property" "$H/MTLBlitCommandEncoder.h" 2>/dev/null | head -30 || \
             ls "$H" | grep -i blit
+          echo
+          echo "=== MTLTexture 的 @property 全表 ==="
+          grep -n "@property" "$H/MTLTexture.h" 2>/dev/null | head -30
+          echo
+          echo "=== MTLTexture 上的 contents / replaceRegion / didModify ==="
+          grep -n "contents\|replaceRegion\|didModifyRange\|MTLStorageModeShared" "$H/MTLTexture.h" 2>/dev/null | head -25
+          echo
+          echo "=== 哪个头文件定义了 contents ==="
+          grep -rln "void \*contents\|void\* *contents" "$H" 2>/dev/null | head
+          grep -rn "contents" "$H/MTLResource.h" 2>/dev/null | head -10
 
       - name: Syntax-check the visualiser alone
         run: |
