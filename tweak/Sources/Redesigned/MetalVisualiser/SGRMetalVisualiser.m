@@ -328,38 +328,65 @@ static float levelAt(float index) {
 }
 
 - (void)buildTextures {
-    _spectrum = [self newTextureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead shared:YES];
-    _text = [self newTextureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead shared:YES];
-    _blurA = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:NO];
-    _blurB = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:NO];
+    _spectrum = [self newTextureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead];
+    _text = [self newTextureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead];
+    _blurA = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    _blurB = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
 }
 
 - (id<MTLTexture>)newTextureOfWidth:(NSUInteger)width
                               height:(NSUInteger)height
-                              usage:(MTLTextureUsage)usage
-                             shared:(BOOL)shared {
+                              usage:(MTLTextureUsage)usage {
     MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
                                                                              mipmapped:NO];
     desc.usage = usage;
-    // Shared storage is CPU-readable on iOS (unified memory, no managed/separate distinction),
-    // so the textures the CPU fills in are written through -contents directly. Only the two
-    // Kawase ping-pong targets stay private: nothing uploads to those.
-    desc.storageMode = shared ? MTLStorageModeShared : MTLStorageModePrivate;
+    desc.storageMode = MTLStorageModePrivate;
     return [_device newTextureWithDescriptor:desc];
 }
 
-// Zeroes a shared texture. MTLTextureUsageShaderRead with no RenderTarget and shared storage:
-// the GPU never writes to it, so it only ever needs to start out cleared.
+// Uploads through a blit encoder. -contents is not declared on MTLTexture for iOS, so writing
+// the bytes by hand is not an option here the way it is on macOS.
+- (void)uploadBytes:(const uint8_t *)bytes
+             length:(NSUInteger)length
+          bytesPerRow:(NSUInteger)bytesPerRow
+                width:(NSUInteger)width
+               height:(NSUInteger)height
+             toTexture:(id<MTLTexture>)texture {
+    if (!bytes || !texture) return;
+    id<MTLBuffer> staging = [_device newBufferWithBytes:bytes
+                                                 length:length
+                                                options:MTLResourceStorageModeShared];
+    if (!staging) return;
+    id<MTLCommandBuffer> cmd = [_queue commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cmd blitCommandEncoder];
+    [blit copyFromBuffer:staging
+            sourceOffset:0
+       sourceBytesPerRow:bytesPerRow
+     sourceBytesPerImage:length
+              sourceSize:MTLSizeMake(width, height, 1)
+                   to:texture
+        destinationSlice:0
+         destinationLevel:0
+        destinationOrigin:MTLOriginMake(0, 0, 0)];
+    [blit endEncoding];
+    [cmd commit];
+}
+
+// Clears the lyrics atlas. MTLBlitCommandEncoder has no fillRegion:...withBytes: on iOS, but it
+// does have fillBuffer:range:value:, and a private texture is reached the same way as any other
+// upload: copy a zeroed staging buffer into it.
 - (void)fillTexture:(id<MTLTexture>)texture with:(uint32_t)pixel {
     if (!texture) return;
-    uint8_t *dst = (uint8_t *)texture.contents;
-    if (!dst) return;
-    uint32_t value = pixel | (pixel >> 8 << 8) | (pixel >> 16 << 16) | (pixel >> 24 << 24);
-    NSUInteger total = texture.width * texture.height * 4;
-    uint32_t *words = (uint32_t *)dst;
-    for (NSUInteger i = 0; i < total / 4; i++) words[i] = value;
+    uint8_t zero = (uint8_t)(pixel & 0xff);
+    NSUInteger length = texture.width * texture.height * 4;
+    uint8_t *bytes = calloc(1, length);
+    if (!bytes) return;
+    if (pixel) memset(bytes, zero, length);
+    [self uploadBytes:bytes length:length bytesPerRow:texture.width * 4
+                width:texture.width height:texture.height toTexture:texture];
+    free(bytes);
 }
 
 #pragma mark - 封面
@@ -379,7 +406,7 @@ static float levelAt(float index) {
     if (!source) { [self drawOnce]; return; }
 
     NSUInteger side = MIN(MAX((NSUInteger)CGImageGetWidth(source), (NSUInteger)CGImageGetHeight(source)), 1024);
-    id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget shared:YES];
+    id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
     if (!texture) { [self drawOnce]; return; }
 
     // 用 CoreGraphics 画到 4 字节像素,再 blit 上传。
@@ -396,8 +423,8 @@ static float levelAt(float index) {
     }
     CGColorSpaceRelease(space);
 
-    uint8_t *dst = (uint8_t *)texture.contents;
-    if (dst) memcpy(dst, bytes, side * stride);
+    [self uploadBytes:bytes length:side * stride bytesPerRow:stride
+                width:side height:side toTexture:texture];
     free(bytes);
 
     _cover = texture;
@@ -481,8 +508,7 @@ static float levelAt(float index) {
     }
     CGColorSpaceRelease(space);
 
-    uint8_t *dst = (uint8_t *)texture.contents;
-    if (dst) memcpy(dst, bytes, h * stride);
+    [self uploadBytes:bytes length:h * stride bytesPerRow:stride width:w height:h toTexture:texture];
     free(bytes);
 }
 
@@ -672,8 +698,8 @@ static float levelAt(float index) {
         bytes[off + 3] = 255;
     }
 
-    uint8_t *dst = (uint8_t *)_spectrum.contents;
-    if (dst) memcpy(dst, bytes, sizeof(bytes));
+    [self uploadBytes:bytes length:sizeof(bytes) bytesPerRow:kSpectrumWidth * 4
+                width:kSpectrumWidth height:kSpectrumHeight toTexture:_spectrum];
 }
 
 @end
