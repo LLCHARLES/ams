@@ -68,8 +68,18 @@ jobs:
           echo "::endgroup::"
           exit $status
 
+      # The job log cannot be fetched from outside a browser session, so the build log rides along
+      # as an artifact too: a failure then says what went wrong without opening the run page.
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v5
-        if: inputs.upload_method != 'filebin'
+        if: inputs.upload_method != 'filebin' && success()
         with:
           name: ams-metal.ipa
           path: out/*.ipa
