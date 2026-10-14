@@ -138,6 +138,22 @@ jobs:
           echo "::endgroup::"
           exit $status
 
+      # The build log says which rules ran; the dylib says whether the shaders are actually in it.
+      # A makefile can attach a prerequisite correctly and still hand ld a stale path, and the
+      # only thing that settles it is the section table of the binary that will be loaded.
+      - name: Verify the shaders are inside the dylib
+        run: |
+          set -e
+          DYLIB=$(find .theos tweak/.theos -name 'spotifyglass.dylib' -path '*arm64*' 2>/dev/null | head -1)
+          if [ -z "$DYLIB" ]; then echo "no dylib found — the build did not produce one"; exit 1; fi
+          echo "dylib: $DYLIB ($(wc -c < "$DYLIB") bytes)"
+          echo "--- sections named metallib ---"
+          otool -l "$DYLIB" | grep -A2 -i "sectname" | grep -i "metallib" || echo "NOT FOUND in section table"
+          echo "--- any metallib segment/section ---"
+          otool -l "$DYLIB" | grep -c -i metallib || echo "0 occurrences"
+          echo "--- the Metal visualiser's own symbols, as a second witness ---"
+          nm -a "$DYLIB" 2>/dev/null | grep -c "SGRMetalVisualiser\|SGRMetalBridge" || echo "0 symbols"
+
       # The job log cannot be fetched from outside a browser session, so the build log rides along
       # as an artifact too: a failure then says what went wrong without opening the run page.
       - name: Upload build log
