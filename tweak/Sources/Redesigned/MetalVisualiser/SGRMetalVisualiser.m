@@ -14,8 +14,8 @@
 #import <dlfcn.h>
 #import "SGRMetalVisualiser.h"
 #import "Core/SGCore.h"
-#import "Kit/SGRKit.h"
-#import "Player/SGRSpectrum.h"
+#import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Player/SGRSpectrum.h"
 #import "Shared/AudioEffects/AudioEffects.h"
 
 // ============================================================================
