@@ -58,9 +58,9 @@ jobs:
       - name: Check the Metal toolchain
         run: |
           set -e
-          echo "--- xcrun -sdk iphoneos metal ---"
+          echo "--- xcrun -sdk iphoneos metal -v ---"
           xcrun -sdk iphoneos metal -v 2>&1 | head -3
-          echo "--- compile a trivial shader ---"
+          echo "--- a trivial shader, straight to .metallib (as the Makefile does) ---"
           cat > /tmp/probe.metal <<'EOF'
           #include <metal_stdlib>
           using namespace metal;
@@ -72,12 +72,10 @@ jobs:
               return float4(1.0, 0.0, 0.0, 1.0);
           }
           EOF
-          xcrun -sdk iphoneos metal -O3 -o /tmp/probe.air /tmp/probe.metal
-          xcrun -sdk iphoneos metallib -o /tmp/probe.metallib /tmp/probe.air
+          xcrun -sdk iphoneos metal -O3 -o /tmp/probe.metallib /tmp/probe.metal
           ls -la /tmp/probe.metallib
           echo "--- the real shaders ---"
-          xcrun -sdk iphoneos metal -O3 -o /tmp/sgr.air tweak/Sources/Redesigned/MetalVisualiser/SGRMetalShaders.metal
-          xcrun -sdk iphoneos metallib -o /tmp/sgr.metallib /tmp/sgr.air
+          xcrun -sdk iphoneos metal -O3 -o /tmp/sgr.metallib tweak/Sources/Redesigned/MetalVisualiser/SGRMetalShaders.metal
           ls -la /tmp/sgr.metallib
           echo "Metal toolchain OK"
 

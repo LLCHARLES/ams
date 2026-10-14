@@ -593,6 +593,9 @@ static float levelAt(float index) {
         [enc setFragmentTexture:_previous index:1];
         [enc setFragmentTexture:_spectrum index:2];
         [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        // The shaders take the sampler as [[sampler(0)]]; a constexpr sampler cannot carry
+        // max_anisotropy, so the host's MTLSamplerState is bound here instead.
+        [enc setFragmentSamplerState:_sampler index:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];
     }
@@ -615,6 +618,7 @@ static float levelAt(float index) {
             [enc setFragmentTexture:src index:0];
             vector_float2 srcSize = { (float)src.width, (float)src.height };
             [enc setFragmentBytes:&srcSize length:sizeof(srcSize) index:0];
+            [enc setFragmentSamplerState:_sampler index:0];
             [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
             [enc endEncoding];
         }
@@ -628,6 +632,7 @@ static float levelAt(float index) {
         [enc setFragmentTexture:_text index:1];
         [enc setFragmentTexture:_spectrum index:2];
         [enc setFragmentBytes:&_u length:sizeof(_u) index:0];
+        [enc setFragmentSamplerState:_sampler index:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];
     }

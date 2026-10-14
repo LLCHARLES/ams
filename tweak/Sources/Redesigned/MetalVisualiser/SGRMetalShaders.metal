@@ -50,37 +50,37 @@ struct Params {
     uint   spectrumBands; // 频段数
 };
 
-constexpr sampler chromaSampler(
-    filter::linear,
-    address::clamp_to_edge,
-    mip_filter::linear,
-    max_anisotropy = 8);
+// A constexpr sampler is built in the device address space and may only carry addressing and
+// filtering, not max_anisotropy — that one needs a MTLSamplerState made by the host. The
+// functions below therefore take the sampler as a parameter, and the host passes the state it
+// built in -[SGRMetalVisualiser buildPipelines].
+typedef sampler SGGSampler;
 
 // ============================================================================
 // 频谱采样 — 256x2
 // ============================================================================
 
 /// 行 0 = 频段,行 1 = dB 级。相邻之间线性插值。
-inline float spectrumRow(float x, int row) {
+inline float spectrumRow(float x, int row, sampler smp) {
     float maxX = (row == 0) ? 127.0 : 255.0;
     float p = clamp(x, 0.0, 1.0) * maxX;
     int i = min(int(p), int(maxX) - 1);
-    float4 a = chromaSampler.sample(chromaSampler, float2(float(i)     / maxX, (float)row));
-    float4 b = chromaSampler.sample(chromaSampler, float2(float(i + 1) / maxX, (float)row));
+    float4 a = smp.sample(smp, float2(float(i)     / maxX, (float)row));
+    float4 b = smp.sample(smp, float2(float(i + 1) / maxX, (float)row));
     return mix(a.r, b.r, p - float(i));
 }
 
-inline float chromaSpectrum(float slot) {
-    return spectrumRow(slot, 0);
+inline float chromaSpectrum(float slot, sampler smp) {
+    return spectrumRow(slot, 0, smp);
 }
 
-inline float chromaWave(float x) {
-    return spectrumRow(x, 1);
+inline float chromaWave(float x, sampler smp) {
+    return spectrumRow(x, 1, smp);
 }
 
 /// 整体能量,驱动画面呼吸
-inline float chromaEnergy() {
-    return chromaSpectrum(0.06) * 0.5 + chromaSpectrum(0.50) * 0.3 + chromaSpectrum(0.85) * 0.2;
+inline float chromaEnergy(sampler smp) {
+    return chromaSpectrum(0.06, smp) * 0.5 + chromaSpectrum(0.50, smp) * 0.3 + chromaSpectrum(0.85, smp) * 0.2;
 }
 
 // ============================================================================
@@ -121,23 +121,23 @@ inline float2 chromaTurn(float2 uv, Frame frame, Params p, float energy) {
 // Kawase 模糊
 // ============================================================================
 
-inline float4 kawaseDown(float2 uv, float2 halfPixel) {
+inline float4 kawaseDown(float2 uv, float2 halfPixel, sampler smp) {
     float4 sum = float4(0.0);
-    sum += chromaSampler.sample(chromaSampler, uv + float2(-halfPixel.x, -halfPixel.y));
-    sum += chromaSampler.sample(chromaSampler, uv + float2( halfPixel.x, -halfPixel.y));
-    sum += chromaSampler.sample(chromaSampler, uv + float2(-halfPixel.x,  halfPixel.y));
-    sum += chromaSampler.sample(chromaSampler, uv + float2( halfPixel.x,  halfPixel.y));
+    sum += smp.sample(smp, uv + float2(-halfPixel.x, -halfPixel.y));
+    sum += smp.sample(smp, uv + float2( halfPixel.x, -halfPixel.y));
+    sum += smp.sample(smp, uv + float2(-halfPixel.x,  halfPixel.y));
+    sum += smp.sample(smp, uv + float2( halfPixel.x,  halfPixel.y));
     return sum * 0.25;
 }
 
-inline float4 kawaseUp(float2 uv, float2 halfPixel) {
+inline float4 kawaseUp(float2 uv, float2 halfPixel, sampler smp) {
     float2 o = halfPixel * 1.5;
     float4 sum = float4(0.0);
-    sum += chromaSampler.sample(chromaSampler, uv) * 1.0;
-    sum += chromaSampler.sample(chromaSampler, uv + float2(-o.x, 0.0)) * 2.0;
-    sum += chromaSampler.sample(chromaSampler, uv + float2( o.x, 0.0)) * 2.0;
-    sum += chromaSampler.sample(chromaSampler, uv + float2(0.0, -o.y)) * 2.0;
-    sum += chromaSampler.sample(chromaSampler, uv + float2(0.0,  o.y)) * 2.0;
+    sum += smp.sample(smp, uv) * 1.0;
+    sum += smp.sample(smp, uv + float2(-o.x, 0.0)) * 2.0;
+    sum += smp.sample(smp, uv + float2( o.x, 0.0)) * 2.0;
+    sum += smp.sample(smp, uv + float2(0.0, -o.y)) * 2.0;
+    sum += smp.sample(smp, uv + float2(0.0,  o.y)) * 2.0;
     return sum / 9.0;
 }
 
@@ -164,14 +164,13 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
                                       texture2d<float> previousTex [[texture(1)]],
                                       texture2d<float> soundTex    [[texture(2)]],
                                       constant Frame&  frame       [[buffer(0)]],
-                                      constant Params& p           [[buffer(1)]]) {
-    constexpr sampler smp(filter::linear, address::clamp_to_edge);
-
-    float energy = chromaEnergy();
+                                      constant Params& p           [[buffer(1)]],
+                                      sampler           smp         [[sampler(0)]]) {
+    float energy = chromaEnergy(smp);
     float2 uv = chromaTurn(in.uv, frame, p, energy);
 
-    float band = chromaSpectrum(uv.y);
-    float wave = chromaWave(uv.x);
+    float band = chromaSpectrum(uv.y, smp);
+    float wave = chromaWave(uv.x, smp);
 
     float4 cover = coverTex.sample(smp, clamp(uv, 0.0, 1.0));
 
@@ -216,14 +215,16 @@ vertex BlurInOut blitVertex(uint vid [[vertex_id]]) {
 
 fragment float4 kawaseDownFragment(BlurInOut in [[stage_in]],
                                    texture2d<float> src [[texture(0)]],
-                                   constant float2&  srcSize [[buffer(0)]]) {
-    return kawaseDown(in.uv, 0.5 / srcSize);
+                                   constant float2&  srcSize [[buffer(0)]],
+                                   sampler           smp   [[sampler(0)]]) {
+    return kawaseDown(in.uv, 0.5 / srcSize, smp);
 }
 
 fragment float4 kawaseUpFragment(BlurInOut in [[stage_in]],
                                  texture2d<float> src [[texture(0)]],
-                                 constant float2&  srcSize [[buffer(0)]]) {
-    return kawaseUp(in.uv, 0.5 / srcSize);
+                                 constant float2&  srcSize [[buffer(0)]],
+                                 sampler           smp   [[sampler(0)]]) {
+    return kawaseUp(in.uv, 0.5 / srcSize, smp);
 }
 
 // ============================================================================
@@ -235,9 +236,8 @@ fragment float4 compositeFragment(BlurInOut in [[stage_in]],
                                   texture2d<float> textTex [[texture(1)]],
                                   texture2d<float> soundTex [[texture(2)]],
                                   constant Frame&  frame [[buffer(0)]],
-                                  constant Params& p     [[buffer(1)]]) {
-    constexpr sampler smp(filter::linear, address::clamp_to_edge);
-
+                                  constant Params& p     [[buffer(1)]],
+                                  sampler           smp   [[sampler(0)]]) {
     float3 bg = blurred.sample(smp, in.uv).rgb;
 
     // 歌词直接进 GPU,所以能随节拍发光
@@ -245,7 +245,7 @@ fragment float4 compositeFragment(BlurInOut in [[stage_in]],
     tuv.y = 1.0 - tuv.y;
     float4 txt = textTex.sample(smp, tuv);
 
-    float band = chromaSpectrum(tuv.y);
+    float band = chromaSpectrum(tuv.y, smp);
     float glow = txt.a * (0.55 + band * p.audioAmount * 0.9);
 
     float3 outRGB = bg;
