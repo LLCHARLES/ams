@@ -319,14 +319,16 @@ static float levelAt(float index) {
 }
 
 - (void)buildTextures {
-    _spectrum = [self textureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead];
-    _text = [self textureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead];
-    _blurA = [self textureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
-    _blurB = [self textureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    _spectrum = [self newTextureOfWidth:kSpectrumWidth height:kSpectrumHeight usage:MTLTextureUsageShaderRead];
+    _text = [self newTextureOfWidth:512 height:512 usage:MTLTextureUsageShaderRead];
+    _blurA = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    _blurB = [self newTextureOfWidth:kBlurSide height:kBlurSide usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
     if (_text) [self fillTexture:_text with:0x00000000];
 }
 
-- (id<MTLTexture>)textureOfWidth:(NSUInteger)width height:(NSUInteger)height usage:MTLTextureUsage) {
+- (id<MTLTexture>)newTextureOfWidth:(NSUInteger)width
+                              height:(NSUInteger)height
+                              usage:(MTLTextureUsage)usage {
     id<MTLTextureDescriptor> desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                  width:width
                                                                                 height:height
@@ -362,7 +364,7 @@ static float levelAt(float index) {
     if (!source) { [self drawOnce]; return; }
 
     NSUInteger side = MIN(MAX(source.width, source.height), 1024);
-    id<MTLTexture> texture = [self textureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
+    id<MTLTexture> texture = [self newTextureOfWidth:side height:side usage:MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget];
     if (!texture) { [self drawOnce]; return; }
 
     // 用 CoreGraphics 画到 4 字节像素,再 blit 上传。
