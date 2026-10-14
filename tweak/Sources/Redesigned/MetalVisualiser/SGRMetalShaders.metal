@@ -65,8 +65,8 @@ inline float spectrumRow(float x, int row, sampler smp) {
     float maxX = (row == 0) ? 127.0 : 255.0;
     float p = clamp(x, 0.0, 1.0) * maxX;
     int i = min(int(p), int(maxX) - 1);
-    float4 a = smp.sample(smp, float2(float(i)     / maxX, (float)row));
-    float4 b = smp.sample(smp, float2(float(i + 1) / maxX, (float)row));
+    float4 a = smp.sample(float2(float(i)     / maxX, (float)row));
+    float4 b = smp.sample(float2(float(i + 1) / maxX, (float)row));
     return mix(a.r, b.r, p - float(i));
 }
 
@@ -121,23 +121,25 @@ inline float2 chromaTurn(float2 uv, Frame frame, Params p, float energy) {
 // Kawase 模糊
 // ============================================================================
 
-inline float4 kawaseDown(float2 uv, float2 halfPixel, sampler smp) {
+// Kawase samples a texture, so it takes the texture and the sampler rather than a bare sampler:
+// a sampler cannot read a pixel on its own.
+inline float4 kawaseDown(texture2d<float> tex, sampler smp, float2 uv, float2 halfPixel) {
     float4 sum = float4(0.0);
-    sum += smp.sample(smp, uv + float2(-halfPixel.x, -halfPixel.y));
-    sum += smp.sample(smp, uv + float2( halfPixel.x, -halfPixel.y));
-    sum += smp.sample(smp, uv + float2(-halfPixel.x,  halfPixel.y));
-    sum += smp.sample(smp, uv + float2( halfPixel.x,  halfPixel.y));
+    sum += tex.sample(smp, uv + float2(-halfPixel.x, -halfPixel.y));
+    sum += tex.sample(smp, uv + float2( halfPixel.x, -halfPixel.y));
+    sum += tex.sample(smp, uv + float2(-halfPixel.x,  halfPixel.y));
+    sum += tex.sample(smp, uv + float2( halfPixel.x,  halfPixel.y));
     return sum * 0.25;
 }
 
-inline float4 kawaseUp(float2 uv, float2 halfPixel, sampler smp) {
+inline float4 kawaseUp(texture2d<float> tex, sampler smp, float2 uv, float2 halfPixel) {
     float2 o = halfPixel * 1.5;
     float4 sum = float4(0.0);
-    sum += smp.sample(smp, uv) * 1.0;
-    sum += smp.sample(smp, uv + float2(-o.x, 0.0)) * 2.0;
-    sum += smp.sample(smp, uv + float2( o.x, 0.0)) * 2.0;
-    sum += smp.sample(smp, uv + float2(0.0, -o.y)) * 2.0;
-    sum += smp.sample(smp, uv + float2(0.0,  o.y)) * 2.0;
+    sum += tex.sample(smp, uv) * 1.0;
+    sum += tex.sample(smp, uv + float2(-o.x, 0.0)) * 2.0;
+    sum += tex.sample(smp, uv + float2( o.x, 0.0)) * 2.0;
+    sum += tex.sample(smp, uv + float2(0.0, -o.y)) * 2.0;
+    sum += tex.sample(smp, uv + float2(0.0,  o.y)) * 2.0;
     return sum / 9.0;
 }
 
@@ -181,7 +183,7 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
     rgb = mix(rgb, frame.accent.rgb, p.audioAmount * band * 0.45);
 
     float lum = dot(rgb, float3(0.2126, 0.7152, 0.0722));
-    rgb = mix(vec3(lum), rgb, p.saturation);
+    rgb = mix(float3(lum), rgb, p.saturation);
     rgb *= p.brightness;
 
     // 边缘淡出
@@ -217,14 +219,14 @@ fragment float4 kawaseDownFragment(BlurInOut in [[stage_in]],
                                    texture2d<float> src [[texture(0)]],
                                    constant float2&  srcSize [[buffer(0)]],
                                    sampler           smp   [[sampler(0)]]) {
-    return kawaseDown(in.uv, 0.5 / srcSize, smp);
+    return kawaseDown(src, smp, in.uv, 0.5 / srcSize);
 }
 
 fragment float4 kawaseUpFragment(BlurInOut in [[stage_in]],
                                  texture2d<float> src [[texture(0)]],
                                  constant float2&  srcSize [[buffer(0)]],
                                  sampler           smp   [[sampler(0)]]) {
-    return kawaseUp(in.uv, 0.5 / srcSize, smp);
+    return kawaseUp(src, smp, in.uv, 0.5 / srcSize);
 }
 
 // ============================================================================
@@ -253,7 +255,7 @@ fragment float4 compositeFragment(BlurInOut in [[stage_in]],
     outRGB = mix(outRGB, outRGB * 0.42, region * 0.75);
 
     outRGB += frame.accent.rgb * glow * 0.55;
-    outRGB += vec3(glow) * glow * 0.35;
+    outRGB += float3(glow) * glow * 0.35;
 
     return float4(outRGB, 1.0);
 }
