@@ -54,14 +54,18 @@ Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/e
 # for them at runtime. Recompiled only when the source is newer than the library.
 SG_METAL_SRC := $(wildcard Sources/Redesigned/MetalVisualiser/*.metal)
 SG_METAL_LIB := $(SG_METAL_SRC:.metal=.metallib)
-# xcrun takes the -sdk itself and hands the rest to the tool, so -isysroot/-mtlsdk_version must
-# not be here: xcrun rejects them before the compiler ever sees them. The SDK path and version
-# are passed by -sdk $(SDK) alone, which is where metal finds the SDK.
+# metal is driven straight, not through xcrun's SDK lookup: xcrun parses its own options before
+# the tool name and rejects anything it does not know there ("unrecognized option: -O3"), so a
+# flag placed after `metal` is read by metal, while $(SDK) — the SDK *name* — is not defined in
+# this scope and expanded to nothing, leaving xcrun with no tool to run. xcrun -sdk iphoneos with
+# the tool named first is the form that works:
+#   xcrun -sdk iphoneos metal -O3 -o out.metallib in.metal
+SG_METALLIB_SDK := iphoneos
 SG_METALLIB_FLAGS := -O3
 
 $(SG_METAL_LIB): %.metallib: %.metal
 	@echo "METALC $@"
-	@xcrun -sdk $(SDK) metal $(SG_METALLIB_FLAGS) -o $@ $<
+	@xcrun -sdk $(SG_METALLIB_SDK) metal $(SG_METALLIB_FLAGS) -o $@ $<
 
 # 改shader 后要重新编,靠 .metal/.metallib 的时间戳即可,不需要在解析时删产物 ——
 # $(shell rm) 会在 make 还没决定是否重建时就把库删掉,而这一行的求值时机早于目标判断,

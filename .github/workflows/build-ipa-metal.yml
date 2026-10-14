@@ -55,6 +55,32 @@ jobs:
             exit 1
           fi
 
+      - name: Check the Metal toolchain
+        run: |
+          set -e
+          echo "--- xcrun -sdk iphoneos metal ---"
+          xcrun -sdk iphoneos metal -v 2>&1 | head -3
+          echo "--- compile a trivial shader ---"
+          cat > /tmp/probe.metal <<'EOF'
+          #include <metal_stdlib>
+          using namespace metal;
+          vertex float4 probeVertex(uint vid [[vertex_id]]) {
+              float2 p[3] = { float2(-1.0, -3.0), float2(-1.0, 1.0), float2(3.0, 1.0) };
+              return float4(p[vid], 0.0, 1.0);
+          }
+          fragment float4 probeFragment() {
+              return float4(1.0, 0.0, 0.0, 1.0);
+          }
+          EOF
+          xcrun -sdk iphoneos metal -O3 -o /tmp/probe.air /tmp/probe.metal
+          xcrun -sdk iphoneos metallib -o /tmp/probe.metallib /tmp/probe.air
+          ls -la /tmp/probe.metallib
+          echo "--- the real shaders ---"
+          xcrun -sdk iphoneos metal -O3 -o /tmp/sgr.air tweak/Sources/Redesigned/MetalVisualiser/SGRMetalShaders.metal
+          xcrun -sdk iphoneos metallib -o /tmp/sgr.metallib /tmp/sgr.air
+          ls -la /tmp/sgr.metallib
+          echo "Metal toolchain OK"
+
       - name: Build
         run: |
           set -o pipefail
