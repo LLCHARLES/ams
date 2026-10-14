@@ -94,6 +94,20 @@ jobs:
           ls -la /tmp/sgr.metallib
           echo "Metal toolchain OK"
 
+      - name: Syntax-check the visualiser alone
+        run: |
+          set -o pipefail
+          # The whole tweak takes minutes to build and its errors cascade; this file is the
+          # only one that is new, so it is compiled on its own first, in seconds.
+          xcrun clang -fsyntax-only -fobjc-arc -x objective-c \
+            -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
+            -target arm64-apple-ios16.0 \
+            -ISources -ISources/Headers \
+            Sources/Redesigned/MetalVisualiser/SGRMetalVisualiser.m 2>&1 | tee syntax.log
+          echo "::group::first errors"
+          grep -E "error:" syntax.log | head -20 || echo "(clean)"
+          echo "::endgroup::"
+
       - name: Build
         run: |
           set -o pipefail
