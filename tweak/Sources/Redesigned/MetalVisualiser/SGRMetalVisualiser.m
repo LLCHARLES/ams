@@ -366,7 +366,7 @@ static float levelAt(float index) {
        sourceBytesPerRow:bytesPerRow
      sourceBytesPerImage:length
               sourceSize:MTLSizeMake(width, height, 1)
-                   to:texture
+              toTexture:texture
         destinationSlice:0
          destinationLevel:0
         destinationOrigin:MTLOriginMake(0, 0, 0)];
