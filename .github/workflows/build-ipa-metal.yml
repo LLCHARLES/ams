@@ -94,6 +94,30 @@ jobs:
           ls -la /tmp/sgr.metallib
           echo "Metal toolchain OK"
 
+      - name: Probe the encoder protocols in isolation
+        run: |
+          set -e
+          cat > /tmp/probe.m <<'EOF'
+          #import <MetalKit/MetalKit.h>
+          #import <Metal/Metal.h>
+          void probe(id<MTLDevice> d) {
+              id<MTLCommandQueue> q = [d newCommandQueue];
+              id<MTLCommandBuffer> c = [q commandBuffer];
+              id<MTLBlitCommandEncoder> b = [c blitCommandEncoder];
+              [b endEncoding];
+              MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+              id<MTLRenderCommandEncoder> e = [c renderCommandEncoderWithDescriptor:rpd];
+              [e setFragmentTexture:nil index:0];
+              [e setFragmentBytes:nil length:0 index:0];
+              [e endEncoding];
+          }
+          EOF
+          xcrun clang -fsyntax-only -fobjc-arc -x objective-c \
+            -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
+            -target arm64-apple-ios16.0 /tmp/probe.m \
+            && echo "PROBE CLEAN: the encoder protocols are reachable" \
+            || { echo "PROBE FAILED: the protocols are not reachable from these imports"; exit 1; }
+
       - name: Syntax-check the visualiser alone
         run: |
           # Advisory only. It does not have the Theos include paths or the project's -ISources
