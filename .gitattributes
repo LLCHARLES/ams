@@ -1,3 +1,23 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 *.deb binary
+
+# The tweak is compiled on macOS but developed on Windows, where git would otherwise
+# check these out with CRLF. A line ending is whitespace to the preprocessor so it
+# mostly survives — but a stray CR inside a Logos directive or a shader line has
+# nowhere good to go, and the failure surfaces as a parse error far from its cause.
+# Pin the files a compiler reads rather than a text editor.
+*.m text eol=lf
+*.h text eol=lf
+*.x text eol=lf
+*.metal text eol=lf
+*.c text eol=lf
+*.cpp text eol=lf
+*.swift text eol=lf
+*.y text eol=lf
+*.l text eol=lf
+
+# Build inputs that must not be touched at all.
+Makefile text eol=lf
+*.mk text eol=lf
+*.sh text eol=lf

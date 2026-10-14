@@ -73,8 +73,13 @@ $(SG_METAL_LIB): %.metallib: %.metal
 
 # 改shader 后要重新编,靠 .metal/.metallib 的时间戳即可,不需要在解析时删产物 ——
 # $(shell rm) 会在 make 还没决定是否重建时就把库删掉,而这一行的求值时机早于目标判断,
-# 于是增量构建也会每次重编,并且刚编好的库在同一次 make 里可能又被删。
-spotifyglass_OBJ_FILES += $(SG_METAL_LIB)
+# 于是增量构建也会每次重编,并且刚编好的库在同一次make 里可能又被删。
+#
+# .metallib 必须只走 -sectcreate,不能进 spotifyglass_OBJ_FILES:OBJ_FILES 里的东西被当作
+# 目标文件直接交给 ld,而 ld 不认识 metallib 这个类型 ——
+#   ld: unknown file type in 'SGRMetalShaders.metallib'
+# -sectcreate 才是把任意文件塞进 Mach-O 某个 section 的正确方式,而 __TEXT,__metallib
+# 正是 -newLibraryWithURL: 在 dylib 里找 shader 的位置。
 spotifyglass_LDFLAGS += -Wl,-sectcreate,__TEXT,__metallib,$(SG_METAL_LIB)
 
 include $(THEOS_MAKE_PATH)/tweak.mk
