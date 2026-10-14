@@ -548,7 +548,7 @@ static float levelAt(float index) {
 }
 
 - (void)draw:(CGRect)rect {
-    id<MTLRenderPassDescriptor> drawableRPD = self.currentRenderPassDescriptor;
+    MTLRenderPassDescriptor *drawableRPD = self.currentRenderPassDescriptor;
     id<CAMetalDrawable> drawable = self.currentDrawable;
     if (!drawableRPD || !drawable) return;
 
