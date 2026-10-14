@@ -54,15 +54,18 @@ Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/e
 # for them at runtime. Recompiled only when the source is newer than the library.
 SG_METAL_SRC := $(wildcard Sources/Redesigned/MetalVisualiser/*.metal)
 SG_METAL_LIB := $(SG_METAL_SRC:.metal=.metallib)
-SG_METALLIB_FLAGS := -isysroot $(SDK_PATH) -mtlsdk_version=$(SDK_VERSION) -O3
+# xcrun takes the -sdk itself and hands the rest to the tool, so -isysroot/-mtlsdk_version must
+# not be here: xcrun rejects them before the compiler ever sees them. The SDK path and version
+# are passed by -sdk $(SDK) alone, which is where metal finds the SDK.
+SG_METALLIB_FLAGS := -O3
 
 $(SG_METAL_LIB): %.metallib: %.metal
 	@echo "METALC $@"
 	@xcrun -sdk $(SDK) metal $(SG_METALLIB_FLAGS) -o $@ $<
 
-# 旧产物先删,避免改了 shader 却链进上一次的库。
-$(shell rm -f $(SG_METAL_LIB))
-
+# 改shader 后要重新编,靠 .metal/.metallib 的时间戳即可,不需要在解析时删产物 ——
+# $(shell rm) 会在 make 还没决定是否重建时就把库删掉,而这一行的求值时机早于目标判断,
+# 于是增量构建也会每次重编,并且刚编好的库在同一次 make 里可能又被删。
 spotifyglass_OBJ_FILES += $(SG_METAL_LIB)
 spotifyglass_LDFLAGS += -Wl,-sectcreate,__TEXT,__metallib,$(SG_METAL_LIB)
 
