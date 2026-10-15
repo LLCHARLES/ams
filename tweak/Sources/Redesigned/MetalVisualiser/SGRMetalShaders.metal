@@ -113,31 +113,6 @@ inline float2 chromaPoint(float2 uv, Frame frame) {
     float r = 0.5 * min(frame.resolution.x, frame.resolution.y);
     return d / max(r, 1.0);
 }
-
-inline float2 chromaTurn(float2 uv, Frame frame, Params p, float energy) {
-    float2 pt = chromaPoint(uv, frame);
-
-    // 低频能量越大,中心放大越明显
-    float breathe = 1.0 + p.audioAmount * energy * 0.22;
-
-    float2 tiltDir = (frame.tilt - 0.5) * 2.0;
-
-    // 极坐标 + 时间相位 + 径向正弦
-    float r = length(pt);
-    float a = atan2(pt.y, pt.x);
-    float swirl = sin(r * 2.4 - p.time * 1.1 + a * 0.8) * p.flowAmount * 0.06;
-
-    float2 rotated;
-    rotated.x = pt.x * cos(swirl) - pt.y * sin(swirl);
-    rotated.y = pt.x * sin(swirl) + pt.y * cos(swirl);
-
-    rotated *= breathe;
-    rotated += tiltDir * p.flowAmount * r * 0.05;
-
-    return rotated * (0.5 * min(frame.resolution.x, frame.resolution.y))
-           / frame.resolution + frame.focus;
-}
-
 // ============================================================================
 // Kawase 模糊
 // ============================================================================
@@ -197,12 +172,20 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
     // 构图与 SGRFluid.m 对齐:四张各自旋转的封面副本,边长是可见区长边的 2 倍上下,
     // 中心按 kCopy 的 (x, y) 错落;warp 决定中心离可见区中点多远(为 0 时四张重合,
     // 就是一张原地转的静态图)。副本远大于屏幕,所以大部分时候只看到其中一块。
+    //
+    // SGRFluid.m 里副本是正方形(bounds = side × side),contentsGravity 为 aspectFill,
+    // 位置和尺寸都用点而不是 uv。所以这里的换算也按像素走:先乘回分辨率得到像素坐标,
+    // 副本的边长 = 可见区长边(像素)× kCopy.side,再把像素偏移按 side 归一化成 uv。
+    // 早先一版在 uv 空间用 aspect 交换 x/y 去归一化,把画面纵向拉长了一倍,上下左右都裁错。
     float2 visTL   = p.visibleTopLeft;
     float2 visSize = max(p.visibleSize, float2(1e-4));
     float2 visMid  = visTL + visSize * 0.5;
-    // 可见区的长边换算到 uv ——副本的边长以它为 1。
-    float  longer  = max(visSize.x, visSize.y);
-    float2 aspect  = float2(visSize.x / longer, visSize.y / longer);
+    float  longer  = max(visSize.x, visSize.y);              // uv
+    float  longerPx = longer * frame.resolution.x;            // 像素(SGRFluid.m 的 longer)
+
+    float2 px    = in.uv * frame.resolution;                   // 当前像素
+    float2 midPx = visMid * frame.resolution;
+    float2 visPx = visSize * frame.resolution;
 
     float3 rgb = float3(0.0);
     float  acc = 0.0;
@@ -213,26 +196,30 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
         float opacity = (i == 0) ? 1.0 : 0.7 * p.warp;
         if (opacity <= 0.001) { continue; }
 
-        float2 centre = visMid + visSize * (shape.yz - 0.5) * p.warp;
-        float  side   = longer * shape.x * p.coverScale;
+        // 位置:可见区中点 + 可见区尺寸 × (kCopy 的中心 − 0.5)× warp,与那边一致。
+        float2 centrePx = midPx + visPx * (shape.yz - 0.5) * p.warp;
+        // 尺寸:可见区长边(像素)× kCopy 的边长比例。
+        float  sidePx   = longerPx * shape.x * p.coverScale;
 
         // 该副本转过的角度:一圈 shape.w 秒,方向由正负决定。
         float turns  = p.time / shape.w;
         float  angle = turns * 2.0 * 3.14159265;
-        float2 rel    = in.uv - centre;
-        rel = float2(rel.x / aspect.y, rel.y / aspect.x);
+        float2 rel    = px - centrePx;
         float2 turned = float2(rel.x * cos(angle) - rel.y * sin(angle),
                                rel.x * sin(angle) + rel.y * cos(angle));
-        float2 copyUV = turned * (longer / side) + 0.5;
+        // 正方形副本:像素偏移按边长归一化,加半边得到 0..1 的取样坐标。
+        float2 copyUV = turned / sidePx + 0.5;
 
-        // 音频驱动的径向扰动,叠加在旋转之上。chromaTurn 带的是呼吸、倾斜与涡旋 ——
-        // 拖动封面时的流动感靠它,所以保留:副本的旋转是 SGRFluid.m 的构图,径向扭曲是本实现自己的。
-        float2 radial = chromaTurn(in.uv, frame, p, energy) * p.flowAmount * 0.5;
+        // 音频驱动的径向扰动,叠加在旋转之上。用 chromaPoint:它是纯偏移(相对焦点的
+        // 像素距离 / 半长边),而任何返回完整 uv 的函数当偏移用会让画面跟着 focus 漂移。
+        // 低频能量越大推得越远。
+        float2 radial = chromaPoint(in.uv, frame) * p.flowAmount * (0.35 + energy * 0.65)
+                      / max(longerPx, 1.0);
         copyUV += radial;
 
-        // 副本比屏幕大得多,取样时绕回(镜像),和 contentsGravity = aspectFill 的效果一致。
-        float2 wrapped = fract(copyUV + 0.5) - 0.5;
-        float4 cover = coverTex.sample(smp, wrapped + 0.5);
+        // 副本远大于屏幕,取样坐标几乎总在 0..1 之外 —— clamp 到边缘,和 aspectFill 一样:
+        // 封面被拉大铺满正方形副本,副本露在屏幕外的那部分本来看不见。
+        float4 cover = coverTex.sample(smp, clamp(copyUV, 0.0, 1.0));
 
         float4 base = mix(frame.color0_, frame.color1_, clamp(band * 1.2, 0.0, 1.0));
         base = mix(base, frame.color2_, clamp(wave * 0.5, 0.0, 1.0));
@@ -240,11 +227,20 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
         float3 c = cover.rgb * mix(float3(1.0), base.rgb, 0.35);
         c = mix(c, frame.accent.rgb, p.audioAmount * band * 0.45);
 
-        rgb += c * opacity;
-        acc += opacity;
+        // 层叠而非平均:SGRFluid.m 里四张是四个 CALayer,后画的盖在先画的上面,
+        // 只有自己的 opacity 参与混合。累加再除以总权重会把四张都摊平 —— 重叠处
+        // 本该是上层那张的颜色,而不是四张的平均。
+        if (i == 0) {
+            rgb = c;
+            acc = 1.0;
+        } else {
+            float a = clamp(opacity, 0.0, 1.0);
+            rgb = mix(rgb, c, a);
+            acc = mix(acc, 1.0, a);
+        }
     }
 
-    rgb = (acc > 0.0) ? rgb / acc : float3(0.0);
+    if (acc <= 0.0) { rgb = float3(0.0); }
 
     float lum = dot(rgb, float3(0.2126, 0.7152, 0.0722));
     rgb = mix(float3(lum), rgb, p.saturation);
