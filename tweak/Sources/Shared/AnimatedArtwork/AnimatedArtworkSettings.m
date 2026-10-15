@@ -15,6 +15,12 @@ SGLockArtwork SGLockScreenArtwork(void) {
     return SGLockArtworkOff;
 }
 
+// 50% unless changed. SGFluidClip.m draws the cover at this share of the clip's width for Every song, where
+// there is no moving artwork and no lyrics clip to fill the screen.
+CGFloat SGLockScreenCoverArtworkScale(void) {
+    return (CGFloat)SGInt(SGKeyLockScreenCoverArtworkScale, 50) / 100.0;
+}
+
 NSArray *SGLockScreenMotionRows(void) {
     if (@available(iOS 26.0, *)) {
         SGLockScreenArtwork();   // moves the old switch over before the row reads the new key
@@ -29,6 +35,16 @@ NSArray *SGLockScreenMotionRows(void) {
         };
         SGModRow *sources = SGMotionSourcesRow();
         sources.visible = lowData.visible;
+        // Every song's fallback cover, at the size the deb's own slider offers (0.25 to 0.85; SGFluidClip.m
+        // holds it between 0.2 and 0.9 on top of that). Shown only where that cover is what fills the
+        // screen, since the other choices draw moving artwork or lyrics over it instead.
+        SGModRow *coverSize = SGSliderRow(@"Fallback album art size",
+            @"Every song's blurred fallback when no moving artwork or lyrics clip is available",
+            0.25, 0.85, 0.05,
+            ^double { return SGLockScreenCoverArtworkScale(); },
+            ^(double value) { SGSetInt(SGKeyLockScreenCoverArtworkScale, (NSInteger)lround(value * 100)); },
+            ^NSString *(double value) { return [NSString stringWithFormat:@"%.0f%%", value * 100]; });
+        coverSize.visible = ^BOOL { return SGLockScreenArtwork() == SGLockArtworkEverySong; };
         SGModRow *star = SGOptionRow(@"Switch with the star", @"The lock screen widget's star swaps the moving artwork for the lyrics "
                                                              @"and back. It takes the place of Spotify's like and dislike buttons",
                                      SGKeyLockScreenStar);
@@ -43,6 +59,7 @@ NSArray *SGLockScreenMotionRows(void) {
             star,
             sources,
             lowData,
+            coverSize,
         ];
     }
     return @[SGLockScreenArtworkNeedsRow()];

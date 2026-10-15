@@ -146,13 +146,16 @@ static NSString *pictureOf(SPTPlayerTrack *track, NSDictionary *metadata) {
 API_AVAILABLE(ios(26.0))
 static void showCover(NSString *picture) {
     if (![MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys containsObject:MPNowPlayingInfoProperty3x4AnimatedArtwork]) return;
-    NSURL *file = SGMotionMadeFile([@"fluid\n" stringByAppendingString:picture]);
+    // The size goes in the clip's identity: a different one is a different file, so changing the setting
+    // writes a new clip rather than serving the old one from the store.
+    CGFloat coverScale = SGLockScreenCoverArtworkScale();
+    NSURL *file = SGMotionMadeFile([NSString stringWithFormat:@"fluid\n%@\ncover %.2f", picture, coverScale]);
     NSString *title = sg_title;
     CGSize size = SGLyricsClipSize(SGMotionPixels());
     MPMediaItemAnimatedArtwork *artwork = [[MPMediaItemAnimatedArtwork alloc] initWithArtworkID:file.lastPathComponent
         previewImageRequestHandler:^(CGSize wanted, void (^completion)(UIImage *)) {
             withCover(title, ^(CGImageRef cover) {
-                CGImageRef frame = SGFluidClipFrame(cover, size);
+                CGImageRef frame = SGFluidClipFrame(cover, size, coverScale);
                 completion(frame ? filled([UIImage imageWithCGImage:frame], wanted) : nil);
                 CGImageRelease(frame);
             });
@@ -160,20 +163,24 @@ static void showCover(NSString *picture) {
         videoAssetFileURLRequestHandler:^(CGSize wanted, void (^completion)(NSURL *)) {
             withCover(title, ^(CGImageRef cover) {
                 CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
-                BOOL ok = [NSFileManager.defaultManager fileExistsAtPath:file.path] || SGFluidClipWrite(file, cover, size);
+                BOOL ok = [NSFileManager.defaultManager fileExistsAtPath:file.path] || SGFluidClipWrite(file, cover, size, coverScale);
                 SGLog(@"lock motion: the cover's clip %@ %@ in %.0f ms", file.lastPathComponent, ok ? @"ready" : @"not written",
                       (CFAbsoluteTimeGetCurrent() - start) * 1000);
                 completion(ok ? file : nil);
             });
         }];
     SGNowPlayingSetExtras(@"motion", @{MPNowPlayingInfoProperty3x4AnimatedArtwork: artwork}, title);
-    SGLog(@"lock motion: no moving artwork, the cover's clip offered as %@", file.lastPathComponent);
+    SGLog(@"lock motion: no moving artwork, the cover's clip offered as %@ at %.0f%%", file.lastPathComponent, coverScale * 100);
 }
 
 %ctor {
     if (@available(iOS 26.0, *)) {
         sg_choice = SGLockScreenArtwork();
         sg_queue = dispatch_queue_create("spotifyglass.lockscreen.motion", DISPATCH_QUEUE_SERIAL);
+        // The listening and running sizes, so a change to either walks the playing track again: the clip's
+        // identity carries the size (showCover), so the new one is written rather than the old one served.
+        __block CGFloat coverScale = SGLockScreenCoverArtworkScale();
+        __block NSUInteger coverScaleRequest = 0;
         // Each walk takes the last one's clip off first, so the lock screen falls back to the still cover.
         sg_follower = [[SGMotionFollower alloc] initWithBegin:^BOOL(NSString *uri, SPTPlayerState *state) {
             sg_walk++;
@@ -202,10 +209,26 @@ static void showCover(NSString *picture) {
                                                     usingBlock:^(NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 SGLockArtwork choice = SGLockScreenArtwork();
-                if (choice == sg_choice) return;
-                SGLog(@"lock motion: the choice changed to %ld, the playing track looked up again", (long)choice);
+                CGFloat newCoverScale = SGLockScreenCoverArtworkScale();
+                BOOL choiceChanged = choice != sg_choice;
+                if (!choiceChanged && newCoverScale == coverScale) return;
                 sg_choice = choice;
-                [sg_follower restart];
+                coverScale = newCoverScale;
+                if (choiceChanged) {
+                    coverScaleRequest++;
+                    SGLog(@"lock motion: the choice changed to %ld, the playing track looked up again", (long)choice);
+                    [sg_follower restart];
+                    return;
+                }
+                // Only the size moved. A slider writes on every step it passes over, so this waits for it to
+                // settle and redraws once: the last write wins, and nothing is written for the steps between.
+                SGLog(@"lock motion: the fallback cover size changed to %.0f%%, the playing track looked up again",
+                      coverScale * 100);
+                NSUInteger request = ++coverScaleRequest;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (request == coverScaleRequest && coverScale == SGLockScreenCoverArtworkScale())
+                        [sg_follower restart];
+                });
             });
         }];
         SGLog(@"lock motion: %@, the lock screen takes %@", motionOn(sg_choice) ? (sg_choice == SGLockArtworkEverySong ? @"on for every song" : @"on") : @"off",

@@ -94,12 +94,14 @@ int main(int argc, char **argv) {
         CGImageRef cover = argc > 1 ? newImageAt([NSString stringWithUTF8String:argv[1]]) : newCover();
         // 1206 pixels wide, an iPhone 17 Pro, at SGMotionPixels' three quarters, as LockScreenMotion.x asks.
         CGSize size = SGLyricsClipSize(round(1206 * 0.75));
+        // SGLockScreenCoverArtworkScale's default, the size every call site passes it now.
+        CGFloat coverScale = 0.5;
         NSURL *url = [out URLByAppendingPathComponent:@"fluid.mp4"];
         printf("fluid.mp4\n");
         CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
-        BOOL written = SGFluidClipWrite(url, cover, size);
+        BOOL written = SGFluidClipWrite(url, cover, size, coverScale);
         check(written, [NSString stringWithFormat:@"written in %.0f ms", (CFAbsoluteTimeGetCurrent() - start) * 1000]);
-        check(!SGFluidClipWrite([out URLByAppendingPathComponent:@"none.mp4"], NULL, size), @"no cover, no clip");
+        check(!SGFluidClipWrite([out URLByAppendingPathComponent:@"none.mp4"], NULL, size, coverScale), @"no cover, no clip");
         if (!written) return 1;
         NSNumber *bytes = nil;
         [url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil];
@@ -139,7 +141,7 @@ int main(int argc, char **argv) {
             savePNG(middle, [[out URLByAppendingPathComponent:@"fluid-middle"] URLByAppendingPathExtension:@"png"]);
             // Measured against the preview, which is the loop's start drawn exactly, over the field in the top
             // quarter, clear of the cover: H.264 alone puts a decoded frame a little over 2 of 255 off it.
-            CGImageRef preview = SGFluidClipFrame(cover, size);
+            CGImageRef preview = SGFluidClipFrame(cover, size, coverScale);
             double toFirst = difference(preview, first, 0, 0.25, 0, 1), toSecond = difference(preview, second, 0, 0.25, 0, 1);
             double toLast = difference(preview, last, 0, 0.25, 0, 1), toMiddle = difference(preview, middle, 0, 0.25, 0, 1);
             check(toMiddle > 4, [NSString stringWithFormat:@"the field moves over the loop (%.2f of 255 from the start to the middle)", toMiddle]);
@@ -153,6 +155,23 @@ int main(int argc, char **argv) {
                 int rgb[3];
                 colourAt(first, 0.5, 0.45, rgb);
                 check(rgb[0] > 200 && rgb[1] > 190 && rgb[2] > 140, [NSString stringWithFormat:@"the cover's middle is drawn sharp (%d, %d, %d)", rgb[0], rgb[1], rgb[2]]);
+                // The size reaches the drawing, at both ends of the setting's 0.25-0.85 range. The stand-in's
+                // light disc covers the middle 37.5% of the cover and its top half is red, so one probe falls
+                // on the disc at the top of the range and on the cover's own top-left corner at the bottom.
+                CGImageRef big = SGFluidClipFrame(cover, size, 0.85), little = SGFluidClipFrame(cover, size, 0.25);
+                int wide[3], small[3];
+                colourAt(big, 0.40, 0.36, wide);
+                colourAt(little, 0.40, 0.36, small);
+                check(wide[1] > 180, [NSString stringWithFormat:@"at 85%% the cover reaches (0.40, 0.36), its light disc (%d, %d, %d)", wide[0], wide[1], wide[2]]);
+                check(small[1] < 140, [NSString stringWithFormat:@"at 25%% the same point is the cover's corner, not its disc (%d, %d, %d)", small[0], small[1], small[2]]);
+
+                // Held between 0.2 and 0.9 however it is asked for: a stored value cannot draw a cover that is
+                // not there, or one that swallows the clip.
+                CGImageRef under = SGFluidClipFrame(cover, size, 0.0), over = SGFluidClipFrame(cover, size, 5.0);
+                check(difference(little, under, 0, 1, 0, 1) < 1, @"below the range it is held at 0.2");
+                check(difference(big, over, 0, 1, 0, 1) < 1, @"above the range it is held at 0.9");
+                CGImageRelease(under); CGImageRelease(over);
+                CGImageRelease(big); CGImageRelease(little);
             }
             CGImageRelease(preview);
         }

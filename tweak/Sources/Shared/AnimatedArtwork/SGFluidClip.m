@@ -20,10 +20,14 @@ static const CGFloat kSway = 0.35, kDrift = 0.06;
 static const CGFloat kBlurSide = 128, kBlurRadius = 10, kSaturation = 1.5, kBrightness = -0.08, kFieldScale = 0.125;
 // The shade over the bottom, where the lock screen's controls are.
 static const CGFloat kShadeFrom = 0.55, kShadeAlpha = 0.45;
-// The cover's side as a share of the clip's width, and its center's height from the top. The lock screen
-// cuts a 3:4 clip's sides off on a phone's taller screen, so the cover keeps to the middle.
+// The cover's side as a share of the clip's width — the caller's, SGLockScreenCoverArtworkScale, 0.5 by
+// default — and its center's height from the top. The lock screen cuts a 3:4 clip's sides off on a phone's
+// taller screen, so the cover keeps to the middle.
 // ponytail: guessed from the screen's shape, as SGLyricsClip.m's column is; tune both on a device.
-static const CGFloat kCoverSide = 0.5, kCoverY = 0.45, kCoverRadius = 0.035, kShadowBlur = 0.08;
+static const CGFloat kCoverY = 0.45, kCoverRadius = 0.035, kShadowBlur = 0.08;
+// What the scale is held between, so a stored value can never draw a cover that is not there or one that
+// swallows the clip.
+static const CGFloat kCoverScaleLeast = 0.2, kCoverScaleMost = 0.9;
 // An eight second loop: long enough that the sway reads as slow, short enough to write in a few seconds.
 static const int32_t kLoopSeconds = 8, kFPS = 24;
 
@@ -52,17 +56,17 @@ static CGImageRef newBlurred(CGImageRef cover) CF_RETURNS_RETAINED {
 }
 
 // Where the cover's picture goes with its shadow around it: the frame of the image newCover makes.
-static CGRect coverFrame(CGSize size) {
-    CGFloat side = round(size.width * kCoverSide), margin = ceil(side * kShadowBlur * 1.5);
+static CGRect coverFrame(CGSize size, CGFloat coverScale) {
+    CGFloat side = round(size.width * coverScale), margin = ceil(side * kShadowBlur * 1.5);
     CGFloat x = round((size.width - side) / 2), top = round(size.height * kCoverY - side / 2);
     // Core Graphics counts up from the bottom.
     return CGRectMake(x - margin, size.height - top - side - margin, side + 2 * margin, side + 2 * margin);
 }
 
 // The cover with its rounded corners and a soft shadow, on a clear image the size of coverFrame.
-static CGImageRef newCover(CGImageRef cover, CGSize size) CF_RETURNS_RETAINED {
-    CGRect frame = coverFrame(size);
-    CGFloat side = round(size.width * kCoverSide), margin = (frame.size.width - side) / 2;
+static CGImageRef newCover(CGImageRef cover, CGSize size, CGFloat coverScale) CF_RETURNS_RETAINED {
+    CGRect frame = coverFrame(size, coverScale);
+    CGFloat side = round(size.width * coverScale), margin = (frame.size.width - side) / 2;
     CGContextRef context = newContext(frame.size, NULL, 0);
     CGRect picture = CGRectMake(margin, margin, side, side);
     CGPathRef rounded = CGPathCreateWithRoundedRect(picture, side * kCoverRadius, side * kCoverRadius, NULL);
@@ -97,10 +101,10 @@ typedef struct {
     CGGradientRef shade;
 } Parts;
 
-static Parts makeParts(CGImageRef cover, CGSize size) {
+static Parts makeParts(CGImageRef cover, CGSize size, CGFloat coverScale) {
     Parts parts = {0};
     parts.blurred = newBlurred(cover);
-    parts.cover = newCover(cover, size);
+    parts.cover = newCover(cover, size, coverScale);
     parts.fieldSize = CGSizeMake(ceil(size.width * kFieldScale), ceil(size.height * kFieldScale));
     parts.field = newContext(parts.fieldSize, NULL, 0);
     CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
@@ -118,7 +122,7 @@ static void freeParts(Parts parts) {
 }
 
 // A frame `phase` of the way through the loop, 0 to 1, into `context`.
-static void drawFrame(CGContextRef context, Parts parts, CGSize size, double phase) {
+static void drawFrame(CGContextRef context, Parts parts, CGSize size, CGFloat coverScale, double phase) {
     CGContextRef field = parts.field;
     CGSize small = parts.fieldSize;
     CGFloat longer = MAX(small.width, small.height);
@@ -143,14 +147,15 @@ static void drawFrame(CGContextRef context, Parts parts, CGSize size, double pha
     CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
     CGContextDrawImage(context, (CGRect){CGPointZero, size}, drawn);
     CGImageRelease(drawn);
-    CGContextDrawImage(context, coverFrame(size), parts.cover);
+    CGContextDrawImage(context, coverFrame(size, coverScale), parts.cover);
 }
 
-CGImageRef SGFluidClipFrame(CGImageRef cover, CGSize size) {
+CGImageRef SGFluidClipFrame(CGImageRef cover, CGSize size, CGFloat coverScale) {
     if (!cover) return NULL;
-    Parts parts = makeParts(cover, size);
+    coverScale = MIN(MAX(coverScale, kCoverScaleLeast), kCoverScaleMost);
+    Parts parts = makeParts(cover, size, coverScale);
     CGContextRef context = newContext(size, NULL, 0);
-    drawFrame(context, parts, size, 0);
+    drawFrame(context, parts, size, coverScale, 0);
     CGImageRef frame = CGBitmapContextCreateImage(context);
     CGContextRelease(context);
     freeParts(parts);
@@ -159,8 +164,9 @@ CGImageRef SGFluidClipFrame(CGImageRef cover, CGSize size) {
 
 // ponytail: the writing loop is SGLyricsClip.m's again, kept apart so neither clip's drawing leaks into the
 // other's; one writer taking a draw block is the step up if a third clip comes.
-BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size) {
+BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size, CGFloat coverScale) {
     if (!cover) return NO;
+    coverScale = MIN(MAX(coverScale, kCoverScaleLeast), kCoverScaleMost);
     // Written beside the file and moved over it once whole, so a clip cut off halfway is never found.
     NSURL *partial = [file URLByAppendingPathExtension:@"partial"];
     [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
@@ -183,7 +189,7 @@ BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size) {
     [writer addInput:input];
     if (![writer startWriting]) return NO;
     [writer startSessionAtSourceTime:kCMTimeZero];
-    Parts parts = makeParts(cover, size);
+    Parts parts = makeParts(cover, size, coverScale);
     BOOL ok = parts.blurred && parts.cover;
     for (int32_t i = 0; i < frames && ok; i++) {
         while (!input.readyForMoreMediaData && writer.status == AVAssetWriterStatusWriting) [NSThread sleepForTimeInterval:0.002];
@@ -193,7 +199,7 @@ BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size) {
         if (!ok) break;
         CVPixelBufferLockBaseAddress(buffer, 0);
         CGContextRef context = newContext(size, CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer));
-        drawFrame(context, parts, size, (double)i / frames);
+        drawFrame(context, parts, size, coverScale, (double)i / frames);
         CGContextRelease(context);
         CVPixelBufferUnlockBaseAddress(buffer, 0);
         ok = [adaptor appendPixelBuffer:buffer withPresentationTime:CMTimeMake(i, kFPS)];

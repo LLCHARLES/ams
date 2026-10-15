@@ -35,6 +35,12 @@ static inline BOOL SGLockArtworkShowsLyrics(SGLockArtwork artwork) {
 #define SGKeyLockScreenStarBack @"spotifyglass.lockscreen.star.back"
 // Off until switched on: download in Low Data Mode too.
 #define SGKeyMotionLowData @"spotifyglass.motion.lowdata"
+// Every song's fallback cover size, as a share of the clip's width, stored as a whole percent. Only Every
+// song draws that cover over the moving blur (SGFluidClip.m), so the row is only shown for it.
+#define SGKeyLockScreenCoverArtworkScale @"spotifyglass.lockscreen.coverArtworkScale"
+// 50% unless changed: SGFluidClip.m's own kCoverSide was a fixed 0.5 and every call site now passes this
+// instead, so the default keeps the picture that was there before the setting existed.
+CGFloat SGLockScreenCoverArtworkScale(void);
 
 typedef NS_ENUM(NSInteger, SGMotionShape) {
     SGMotionSquare,   // 1:1
