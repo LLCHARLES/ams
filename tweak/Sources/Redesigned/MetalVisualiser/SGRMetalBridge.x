@@ -5,7 +5,13 @@
 //
 // 挂在fieldIn() 建好 SGRArtworkField 之后: 同一档位下 Metal 版是 SGRArtworkField 的
 // 同级兄弟,铺在同一块平面上,压在field 之上、Spotify 自己的渐变之下。
-// Fluid 的四层旋转在这里关掉 —— Metal 版自己就是那层背景,不需要再叠一层。
+//
+// 「压在 field 之上」要自己维持 —— PlayerField.x 的 viewDidLayoutSubviews 每次都
+// bringSubviewToFront:field(它的第 122 行),而 PlayerMotion.x 开头就写了原因:
+// 「the plane's layout brings the field to the front on every pass, and a sibling would
+// end up under it」,所以它把 clip 挂成 field 的子视图。这里是同级兄弟,就每次布局
+// 跟着提回最前(见 trackPlane);不然 field 第一个子层 _solid 那层不透明底色会盖住整个
+// Metal 画面。Fluid 的四层旋转和 backdrop 也在这里关掉 —— Metal 版自己就是那层背景。
 //
 // 频谱: 读 SGRSpectrum(Spotify 自己的输出),不碰音频 tap。歌词页降到 30fps,与
 // PlayerVisualiser.m 同节流;暂停、低电量、Reduce Motion 时停链。
@@ -25,6 +31,36 @@
 
 static char kMetalKey;
 static __weak SGRMetalVisualiser *sg_metal;
+
+// field 的背景状态归谁管。接管时三项全关;交还时按 vitrine 自己的规则恢复。
+//
+// showsBackdrop 是这里必须显式关掉的那一项,而且是我自己弄出来的坑。SGRField 只在
+// !flows && !fluid 时把 backdrop 画出来(SGRField.m 的 showPage),而 vitrine 在 Visualizer 档是
+// field.fluid = YES(PlayerField.x:101 —— Visualiser 在枚举里大于 Fluid),backdrop 因此从不出现。
+// 我把 fluid 改成 NO,等于把 backdrop 放了出来:那是一张 160px 宽的位图
+// (SGRPalette.m:kBackdropWidth 160 / kBackdropMaxHeight 400),drawFilling 用 MAX 缩放裁切,
+// 正方形封面进去只剩中间约 48%,再按屏幕高拉伸填满(SGRField.m:136,backdropHeightNow 默认
+// 就是整个窗口高)。画面上就是「封面被放大」的模糊版 —— 而它根本不是 Metal 画的,
+// 所以之前几轮改 shader 的坐标、bleed、分辨率、模糊半径怎么改都碰不到它。
+//
+// 交还时按 PlayerField.x:98-101 与 PlayerSettings.m:194-195 的规则恢复。必须在这里做:
+// ⋯ 菜单切档走的是 SGRPlayerMenuSetBackground(SGSetInt + SGRPlayerHoldField),不经过
+// PlayerSettings.m 那两行,切到 Fluid 时 field.fluid 会停在我设的 NO —— 背景只剩一片底色。
+static void holdField(BOOL mine) {
+    SGRArtworkField *field = SGRPlayerField();
+    if (!field) return;
+    if (mine) {
+        field.flows = NO;
+        field.fluid = NO;
+        field.showsBackdrop = NO;
+        return;
+    }
+    SGRPlayerBackgroundKind kind = SGRPlayerBackground();
+    field.flows = kind == SGRPlayerBackgroundColours;
+    field.fluid = kind >= SGRPlayerBackgroundFluid;
+    // backdrop 只在 !flows && !fluid(Still 档)冒出来,交给 SGRField 自己判断。
+    field.showsBackdrop = YES;
+}
 
 // Metal 可用且被选中时才建。
 BOOL SGRMetalBridgeWanted(void) {
@@ -71,10 +107,8 @@ UIView *SGRMetalBridgeAttach(UIView *plane) {
     UIImage *cover = SGRNowPlayingArtwork(NULL, NULL);
     if (cover) [metal setArtwork:cover];
 
-    // Fluid 的四层旋转让位:Metal 版自己就是背景。
-    SGRArtworkField *field = SGRPlayerField();
-    field.fluid = NO;
-    field.flows = NO;
+    // 背景归 Metal 管:field 自己的流体、流动和 backdrop 都让位(见 holdField)。
+    holdField(YES);
 
     SGLog(@"metal bridge: visualiser on %.0fx%.0f bleeding to %.0fx%.0f, artwork %@",
           painted.size.width, painted.size.height, bounds.size.width, bounds.size.height,
@@ -103,6 +137,16 @@ static void trackPlane(SGRMetalVisualiser *metal) {
                                 bounds.size.height + kBleed.top + kBleed.bottom);
     if (!CGRectEqualToRect(metal.frame, painted)) metal.frame = painted;
     SGRMetalBridgeSetVisibleRect(CGRectMake(kBleed.left, kBleed.top, bounds.size.width, bounds.size.height));
+
+    // 提回最前。PlayerField.x 的 viewDidLayoutSubviews 每次都 bringSubviewToFront:field(它的第 122 行),
+    // 而 PlayerMotion.x 开头就写明原因:「the plane's layout brings the field to the front on every pass,
+    // and a sibling would end up under it」—— 所以它把 clip 挂成 field 的子视图,而不是 plane 的兄弟。
+    //
+    // 我的视图是 plane 的兄弟,而且只在 Attach 里 addSubview 一次,之后的布局就把 field 提到它上面了。
+    // field 的第一个子层 _solid 是不透明底色(SGRField.m:130 铺满 painted),压在上面会把 Metal 整个盖住。
+    // 这一步在 PlayerField.x 的 bringSubviewToFront 之后调用,所以每次都跟着提回来 —— 等价于
+    // PlayerMotion 改成 field 的子视图那个做法,只是不动它的父子关系(bleed 和可见区都按 plane 算)。
+    if (plane.subviews.lastObject != metal) [plane bringSubviewToFront:metal];
 }
 
 // 歌词。歌词页开着时降帧 —— 山丘那条链也是这么做的。
@@ -122,9 +166,11 @@ void SGRMetalBridgeUpdate(void) {
     if (!SGRMetalBridgeWanted()) {
         metal.hidden = YES;
         metal.moving = NO;
+        holdField(NO);
         return;
     }
     metal.hidden = NO;
+    holdField(YES);
     trackPlane(metal);
 
     BOOL inWindow = metal.window != nil;
