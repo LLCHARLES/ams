@@ -144,9 +144,14 @@ static void trackPlane(SGRMetalVisualiser *metal) {
     //
     // 我的视图是 plane 的兄弟,而且只在 Attach 里 addSubview 一次,之后的布局就把 field 提到它上面了。
     // field 的第一个子层 _solid 是不透明底色(SGRField.m:130 铺满 painted),压在上面会把 Metal 整个盖住。
-    // 这一步在 PlayerField.x 的 bringSubviewToFront 之后调用,所以每次都跟着提回来 —— 等价于
-    // PlayerMotion 改成 field 的子视图那个做法,只是不动它的父子关系(bleed 和可见区都按 plane 算)。
-    if (plane.subviews.lastObject != metal) [plane bringSubviewToFront:metal];
+    //
+    // 这里用 insertSubview:aboveSubview: 而不是 bringSubviewToFront —— 后者会把我提到 plane 里所有
+    // 子视图之上,连 field 的 veil(封面还没读出来时挡着 field 的那层)也压下去。这里只要求「在 field 之上」,
+    // 比 field 更高的东西一律保持在上面。
+    SGRArtworkField *field = SGRPlayerField();
+    if (field && field.superview == plane && [plane.subviews indexOfObject:metal] < [plane.subviews indexOfObject:field]) {
+        [plane insertSubview:metal aboveSubview:field];
+    }
 }
 
 // 歌词。歌词页开着时降帧 —— 山丘那条链也是这么做的。
