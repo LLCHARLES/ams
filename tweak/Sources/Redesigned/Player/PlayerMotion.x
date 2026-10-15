@@ -208,14 +208,19 @@ static UIBlurEffect *blurEffect(void) {
     CGFloat screen = _screenHeight > 0 ? _screenHeight : total;
     CGFloat height = round(width * _aspect);
     if (_aspect > kCanvasAspect) height = MAX(height, screen);
-    CGFloat seam = round(height * kFootFrom), blurFrom = MIN(seam, round(screen * kBlurByControls));
+    // Centred in the player height (the Taurus placement), so a cover shorter than the player sits in the
+    // middle of it rather than under the header. A Canvas fills the height, so for it this is 0.
+    CGFloat top = round((screen - height) / 2);
+    // The foot and the blur follow the cover down: the seam is where it dissolves, still at least where
+    // the controls are, so they read over the blur whatever the cover's shape.
+    CGFloat seam = top + round(height * kFootFrom), blurFrom = MIN(seam, round(screen * kBlurByControls));
     _picture.frame = bounds;
     _seamBlur.frame = bounds;
     _seamBlur.maskView.frame = bounds;
     _lyricsBlur.frame = bounds;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _still.frame = CGRectMake(0, 0, width, height);
+    _still.frame = CGRectMake(0, top, width, height);
     _clip.frame = _still.bounds;
     _clipMask.frame = _still.bounds;
     _foot.frame = CGRectMake(0, seam, width, MAX(0, total - seam));
