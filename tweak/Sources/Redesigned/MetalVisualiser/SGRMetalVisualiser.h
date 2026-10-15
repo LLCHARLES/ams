@@ -28,6 +28,8 @@ typedef NS_ENUM(NSInteger, SGRMetalSetting) {
     SGRMetalSettingBlur,          ///< Kawase 迭代深度换算出的强度,百分比
     SGRMetalSettingSaturation,    ///< 饱和度,百分比
     SGRMetalSettingBrightness,    ///< 亮度,百分比
+    SGRMetalSettingWarp,          ///< 副本分布的张开程度,百分比(SGRFluid.m 的 Warp)
+    SGRMetalSettingCoverScale,    ///< 副本边长占可见区长边的倍数,百分比(SGRFluid.m 的 Warp 也管这个的一半)
     SGRMetalSettingCount
 };
 

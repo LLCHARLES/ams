@@ -46,6 +46,14 @@ typedef struct {
     float time;
     uint32_t spectrumBands;
     uint32_t _pad;
+    // 构图,与 shader 的 Params 里同名的一组一一对应。四张副本各自旋转、错落分布,
+    // 压暗带盖在控制条下面。数值取自 vitrine 的 SGRFluid.m。
+    float warp;            // 副本中心离可见区中点的远近,以及上三张的不透明度
+    float shadeFrom;       // 压暗带起点(可见区高度的比例)
+    float shadeAlpha;      // 压暗带底端的黑度
+    float coverScale;      // 副本边长占可见区长边的倍数
+    SGRSimd2 visibleTopLeft;
+    SGRSimd2 visibleSize;
 } SGRMetalUniforms;
 
 // ============================================================================
@@ -57,8 +65,12 @@ static const struct { __unsafe_unretained NSString *key; SGRMetalLimits limits; 
     {@"spotifyglass.metal.flow",       {0,  100, 5, 50}},
     {@"spotifyglass.metal.audio",      {0,  100, 5, 70}},
     {@"spotifyglass.metal.blur",       {0,  100, 5, 62}},
-    {@"spotifyglass.metal.saturation", {0,  200, 10, 114}},
-    {@"spotifyglass.metal.brightness", {40, 150, 5, 96}},
+    {@"spotifyglass.metal.saturation", {0,  200, 10, 150}},
+    {@"spotifyglass.metal.brightness", {40, 150, 5, 100}},
+    // 构图两项。warp 与 coverScale 的默认值就是 SGRFluid.m 的标准值(100% / 1.0),
+    // 范围沿用那边的档位,方便读过那边设置的人直接对上。
+    {@"spotifyglass.metal.warp",       {0,  100, 5, 100}},
+    {@"spotifyglass.metal.coverscale", {50, 200, 5, 100}},
 };
 enum { kSettingCount = sizeof(kSettings) / sizeof(kSettings[0]) };
 
@@ -575,6 +587,12 @@ static float levelAt(float index) {
     // 尺寸
     _u.resolution = (SGRSimd2){ (float)size.width, (float)size.height };
 
+    // 可见区。这个 view 铺满播放器的背景平面,所以可见区就是整个 drawable —— 压暗带
+    // 的起点和副本的边长都以此为基准,与 SGRFluid.m 用 visibleRect 的做法同构。
+    // 若以后只铺播放器的一部分,改这两行即可,着色器已经按可见区而不是整个屏幕来算。
+    _u.visibleTopLeft = (SGRSimd2){ 0.0f, 0.0f };
+    _u.visibleSize = (SGRSimd2){ 1.0f, 1.0f };
+
     // 焦点缓动
     _focusNow.x += (_focus.x - _focusNow.x) * kFocusEase;
     _focusNow.y += (_focus.y - _focusNow.y) * kFocusEase;
@@ -594,7 +612,14 @@ static float levelAt(float index) {
     _u.edgeSmooth = SGRMetalValue(SGRMetalSettingBlur) / 100.0f * 0.5f;
     _u.saturation = SGRMetalValue(SGRMetalSettingSaturation) / 100.0f;
     _u.brightness = SGRMetalValue(SGRMetalSettingBrightness) / 100.0f;
-    _u.zoom = 1.06f;
+    // zoom 已经不是构图的手段了 —— 副本的边长由 coverScale 定,这里是留给后续微调的余量,
+    // 与 SGRFluid.m 一样默认 1。
+    _u.zoom = 1.0f;
+    _u.warp = SGRMetalValue(SGRMetalSettingWarp) / 100.0f;
+    _u.coverScale = SGRMetalValue(SGRMetalSettingCoverScale) / 100.0f;
+    // 压暗带:SGRFluid.m 的 kShadeFrom / kShadeAlpha。
+    _u.shadeFrom = 0.45f;
+    _u.shadeAlpha = 0.55f;
     _u.spectrumBands = SGRSpectrumBands;
 
     // 频谱上传
