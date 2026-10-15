@@ -68,6 +68,11 @@ extern NSNotificationName const SGRMetalSettingsDidChangeNotification;
 /// 帧率。歌词页降到 30,与PlayerVisualiser 的做法一致。
 @property (nonatomic, assign) NSInteger preferredFPS;
 
+/// 屏幕上真正可见的那一块,图层自己的坐标。图层比屏幕大(bleed),副本要绕这块里的点转、
+/// 压暗带在这块的下边收住,所以副本的边长也以这块的长边为基准 —— 与 SGRFluidLayer 的
+/// visibleRect 同义。默认整块图层。
+@property (nonatomic, assign) CGRect visibleRect;
+
 /// Metal 设备不可用时为 NO,调用方回退到 Core Animation 的实现。
 @property (class, nonatomic, readonly) BOOL isAvailable;
 

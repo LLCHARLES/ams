@@ -15,6 +15,11 @@ BOOL SGRMetalBridgeWanted(void);
 // 未接管时为 nil。
 UIView *_Nullable SGRMetalBridgeAttach(UIView *plane);
 
+// The part of the layer on screen: the copies are placed and the shade ends against it, while the
+// layer itself bleeds past the bounds. SGRField.m's layoutSubviews sets SGRFluidLayer.visibleRect
+// the same way — a layer the size of the screen has no room to bleed into.
+void SGRMetalBridgeSetVisibleRect(CGRect rect);
+
 // 每帧更新:读播放状态、频谱与歌词,决定要不要走链路。
 void SGRMetalBridgeUpdate(void);
 

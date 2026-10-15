@@ -204,11 +204,20 @@ static float levelAt(float index) {
     NSArray<NSString *> *_lyrics;
     NSUInteger _textWanted;
     UIColor *_coverAccent;
+    // 图层坐标里的可见区。CGRectZero 表示整块图层。
+    CGRect _visibleRect;
 
     CADisplayLink *_link;
 }
 
 @synthesize accent = _coverAccent;
+
+// 可见区变了要重画:副本的位置和压暗带都跟着它走。
+- (void)setVisibleRect:(CGRect)rect {
+    if (CGRectEqualToRect(rect, _visibleRect)) return;
+    _visibleRect = rect;
+    [self drawOnce];
+}
 
 + (BOOL)isAvailable {
     static BOOL available;
@@ -587,11 +596,18 @@ static float levelAt(float index) {
     // 尺寸
     _u.resolution = (SGRSimd2){ (float)size.width, (float)size.height };
 
-    // 可见区。这个 view 铺满播放器的背景平面,所以可见区就是整个 drawable —— 压暗带
-    // 的起点和副本的边长都以此为基准,与 SGRFluid.m 用 visibleRect 的做法同构。
-    // 若以后只铺播放器的一部分,改这两行即可,着色器已经按可见区而不是整个屏幕来算。
-    _u.visibleTopLeft = (SGRSimd2){ 0.0f, 0.0f };
-    _u.visibleSize = (SGRSimd2){ 1.0f, 1.0f };
+    // 可见区。图层比屏幕大(bleed),这一块是屏幕上真正看到的部分;副本绕它里面的点转、
+    // 边长以它的长边为基准、压暗带在它下边收住。shader 用的是 uv,所以把 rect 除以图层尺寸。
+    // 早先这里写死 (0,0,1,1),等于把整块画布当可见区 —— 于是"副本比屏幕大"这个前提消失了,
+    // 构图比例全错,看着像被裁。
+    CGRect visible = _visibleRect;
+    if (CGRectIsEmpty(visible) || self.bounds.size.width < 1 || self.bounds.size.height < 1) {
+        visible = self.bounds;
+    }
+    _u.visibleTopLeft = (SGRSimd2){ (float)(visible.origin.x / MAX(self.bounds.size.width, 1.0)),
+                                    (float)(visible.origin.y / MAX(self.bounds.size.height, 1.0)) };
+    _u.visibleSize    = (SGRSimd2){ (float)(visible.size.width  / MAX(self.bounds.size.width, 1.0)),
+                                    (float)(visible.size.height / MAX(self.bounds.size.height, 1.0)) };
 
     // 焦点缓动
     _focusNow.x += (_focus.x - _focusNow.x) * kFocusEase;

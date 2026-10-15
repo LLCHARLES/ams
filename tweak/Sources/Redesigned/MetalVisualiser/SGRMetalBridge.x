@@ -31,6 +31,11 @@ BOOL SGRMetalBridgeWanted(void) {
     return SGRPlayerBackground() == SGRPlayerBackgroundVisualiser && SGRMetalVisualiser.isAvailable;
 }
 
+// Past the plane's edges: above for the pull that dismisses the player, below for the bounce at the end
+// of the cards. The same insets PlayerField.x gives SGRArtworkField.bleed, so the Metal field bleeds
+// where the Core Animation one does — its copies need somewhere to turn that the screen does not show.
+static const UIEdgeInsets kBleed = {200, 0, 600, 0};
+
 // 平面就位后调用。返回挂上的视图,没挂返回 nil。
 UIView *SGRMetalBridgeAttach(UIView *plane) {
     if (!plane || plane.bounds.size.height < 200) return nil;
@@ -39,7 +44,11 @@ UIView *SGRMetalBridgeAttach(UIView *plane) {
     if (existing) return existing;
     if (!SGRMetalBridgeWanted()) return nil;
 
-    SGRMetalVisualiser *metal = [[SGRMetalVisualiser alloc] initWithFrame:plane.bounds];
+    CGRect bounds = plane.bounds;
+    CGRect painted = CGRectMake(-kBleed.left, -kBleed.top,
+                                bounds.size.width + kBleed.left + kBleed.right,
+                                bounds.size.height + kBleed.top + kBleed.bottom);
+    SGRMetalVisualiser *metal = [[SGRMetalVisualiser alloc] initWithFrame:painted];
     if (!metal) {
         SGLog(@"metal bridge: no device, the Core Animation visualiser keeps the background");
         return nil;
@@ -47,10 +56,16 @@ UIView *SGRMetalBridgeAttach(UIView *plane) {
 
     metal.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     metal.userInteractionEnabled = NO;
+    metal.clipsToBounds = NO;
     [plane addSubview:metal];
 
     objc_setAssociatedObject(plane, &kMetalKey, metal, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     sg_metal = metal;
+
+    // 可见区:屏幕上真正看到的那一块。图层比它大,副本要绕着屏幕内的点转、压暗带要在屏幕
+    // 底边收住 —— 都以这块为准,和 SGRField.m 给 SGRFluidLayer.visibleRect 的做法一致。
+    // 少了这一层,副本就只能按整块画布算,构图比例会错(看起来像被裁)。
+    SGRMetalBridgeSetVisibleRect(CGRectMake(kBleed.left, kBleed.top, bounds.size.width, bounds.size.height));
 
     // 第一张封面现在就给,免得开屏几帧是黑的。
     UIImage *cover = SGRNowPlayingArtwork(NULL, NULL);
@@ -61,14 +76,33 @@ UIView *SGRMetalBridgeAttach(UIView *plane) {
     field.fluid = NO;
     field.flows = NO;
 
-    SGLog(@"metal bridge: visualiser in on the player plane %.0fx%.0f, artwork %@",
-          plane.bounds.size.width, plane.bounds.size.height, cover ? @"ready" : @"not read yet");
+    SGLog(@"metal bridge: visualiser on %.0fx%.0f bleeding to %.0fx%.0f, artwork %@",
+          painted.size.width, painted.size.height, bounds.size.width, bounds.size.height,
+          cover ? @"ready" : @"not read yet");
     return metal;
 }
 
 // 切歌 / 封面更新。走SGRPlayerField 的同一个钩子(PlayerField.x 的 publishCover)。
 void SGRMetalBridgeSetArtwork(UIImage *artwork) {
     [sg_metal setArtwork:artwork];
+}
+
+// 可见区。图层比屏幕大,这一块是屏幕上真正看到的部分;副本的边长基准、旋转中心和压暗带
+// 终点都以它为准。plane 的高度随播放器滚动变化,所以每次 Update 都重算一遍。
+void SGRMetalBridgeSetVisibleRect(CGRect rect) {
+    [sg_metal setVisibleRect:rect];
+}
+
+// 图层随plane 走:bleed 后仍比plane大一圈,可见区跟着 plane 的尺寸。
+static void trackPlane(SGRMetalVisualiser *metal) {
+    UIView *plane = metal.superview;
+    if (!plane) return;
+    CGRect bounds = plane.bounds;
+    CGRect painted = CGRectMake(-kBleed.left, -kBleed.top,
+                                bounds.size.width + kBleed.left + kBleed.right,
+                                bounds.size.height + kBleed.top + kBleed.bottom);
+    if (!CGRectEqualToRect(metal.frame, painted)) metal.frame = painted;
+    SGRMetalBridgeSetVisibleRect(CGRectMake(kBleed.left, kBleed.top, bounds.size.width, bounds.size.height));
 }
 
 // 歌词。歌词页开着时降帧 —— 山丘那条链也是这么做的。
@@ -91,6 +125,7 @@ void SGRMetalBridgeUpdate(void) {
         return;
     }
     metal.hidden = NO;
+    trackPlane(metal);
 
     BOOL inWindow = metal.window != nil;
     BOOL playing = !SGPlayerState().isPaused;
