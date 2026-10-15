@@ -80,10 +80,9 @@ void SGRPlayerFitClipToCover(void);
 
 #pragma mark - Animated artwork (PlayerAnimated.x)
 
-// The view the clip plays in: a video band across the top of the screen over a dark ground. `videoHeight`
-// is how tall that band is; the rest is filled by the view's own black background.
+// The view the clip plays in. The clip is drawn inside it at its own aspect, centred in the player height
+// (a 1:1 or 3:4 cover shown whole; only a Canvas fills the height), dissolving into the Fluid artwork below.
 @interface SGRPlayerAnimatedView : UIView
-@property (nonatomic) CGFloat videoHeight;
 @end
 
 // The view the clip plays in, for PlayerField.x to keep over `field` in the background plane; nil while

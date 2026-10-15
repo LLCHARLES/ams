@@ -28,6 +28,10 @@ static const float kDissolveStart = 0.78f;
 // two-stop gradient interpolates linearly in the shader, which bands across a
 // near-flat alpha on an 8-bit display; sampling the curve hands it short spans.
 static const NSInteger kMaskStops = 12;
+// A clip taller than this (its height over its width) is a Canvas: it is drawn to the full player height
+// and cut at its sides. At or below it — a 1:1 or 3:4 cover — the clip keeps its own aspect and is centred
+// in the player height, so it is shown whole and resizeAspectFill crops nothing. (The Taurus placement.)
+static const CGFloat kFillAspect = 1.5f;
 
 static char kReadyContext, kViewKey;
 
@@ -82,8 +86,11 @@ static void readLight(NSURL *file, void (^done)(float light)) {
 @property (nonatomic, readonly) NSURL *file;
 @property (nonatomic, readonly) AVPlayerLayer *layer;
 @property (nonatomic, readonly) float light;   // negative until read
-// Once, on the main queue, when its first frame can be drawn and its light has been read.
+@property (nonatomic, readonly) CGFloat aspect;   // height over width; 0 until read
+// Once, on the main queue, when its first frame can be drawn, and its light and aspect have been read.
 @property (nonatomic, copy) void (^ready)(SGRPlayerClip *clip);
+// On the main queue when the aspect becomes known, so the view can lay the clip out at its true shape.
+@property (nonatomic, copy) void (^aspectReady)(void);
 - (instancetype)initWithFile:(NSURL *)file;
 - (void)setPlaying:(BOOL)playing;
 - (void)stop;
@@ -93,6 +100,7 @@ static void readLight(NSURL *file, void (^done)(float light)) {
     AVQueuePlayer *_player;
     AVPlayerLooper *_looper;
     BOOL _observing;
+    CGFloat _aspect;
 }
 
 // The album hero's player: muted, never on AirPlay, letting the screen lock.
@@ -112,6 +120,7 @@ static void readLight(NSURL *file, void (^done)(float light)) {
     [_layer addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial context:&kReadyContext];
     _observing = YES;
     _light = -1;
+    _aspect = 0;
     __weak SGRPlayerClip *weakSelf = self;
     readLight(file, ^(float light) {
         SGRPlayerClip *clip = weakSelf;
@@ -119,12 +128,37 @@ static void readLight(NSURL *file, void (^done)(float light)) {
         clip->_light = light;
         [clip checkReady];
     });
+    [self readAspect:file];
     return self;
+}
+
+// The clip's height over its width, read off its video track (preferred transform applied, so a rotated
+// clip reports the way it is drawn). Falls back to 1 (square) so a clip always has a shape to be laid out
+// at. The result is delivered on the main queue.
+- (void)readAspect:(NSURL *)file {
+    __weak SGRPlayerClip *weakSelf = self;
+    AVURLAsset *asset = [AVURLAsset URLAssetWithURL:file options:nil];
+    [asset loadValuesAsynchronouslyForKeys:@[@"tracks"] completionHandler:^{
+        CGFloat aspect = 1;
+        NSError *error = nil;
+        if ([asset statusOfValueForKey:@"tracks" error:&error] == AVKeyValueStatusLoaded) {
+            AVAssetTrack *track = [[asset tracksWithMediaType:AVMediaTypeVideo] firstObject];
+            CGSize size = track ? CGSizeApplyAffineTransform(track.naturalSize, track.preferredTransform) : CGSizeZero;
+            if (size.width > 0 && size.height > 0) aspect = fabs(size.height) / fabs(size.width);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            SGRPlayerClip *clip = weakSelf;
+            if (!clip) return;
+            clip->_aspect = aspect;
+            if (clip->_aspectReady) clip->_aspectReady();
+            [clip checkReady];
+        });
+    }];
 }
 
 - (void)checkReady {
     void (^ready)(SGRPlayerClip *) = _ready;
-    if (!ready || _light < 0 || !_layer.readyForDisplay) return;
+    if (!ready || _light < 0 || _aspect <= 0 || !_layer.readyForDisplay) return;
     _ready = nil;
     ready(self);
 }
@@ -151,6 +185,7 @@ static void readLight(NSURL *file, void (^done)(float light)) {
     if (_observing) [_layer removeObserver:self forKeyPath:@"readyForDisplay" context:&kReadyContext];
     _observing = NO;
     _ready = nil;
+    _aspectReady = nil;
     [_player pause];
     [_looper disableLooping];
     [_layer removeFromSuperlayer];
@@ -195,6 +230,18 @@ static float dimFor(float light, BOOL lyricsUp) {
     float ceiling = SGRIncreaseContrast() ? kCeilingContrast : kCeiling;
     float need = light > ceiling ? 1 - powf(ceiling / light, 1 / 2.2f) : 0;
     return MIN(kDimMost, MAX(kDimLeast, need) + (lyricsUp ? kDimLyrics : 0));
+}
+
+// Where the clip is drawn: full width, its own aspect, centred in the player height (the Taurus placement),
+// so a 1:1 or 3:4 cover is shown whole — resizeAspectFill then fits it exactly and crops nothing. Only a
+// clip taller than kFillAspect (a Canvas) is drawn to the full height, centred and cut at its sides.
+static CGRect clipFrame(CGFloat width, CGFloat screen, CGFloat aspect) {
+    if (aspect <= 0) aspect = 1;
+    CGFloat height = round(width * aspect);
+    if (aspect > kFillAspect) height = MAX(height, screen);
+    if (height > screen) height = screen;
+    CGFloat top = round((screen - height) / 2);
+    return CGRectMake(0, top, width, height);
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -280,20 +327,15 @@ static float dimFor(float light, BOOL lyricsUp) {
     for (SGRPlayerClip *clip in _leaving) [clip stop];
 }
 
-- (void)setVideoHeight:(CGFloat)videoHeight {
-    if (fabs(_videoHeight - videoHeight) < 0.5) return;
-    _videoHeight = videoHeight;
-    [self setNeedsLayout];
-}
-
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
-    CGFloat vh = _videoHeight > 0 ? MIN(_videoHeight, bounds.size.height) : bounds.size.height;
-    // The clip lives only in the artwork area so resizeAspectFill does not crop its content. Below it
-    // the Fluid artwork (the field) carries on, following the cover's colours as it does everywhere
-    // else in the player.
-    _video.frame = CGRectMake(0, 0, bounds.size.width, vh);
+    CGFloat w = bounds.size.width, h = bounds.size.height;
+    // The clip is laid out at its own aspect and centred in the player height, so a 1:1 or 3:4 cover shows
+    // whole (resizeAspectFill then crops nothing); only a Canvas fills the height. Below the clip the Fluid
+    // artwork (the field) carries on, following the cover's colours as it does everywhere else in the player.
+    CGRect vf = clipFrame(w, h, _clip ? _clip.aspect : 0);
+    _video.frame = vf;
     // Dissolve the clip's bottom edge into the Fluid artwork below (BitChord-style),
     // rather than leaving the hard rectangle the blur alone could not hide.
     _mask.frame = _video.bounds;
@@ -302,24 +344,26 @@ static float dimFor(float light, BOOL lyricsUp) {
     _dim.frame = _video.bounds;
     _clip.layer.frame = _video.bounds;
     for (SGRPlayerClip *clip in _leaving) clip.layer.frame = _video.bounds;
-    // The blur ramps in over the lower half of the artwork area and stays on down to the bottom of the
-    // screen. It smears the clip's bottom edge into the Fluid artwork so the two meet on a colour
-    // field rather than a line — no hard rectangle, and no cropping because the blur sits over the
-    // field, not over a stretched copy of the clip.
+    // The blur ramps in over the lower half of the cover and stays on down to the bottom of the screen.
+    // It smears the clip's bottom edge into the Fluid artwork so the two meet on a colour field rather
+    // than a line — no hard rectangle, and no cropping because the blur sits over the field, not over a
+    // stretched copy of the clip. Its anchor follows the cover, so the marriage holds wherever the cover
+    // now sits.
     _blur.frame = bounds;
     CAGradientLayer *blurMask = (CAGradientLayer *)_blur.layer.mask;
     if (![blurMask isKindOfClass:CAGradientLayer.class]) {
         blurMask = [CAGradientLayer layer];
         _blur.layer.mask = blurMask;
     }
-    CGFloat h = bounds.size.height;
     blurMask.colors = @[
-        (id)UIColor.clearColor.CGColor,   // top half of the artwork: sharp clip
+        (id)UIColor.clearColor.CGColor,   // top half of the cover: sharp clip
         (id)UIColor.clearColor.CGColor,
-        (id)UIColor.blackColor.CGColor,   // past the artwork: fully blurred field
+        (id)UIColor.blackColor.CGColor,   // past the cover: fully blurred field
         (id)UIColor.blackColor.CGColor,
     ];
-    blurMask.locations = @[@0, @(vh * 0.5 / h), @(vh * 1.1 / h), @1];
+    CGFloat mid = CGRectGetMidY(vf);
+    CGFloat pastBottom = MIN(h, CGRectGetMaxY(vf) + 0.1 * vf.size.height);
+    blurMask.locations = @[@0, @(mid / h), @(pastBottom / h), @1];
     blurMask.frame = bounds;
     // Scrim over the whole field so the title and controls read against the Fluid artwork; the opaque
     // clip hides it up top, the blur reveals it below.
@@ -387,13 +431,14 @@ static void fade(CALayer *layer, float to, NSTimeInterval duration) {
     NSUInteger generation = ++_generation;
     if (_clip) [_leaving addObject:_clip];
     _clip = clip;
-    CGFloat vh = _videoHeight > 0 ? MIN(_videoHeight, self.bounds.size.height) : self.bounds.size.height;
-    clip.layer.frame = CGRectMake(0, 0, self.bounds.size.width, vh);
+    clip.layer.frame = clipFrame(self.bounds.size.width, self.bounds.size.height, clip.aspect);
     clip.layer.opacity = 0;
     [_clips addSublayer:clip.layer];
     [clip setPlaying:_playing];
     __weak SGRPlayerAnimatedView *weakSelf = self;
     clip.ready = ^(SGRPlayerClip *ready) { [weakSelf fadeIn:ready generation:generation]; };
+    // The aspect may still be loading; lay the clip out again the moment it is known, before it fades in.
+    clip.aspectReady = ^{ [weakSelf setNeedsLayout]; [weakSelf layoutIfNeeded]; };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kReadyWithin * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         SGRPlayerAnimatedView *view = weakSelf;
         if (!view || view.clip != clip || clip.layer.readyForDisplay) return;

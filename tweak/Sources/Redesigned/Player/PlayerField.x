@@ -89,7 +89,8 @@ static void keepOnTop(UIView *plane, NSArray<UIView *> *views) {
     UIView *clip = SGRPlayerAnimatedViewIn(plane, field);
     keepOnTop(plane, clip ? @[field, clip] : @[field]);
     if (!CGRectEqualToRect(field.frame, plane.bounds)) field.frame = plane.bounds;
-    // The animated cover sits in the cover's own square, not over the whole screen.
+    // Keep the animated-cover view sized to the plane; the cover itself is placed inside it at its own
+    // aspect, centred (the Taurus placement).
     SGRPlayerFitClipToCover();
 }
 
@@ -107,19 +108,16 @@ static void keepOnTop(UIView *plane, NSArray<UIView *> *views) {
 
 #pragma mark - the player's own cover
 
-// The clip view fills the whole screen: its video band runs from the top down to where the title
-// begins, dissolving at the bottom into the Fluid artwork behind it, with a light scrim over the
-// whole field for legibility — the way Apple Music and BitChord carry the cover's colours under
-// the controls rather than cutting to black.
+// The clip view fills the whole screen. Inside it the clip is drawn at its own aspect, centred in the
+// player height (a 1:1 or 3:4 cover shown whole; only a Canvas fills the height), dissolving at its
+// bottom into the Fluid artwork behind it, with a light scrim over the whole field for legibility — the
+// way Apple Music and BitChord carry the cover's colours under the controls rather than cutting to black.
 void SGRPlayerFitClipToCover(void) {
     SGRArtworkField *field = sg_field;
     UIView *plane = field.superview;
     UIView *clip = plane ? SGRPlayerAnimatedViewIn(plane, field) : nil;
     if (!clip) return;
     if (!CGRectEqualToRect(clip.frame, plane.bounds)) clip.frame = plane.bounds;
-    CGRect area = SGRPlayerArtworkAreaIn(plane);
-    CGFloat videoBottom = CGRectIsNull(area) ? plane.bounds.size.height * 0.55 : CGRectGetMaxY(area);
-    [(SGRPlayerAnimatedView *)clip setVideoHeight:videoBottom];
 }
 
 // The picture of the cell under the middle of the list once it has settled: mid swipe the middle is
