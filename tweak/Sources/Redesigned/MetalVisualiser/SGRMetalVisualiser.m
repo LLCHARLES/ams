@@ -17,6 +17,9 @@
 #import "Redesigned/Kit/SGRKit.h"
 #import "Redesigned/Player/SGRSpectrum.h"
 #import "Shared/AudioEffects/AudioEffects.h"
+// SGLockScreenCoverArtworkScale:锁屏那幅画的封面尺寸,播放页的动态封面照它来。
+// 分层允许 Redesigned → Shared。
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 
 // ============================================================================
 // Uniform 桥接 —— 与 .metal 里逐字段对应
@@ -25,8 +28,10 @@
 // The uniform block, laid out to match Frame/Params in the .metal exactly: a pair of floats,
 // then four-vectors, then scalars. SIMD types are spelled out as structs rather than
 // vector_floatN so the layout does not depend on which Metal headers happen to be in scope.
-typedef struct { float x, y; } SGRSimd2;
-typedef struct { float x, y, z, w; } SGRSimd4;
+// 对齐要和 Metal 的 float2 / float4 一致。这一条不是洁癖:shader 那边 float4 要求 16 字节对齐,
+// 这里不声明的话 textAspect 会落在 24 而不是 32,Frame 之后每一个字段都错 8 字节。
+typedef struct __attribute__((aligned(8))) { float x, y; } SGRSimd2;
+typedef struct __attribute__((aligned(16))) { float x, y, z, w; } SGRSimd4;
 
 typedef struct {
     SGRSimd2 resolution;
@@ -37,6 +42,10 @@ typedef struct {
     SGRSimd4 color1;
     SGRSimd4 color2;
     SGRSimd4 accent;
+} SGRMetalFrame;
+
+// shader 的 Params。绑到 buffer(1)。顺序与 SGRMetalShaders.metal 里的 struct Params 逐字对应。
+typedef struct {
     float flowAmount;
     float audioAmount;
     float edgeSmooth;
@@ -45,17 +54,27 @@ typedef struct {
     float zoom;
     float time;
     uint32_t spectrumBands;
-    uint32_t _pad;
-    // 构图,与 shader 的 Params 里同名的一组一一对应。四张副本各自旋转、错落分布,
-    // 压暗带盖在控制条下面。数值取自 vitrine 的 SGRFluid.m。
-    float warp;            // 副本中心离可见区中点的远近,以及上三张的不透明度
+    // 这里曾经有个 _pad,为了让 visibleTopLeft 落上 8 字节边界 —— 但 shader 那边
+    // uint 之后紧跟 float,本来就不需要补,补了反而让 warp 落在 36 而不是 32,
+    // 整个构图部分跟着错 4 字节。去掉它,两边才是同一张布局。
+    // 构图 —— 照锁屏那套(SGFluidClip.m)来,不是播放页的 SGRFluid.m。
+    float warp;            // 副本中心离中点的远近:1 = 锁屏原样,0 = 四张重合
     float shadeFrom;       // 压暗带起点(可见区高度的比例)
     float shadeAlpha;      // 压暗带底端的黑度
     float coverScale;      // 副本边长占可见区长边的倍数
     SGRSimd2 visibleTopLeft;
     SGRSimd2 visibleSize;
     float blurAmount;      // 0 = 清晰封面,1 = SGRFluid.m 那样的全糊
-} SGRMetalUniforms;
+    // 画进画面的封面,边长占 clip 宽度的比例 —— SGLockScreenCoverArtworkScale,默认 0.5。
+    // 和锁屏共用这一个设置,两边的大小就不会各走各的。
+    float coverArtScale;
+} SGRMetalParams;
+
+typedef struct { SGRMetalFrame frame; SGRMetalParams params; } SGRMetalUniforms;
+
+// 偏移错了画面上处处不对,而且不会有任何报错 —— 让编译器挡住。
+_Static_assert(sizeof(SGRMetalFrame)  == 112, "SGRMetalFrame 必须与 shader 的 Frame 逐字节一致");
+_Static_assert(sizeof(SGRMetalParams) == 72,  "SGRMetalParams 必须与 shader 的 Params 逐字节一致");
 
 // ============================================================================
 // 设置
@@ -460,9 +479,9 @@ static float levelAt(float index) {
             CGFloat r, g, b, a;
             [colors[i] getRed:&r green:&g blue:&b alpha:&a];
             SGRSimd4 v = { r, g, b, 1.0f };
-            if (i == 0) _u.color0 = v;
-            else if (i == 1) _u.color1 = v;
-            else _u.color2 = v;
+            if (i == 0) _u.frame.color0 = v;
+            else if (i == 1) _u.frame.color1 = v;
+            else _u.frame.color2 = v;
         }
         // 强调色取最饱和的那个(PlayerField.x 的 followCover 同样判断)。
         UIColor *best = nil;
@@ -485,7 +504,7 @@ static float levelAt(float index) {
     if (color) {
         CGFloat r, g, b, a;
         [color getRed:&r green:&g blue:&b alpha:&a];
-        _u.accent = (SGRSimd4){ r, g, b, 1.0f };
+        _u.frame.accent = (SGRSimd4){ r, g, b, 1.0f };
     }
     [self drawOnce];
 }
@@ -595,7 +614,7 @@ static float levelAt(float index) {
     CGSize size = self.drawableSize;
 
     // 尺寸
-    _u.resolution = (SGRSimd2){ (float)size.width, (float)size.height };
+    _u.frame.resolution = (SGRSimd2){ (float)size.width, (float)size.height };
 
     // 可见区。图层比屏幕大(bleed),这一块是屏幕上真正看到的部分;副本绕它里面的点转、
     // 边长以它的长边为基准、压暗带在它下边收住。shader 用的是 uv,所以把 rect 除以图层尺寸。
@@ -605,43 +624,47 @@ static float levelAt(float index) {
     if (CGRectIsEmpty(visible) || self.bounds.size.width < 1 || self.bounds.size.height < 1) {
         visible = self.bounds;
     }
-    _u.visibleTopLeft = (SGRSimd2){ (float)(visible.origin.x / MAX(self.bounds.size.width, 1.0)),
+    _u.params.visibleTopLeft = (SGRSimd2){ (float)(visible.origin.x / MAX(self.bounds.size.width, 1.0)),
                                     (float)(visible.origin.y / MAX(self.bounds.size.height, 1.0)) };
-    _u.visibleSize    = (SGRSimd2){ (float)(visible.size.width  / MAX(self.bounds.size.width, 1.0)),
+    _u.params.visibleSize    = (SGRSimd2){ (float)(visible.size.width  / MAX(self.bounds.size.width, 1.0)),
                                     (float)(visible.size.height / MAX(self.bounds.size.height, 1.0)) };
 
     // 焦点缓动
     _focusNow.x += (_focus.x - _focusNow.x) * kFocusEase;
     _focusNow.y += (_focus.y - _focusNow.y) * kFocusEase;
-    _u.focus = (SGRSimd2){ _focusNow.x, _focusNow.y };
-    _u.tilt = (SGRSimd2){ _tilt.x, _tilt.y };
+    _u.frame.focus = (SGRSimd2){ _focusNow.x, _focusNow.y };
+    _u.frame.tilt = (SGRSimd2){ _tilt.x, _tilt.y };
 
     // 时间与帧数
     CFTimeInterval now = CACurrentMediaTime();
     if (_lastTick == 0) _lastTick = now;
     _lastTick = now;
-    _u.time = (float)(now - _start);
+    _u.params.time = (float)(now - _start);
     _frames++;
 
     // 设置项
-    _u.flowAmount = SGRMetalValue(SGRMetalSettingFlow) / 100.0f;
-    _u.audioAmount = SGRMetalValue(SGRMetalSettingAudio) / 100.0f;
-    _u.saturation = SGRMetalValue(SGRMetalSettingSaturation) / 100.0f;
-    _u.brightness = SGRMetalValue(SGRMetalSettingBrightness) / 100.0f;
+    _u.params.flowAmount = SGRMetalValue(SGRMetalSettingFlow) / 100.0f;
+    _u.params.audioAmount = SGRMetalValue(SGRMetalSettingAudio) / 100.0f;
+    _u.params.saturation = SGRMetalValue(SGRMetalSettingSaturation) / 100.0f;
+    _u.params.brightness = SGRMetalValue(SGRMetalSettingBrightness) / 100.0f;
     // zoom 已经不是构图的手段了 —— 副本的边长由 coverScale 定,这里是留给后续微调的余量,
     // 与 SGRFluid.m 一样默认 1。
-    _u.zoom = 1.0f;
-    _u.warp = SGRMetalValue(SGRMetalSettingWarp) / 100.0f;
-    _u.coverScale = SGRMetalValue(SGRMetalSettingCoverScale) / 100.0f;
-    // 压暗带:SGRFluid.m 的 kShadeFrom / kShadeAlpha。
-    _u.shadeFrom = 0.45f;
-    _u.shadeAlpha = 0.55f;
+    _u.params.zoom = 1.0f;
+    _u.params.warp = SGRMetalValue(SGRMetalSettingWarp) / 100.0f;
+    _u.params.coverScale = SGRMetalValue(SGRMetalSettingCoverScale) / 100.0f;
+    // 画进画面那个封面的大小 —— 与锁屏共用同一个设置,所以两边一样大,改一处两边都动。
+    // SGFluidClip.m 自己是把这段钳在 0.2~0.9 的,这里跟着钳,免得一个存坏的值让封面盖满屏幕。
+    _u.params.coverArtScale = MIN(0.9f, MAX(0.2f, (float)SGLockScreenCoverArtworkScale()));
+    // 压暗:锁屏那套(SGFluidClip.m 的 kShadeFrom 0.55 / kShadeAlpha 0.45),
+    // 不是播放页 SGRFluid.m 的 0.45/0.55。
+    _u.params.shadeFrom = 0.55f;
+    _u.params.shadeAlpha = 0.45f;
     // 模糊:滑块 0..100 直接当 0..1 用,shader 再乘上封面纹理的 7.8%(vitrine 的比例)。
     // 早先除以 24 是照着 SGRFluid.m 的档位换算,但那个档位是它自己的滑块,和这里的
     // 百分制对不上;结果默认值被 clamp 到 1.0 也不明显,因为半径本身就小得看不见。
-    _u.blurAmount = MIN(1.0f, MAX(0.0f, SGRMetalValue(SGRMetalSettingBlur) / 100.0f));
-    _u.edgeSmooth = 0.35f;
-    _u.spectrumBands = SGRSpectrumBands;
+    _u.params.blurAmount = MIN(1.0f, MAX(0.0f, SGRMetalValue(SGRMetalSettingBlur) / 100.0f));
+    _u.params.edgeSmooth = 0.35f;
+    _u.params.spectrumBands = SGRSpectrumBands;
 
     // 频谱上传
     readSpectrum();
@@ -665,7 +688,15 @@ static float levelAt(float index) {
         [enc setFragmentTexture:_previous atIndex:1];
         [enc setFragmentTexture:_spectrum atIndex:2];
         [enc setFragmentTexture:_text atIndex:3];
-        [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
+        // Frame 到 buffer(0),Params 到 buffer(1) —— 两个结构分别绑。
+        //
+        // 这里以前只绑了 buffer(0),而 shader 的 p 声明在 buffer(1),于是从来没被绑过:
+        // warp / coverScale / blurAmount / visibleSize / 压暗 / 饱和度 / 亮度 / time…… 整个
+        // 构图参数读的都是未定义内存(GPU 上常是上一趟留在那块常量里的内容)。画面因此看着
+        // "像那么回事",但滑块怎么调都不动、几何怎么改都不对 —— 前几十轮改的都是一个
+        // 根本没被喂进去的东西。_Static_assert 挡的是同一类错误:结构漂了就在这里报出来。
+        [enc setFragmentBytes:&_u.frame  length:sizeof(_u.frame)  atIndex:0];
+        [enc setFragmentBytes:&_u.params length:sizeof(_u.params) atIndex:1];
         [enc setFragmentSamplerState:_sampler atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
         [enc endEncoding];

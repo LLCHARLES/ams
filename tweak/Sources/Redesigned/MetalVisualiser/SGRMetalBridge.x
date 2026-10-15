@@ -53,8 +53,13 @@ static void holdField(BOOL mine) {
         field.flows = NO;
         field.fluid = NO;
         field.showsBackdrop = NO;
+        // 播放页自己的方形封面让位:锁屏那幅画里只有一个封面,而那个是画进画面中心的
+        // (SGFluidClip.m 的 coverFrame / newCover)。不藏起来就会有大小差一点的两个封面叠着。
+        // PlayerMorph.x 在 morph 结束时会把它放回来,所以每次 Update 都要重新藏。
+        SGRPlayerSetCoverHidden(YES);
         return;
     }
+    SGRPlayerSetCoverHidden(NO);
     SGRPlayerBackgroundKind kind = SGRPlayerBackground();
     field.flows = kind == SGRPlayerBackgroundColours;
     field.fluid = kind >= SGRPlayerBackgroundFluid;
