@@ -65,7 +65,7 @@ typedef struct {
 static const struct { __unsafe_unretained NSString *key; SGRMetalLimits limits; } kSettings[] = {
     {@"spotifyglass.metal.flow",       {0,  100, 5, 50}},
     {@"spotifyglass.metal.audio",      {0,  100, 5, 70}},
-    {@"spotifyglass.metal.blur",       {0,  100, 5, 92}},
+    {@"spotifyglass.metal.blur",       {0,  100, 5, 100}},
     {@"spotifyglass.metal.saturation", {0,  200, 10, 150}},
     {@"spotifyglass.metal.brightness", {40, 150, 5, 100}},
     // 构图两项。warp 与 coverScale 的默认值就是 SGRFluid.m 的标准值(100% / 1.0),
@@ -636,8 +636,10 @@ static float levelAt(float index) {
     // 压暗带:SGRFluid.m 的 kShadeFrom / kShadeAlpha。
     _u.shadeFrom = 0.45f;
     _u.shadeAlpha = 0.55f;
-    // 模糊:Blur 滑块的值(2..24,SGRFluid.m 的档位)映射成 0..1,那里 8 是标准。
-    _u.blurAmount = MIN(1.0f, MAX(0.0f, SGRMetalValue(SGRMetalSettingBlur) / 24.0f));
+    // 模糊:滑块 0..100 直接当 0..1 用,shader 再乘上封面纹理的 7.8%(vitrine 的比例)。
+    // 早先除以 24 是照着 SGRFluid.m 的档位换算,但那个档位是它自己的滑块,和这里的
+    // 百分制对不上;结果默认值被 clamp 到 1.0 也不明显,因为半径本身就小得看不见。
+    _u.blurAmount = MIN(1.0f, MAX(0.0f, SGRMetalValue(SGRMetalSettingBlur) / 100.0f));
     _u.edgeSmooth = 0.35f;
     _u.spectrumBands = SGRSpectrumBands;
 

@@ -24,6 +24,11 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// 封面模糊半径的上限,以封面纹理的比例计(0..1 的 uv)。vitrine 是在 128px 的封面上用
+// 10px 的高斯半径 —— 纹理的 7.8% —— 所以 0.08 是它的等价。比这更小的半径在画面上
+// 就只是柔化,而不是"模糊的背景"。
+constant float kTextureBlurRadius = 0.08;
+
 // ============================================================================
 // Uniform
 // ============================================================================
@@ -224,11 +229,17 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
         // 那部分只是这个副本自己的画面。
         float4 cover = coverTex.sample(smp, clamp(copyUV, 0.0, 1.0));
 
-        // 模糊在这里做,不靠下游的 512px ping-pong。背景是模糊的封面,不是全屏画面的缩略图 ——
-        // 缩略图会把封面放大 5 倍,于是永远只看见封面的中间一块。Kawase 的多次降采样
-        // 采样点固定在像素中心,离得越远权重越高;这里取一个固定的偏移,等价于一次
-        // 半分辨率高斯,配合下面 16 点的圆盘加权就是 vitrin 那边 CIGaussianBlur 的近似。
-        float2 px1 = 1.0 / max(frame.resolution, float2(1.0));
+        // 模糊在这里做,半径以**封面纹理的比例**计,不是屏幕像素 —— 这是"看起来像模糊"
+        // 与"看起来像被放大的封面"之间的全部差别。
+        //
+        // vitrine 把封面缩到 128px,再用 10px 半径的高斯,即纹理的 ~7.8%;这边的 copyUV 是
+        // 0..1 的方形纹理坐标,同样的比例就是 0.078 uv。早先用的是 1/resolution,在 1024px
+        // 的纹理上只有 0.8 个像素 —— 等于没糊,于是"副本是屏幕的 2.2 倍、只显示封面中间
+        // 45%"这件事就直接暴露成了"封面被放大"。
+        //
+        // 采样点固定,不随分辨率变:半径是封面自己的尺度,与屏幕多大无关。
+        float rad = max(p.blurAmount, 0.02) * kTextureBlurRadius;
+        float2 px1 = float2(rad, rad);
         float3 blurred = cover.rgb * 0.20;
         blurred += coverTex.sample(smp, clamp(copyUV + float2( px1.x,  0.0), 0.0, 1.0)).rgb * 0.10;
         blurred += coverTex.sample(smp, clamp(copyUV + float2(-px1.x,  0.0), 0.0, 1.0)).rgb * 0.10;
