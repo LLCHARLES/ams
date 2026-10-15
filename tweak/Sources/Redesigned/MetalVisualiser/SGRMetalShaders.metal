@@ -42,7 +42,7 @@ struct Frame {
 struct Params {
     float  flowAmount;    // 径向流动强度
     float  audioAmount;   // 音频驱动强度
-    float  edgeSmooth;    // 边缘平滑
+    float  edgeSmooth;    // 边缘淡出强度
     float  saturation;    // 饱和度增益
     float  brightness;    // 亮度增益
     float  zoom;          // 基础放大
@@ -55,6 +55,7 @@ struct Params {
     float  coverScale;    // 副本边长占可见区长边的倍数
     float2 visibleTopLeft;// 可见区在整屏里的左上角(uv),播放器不在全屏时需要
     float2 visibleSize;   // 可见区尺寸(uv)
+    float  blurAmount;    // 0 = 清晰封面,1 = SGRFluid.m 那样的全糊
 };
 
 /// 四张副本的边长(可见区长边的倍数)与中心(x, y),与 SGRFluid.m 的 kCopy 同一组数。
@@ -161,6 +162,7 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
                                       texture2d<float> coverTex    [[texture(0)]],
                                       texture2d<float> previousTex [[texture(1)]],
                                       texture2d<float> soundTex    [[texture(2)]],
+                                      texture2d<float> textTex     [[texture(3)]],
                                       constant Frame&  frame       [[buffer(0)]],
                                       constant Params&  p          [[buffer(1)]],
                                       sampler           smp         [[sampler(0)]]) {
@@ -217,14 +219,40 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
                       / max(longerPx, 1.0);
         copyUV += radial;
 
-        // 副本远大于屏幕,取样坐标几乎总在 0..1 之外 —— clamp 到边缘,和 aspectFill 一样:
-        // 封面被拉大铺满正方形副本,副本露在屏幕外的那部分本来看不见。
+        // 取样坐标以副本中心为 0.5。副本远大于屏幕,所以大部分点落在 0..1 之外 ——
+        // clamp 到边缘,和 aspectFill 一样:封面被拉大铺满正方形副本,副本露在屏幕外的
+        // 那部分只是这个副本自己的画面。
         float4 cover = coverTex.sample(smp, clamp(copyUV, 0.0, 1.0));
+
+        // 模糊在这里做,不靠下游的 512px ping-pong。背景是模糊的封面,不是全屏画面的缩略图 ——
+        // 缩略图会把封面放大 5 倍,于是永远只看见封面的中间一块。Kawase 的多次降采样
+        // 采样点固定在像素中心,离得越远权重越高;这里取一个固定的偏移,等价于一次
+        // 半分辨率高斯,配合下面 16 点的圆盘加权就是 vitrin 那边 CIGaussianBlur 的近似。
+        float2 px1 = 1.0 / max(frame.resolution, float2(1.0));
+        float3 blurred = cover.rgb * 0.20;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( px1.x,  0.0), 0.0, 1.0)).rgb * 0.10;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2(-px1.x,  0.0), 0.0, 1.0)).rgb * 0.10;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( 0.0,  px1.y), 0.0, 1.0)).rgb * 0.10;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( 0.0, -px1.y), 0.0, 1.0)).rgb * 0.10;
+        blurred += coverTex.sample(smp, clamp(copyUV + px1, 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV - px1, 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( px1.x, -px1.y), 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2(-px1.x,  px1.y), 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( px1.x,  px1.y), 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2(-px1.x, -px1.y), 0.0, 1.0)).rgb * 0.0675;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( px1.x * 2.0, 0.0), 0.0, 1.0)).rgb * 0.035;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2(-px1.x * 2.0, 0.0), 0.0, 1.0)).rgb * 0.035;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( 0.0,  px1.y * 2.0), 0.0, 1.0)).rgb * 0.035;
+        blurred += coverTex.sample(smp, clamp(copyUV + float2( 0.0, -px1.y * 2.0), 0.0, 1.0)).rgb * 0.035;
+        // 三步归一化:上面权重和为 0.2+0.4+0.405+0.14 = 1.145,除回来保持亮度。
+        blurred /= 1.145;
 
         float4 base = mix(frame.color0_, frame.color1_, clamp(band * 1.2, 0.0, 1.0));
         base = mix(base, frame.color2_, clamp(wave * 0.5, 0.0, 1.0));
 
-        float3 c = cover.rgb * mix(float3(1.0), base.rgb, 0.35);
+        // blur 的强度:0 是清晰的封面,1 是 SGRFluid.m 那样的全糊。
+        float3 c = mix(cover.rgb, blurred, p.blurAmount);
+        c *= mix(float3(1.0), base.rgb, 0.35);
         c = mix(c, frame.accent.rgb, p.audioAmount * band * 0.45);
 
         // 层叠而非平均:SGRFluid.m 里四张是四个 CALayer,后画的盖在先画的上面,
@@ -259,6 +287,21 @@ fragment float4 chromaPresentFragment(VertexOut in [[stage_in]],
     float inVisible = (in.uv.y - visTL.y) / visSize.y;
     float shade = smoothstep(p.shadeFrom, 1.0, inVisible) * p.shadeAlpha;
     rgb = mix(rgb, float3(0.0), clamp(shade, 0.0, 1.0));
+
+    // 歌词叠上来。合成也曾是独立的一 pass,但那时主渲染写进的是 512px 的中转纹理;
+    // 现在主渲染直接写屏幕,歌词就在同一个 fragment 里叠,少一遍全屏带宽。
+    float2 tuv = in.uv;
+    tuv.y = 1.0 - tuv.y;
+    float4 txt = textTex.sample(smp, tuv);
+    if (txt.a > 0.0) {
+        // 歌词所在的那段压暗一点,和白字拉开对比 —— 和原来 compositeFragment 里那步一样。
+        float region = smoothstep(0.05, 0.35, in.uv.y) * (1.0 - smoothstep(0.72, 0.98, in.uv.y));
+        rgb = mix(rgb, rgb * 0.42, region * 0.75);
+        // 随节拍发光:这正是歌词走 GPU 而不是 UILabel 的原因。
+        float glow = txt.a * (0.55 + band * p.audioAmount * 0.9);
+        rgb += frame.accent.rgb * glow * 0.55;
+        rgb += float3(glow) * glow * 0.35;
+    }
 
     return float4(rgb, 1.0);
 }
@@ -306,22 +349,8 @@ fragment float4 compositeFragment(BlurInOut in [[stage_in]],
                                   constant Frame&  frame [[buffer(0)]],
                                   constant Params& p     [[buffer(1)]],
                                   sampler           smp   [[sampler(0)]]) {
-    float3 bg = blurred.sample(smp, in.uv).rgb;
-
-    // 歌词直接进 GPU,所以能随节拍发光
-    float2 tuv = in.uv;
-    tuv.y = 1.0 - tuv.y;
-    float4 txt = textTex.sample(smp, tuv);
-
-    float band = chromaSpectrum(soundTex, smp, tuv.y);
-    float glow = txt.a * (0.55 + band * p.audioAmount * 0.9);
-
-    float3 outRGB = bg;
-    float region = smoothstep(0.05, 0.35, in.uv.y) * (1.0 - smoothstep(0.72, 0.98, in.uv.y));
-    outRGB = mix(outRGB, outRGB * 0.42, region * 0.75);
-
-    outRGB += frame.accent.rgb * glow * 0.55;
-    outRGB += float3(glow) * glow * 0.35;
-
-    return float4(outRGB, 1.0);
+    // 已并入 chromaPresentFragment:主渲染现在直接写 drawable,不再经由 512px 的中转纹理
+    // (那会把封面放大五倍,只看得见中间一块)。歌词也在那一个 fragment 里叠上去,
+    // 所以这里保留一个恒黑的结果,万一还有调用者也不会画出错误的东西。
+    return float4(0.0, 0.0, 0.0, 1.0);
 }

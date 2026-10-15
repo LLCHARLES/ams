@@ -54,6 +54,7 @@ typedef struct {
     float coverScale;      // 副本边长占可见区长边的倍数
     SGRSimd2 visibleTopLeft;
     SGRSimd2 visibleSize;
+    float blurAmount;      // 0 = 清晰封面,1 = SGRFluid.m 那样的全糊
 } SGRMetalUniforms;
 
 // ============================================================================
@@ -64,7 +65,7 @@ typedef struct {
 static const struct { __unsafe_unretained NSString *key; SGRMetalLimits limits; } kSettings[] = {
     {@"spotifyglass.metal.flow",       {0,  100, 5, 50}},
     {@"spotifyglass.metal.audio",      {0,  100, 5, 70}},
-    {@"spotifyglass.metal.blur",       {0,  100, 5, 62}},
+    {@"spotifyglass.metal.blur",       {0,  100, 5, 92}},
     {@"spotifyglass.metal.saturation", {0,  200, 10, 150}},
     {@"spotifyglass.metal.brightness", {40, 150, 5, 100}},
     // 构图两项。warp 与 coverScale 的默认值就是 SGRFluid.m 的标准值(100% / 1.0),
@@ -625,7 +626,6 @@ static float levelAt(float index) {
     // 设置项
     _u.flowAmount = SGRMetalValue(SGRMetalSettingFlow) / 100.0f;
     _u.audioAmount = SGRMetalValue(SGRMetalSettingAudio) / 100.0f;
-    _u.edgeSmooth = SGRMetalValue(SGRMetalSettingBlur) / 100.0f * 0.5f;
     _u.saturation = SGRMetalValue(SGRMetalSettingSaturation) / 100.0f;
     _u.brightness = SGRMetalValue(SGRMetalSettingBrightness) / 100.0f;
     // zoom 已经不是构图的手段了 —— 副本的边长由 coverScale 定,这里是留给后续微调的余量,
@@ -636,6 +636,9 @@ static float levelAt(float index) {
     // 压暗带:SGRFluid.m 的 kShadeFrom / kShadeAlpha。
     _u.shadeFrom = 0.45f;
     _u.shadeAlpha = 0.55f;
+    // 模糊:Blur 滑块的值(2..24,SGRFluid.m 的档位)映射成 0..1,那里 8 是标准。
+    _u.blurAmount = MIN(1.0f, MAX(0.0f, SGRMetalValue(SGRMetalSettingBlur) / 24.0f));
+    _u.edgeSmooth = 0.35f;
     _u.spectrumBands = SGRSpectrumBands;
 
     // 频谱上传
@@ -644,59 +647,22 @@ static float levelAt(float index) {
 
     id<MTLCommandBuffer> cmd = [_queue commandBuffer];
 
-    // Pass 1 — 主渲染进 _blurA。不能直接写 drawable: Pass 3 还要往同一张
-    // drawable 上合成歌词, 先写了就被后面那遍覆盖掉。
-    if (_blurA) {
-        MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
-        desc.colorAttachments[0].texture = _blurA;
-        desc.colorAttachments[0].loadAction = MTLLoadActionClear;
-        desc.colorAttachments[0].storeAction = MTLStoreActionStore;
-        desc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-
-        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
+    // 主渲染 + 歌词合成 -> 屏幕,一pass 到 drawable。
+    //
+    // 早先是三pass:主渲染进 512×512 的 _blurA,Kawase 之后再上采样到 drawable。那个 512
+    // 才是裁切的真凶 —— 屏幕上每个 texel 铺了约 5 个像素,封面被放大五倍,所以无论
+    // kCopy 的参数怎么算,都只看得见封面的中间一块。Kawase 本来也用错了地方:它降的是
+    // 屏幕分辨率,可背景需要的模糊是封面自己的,不是整幅画面的。模糊现在在主渲染里按
+    // 屏幕像素取 16 点圆盘完成,分辨率与屏幕一致。
+    {
+        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:drawableRPD];
+        // _present 是主渲染,现在也兼做歌词合成(compositeFragment 的活并进了 chromaPresentFragment),
+        // 所以一 pass 到 drawable 就够。用 _composite 会画出恒黑 —— 那只是留给旧路径的。
         [enc setRenderPipelineState:_present];
         [enc setFragmentTexture:_cover atIndex:0];
         [enc setFragmentTexture:_previous atIndex:1];
         [enc setFragmentTexture:_spectrum atIndex:2];
-        [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
-        // The shaders take the sampler as [[sampler(0)]]; a constexpr sampler cannot carry
-        // max_anisotropy, so the host's MTLSamplerState is bound here instead.
-        [enc setFragmentSamplerState:_sampler atIndex:0];
-        [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-        [enc endEncoding];
-    }
-
-    // Pass 2 — Kawase: _blurA -> _blurB(降) -> _blurA(升)
-    if (_blurA && _blurB) {
-        for (NSUInteger pass = 0; pass < 2; pass++) {
-            id<MTLTexture> src = pass == 0 ? _blurA : _blurB;
-            id<MTLTexture> dst = pass == 0 ? _blurB : _blurA;
-            id<MTLRenderPipelineState> pipe = pass == 0 ? _down : _up;
-
-            MTLRenderPassDescriptor *desc = [MTLRenderPassDescriptor renderPassDescriptor];
-            desc.colorAttachments[0].texture = dst;
-            desc.colorAttachments[0].loadAction = MTLLoadActionClear;
-            desc.colorAttachments[0].storeAction = MTLStoreActionStore;
-            desc.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-
-            id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:desc];
-            [enc setRenderPipelineState:pipe];
-            [enc setFragmentTexture:src atIndex:0];
-            SGRSimd2 srcSize = { (float)src.width, (float)src.height };
-            [enc setFragmentBytes:&srcSize length:sizeof(srcSize) atIndex:0];
-            [enc setFragmentSamplerState:_sampler atIndex:0];
-            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
-            [enc endEncoding];
-        }
-    }
-
-    // Pass 3 — 模糊结果 + 歌词 -> 屏幕
-    {
-        id<MTLRenderCommandEncoder> enc = [cmd renderCommandEncoderWithDescriptor:drawableRPD];
-        [enc setRenderPipelineState:_composite];
-        [enc setFragmentTexture:_blurA atIndex:0];
-        [enc setFragmentTexture:_text atIndex:1];
-        [enc setFragmentTexture:_spectrum atIndex:2];
+        [enc setFragmentTexture:_text atIndex:3];
         [enc setFragmentBytes:&_u length:sizeof(_u) atIndex:0];
         [enc setFragmentSamplerState:_sampler atIndex:0];
         [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
