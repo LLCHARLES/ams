@@ -47,17 +47,28 @@ jobs:
 
       - run: make release
 
+      # The Metal visualiser's shaders are compiled by tweak/Makefile and linked into the dylib with
+      # -sectcreate, which no step here would report on: a build can go green without them. The
+      # section table of the binary that will actually be loaded is the only thing that settles it.
+      - name: Verify the shaders are inside the dylib
+        run: |
+          DYLIB=$(find tweak/.theos -name 'spotifyglass.dylib' -path '*arm64*' | head -1)
+          test -n "$DYLIB" || { echo "no dylib"; exit 1; }
+          otool -l "$DYLIB" | grep -q "sectname __metallib" \
+            || { echo "::error::no __metallib section — the visualiser will fall back to Core Animation"; exit 1; }
+          echo "shaders present in $(wc -c < "$DYLIB") bytes"
+
       - uses: actions/upload-artifact@v5
         if: inputs.upload_method != 'filebin'
         with:
-          name: spoti.ipa
+          name: vitrine.ipa
           path: out/*.ipa
           if-no-files-found: error
 
       - name: Upload to filebin.net
         if: inputs.upload_method != 'artifacts'
         run: |
-          BIN="spotifyglass-${{ github.run_id }}"
+          BIN="vitrine-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
           for f in out/*.ipa; do
             curl -fsS -X POST -H "Content-Type: application/octet-stream" --data-binary "@$f" "https://filebin.net/$BIN/$(basename "$f")" >/dev/null
