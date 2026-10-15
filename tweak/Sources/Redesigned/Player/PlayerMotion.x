@@ -46,9 +46,8 @@
 static const CGFloat kFootFrom = 0.9;
 // The share of the poster's height, at its bottom, drawn on down as the foot (one pixel row at least).
 static const CGFloat kFootRows = 0.01;
-// A clip this much taller than wide is drawn to the window's full height and centered, cut at its sides: a Canvas
-// (9:16) or Apple Music's tall cover (3:4). A square one keeps its own height, from the top.
-static const CGFloat kCanvasAspect = 1.05;
+// A clip this much taller than wide is a Canvas, drawn to the window's full height.
+static const CGFloat kCanvasAspect = 1.5;
 // The blur starts at the seam, or this share of the screen down where that is higher, so it is under the
 // controls whatever the clip's shape; it is whole kBlurRamp points below its start.
 static const CGFloat kBlurByControls = 0.6, kBlurRamp = 96;
@@ -123,7 +122,6 @@ static CGFloat brightEnd(NSData *luminances) {
     AVPlayerLayer *_clip;
     CAGradientLayer *_clipMask, *_seamMask;
     CALayer *_foot;
-    CGFloat _footRows;   // the share of the poster's height the foot draws, from its bottom
     CALayer *_dim;   // black over the clip and its foot, as dark as the clip is bright
     NSMutableData *_luminances;   // of the frames measured so far
     BOOL _lyricsUp;
@@ -221,9 +219,6 @@ static UIBlurEffect *blurEffect(void) {
     _clip.frame = _still.bounds;
     _clipMask.frame = _still.bounds;
     _foot.frame = CGRectMake(0, seam, width, MAX(0, total - seam));
-    // The foot takes the same middle the clip shows when it is drawn taller than its shape and cut at its sides.
-    CGFloat shown = _aspect > 0 ? MIN(1, width * _aspect / height) : 1;
-    _foot.contentsRect = CGRectMake((1 - shown) / 2, 1 - _footRows, shown, _footRows);
     _dim.frame = bounds;
     _seamMask.frame = bounds;
     _seamMask.locations = @[@(MIN(1, blurFrom / total)), @(MIN(1, (blurFrom + kBlurRamp) / total))];
@@ -233,10 +228,10 @@ static UIBlurEffect *blurEffect(void) {
 - (void)playFile:(NSURL *)file poster:(UIImage *)poster {
     _aspect = poster.size.height / poster.size.width;
     // The poster's last rows, stretched from the seam to the bottom: the clip goes on down in its own color.
-    _footRows = MAX(kFootRows, 1 / MAX(1, poster.size.height * poster.scale));
+    CGFloat rows = MAX(kFootRows, 1 / MAX(1, poster.size.height * poster.scale));
     _foot.contents = (__bridge id)poster.CGImage;
     _still.contents = (__bridge id)poster.CGImage;
-    [self setNeedsLayout];
+    _foot.contentsRect = CGRectMake(0, 1 - rows, 1, rows);
     _player = [AVQueuePlayer new];
     _player.muted = YES;
     _player.preventsDisplaySleepDuringVideoPlayback = NO;
