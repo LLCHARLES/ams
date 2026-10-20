@@ -8,13 +8,14 @@
 // the bar's bottom edge times (1 - progress), and the player's alpha, and moves and fades the bar's stand-in.
 //
 // The morph rides on that progress, after Spotify's own, so taps, drags and canceled drags follow:
-//   the sheet   a rounded rect from the card's frame and radius to the screen's, filled with the
-//               field's color, under the player, showing at once;
+//   the sheet   a rounded rect from the card's frame and radius to the screen's, under the player: frosted
+//               glass filling in with the field's color as it grows, the screen's width early in an open
+//               and kept late in a close, as the Music app's;
 //   the player  masked to the sheet, its content scaled and moved so its top left is the sheet's
 //               (sublayerTransform, and the frame's top moved to the sheet's; Spotify's gesture code
 //               reads back only the frame's height), its own background color lifted off meanwhile
 //               (a sublayerTransform does not move it), and faded in over the first part of the growth;
-//   the bar     Spotify's stand-in riding the sheet's top edge, gone by a quarter of the way;
+//   the bar     Spotify's stand-in riding the sheet's top edge until the player has mostly come in;
 //   the tab bar Spotify's stand-in hidden, since the real one stays in view around the sheet
 //               and the stand-in would be a second tab bar;
 //   the cover   a copy flown from the card's artwork to the player's cover, moved within the sheet,
@@ -38,6 +39,9 @@
 @end
 
 static const CGFloat kScreenRadiusFallback = 55;
+// How far into an open the sheet has taken the screen's width (apply:), and the stretch over which the player's content
+// takes over from the card's stand-in, inside it.
+static const CGFloat kAcross = 0.4, kHandoffFrom = 0.08, kHandoffTo = 0.36;
 
 static CGFloat lerp(CGFloat a, CGFloat b, CGFloat t) {
     return a + (b - a) * t;
@@ -73,7 +77,7 @@ static CGFloat screenRadius(void) {
 
 @implementation SGRPlayerMorph {
     __weak UIView *_container, *_overlay, *_bar;
-    UIView *_sheet;
+    UIView *_sheet, *_fill;
     UIImageView *_cover;
     CALayer *_mask;
     CGRect _card, _barArtwork, _barRest, _spotifyFrame;
@@ -89,10 +93,11 @@ static CGFloat screenRadius(void) {
     return CGRectGetMinY(_card);
 }
 
-// 9.1.90's CompactOverlayTransition animates the player itself, so the morph follows where it is drawn.
+// 9.1.90's CompactOverlayTransition animates the player itself, so the morph follows where it is drawn. Its stand-in
+// for the bar is taken over to ride the sheet's top edge, as on 9.1.78 (apply:): hidden, the card went blank the
+// moment the player began to open (a screen recording at 60 fps).
 - (void)follow {
     _follows = YES;
-    _bar.hidden = YES;
 }
 
 - (instancetype)initWithContainer:(UIView *)container overlay:(UIView *)overlay bar:(UIView *)bar barRest:(CGRect)barRest {
@@ -109,11 +114,20 @@ static CGFloat screenRadius(void) {
     _barArtwork = SGRNowPlayingArtworkFrameIn(container);
     _spotifyAlpha = overlay.alpha;
 
+    // Frosted glass that fills in with the field's color as it grows, as the Music app's sheet does: the page shows
+    // blurred through it on the way and it is solid by the time it is the screen (screen recordings at 60 fps).
     _sheet = [[UIView alloc] initWithFrame:card];
     _sheet.userInteractionEnabled = NO;
-    _sheet.backgroundColor = SGRPlayerField().fieldColor ?: UIColor.blackColor;
     _sheet.layer.cornerCurve = kCACornerCurveContinuous;
     _sheet.clipsToBounds = YES;
+    UIVisualEffectView *frost = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThickMaterialDark]];
+    frost.frame = _sheet.bounds;
+    frost.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [_sheet addSubview:frost];
+    _fill = [[UIView alloc] initWithFrame:_sheet.bounds];
+    _fill.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _fill.backgroundColor = SGRPlayerField().fieldColor ?: UIColor.blackColor;
+    [_sheet addSubview:_fill];
     [container insertSubview:_sheet belowSubview:overlay];
 
     // The player's own paint is not a sublayer, so the content's transform would leave it where Spotify
@@ -157,7 +171,18 @@ static CGFloat screenRadius(void) {
         _spotifyFrame = drawn.frame;
     }
     CGRect full = container.bounds;
-    CGRect sheet = lerpRect(_card, full, t);
+    // The Music app's sheet takes the screen's width in the first part of an open and grows taller after, and a close
+    // slides it down at the screen's width before it draws in to the card (screen recordings at 60 fps).
+    CGFloat across = ramp(0, kAcross, t);
+    // The player's content and the card's stand-in cross over in the same stretch, while the sheet draws in from the
+    // screen's width to the card's: one fading as the other came in left the card with both, or with neither.
+    CGFloat content = ramp(kHandoffFrom, kHandoffTo, t);
+    // Its foot goes with its width: the screen's while the sheet is the screen's width, so a close (or a drag down) slides
+    // the player down whole, as the Music app's does, and only draws in to the card's foot as it draws in to the card.
+    // Grown by `t` like its top, the foot rose with it and cut off the player's controls and cover (a screen recording).
+    CGFloat top = lerp(_card.origin.y, full.origin.y, t), foot = lerp(CGRectGetMaxY(_card), CGRectGetMaxY(full), across);
+    CGRect sheet = CGRectMake(lerp(_card.origin.x, full.origin.x, across), top,
+                              lerp(_card.size.width, full.size.width, across), MAX(foot - top, _card.size.height));
     CGFloat radius = lerp(_cardRadius, screenRadius(), t);
     CGFloat scale = full.size.width > 0 ? sheet.size.width / full.size.width : 1;
     // The player's top goes to the sheet's: a mask clips nothing above the layer's bounds, so content
@@ -180,19 +205,32 @@ static CGFloat screenRadius(void) {
         overlay.layer.sublayerTransform = CATransform3DScale(CATransform3DMakeTranslation(shift.x, shift.y, 0), scale, scale, 1);
         self->_mask.frame = CGRectMake(target.x, target.y, sheet.size.width, sheet.size.height);
         self->_mask.cornerRadius = radius;
-        if (!self->_follows) overlay.alpha = ramp(0.08, 0.55, t);
+        if (!self->_follows) overlay.alpha = content;
+        // On 9.1.90 the player's own fade is Spotify's, which the spring's takeover plays where the slide is, at its very
+        // end: the player's header and cover stayed over the card's stand-in in the card's last frames (a screen
+        // recording). Faded through the mask instead, as the sheet nears the card, the card alone is left, as in the
+        // Music app's.
+        else self->_mask.opacity = content;
 
         self->_sheet.frame = sheet;
         self->_sheet.layer.cornerRadius = radius;
         self->_sheet.alpha = ramp(0, 0.15, t);
+        self->_fill.alpha = ramp(0.3, 0.85, t);
 
-        // The card's top edge is the sheet's.
+        // The card's top edge is the sheet's, and the card stays on it until the player has mostly come in, as the
+        // Music app's mini player does. On 9.1.90 Spotify animates the stand-in itself, so its animations are lifted
+        // and it is placed here instead, from where it was first drawn.
         CGFloat rise = sheet.origin.y - self->_card.origin.y;
-        if (bar && !self->_follows) {
-            CGRect frame = bar.frame;
-            frame.origin.y = self->_barRest.origin.y + rise;
+        if (bar) {
+            if (self->_follows) {
+                if (CGRectIsEmpty(self->_barRest)) self->_barRest = (bar.layer.presentationLayer ?: bar.layer).frame;
+                [bar.layer removeAllAnimations];
+            }
+            CGRect frame = self->_barRest;
+            frame.origin.y += rise;
+            frame.origin.x += sheet.origin.x - self->_card.origin.x;
             bar.frame = frame;
-            bar.alpha = 1 - ramp(0, 0.25, t);
+            bar.alpha = 1 - content;
         }
 
         if (self->_cover) {
@@ -212,9 +250,11 @@ static CGFloat screenRadius(void) {
                     self->_coverHidden = YES;
                 }
                 to = CGRectOffset(to, -sheet.origin.x, -sheet.origin.y);
-                self->_cover.frame = CGRectOffset(lerpRect(from, to, t), sheet.origin.x, sheet.origin.y);
+                // On the sheet's width, as the rest of the player's content is scaled: on `t` the cover shrank from the
+                // first frame of a close while the player around it slid down whole (a screen recording).
+                self->_cover.frame = CGRectOffset(lerpRect(from, to, across), sheet.origin.x, sheet.origin.y);
                 // The cover's corners are drawn under its paused shrink too.
-                self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, t);
+                self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, across);
                 // Over an animated artwork the player's cover is hidden: the flown one fades out on the
                 // way there instead of landing on an empty slot.
                 self->_cover.alpha = SGRPlayerMotionShowing() ? 1 - ramp(0.6, 1, t) : 1;
@@ -286,7 +326,62 @@ static SGRPlayerMorph *morphFor(SPTBarOverlayPresentationTransition *transition,
 // has the player and morphs to match, so Spotify's frame, alpha and completion stay its own. It is let go once the
 // transition is no longer interactive and the player has no animation left and holds still a few frames.
 static const CFTimeInterval kGiveUp = 0.9;   // UIKit's presentation runs about 0.5 s
-static const float kCloseSpeed = 1.5;         // how much faster than Spotify's a close it runs on its own plays
+static const float kCloseSpeed = 1.15;        // how much faster than Spotify's a close let go by a finger plays
+
+// The Music app's player opens and closes on a spring: in screen recordings at 60 fps its sheet sets off from rest, is
+// half way in some 0.1 s and eases in, each of its last frames some 75% of the one before (123, 87, 67, 55, 40, 35, 25
+// px), a critically damped spring of omega 16 (SwiftUI's smooth spring, which AppleMusicStylePlayer, a recreation of the
+// Music app's player, uses). Spotify's CompactOverlayTransition slides the player in 0.3 s on an ease of its own (a
+// UIViewPropertyAnimator: a position and an opacity CABasicAnimation, the phone's log), most of the way in its first
+// frames. So a transition Spotify plays on its own is played by where the player is: the container's layer is paused and
+// each frame its time is set to the moment Spotify's ease has the player where the spring has it, worked out from the
+// position animation's own timing function. Spotify's slide, its fade, its stand-ins and the morph keep in step, and
+// Spotify's completion comes when its time is let run on from the end. Each frame is timed by when it will show (the
+// display link's target), or the steps came uneven. A drag is UIKit's to scrub, and left alone.
+//
+// Tried and dropped: a morph on a clock of its own (it got ahead of Spotify's slide, which had not laid the player's foot
+// in, and a close outlasted it and was cut off); Spotify's time scrubbed along an ease (the ease on top of Spotify's own,
+// the player up in 0.15 s); the player's place sampled along Spotify's time (a paused layer's presentation is not worked
+// out again until the next frame, so every sample read the same place and the takeover gave up).
+static const CFTimeInterval kWarpDuration = 0.45;
+static const double kOpenOmega = 16, kCloseOmega = 15;
+
+// A critically damped spring from 0 to 1 setting off at `kick` (of the way per second: a finger's pace when let go, 0 from
+// a tap), scaled to end exactly at 1.
+static CGFloat warpCurve(CGFloat u, BOOL opening, double kick) {
+    double omega = opening ? kOpenOmega : kCloseOmega;
+    double t = MIN(1, MAX(0, u)) * kWarpDuration, T = kWarpDuration;
+    return (1 - exp(-omega * t) * (1 + (omega - kick) * t)) / (1 - exp(-omega * T) * (1 + (omega - kick) * T));
+}
+
+// A timing function's cubic, from 0 to 1 through its control points a and b, at s.
+static double cubicAt(double a, double b, double s) {
+    return 3 * a * s * (1 - s) * (1 - s) + 3 * b * s * s * (1 - s) + s * s * s;
+}
+
+// The s at which a cubic reaches `value`, by halving (the curve rises from 0 to 1).
+static double cubicSolve(double a, double b, double value) {
+    double low = 0, high = 1;
+    for (int i = 0; i < 32; i++) {
+        double mid = (low + high) / 2;
+        if (cubicAt(a, b, mid) < value) low = mid;
+        else high = mid;
+    }
+    return (low + high) / 2;
+}
+
+// When the last of a layer's animations ends, in `space`'s time; 0 with none. One not yet given its start (beginTime 0
+// until the transaction it was added in commits) starts now.
+static CFTimeInterval animationsEnd(CALayer *layer, CALayer *space) {
+    CFTimeInterval end = 0, now = [space convertTime:CACurrentMediaTime() fromLayer:nil];
+    for (NSString *key in layer.animationKeys) {
+        CAAnimation *animation = [layer animationForKey:key];
+        if (animation.repeatCount > 1) continue;
+        CFTimeInterval length = animation.duration / MAX(animation.speed, 0.01);
+        end = MAX(end, animation.beginTime > 0 ? [space convertTime:animation.beginTime + length fromLayer:layer] : now + length);
+    }
+    return end;
+}
 
 @interface SGRMorphFollower : NSObject
 @property (nonatomic, strong) SGRPlayerMorph *morph;
@@ -298,7 +393,20 @@ static const float kCloseSpeed = 1.5;         // how much faster than Spotify's 
 @property (nonatomic) CFTimeInterval settledSince;   // when it was last driven by a finger, or began
 @property (nonatomic) BOOL sped;                     // the container's layer runs at kCloseSpeed until let go
 @property (nonatomic) BOOL closing, wasInteractive;
+// The container's time set along the spring (warp): Spotify's slide's start and length and its ease's control points in
+// the container's time, where the slide already was, the end of all the player's animations, and since when.
+@property (nonatomic) BOOL warping, warped;
+@property (nonatomic) CGFloat warpT;                  // where the morph is while warping
+@property (nonatomic) CGFloat warpTFrom, warpTTo;     // where the morph sets off from and goes to
+@property (nonatomic) double warpKick;
+@property (nonatomic) CGFloat lastT;                  // where a finger had the morph, and its pace, for a let go
+@property (nonatomic) CFTimeInterval lastTime;
+@property (nonatomic) double pace;
+@property (nonatomic) CFTimeInterval warpBegin, warpLength, warpTo, warpStart;
+@property (nonatomic) double warpFrom, ease1x, ease1y, ease2x, ease2y;
 @end
+
+@implementation SGRMorphFollower
 
 // The container's clock runs at kCloseSpeed from now on, continuing from where its animations are.
 static void runFaster(CALayer *layer) {
@@ -308,31 +416,116 @@ static void runFaster(CALayer *layer) {
     layer.timeOffset = local;
 }
 
-@implementation SGRMorphFollower
+// The container's clock runs on at its own pace from `local`.
+static void runFrom(CALayer *layer, CFTimeInterval local) {
+    CFTimeInterval now = CACurrentMediaTime();
+    layer.speed = 1;
+    layer.beginTime = layer.superlayer ? [layer.superlayer convertTime:now fromLayer:nil] : now;
+    layer.timeOffset = local;
+}
+
+// Pauses the container where its animations are, to be played along the spring (stepWarp:). Called as Spotify adds its
+// animations, before they are given their start: paused, they start at the container's paused time.
+- (void)warpFrom:(CGFloat)from pace:(double)pace {
+    CALayer *layer = self.container.layer, *player = self.overlay.layer;
+    CFTimeInterval local = [layer convertTime:CACurrentMediaTime() fromLayer:nil], end = animationsEnd(player, layer);
+    CAAnimation *slide = [player animationForKey:@"position"];
+    if (![slide isKindOfClass:CABasicAnimation.class] || end <= local + 0.05) {
+        static NSUInteger logged;
+        if (logged++ < 3) SGLog(@"player morph: no slide to take over (%lu animations), Spotify's own plays", (unsigned long)player.animationKeys.count);
+        return;
+    }
+    CFTimeInterval length = slide.duration / MAX(slide.speed, 0.01);
+    CFTimeInterval begin = slide.beginTime > 0 ? [layer convertTime:slide.beginTime fromLayer:player] : local;
+    float c1[2] = {0, 0}, c2[2] = {1, 1};
+    if (slide.timingFunction) {
+        [slide.timingFunction getControlPointAtIndex:1 values:c1];
+        [slide.timingFunction getControlPointAtIndex:2 values:c2];
+    }
+    self.ease1x = c1[0];
+    self.ease1y = c1[1];
+    self.ease2x = c2[0];
+    self.ease2y = c2[1];
+    double done = MIN(1, MAX(0, (local - begin) / MAX(length, 0.01)));
+    self.warpFrom = cubicAt(self.ease1y, self.ease2y, cubicSolve(self.ease1x, self.ease2x, done));
+    self.warpBegin = begin;
+    self.warpLength = length;
+    self.warpTo = MAX(end, begin + length);
+    self.warpStart = CACurrentMediaTime();
+    // Where Spotify's slide ends, its model value already there: the screen, or the bar (a close, or a drag let go short).
+    CGFloat rest = self.morph.restY > 0 ? self.morph.restY : self.container.bounds.size.height;
+    self.warpTTo = player.frame.origin.y > rest / 2 ? 0 : 1;
+    // Let go by a finger (from NAN), the morph sets off from where Spotify's slide is: the player's place read back
+    // during the drag did not move (the phone's log: the morph from 1.00 with the slide 36% and 80% done).
+    if (isnan(from)) from = self.warpTTo < 0.5 ? 1 - self.warpFrom : self.warpFrom;
+    self.warpTFrom = from;
+    self.warpKick = fabs(self.warpTTo - from) > 0.01 ? MIN(40, MAX(0, pace / (self.warpTTo - from))) : 0;
+    self.warpT = from;
+    layer.speed = 0;
+    layer.timeOffset = local;
+    self.warping = self.warped = YES;
+    static NSUInteger logged;
+    if (logged++ < 6) SGLog(@"player morph: plays Spotify's %.2f s slide (ease %.2f %.2f %.2f %.2f, %.0f%% done) on a spring of %.2f s, the morph %.2f to %.0f kicked %.1f",
+                            length, c1[0], c1[1], c2[0], c2[1], self.warpFrom * 100, kWarpDuration, from, self.warpTTo, self.warpKick);
+}
+
+- (void)stepWarp:(CFTimeInterval)now {
+    if (!self.warping) return;
+    CALayer *layer = self.container.layer;
+    CGFloat u = (now - self.warpStart) / kWarpDuration;
+    if (u >= 1) {
+        // From the end on, so the animations finish and Spotify's completion comes.
+        runFrom(layer, self.warpTo);
+        self.warping = NO;
+        return;
+    }
+    // How far along its slide the spring has the player, and the moment Spotify's ease has it there.
+    double spring = warpCurve(u, self.warpTTo > 0.5, self.warpKick);
+    double along = self.warpFrom + (1 - self.warpFrom) * spring;
+    double x = cubicAt(self.ease1x, self.ease2x, cubicSolve(self.ease1y, self.ease2y, along));
+    layer.timeOffset = self.warpBegin + self.warpLength * x;
+    // The morph goes with it, worked out rather than read back: a paused layer's place is drawn a frame late.
+    self.warpT = self.warpTFrom + (self.warpTTo - self.warpTFrom) * spring;
+}
+
 - (void)tick:(CADisplayLink *)link {
     UIView *container = self.container, *overlay = self.overlay;
     if (!container || !overlay || !overlay.window) {
         [self finish];
         return;
     }
+    // Timed by when this frame will show, so the steps come even.
+    BOOL warping = self.warping;
+    [self stepWarp:link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime()];
     CALayer *drawn = overlay.layer.presentationLayer ?: overlay.layer;
     CGFloat y = drawn.frame.origin.y, rest = self.morph.restY > 0 ? self.morph.restY : container.bounds.size.height;
-    [self.morph apply:rest > 0 ? MIN(1, MAX(0, 1 - y / rest)) : 1];
+    CGFloat followed = rest > 0 ? MIN(1, MAX(0, 1 - y / rest)) : 1;
+    [self.morph apply:warping ? self.warpT : followed];
     BOOL interactive = self.context.isInteractive;
-    // A close dragged by a finger runs faster from the moment it is let go.
-    if (self.closing && self.wasInteractive && !interactive && !self.sped) {
-        runFaster(container.layer);
-        self.sped = YES;
+    CFTimeInterval at = link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime();
+    if (interactive) {
+        // The finger's pace, smoothed, for the spring to carry on at when it lets go.
+        if (self.lastTime > 0 && at > self.lastTime) self.pace = 0.6 * self.pace + 0.4 * (followed - self.lastT) / (at - self.lastTime);
+        self.lastT = followed;
+        self.lastTime = at;
+    } else if (self.wasInteractive && !self.warped) {
+        // Let go: UIKit plays the rest of Spotify's slide, played along the spring from where the finger left it, at its
+        // pace. Without the slide to go by, a close runs faster as before.
+        [self warpFrom:NAN pace:0];
+        if (!self.warped && self.closing && !self.sped) {
+            runFaster(container.layer);
+            self.sped = YES;
+        }
     }
     self.wasInteractive = interactive;
-    BOOL moving = overlay.layer.animationKeys.count > 0 || fabs(y - self.lastY) > 0.5 || interactive;
+    BOOL moving = overlay.layer.animationKeys.count > 0 || fabs(y - self.lastY) > 0.5 || interactive || self.warping;
     self.lastY = y;
     self.still = moving ? 0 : self.still + 1;
     // Let go once still, or kGiveUp after a finger last drove it whatever the layer holds: a mask and a transform left
     // on the player would keep its glass buttons from drawing.
     CFTimeInterval now = CACurrentMediaTime();
     if (interactive || !self.settledSince) self.settledSince = now;
-    if (self.still >= 3 || now - self.settledSince > kGiveUp) [self finish];
+    if (self.still >= 3 || now - self.settledSince > kGiveUp + (self.warped ? kWarpDuration : 0)) [self finish];
 }
 - (void)finish {
     if (!self.link) return;
@@ -340,8 +533,10 @@ static void runFaster(CALayer *layer) {
     if (logged++ < 3) SGLog(@"player morph: let go after %.2f s, %@", CACurrentMediaTime() - self.settledSince, self.still >= 3 ? @"settled" : @"given up");
     [self.link invalidate];
     self.link = nil;
-    if (self.sped) {
-        CALayer *layer = self.container.layer;
+    CALayer *layer = self.container.layer;
+    if (self.warping) runFrom(layer, self.warpTo);
+    self.warping = NO;
+    if (self.sped || self.warped) {
         layer.speed = 1;
         layer.beginTime = 0;
         layer.timeOffset = 0;
@@ -377,14 +572,11 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
     follower.overlay = overlay;
     follower.context = context;
     follower.lastY = CGFLOAT_MAX;
-    // A close plays faster: its slide, its stand-ins and so the morph that follows them. One Spotify runs on its own
-    // from the start, one dragged by a finger from when it is let go (tick:).
     follower.closing = !to.isBeingPresented;
     follower.wasInteractive = context.isInteractive;
-    if (follower.closing && !context.isInteractive) {
-        runFaster(container.layer);
-        follower.sped = YES;
-    }
+    // One Spotify plays on its own, opened or closed by a tap, is played along the spring (stepWarp:); one dragged by a
+    // finger is UIKit's, and a close let go runs faster.
+    if (!context.isInteractive) [follower warpFrom:follower.closing ? 1 : 0 pace:0];
     follower.link = [CADisplayLink displayLinkWithTarget:follower selector:@selector(tick:)];
     follower.link.preferredFrameRateRange = CAFrameRateRangeMake(80, 120, 120);
     [follower.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];

@@ -8,3 +8,5 @@
 extern NSString *const SGPlayerTransitionNotification;
 extern NSString *const SGPlayerTransitionEndedNotification;
 CFTimeInterval SGPlayerTransitionEnds(void);
+// Whether the transition last announced opens the player (YES) or closes it.
+BOOL SGPlayerTransitionOpens(void);

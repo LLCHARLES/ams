@@ -1,11 +1,11 @@
 // When a page's scroll minimizes the glass bar and when it brings it back (TabBarMinimize.x), apart from
 // UIKit so harness/tabbar/minimize-check.c runs it on the Mac.
 //
-// A scroll down of kSGRMinimizeTravel from where the page last turned minimizes the bar, and a scroll back up
-// of as much expands it again, anywhere in the list: the Music app's bar does the same. Less than that is a
-// finger resting on the glass, not a scroll. Reaching the top always expands it. Pulling past either end is
-// not counted, so the page springing back from its foot does not read as a scroll up, and a page with less
-// than kSGRMinimizeRange to scroll leaves the bar as it is.
+// A scroll down of kSGRMinimizeTravel from where the page last turned minimizes the bar, and only reaching the top or
+// the foot of the list brings it back (or a tap on its circle, TabBar.x): the Music app's bar stays minimized while a
+// list is scrolled back up part way (its owner's recordings), where Vitrine's used to expand at a scroll up of as much
+// anywhere. Less than kSGRMinimizeTravel down is a finger resting on the glass, not a scroll. Pulling past either end is
+// that end, and a page with less than kSGRMinimizeRange to scroll leaves the bar as it is.
 #include <CoreGraphics/CGBase.h>
 #include <math.h>
 #include <stdbool.h>
@@ -14,7 +14,7 @@ static const CGFloat kSGRMinimizeTravel = 24;
 static const CGFloat kSGRMinimizeRange = 120;
 
 typedef struct {
-    CGFloat turn;     // where the scroll last turned: its lowest offset while expanded, its highest while minimized
+    CGFloat turn;     // where the scroll last turned while expanded: its lowest offset
     bool minimized;
 } SGRMinimizeTrack;
 
@@ -22,13 +22,13 @@ typedef struct {
 static inline bool SGRMinimizeStep(SGRMinimizeTrack *track, CGFloat offset, CGFloat top, CGFloat bottom) {
     if (bottom - top < kSGRMinimizeRange) return track->minimized;
     offset = fmin(fmax(offset, top), bottom);
-    if (offset <= top + 1) {
+    if (offset <= top + 1 || offset >= bottom - 1) {
         track->minimized = false;
         track->turn = offset;
-    } else if (track->minimized ? offset > track->turn : offset < track->turn) {
+    } else if (track->minimized || offset < track->turn) {
         track->turn = offset;
-    } else if (fabs(offset - track->turn) >= kSGRMinimizeTravel) {
-        track->minimized = !track->minimized;
+    } else if (offset - track->turn >= kSGRMinimizeTravel) {
+        track->minimized = true;
         track->turn = offset;
     }
     return track->minimized;

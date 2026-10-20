@@ -57,13 +57,18 @@ typedef NS_ENUM(NSInteger, SGRMotion) {
     // An ease out over 0.15 s, for what goes once the finger has let it go (the hold's 2x badge): nothing is
     // watched on its way out. Kept under Reduce Motion like a fade.
     SGRMotionExit,
-    // A spring with no overshoot over 0.34 s, for the tab bar minimizing and expanding with the now playing card:
-    // it happens many times a session, so it is quicker than a layout spring. At once under Reduce Motion.
+    // A lively spring of 0.3 s that overshoots a little, for the tab bar minimizing and expanding with the now
+    // playing card, fitted to the Music app's. At once under Reduce Motion.
     SGRMotionBar,
 };
 // Runs `animations` with the motion's timing, or at once under Reduce Motion (except a fade, a response or an exit), and
 // always calls `completion`. Only transform, alpha and color belong in it while a page scrolls.
 void SGRAnimate(SGRMotion motion, void (^animations)(void), void (^completion)(BOOL finished));
+// SGRMotionBar starting `delay` seconds from now, so the card and the bar can set off a beat apart.
+void SGRAnimateBarAfter(NSTimeInterval delay, void (^animations)(void), void (^completion)(BOOL finished));
+// SGRMotionBar's spring for a layer property UIView's animations leave alone (a sublayerTransform), from `from`
+// to the layer's model value, set off `delay` seconds from now. Nil under Reduce Motion.
+CASpringAnimation *SGRBarSpringAnimation(NSString *keyPath, id from, NSTimeInterval delay);
 
 // Layout with an explicit host: Reduce Motion crossfades the old and new layout in place.
 void SGRAnimateLayout(UIView *host, void (^animations)(void), void (^completion)(BOOL finished));

@@ -17,6 +17,7 @@
 // (386x100, the track card at y = 44). It paints the strip, or a view around the strip and the track, as
 // well, so the card is the painted view that holds the track and has no strip in it. The strip stays out
 // of the card's glass and gets a pane of its own above it, since its own paint goes clear with the rest.
+#import <UIKit/UIGestureRecognizerSubclass.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRRepaint.h"
 #import "Redesigned/Kit/SGRGlass.h"
@@ -26,6 +27,14 @@
 #import "Redesigned/Navbar/Navbar.h"
 
 static const CGFloat kCardRadius = 24;
+// The card's glass, above the expanded bar and in the minimized bar's row alike: 48 pt, as the Music app's is in
+// both (screen recordings: 48 pt high and 398 wide above the bar, 48 against the 62 pt circles in the row), where
+// Spotify's card is 60. Outside a Jam, whose strip needs the card's own height.
+static const CGFloat kRowCardHeight = 48;
+// How far the cover moves to sit concentric with the card's rounded end, and the title with it (scaleRowContent);
+// 0 in a Jam. YES while the card is the compact one.
+static CGFloat sg_rowShift;
+static BOOL sg_compact;
 // The strip's pane is this much smaller than the strip at each end, so a gap parts it from the card's glass.
 static const CGFloat kStripInset = 4;
 static char kGlassKey, kStripGlassKey;
@@ -152,8 +161,13 @@ static void restyleCardContent(UIView *card) {
         });
         sg_progress = progress;
     }
-    // Under the text, 226pt on a full width card, shorter on the one in the minimized tab bar.
-    CGRect target = CGRectMake(52, card.bounds.size.height - 6, MAX(0, card.bounds.size.width - 160), 2);
+    // Under the text, 226pt on a full width card, shorter on the one in the minimized tab bar, whose glass is
+    // shorter than the card (kRowCardHeight).
+    CGFloat inset = sg_inline ? MAX(0, (card.bounds.size.height - kRowCardHeight) / 2) : 0;
+    CGRect target = CGRectMake(52, card.bounds.size.height - 6 - inset, MAX(0, card.bounds.size.width - 160), 2);
+    // The compact card has no progress line, as the Music app's has none.
+    CGFloat shown = sg_compact ? 0 : 1;
+    if (progress && progress.alpha != shown) progress.alpha = shown;
     if (progress && !CGRectEqualToRect(progress.frame, target)) {
         progress.frame = target;
         [progress setNeedsLayout];
@@ -372,6 +386,8 @@ static void placeText(UIView *page) {
         text.artists.text = artists ?: @"";
         // Every pass: the artists can come in after the title.
         text.inRow = inRow;
+        CGAffineTransform shift = CGAffineTransformMakeTranslation(sg_rowShift, 0);
+        if (!CGAffineTransformEqualToTransform(text.transform, shift)) text.transform = shift;
         [text setNeedsLayout];
         [text layoutIfNeeded];
     };
@@ -389,22 +405,68 @@ static void placeTexts(UIView *bar) {
     });
 }
 
+// The compact card's cover and buttons are drawn smaller round their centers, to the Music app's sizes (screen
+// recordings at 60 fps: a 30 pt cover and a 15 pt play glyph on a 48 pt card, above the bar and in the row): Spotify's
+// are sized for its own 60 pt card and filled the compact one to its edges. Only the outermost control of a nest is
+// scaled.
+static const CGFloat kRowCover = 30, kRowButtonScale = 0.8;
+
+static void scaleRowContent(UIView *bar, BOOL inRow) {
+    UIView *artwork = sg_cardArtwork;
+    sg_rowShift = 0;
+    sg_compact = inRow;
+    if (artwork && [artwork isDescendantOfView:bar]) {
+        CGFloat side = artwork.bounds.size.width;
+        // The round cover's center on the center of the card's rounded end, so it is as far from the card's side
+        // as from its top and bottom (9 pt): Spotify's own inset left it 15 pt from the side (a screenshot). The
+        // card's glass starts at the card's leading edge (styleNowPlayingBar).
+        UIView *card = sg_card;
+        CGFloat center = card && [artwork isDescendantOfView:card] ? [card convertPoint:artwork.center fromView:artwork.superview].x : kRowCardHeight / 2;
+        CGFloat shift = kRowCardHeight / 2 - center;
+        if (inRow && fabs(shift) < 20) sg_rowShift = shift;
+        CGAffineTransform transform = CGAffineTransformIdentity;
+        if (inRow && side > kRowCover) transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(sg_rowShift, 0), kRowCover / side, kRowCover / side);
+        if (!CGAffineTransformEqualToTransform(artwork.transform, transform)) artwork.transform = transform;
+    }
+    NSHashTable<UIView *> *controls = [NSHashTable weakObjectsHashTable];
+    SGForEachView(bar, ^(UIView *v) {
+        if (![v isKindOfClass:UIControl.class] || v.bounds.size.width > 64 || inStrip(v, bar)) return;
+        if (artwork && ([v isDescendantOfView:artwork] || [artwork isDescendantOfView:v])) return;
+        [controls addObject:v];
+    });
+    CGAffineTransform transform = inRow ? CGAffineTransformMakeScale(kRowButtonScale, kRowButtonScale) : CGAffineTransformIdentity;
+    for (UIView *control in controls.allObjects) {
+        BOOL nested = NO;
+        for (UIView *up = control.superview; up && up != bar && !nested; up = up.superview) nested = [controls containsObject:up];
+        if (!nested && !CGAffineTransformEqualToTransform(control.transform, transform)) control.transform = transform;
+    }
+}
+
 // In the minimized tab bar's row (TabBar.x): the bar narrowed to the slot by its edges, so Spotify's content
 // lays itself out to the width, and moved down by a transform on the container's view, which Spotify's
-// layout leaves alone. Outside a Jam only: its strip has no room in the row.
+// layout leaves alone. Outside a Jam only: its strip has no room in the row. Above the expanded bar it is
+// narrowed the same way to the bar's platters (SGRTabBarFullSlot), where Spotify's runs 8 pt from the screen's
+// edges and stood out past the glass under it.
 static void placeInline(UIViewController *container) {
     UIView *view = container.view;
     UIView *bar = container.childViewControllers.firstObject.viewIfLoaded;
     UIView *strip = bar ? stripIn(bar) : nil;
     BOOL jam = strip && !strip.hidden && strip.alpha >= 0.01 && strip.window && strip.bounds.size.height >= 1;
-    CGRect slot = !bar || bar.superview != view || jam ? CGRectNull : SGRTabBarInlineSlot(view.superview, bar.bounds.size.height);
+    BOOL ours = bar && bar.superview == view;
+    CGRect slot = !ours || jam ? CGRectNull : SGRTabBarInlineSlot(view.superview, bar.bounds.size.height);
     // Where the view stands untransformed, in the slot's coordinates.
     CGPoint origin = CGPointMake(view.center.x - view.bounds.size.width / 2, view.center.y - view.bounds.size.height / 2);
     if (CGRectIsNull(slot) || !setEdges(bar, CGRectGetMinX(slot) - origin.x, CGRectGetMaxX(slot) - origin.x)) {
-        if (sg_inline) restoreEdges(bar);
         if (sg_inline) tuckExtras(bar, NO);
         sg_inline = nil;
-        if (!CGAffineTransformIsIdentity(view.transform)) view.transform = CGAffineTransformIdentity;
+        if (bar) scaleRowContent(bar, !jam);
+        // The compact card's glass is shorter than Spotify's card by as much at its foot as at its head; the card
+        // comes down by that much, to stand 8 pt over the bar's glass as the Music app's does, not 14.
+        CGFloat drop = !jam && sg_card ? MAX(0, (sg_card.bounds.size.height - kRowCardHeight) / 2) : 0;
+        CGAffineTransform lower = CGAffineTransformMakeTranslation(0, drop);
+        if (!CGAffineTransformEqualToTransform(view.transform, lower)) view.transform = lower;
+        CGRect wide = ours ? SGRTabBarFullSlot(view.superview) : CGRectNull;
+        if (bar && (CGRectIsNull(wide) || !setEdges(bar, CGRectGetMinX(wide) - origin.x, CGRectGetMaxX(wide) - origin.x))) restoreEdges(bar);
         if (bar) placeTexts(bar);
         return;
     }
@@ -412,6 +474,7 @@ static void placeInline(UIViewController *container) {
     if (!CGAffineTransformEqualToTransform(view.transform, move)) view.transform = move;
     tuckExtras(bar, YES);
     sg_inline = view;
+    scaleRowContent(bar, YES);
     placeTexts(bar);
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -439,6 +502,80 @@ static BOOL inSheet(UIView *view) {
         if ([v.accessibilityIdentifier isEqualToString:@"sheet-view"] || [NSStringFromClass(v.class) containsString:@"SheetImpl"]) return YES;
     }
     return NO;
+}
+
+// A press on the card, as the Music app's mini player takes one (a screen recording at 60 fps): it grows by some 4%
+// (398 pt to 413) on a lively spring and its glass shows brighter while the finger is down, and settles back when it
+// lifts. iOS 26 draws that for interactive glass, but Spotify's content lies over the card's glass and takes the
+// touches, so it is drawn here: the container's sublayers scale round the card's center (a sublayer transform, which
+// Spotify's layout and the row's move leave alone) and a sheen in the glass fades in. The tap still opens the player.
+static const CGFloat kPressScale = 1.04, kPressSheen = 0.08;
+static char kPressKey, kSheenKey;
+
+@interface SGRCardPress : NSObject <UIGestureRecognizerDelegate>
+@end
+
+@implementation SGRCardPress
+- (void)pressed:(UILongPressGestureRecognizer *)press {
+    UIGestureRecognizerState state = press.state;
+    if (state == UIGestureRecognizerStateBegan) [self press:YES on:press.view];
+    else if (state == UIGestureRecognizerStateEnded || state == UIGestureRecognizerStateCancelled || state == UIGestureRecognizerStateFailed) [self press:NO on:press.view];
+}
+
+- (void)press:(BOOL)down on:(UIView *)view {
+    UIVisualEffectView *glass = sg_cardGlass;
+    if (!view || glass.superview != view) return;
+    CALayer *layer = view.layer;
+    CGPoint off = CGPointMake(glass.center.x - CGRectGetMidX(view.bounds), glass.center.y - CGRectGetMidY(view.bounds));
+    CATransform3D to = CATransform3DIdentity;
+    if (down) {
+        to = CATransform3DMakeTranslation(off.x, off.y, 0);
+        to = CATransform3DScale(to, kPressScale, kPressScale, 1);
+        to = CATransform3DTranslate(to, -off.x, -off.y, 0);
+    }
+    CATransform3D from = (layer.presentationLayer ?: layer).sublayerTransform;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.sublayerTransform = to;
+    [CATransaction commit];
+    if (@available(iOS 17.0, *)) if (!SGRReduceMotion()) {
+        CASpringAnimation *spring = [[CASpringAnimation alloc] initWithPerceptualDuration:0.3 bounce:down ? 0.25 : 0.35];
+        spring.keyPath = @"sublayerTransform";
+        spring.fromValue = [NSValue valueWithCATransform3D:from];
+        spring.duration = spring.settlingDuration;
+        [layer addAnimation:spring forKey:@"sgr.press"];
+    }
+    UIView *sheen = objc_getAssociatedObject(glass, &kSheenKey);
+    if (!sheen) {
+        sheen = [[UIView alloc] initWithFrame:glass.contentView.bounds];
+        sheen.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        sheen.backgroundColor = UIColor.whiteColor;
+        sheen.userInteractionEnabled = NO;
+        sheen.alpha = 0;
+        [glass.contentView addSubview:sheen];
+        objc_setAssociatedObject(glass, &kSheenKey, sheen, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    SGRAnimate(SGRMotionRespond, ^{ sheen.alpha = down ? kPressSheen : 0; }, nil);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return YES;
+}
+@end
+
+static void watchPresses(UIView *view) {
+    if (objc_getAssociatedObject(view, &kPressKey)) return;
+    static SGRCardPress *handler;
+    if (!handler) handler = [SGRCardPress new];
+    UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc] initWithTarget:handler action:@selector(pressed:)];
+    press.minimumPressDuration = 0;
+    press.allowableMovement = CGFLOAT_MAX;
+    press.cancelsTouchesInView = NO;
+    press.delaysTouchesBegan = NO;
+    press.delaysTouchesEnded = NO;
+    press.delegate = handler;
+    [view addGestureRecognizer:press];
+    objc_setAssociatedObject(view, &kPressKey, press, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 static void styleNowPlayingBar(UIViewController *container) {
@@ -491,6 +628,7 @@ static void styleNowPlayingBar(UIViewController *container) {
         if (stripAbove) frame.origin.y += cut;
     }
     frame.size.height = MIN(frame.size.height, 80);
+    if (!strip && frame.size.height > kRowCardHeight) frame = CGRectInset(frame, 0, (frame.size.height - kRowCardHeight) / 2);
     if (frame.size.height < 30 || frame.size.width < 100) return;
 
     CGFloat radius = MIN(kCardRadius, frame.size.height / 2);
@@ -504,6 +642,7 @@ static void styleNowPlayingBar(UIViewController *container) {
     // took the system's light glass on a phone in light mode (TabBar.x).
     if (glass.overrideUserInterfaceStyle != UIUserInterfaceStyleDark) glass.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     sg_cardGlass = glass;
+    watchPresses(container.view);
     glass.frame = frame;
     SGShapeGlass(glass, radius, NO);
     placeStripGlass(container.view, strip, frame, stripAbove);
@@ -534,9 +673,61 @@ static void styleNowPlayingBar(UIViewController *container) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = %orig;
     UIView *moved = sg_inline;
-    if ((hit && hit != (UIView *)self) || ![moved isDescendantOfView:(UIView *)self]) return hit;
+    if (![moved isDescendantOfView:(UIView *)self]) return hit;
     UIView *inside = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
-    return inside && inside != moved ? inside : hit;
+    if (inside && inside != moved) return inside;
+    // Off the card in the row the page under the bar takes the touch: the bar's views where the card used to stand
+    // kept it, and the page would not scroll there (a screen recording).
+    return hit && (hit == (UIView *)self || [hit isDescendantOfView:(UIView *)self]) ? nil : hit;
+}
+%end
+
+// The mini player opens the player by a tap alone, as the Music app's does (and as its owner asked): Spotify's swipe up
+// on the bar is turned away, its pages' sideways scroll for the next track kept. With the card in the minimized bar's
+// row, Spotify's tap sits on a view of the bar's page that the row's move leaves where it was, so it starts only on the
+// card's glass (a screen recording: a swipe where the card used to stand opened the player).
+static BOOL inBar(UIGestureRecognizer *recognizer) {
+    UIView *view = recognizer.view, *bar = sg_container.viewIfLoaded;
+    if (!view || !bar) return NO;
+    if ([view isDescendantOfView:bar]) return YES;
+    if (![bar isDescendantOfView:view]) return NO;
+    NSUInteger levels = 0;
+    for (UIView *v = view; v && levels < 6; v = v.superview, levels++) {
+        if ([NSStringFromClass(v.class) containsString:@"NowPlaying"]) return YES;
+    }
+    return NO;
+}
+
+static BOOL isBarSwipe(UIGestureRecognizer *recognizer) {
+    UIView *view = recognizer.view;
+    if ([view isKindOfClass:UIScrollView.class] && ((UIScrollView *)view).panGestureRecognizer == recognizer) return NO;
+    return inBar(recognizer);
+}
+
+static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) {
+    UIVisualEffectView *glass = sg_cardGlass;
+    if (!sg_inline || !glass.window || !inBar(recognizer)) return NO;
+    CGPoint point = [touches.anyObject locationInView:glass];
+    return !CGRectContainsPoint(CGRectInset(glass.bounds, -4, -4), point);
+}
+
+%hook UIPanGestureRecognizer
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (isBarSwipe((UIGestureRecognizer *)self)) {
+        ((UIGestureRecognizer *)self).state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    %orig;
+}
+%end
+
+%hook UITapGestureRecognizer
+- (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
+    if (offCard((UIGestureRecognizer *)self, touches)) {
+        ((UIGestureRecognizer *)self).state = UIGestureRecognizerStateFailed;
+        return;
+    }
+    %orig;
 }
 %end
 

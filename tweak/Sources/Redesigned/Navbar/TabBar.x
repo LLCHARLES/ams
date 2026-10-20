@@ -447,7 +447,7 @@ static SGRSystemTabBar *makeBar(UIView *stockBar) {
 }
 
 // One bar's share of the tabs: its items, their glyphs and titles. YES while a glyph is still missing.
-static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideLabels) {
+static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideLabels, BOOL lit) {
     bar.tintColor = SGRAccent();
     if (![sources isEqualToArray:bar.sources]) {
         NSMutableArray<UITabBarItem *> *items = [NSMutableArray array];
@@ -469,7 +469,8 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
     BOOL missing = NO;
     for (NSUInteger i = 0; i < sources.count; i++) {
         UITabBarItem *item = bar.items[i];
-        if (!item.image) item.image = glyphOf(sources[i], NO);
+        if (!item.image) item.image = lit ? [glyphOf(sources[i], YES) imageWithTintColor:SGRAccent() renderingMode:UIImageRenderingModeAlwaysOriginal]
+                                          : glyphOf(sources[i], NO);
         if (!item.selectedImage || item.selectedImage == item.image) item.selectedImage = glyphOf(sources[i], YES);
         missing |= !item.image || !item.selectedImage;
         item.accessibilityLabel = labelIn(sources[i]).text;
@@ -503,6 +504,64 @@ static UIView *selectedSource(SGRSystemTabBar *bar) {
 // a 62 pt platter, a circle as tall as the bar's, per tab plus those insets, and the main bar runs under
 // its leading inset to leave 12 pt of glassless gap between the two platters.
 static const CGFloat kPlatterInset = 21, kApartItemWidth = 62, kPlatterGap = 12;
+
+static UIView *platterOf(UIView *bar) {
+    __block UIView *platter = nil;
+    SGForEachView(bar, ^(UIView *v) {
+        if (!platter && [NSStringFromClass(v.class) hasSuffix:@"PlatterView"]) platter = v;
+    });
+    return platter;
+}
+
+// UIKit gives a standalone bar's items a width of their own and centers the platter round them, so with three
+// tabs beside a split one the platter stood 37 pt in from the screen's edge and 29 pt short of the split circle,
+// where the Music app's runs from 21 pt in to 12 pt short of it (screen recordings at 60 fps). The items are
+// given the platter's whole width instead, which UIKit only honors for centered items. Minimized, the one item
+// is a circle's and keeps UIKit's own width.
+static void fillPlatter(SGRSystemTabBar *bar, BOOL circle) {
+    if (circle || bar.items.count < 2) {
+        if (bar.itemPositioning != UITabBarItemPositioningAutomatic) bar.itemPositioning = UITabBarItemPositioningAutomatic;
+        if (bar.itemWidth != 0) bar.itemWidth = 0;
+        return;
+    }
+    UIView *platter = platterOf(bar);
+    CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
+    if (!platter || room < 100) return;
+    CGFloat before = [platter convertRect:platter.bounds toView:bar].size.width;
+    if (before >= room - 1 && bar.itemPositioning == UITabBarItemPositioningAutomatic) return;
+    CGFloat itemWidth = floor((room - 8) / bar.items.count);
+    if (bar.itemPositioning == UITabBarItemPositioningCentered && fabs(bar.itemWidth - itemWidth) < 0.5) return;
+    bar.itemPositioning = UITabBarItemPositioningCentered;
+    bar.itemWidth = itemWidth;
+    [bar layoutIfNeeded];
+    SGLog(@"tab bar: platter %.0f pt wide for %.0f of room; items made %.0f pt wide, platter now %.0f",
+          before, room, itemWidth, [platter convertRect:platter.bounds toView:bar].size.width);
+}
+
+// The minimized bar's circles are as tall as its card, 48 pt, as the Music app's are, where UIKit draws a bar's
+// platter 62 pt high whatever is in it. Each bar draws its contents smaller round the circle's center, which stays
+// put, by a transform on its sublayers: its own frame, which the moves and the card's slot read, is untouched.
+static const CGFloat kRowCircle = 48;
+
+static CATransform3D circleTransform(UIView *bar, BOOL circle) {
+    if (!circle) return CATransform3DIdentity;
+    CGPoint center = CGPointMake(kPlatterInset + kApartItemWidth / 2, kApartItemWidth / 2);
+    CGPoint off = CGPointMake(center.x - CGRectGetMidX(bar.bounds), center.y - CGRectGetMidY(bar.bounds));
+    CGFloat scale = kRowCircle / kApartItemWidth;
+    CATransform3D transform = CATransform3DMakeTranslation(off.x, off.y, 0);
+    transform = CATransform3DScale(transform, scale, scale, 1);
+    return CATransform3DTranslate(transform, -off.x, -off.y, 0);
+}
+
+static void shrinkCircle(UIView *bar, BOOL circle) {
+    if (!bar) return;
+    CATransform3D transform = circleTransform(bar, circle);
+    if (CATransform3DEqualToTransform(bar.layer.sublayerTransform, transform)) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    bar.layer.sublayerTransform = transform;
+    [CATransaction commit];
+}
 
 static void syncBar(UIView *stockBar) {
     sg_stockBar = stockBar;
@@ -583,10 +642,20 @@ static void syncBar(UIView *stockBar) {
     // is made in and never again when the bar grows, so items made while a bar was still a circle kept "…" for
     // their names at full width (harness/tabbar, `names`).
     [host layoutIfNeeded];
-    BOOL missing = fillBar(bar, main, hideLabels);
-    if (apart.count) missing |= fillBar(apartBar, apart, hideLabels);
-    selectActive(bar, active);
-    if (apart.count) selectActive(apartBar, active);
+    BOOL missing = fillBar(bar, main, hideLabels, minimized);
+    fillPlatter(bar, minimized);
+    if (apart.count) missing |= fillBar(apartBar, apart, hideLabels, NO);
+    // The minimized bar's circle holds the tab it is on, lit, with no bubble round it: the Music app's circle is
+    // its glass and the glyph. Selected, UIKit drew its bubble inside the circle, a dark disc in a ring.
+    if (minimized) {
+        if (bar.selectedItem) bar.selectedItem = nil;
+        if (apartBar.selectedItem) apartBar.selectedItem = nil;
+    } else {
+        selectActive(bar, active);
+        if (apart.count) selectActive(apartBar, active);
+    }
+    shrinkCircle(bar, minimized);
+    shrinkCircle(apartBar, minimized && apart.count);
     // An icon view Spotify has not built yet is looked for again shortly, not on the next touch.
     static NSUInteger retries;
     if (missing && retries++ < 40) {
@@ -654,9 +723,16 @@ void SGRSetTabBarMinimized(BOOL minimized, BOOL animated) {
 // buttons that went fade out from where they were.
 typedef struct {
     NSMapTable<UIView *, NSArray<NSValue *> *> *frames; // every view of the host: its frame, the frame shown, moving
-    NSMutableDictionary<NSString *, NSValue *> *glyphs; // the selected tab's glyph center in the host (buttonKey)
+    NSMutableDictionary<NSString *, NSValue *> *glyphs; // each tab's glyph center in the host, by its keys (tabKeys)
     NSMapTable<UIView *, UIView *> *buttons;            // each tab button, a picture of it
+    NSMapTable<UIView *, NSArray<NSString *> *> *keys;  // each tab button, its keys
 } SGRBarState;
+
+// How the tabs follow the glass's edge (moveFrom): the longest wait before a tab fades, for the one furthest
+// from the leading end, and how long the fade takes. The platter covers most of its way in some 0.15 s.
+static const NSTimeInterval kArriveSweep = 0.15, kArriveFade = 0.15, kLeaveSweep = 0.08, kLeaveFade = 0.1;
+// How far the card trails the bars into a minimize, and the bars trail the card out of it (setMinimized).
+static const NSTimeInterval kCardLag = 0.05, kBarLag = 0.03;
 
 // UIKit draws every tab twice, the second time in the accent under the selection's bubble only.
 static BOOL isLitCopy(UIView *view, UIView *host) {
@@ -683,11 +759,45 @@ static BOOL isTabButton(UIView *view) {
     return [view isKindOfClass:UIControl.class] && glyphView(view) != nil;
 }
 
-// Which old button a new one takes over from. UIKit draws its glyphs anew with each set of items (each copy a
-// UIImage of its own), so the selected tab is what the two share, in each of the two copies.
-static NSString *buttonKey(UIView *button, UIView *host) {
-    if (!isTabButton(button) || !((UIControl *)button).selected) return nil;
-    return isLitCopy(button, host) ? @"lit" : @"plain";
+// A glyph's shape: its alpha on a 16 pt grid, the same for the same icon whatever its color or UIImage copy.
+static NSString *glyphShape(UIView *button) {
+    CGImageRef image = glyphView(button).image.CGImage;
+    if (!image) return nil;
+    enum { kSide = 16 };
+    uint8_t alpha[kSide * kSide] = {0};
+    CGContextRef context = CGBitmapContextCreate(alpha, kSide, kSide, 8, kSide, NULL, (CGBitmapInfo)kCGImageAlphaOnly);
+    CGContextDrawImage(context, CGRectMake(0, 0, kSide, kSide), image);
+    CGContextRelease(context);
+    uint64_t hash = 1469598103934665603ULL;
+    for (int i = 0; i < kSide * kSide; i++) hash = (hash ^ (alpha[i] > 127)) * 1099511628211ULL;
+    return [NSString stringWithFormat:@"%llx", hash];
+}
+
+// Which old button a new one takes over from, in each of the two copies. A tab that stays slides from where its
+// glyph was, the way the Music app's Library tab slides into the circle, and only a tab that comes or goes fades.
+// UIKit draws its glyphs anew with each set of items (each copy a UIImage of its own) and its buttons carry no
+// name, so a tab is told by its glyph's shape (the minimized circle's glyph is the selected tab's, lit, the same
+// shape). Matched by selection or by name, the tabs on the phone faded out and back in at every move (screen
+// recordings at 60 fps): two Home icons at once, and Home and Search blank for a fifth of a second.
+static NSArray<NSString *> *tabKeys(UIView *button, UIView *host) {
+    if (!isTabButton(button)) return @[];
+    NSString *copy = isLitCopy(button, host) ? @"lit" : @"plain";
+    NSMutableArray<NSString *> *keys = [NSMutableArray array];
+    NSString *shape = glyphShape(button);
+    if (shape) [keys addObject:[copy stringByAppendingFormat:@" %@", shape]];
+    if (((UIControl *)button).selected) [keys addObject:copy];
+    return keys;
+}
+
+// A picture of a tab button to fade out once UIKit has taken the button away. A snapshot of a view inside the
+// glass came back empty on the phone (a screen recording at 60 fps: the leaving tabs went in one frame), so the
+// button's own layers are drawn; their glyph and title need no glass to show.
+static UIView *pictureOf(UIView *button) {
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:button.bounds.size];
+    UIImage *image = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [button.layer renderInContext:context.CGContext];
+    }];
+    return hasInk(image) ? [[UIImageView alloc] initWithImage:image] : [button snapshotViewAfterScreenUpdates:NO];
 }
 
 static CGRect shownIn(UIView *view, UIView *host) {
@@ -700,17 +810,19 @@ static SGRBarState barState(UIView *host) {
         [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality valueOptions:NSPointerFunctionsStrongMemory],
         [NSMutableDictionary dictionary],
         [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality valueOptions:NSPointerFunctionsStrongMemory],
+        [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality valueOptions:NSPointerFunctionsStrongMemory],
     };
     SGForEachView(host, ^(UIView *v) {
         CALayer *shownLayer = v.layer.presentationLayer;
         [state.frames setObject:@[[NSValue valueWithCGRect:v.frame], [NSValue valueWithCGRect:shownLayer ? shownLayer.frame : v.frame], @(isMoving(v))] forKey:v];
         if (!v.window || v == host || !isTabButton(v)) return;
         CGRect shown = shownIn(v, host), glyph = shownIn(glyphView(v), host);
-        NSString *key = buttonKey(v, host);
-        if (key) state.glyphs[key] = [NSValue valueWithCGPoint:CGPointMake(CGRectGetMidX(glyph), CGRectGetMidY(glyph))];
+        NSArray<NSString *> *keys = tabKeys(v, host);
+        for (NSString *key in keys) state.glyphs[key] = [NSValue valueWithCGPoint:CGPointMake(CGRectGetMidX(glyph), CGRectGetMidY(glyph))];
+        [state.keys setObject:keys forKey:v];
         // The lit copy is left out, or its picture would show the tab lit outside the bubble.
         if (isLitCopy(v, host)) return;
-        UIView *picture = [v snapshotViewAfterScreenUpdates:NO];
+        UIView *picture = pictureOf(v);
         if (picture) {
             picture.frame = shown;
             [state.buttons setObject:picture forKey:v];
@@ -719,8 +831,10 @@ static SGRBarState barState(UIView *host) {
     return state;
 }
 
-// Moves the host's views from `before` to where they are now, with `along` (the card) in the same spring.
-static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), void (^completion)(BOOL)) {
+// Moves the host's views from `before` to where they are now, with `along` (the card) on the same spring. The card
+// sets off `alongDelay` after the bars, or the bars `barDelay` after the card (see setMinimized).
+static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), NSTimeInterval alongDelay, NSTimeInterval barDelay,
+                     void (^completion)(BOOL)) {
     NSMutableArray<UIView *> *moved = [NSMutableArray array], *faded = [NSMutableArray array];
     NSMutableArray<NSValue *> *starts = [NSMutableArray array], *targets = [NSMutableArray array];
     NSMutableSet<NSString *> *taken = [NSMutableSet set];
@@ -736,15 +850,15 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), void
             [targets addObject:[NSValue valueWithCGRect:v.frame]];
             return;
         }
-        // A view made for the new items, whose superview was there before. The selected tab's button starts where
-        // the old one's glyph was, another fades in where it is going; the rest (the selection's bubble) are there
+        // A view made for the new items, whose superview was there before. A tab that was on the bar starts where
+        // its old glyph was, a new one fades in where it is going; the rest (the selection's bubble) are there
         // at once, or the selected tab's glyph, drawn under the bubble, went with it.
         if (![before.frames objectForKey:v.superview] || [v isKindOfClass:UITabBar.class]) return;
-        NSString *key = buttonKey(v, host);
-        NSValue *was = key ? before.glyphs[key] : nil;
-        if (was) {
+        NSString *key = nil;
+        for (NSString *candidate in tabKeys(v, host)) if (!key && before.glyphs[candidate] && ![taken containsObject:candidate]) key = candidate;
+        if (key) {
             [moved addObject:v];
-            [starts addObject:was];   // a center in the host, placed once the views above it are back
+            [starts addObject:before.glyphs[key]];   // a center in the host, placed once the views above it are back
             [targets addObject:[NSValue valueWithCGRect:v.frame]];
             [taken addObject:key];
         } else if (isTabButton(v) && v.alpha > 0.01) {
@@ -753,7 +867,8 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), void
     });
     NSMutableArray<UIView *> *gone = [NSMutableArray array];
     for (UIView *button in before.buttons) {
-        BOOL replaced = ((UIControl *)button).selected && [taken containsObject:@"plain"];
+        BOOL replaced = NO;
+        for (NSString *key in [before.keys objectForKey:button]) replaced |= [taken containsObject:key];
         if (!button.window && !replaced) [gone addObject:[before.buttons objectForKey:button]];
     }
 
@@ -773,15 +888,30 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), void
         for (UIView *v in faded) v.alpha = 0;
         for (UIView *picture in gone) [host addSubview:picture];
     }];
-    SGRAnimate(SGRMotionBar, ^{
+    SGRAnimateBarAfter(barDelay, ^{
         for (NSUInteger i = 0; i < moved.count; i++) moved[i].frame = targets[i].CGRectValue;
-        if (along) along();
     }, completion);
-    // The buttons that went leave quickly, and those that came arrive as the platter reaches them.
-    SGRAnimate(SGRMotionExit, ^{ for (UIView *picture in gone) picture.alpha = 0; }, ^(BOOL finished) {
-        for (UIView *picture in gone) [picture removeFromSuperview];
-    });
-    SGRAnimate(SGRMotionFade, ^{ for (UIView *v in faded) v.alpha = 1; }, nil);
+    if (along) SGRAnimateBarAfter(alongDelay, along, nil);
+    // The glass's trailing edge sweeps over the tabs, as the Music app's does: a tab that went fades as the
+    // shrinking platter passes it, the one furthest out first, and one that came fades in as the growing
+    // platter reaches it. Faded all at once, the new tabs stood outside the glass before it got to them.
+    CGFloat width = MAX(host.bounds.size.width, 1);
+    BOOL still = SGRReduceMotion();
+    for (UIView *picture in gone) {
+        CGFloat at = CGRectGetMidX(picture.frame) / width;
+        [UIView animateWithDuration:kLeaveFade delay:still ? 0 : barDelay + kLeaveSweep * MAX(0, 1 - at)
+                            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionCurveEaseOut
+                         animations:^{ picture.alpha = 0; }
+                         completion:^(BOOL finished) { [picture removeFromSuperview]; }];
+    }
+    for (UIView *v in faded) {
+        CGFloat at = CGRectGetMidX([v convertRect:v.bounds toView:host]) / width;
+        [UIView animateWithDuration:kArriveFade delay:still ? 0 : barDelay + kArriveSweep * MIN(1, MAX(0, at))
+                            options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState | UIViewAnimationOptionCurveEaseOut
+                         animations:^{ v.alpha = 1; }
+                         completion:nil];
+    }
+    SGLog(@"tab bar: %lu tabs fade out, %lu fade in", (unsigned long)gone.count, (unsigned long)faded.count);
 }
 
 static void setMinimized(BOOL minimized, BOOL animated) {
@@ -801,6 +931,9 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     };
     animated &= host.window != nil;
     SGRBarState before = animated ? barState(host) : (SGRBarState){0};
+    UIView *mainBar = objc_getAssociatedObject(stockBar, &kBarKey), *apartBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
+    CALayer *mainShown = mainBar.layer.presentationLayer ?: mainBar.layer, *apartShown = apartBar.layer.presentationLayer ?: apartBar.layer;
+    NSValue *mainWas = [NSValue valueWithCATransform3D:mainShown.sublayerTransform], *apartWas = [NSValue valueWithCATransform3D:apartShown.sublayerTransform];
     // The items are made where the bars are going, before anything moves. UIKit sizes a tab's name by the platter
     // its item is made in and never again, and the first pass made the expanding row's items while the bar still
     // held the circle's one item, its platter a circle: "Your Library" stayed cut. So they are made a second time,
@@ -820,7 +953,18 @@ static void setMinimized(BOOL minimized, BOOL animated) {
         settle(YES);
         return;
     }
-    moveFrom(host, before, ^{ SGRNowPlayingBarFollowTabBar(); }, settle);
+    // The Music app's bar leads a minimize, drawing in before the card comes down into its row, and the card leads
+    // an expand, lifting off before the bar grows under it. Set off together, the two glasses lay over each other
+    // half the way (a screen recording at 60 fps).
+    moveFrom(host, before, ^{ SGRNowPlayingBarFollowTabBar(); }, minimized ? kCardLag : 0, minimized ? 0 : kBarLag, settle);
+    // The circles grow and shrink on the bars' spring.
+    for (UIView *bar in @[mainBar ?: NSNull.null, apartBar ?: NSNull.null]) {
+        if (![bar isKindOfClass:UIView.class]) continue;
+        NSValue *was = bar == mainBar ? mainWas : apartWas;
+        if (CATransform3DEqualToTransform(was.CATransform3DValue, bar.layer.sublayerTransform)) continue;
+        CASpringAnimation *spring = SGRBarSpringAnimation(@"sublayerTransform", was, minimized ? 0 : kBarLag);
+        if (spring) [bar.layer addAnimation:spring forKey:@"sgr.circle"];
+    }
 }
 
 CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height) {
@@ -831,14 +975,16 @@ CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height) {
     // The frames the bars are going to, not what is on screen mid-spring. Without a split tab's circle the
     // card runs to where the trailing circle's glass would end.
     CGRect lead = [bar.superview convertRect:bar.frame toView:host];
-    CGFloat left = CGRectGetMinX(lead) + kPlatterInset + kApartItemWidth + SGRGrid;
+    // The circles are kRowCircle across round the centers of UIKit's 62 pt platters, the card kPlatterGap from each.
+    CGFloat shrunk = (kApartItemWidth - kRowCircle) / 2;
+    CGFloat left = CGRectGetMinX(lead) + kPlatterInset + kApartItemWidth - shrunk + kPlatterGap;
     CGFloat right;
     if (apartBar && !apartBar.hidden) {
         CGRect trail = [apartBar.superview convertRect:apartBar.frame toView:host];
-        right = CGRectGetMaxX(trail) - kPlatterInset - kApartItemWidth - SGRGrid;
+        right = CGRectGetMaxX(trail) - kPlatterInset - kApartItemWidth + shrunk - kPlatterGap;
     } else {
         CGRect whole = [stockBar convertRect:stockBar.bounds toView:host];
-        right = CGRectGetMaxX(whole) - kPlatterInset;
+        right = CGRectGetMaxX(whole) - kPlatterInset - shrunk;
     }
     CGFloat middle = CGRectGetMinY(lead) + kApartItemWidth / 2;
     CGRect slot = CGRectMake(left, middle - height / 2, right - left, height);
@@ -846,6 +992,15 @@ CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height) {
     CGRect inWindow = [host convertRect:slot toView:nil];
     if (slot.size.width < 100 || CGRectGetMaxY(inWindow) > CGRectGetMaxY(bar.window.bounds)) return CGRectNull;
     return slot;
+}
+
+CGRect SGRTabBarFullSlot(UIView *host) {
+    UIView *stockBar = sg_stockBar;
+    UIView *bar = stockBar ? objc_getAssociatedObject(stockBar, &kBarKey) : nil;
+    if (sg_minimized || !host || !bar.window || stockBar.hidden || stockBar.alpha < 0.01) return CGRectNull;
+    if (stockBar.traitCollection.horizontalSizeClass != UIUserInterfaceSizeClassCompact) return CGRectNull;
+    CGRect whole = [stockBar convertRect:stockBar.bounds toView:host];
+    return CGRectInset(whole, kPlatterInset, 0);
 }
 
 #pragma mark - hooks

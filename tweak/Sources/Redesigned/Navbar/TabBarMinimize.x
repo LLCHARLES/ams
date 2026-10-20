@@ -1,9 +1,10 @@
 // What minimizes the glass bar and what brings it back (TabBar.x draws it): a page scrolled down by a
-// finger or the fling after it, and scrolled back up or to its top (MinimizeStep.h). After the bar changes some
+// finger or the fling after it, and scrolled to its top or its foot (MinimizeStep.h). After the bar changes some
 // other way (a tap on its circle, a tab, the player), only a new touch minimizes it again: the fling still
 // running would otherwise undo the tap at once; another tab (TabBar.x);
-// and the full screen player opening or closing, which takes Spotify's pictures of the bars to move with it
-// and would have moved the card from the tab bar's row back up to its place above the bar.
+// and the full screen player opening, which takes Spotify's pictures of the bars to move with it and would have
+// moved the card from the tab bar's row back up to its place above the bar. A player opened from the minimized bar
+// closes back into it.
 //
 // Only a page's own scroll views count: those inside Spotify's tab bar container. The player and the now
 // playing bar are outside it, and a shelf scrolling sideways has nothing to scroll down.
@@ -59,6 +60,17 @@ static void scrolled(UIScrollView *scrollView) {
     sg_containerClass = NSClassFromString(@"_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl");
     if (!sg_containerClass) return;
     %init;
+    // The player opens over the whole bar, so the bar is expanded first (its pictures move with the player); a player
+    // opened from the minimized bar closes back into it, minimized again before the close takes the bar's pictures, as
+    // the Music app's does (its owner asked). The appearance callbacks that announce a close come before its animator.
     [NSNotificationCenter.defaultCenter addObserverForName:SGPlayerTransitionNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) { SGRSetTabBarMinimized(NO, NO); }];
+                                                usingBlock:^(NSNotification *note) {
+        static BOOL openedMinimized;
+        if (SGPlayerTransitionOpens()) {
+            openedMinimized = SGRTabBarMinimized();
+            SGRSetTabBarMinimized(NO, NO);
+        } else if (openedMinimized) {
+            SGRSetTabBarMinimized(YES, NO);
+        }
+    }];
 }

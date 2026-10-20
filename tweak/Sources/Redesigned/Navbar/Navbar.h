@@ -50,6 +50,9 @@ void SGRSetTabBarMinimized(BOOL minimized, BOOL animated);
 // The room between the minimized bar's two tabs, `height` high and centered on them, in `host`'s
 // coordinates: where the now playing card goes. CGRectNull while the bar is not minimized or not on screen.
 CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height);
+// The expanded bar's width less its platters' insets, in `host`'s coordinates: the card above it lines up with
+// the glass under it, as the Music app's does. CGRectNull while the bar is minimized, not on screen or regular width.
+CGRect SGRTabBarFullSlot(UIView *host);
 
 // A tab's glyph as the glass bar draws it, white, filled when `active` (TabBar.x), for the Tab bar page.
 UIImage *SGRNavbarGlyph(NSDictionary *entry, BOOL active);

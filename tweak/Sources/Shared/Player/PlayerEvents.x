@@ -10,14 +10,20 @@ NSString *const SGPlayerTransitionNotification = @"spotifyglass.playerTransition
 NSString *const SGPlayerTransitionEndedNotification = @"spotifyglass.playerTransitionEnded";
 static CFTimeInterval sg_transitionEnds;
 static NSUInteger sg_transitionGeneration;
+static BOOL sg_opens;
 
 CFTimeInterval SGPlayerTransitionEnds(void) {
     return sg_transitionEnds > CACurrentMediaTime() ? sg_transitionEnds : 0;
 }
 
+BOOL SGPlayerTransitionOpens(void) {
+    return sg_opens;
+}
+
 static void announceTransition(UIViewController *unit, BOOL animated, NSString *what) {
     id<UIViewControllerTransitionCoordinator> coordinator = unit.transitionCoordinator;
     if (!animated || !coordinator) return;
+    sg_opens = [what isEqualToString:@"opens"];
     NSTimeInterval duration = MAX(0.1, coordinator.transitionDuration);
     NSUInteger generation = ++sg_transitionGeneration;
     sg_transitionEnds = CACurrentMediaTime() + duration;

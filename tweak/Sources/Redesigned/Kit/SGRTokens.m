@@ -17,9 +17,13 @@ const NSTimeInterval SGRCrossfade = 0.35;
 
 // A layout spring settles in about this long without overshooting; a press gives a little back.
 static const NSTimeInterval kLayoutDuration = 0.45, kPressDuration = 0.32;
-// The tab bar's minimize runs on every scroll, so it is quicker than the 0.3 to 0.4 s Apple gives a
-// repositioning spring.
-static const NSTimeInterval kBarDuration = 0.26;
+// The tab bar's minimize, fitted to the Music app's on iOS 26: in a screen recording at 60 fps its card rose 61 pt
+// 29% of the way in 0.04 s, 61% in 0.07, 90% in 0.12, overshot by 4% at 0.2 s and had settled by 0.4, an
+// underdamped spring of some 0.3 s with a damping ratio of 0.7. A spring that settles in 0.26 s with no overshoot
+// took the card most of the way in two frames and read as a snap; one of 0.42 s with a bounce of 0.1 got there at
+// half the Music app's pace and read as a glide.
+static const NSTimeInterval kBarDuration = 0.3;
+static const CGFloat kBarBounce = 0.3;
 static const CGFloat kPressDamping = 0.62;
 // A response lands within the press feedback's budget, on a curve that is most of the way there at once.
 static const NSTimeInterval kRespondDuration = 0.2;
@@ -90,6 +94,44 @@ BOOL SGRIncreaseContrast(void) {
     return UIAccessibilityDarkerSystemColorsEnabled();
 }
 
+// A perceptual duration, as the system's own springs take it: the older call's duration is the time to
+// settle, which front-loads the move.
+static void barSpring(NSTimeInterval delay, UIViewAnimationOptions options, void (^animations)(void), void (^completion)(BOOL)) {
+    if (@available(iOS 17.0, *)) {
+        [UIView animateWithSpringDuration:kBarDuration bounce:kBarBounce initialSpringVelocity:0 delay:delay options:options animations:animations completion:completion];
+    } else {
+        [UIView animateWithDuration:kBarDuration delay:delay usingSpringWithDamping:0.9 initialSpringVelocity:0 options:options animations:animations completion:completion];
+    }
+}
+
+void SGRAnimateBarAfter(NSTimeInterval delay, void (^animations)(void), void (^completion)(BOOL finished)) {
+    if (!animations) return;
+    if (SGRReduceMotion() || delay <= 0) {
+        SGRAnimate(SGRMotionBar, animations, completion);
+        return;
+    }
+    barSpring(delay, UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState, animations, completion);
+}
+
+CASpringAnimation *SGRBarSpringAnimation(NSString *keyPath, id from, NSTimeInterval delay) {
+    if (SGRReduceMotion()) return nil;
+    CASpringAnimation *spring;
+    if (@available(iOS 17.0, *)) {
+        spring = [[CASpringAnimation alloc] initWithPerceptualDuration:kBarDuration bounce:kBarBounce];
+    } else {
+        spring = [CASpringAnimation animationWithKeyPath:keyPath];
+        spring.damping = 2 * 0.9 * sqrt(spring.stiffness * spring.mass);
+    }
+    spring.keyPath = keyPath;
+    spring.fromValue = from;
+    spring.duration = spring.settlingDuration;
+    if (delay > 0) {
+        spring.beginTime = CACurrentMediaTime() + delay;
+        spring.fillMode = kCAFillModeBackwards;
+    }
+    return spring;
+}
+
 void SGRAnimate(SGRMotion motion, void (^animations)(void), void (^completion)(BOOL finished)) {
     if (!animations) return;
     if ((motion == SGRMotionLayout || motion == SGRMotionPress || motion == SGRMotionBar) && SGRReduceMotion()) {
@@ -103,7 +145,7 @@ void SGRAnimate(SGRMotion motion, void (^animations)(void), void (^completion)(B
             [UIView animateWithDuration:kLayoutDuration delay:0 usingSpringWithDamping:1 initialSpringVelocity:0 options:options animations:animations completion:completion];
             break;
         case SGRMotionBar:
-            [UIView animateWithDuration:kBarDuration delay:0 usingSpringWithDamping:1 initialSpringVelocity:0 options:options animations:animations completion:completion];
+            barSpring(0, options, animations, completion);
             break;
         case SGRMotionPress:
             [UIView animateWithDuration:kPressDuration delay:0 usingSpringWithDamping:kPressDamping initialSpringVelocity:0 options:options animations:animations completion:completion];
