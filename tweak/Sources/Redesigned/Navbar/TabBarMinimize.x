@@ -1,5 +1,5 @@
 // What minimizes the glass bar and what brings it back (TabBar.x draws it): a page scrolled down by a
-// finger or the fling after it, and scrolled to its top or its foot (MinimizeStep.h). After the bar changes some
+// finger or the fling after it, and scrolled back up or to its top (MinimizeStep.h). After the bar changes some
 // other way (a tap on its circle, a tab, the player), only a new touch minimizes it again: the fling still
 // running would otherwise undo the tap at once; another tab (TabBar.x);
 // and the full screen player opening, which takes Spotify's pictures of the bars to move with it and would have

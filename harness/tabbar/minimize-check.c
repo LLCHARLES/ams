@@ -12,14 +12,13 @@ int main(void) {
     assert(!step(&t, -77));
     assert(step(&t, -76));           // 24 down from the top: minimized
     assert(step(&t, 600));           // further down
-    assert(step(&t, 590));           // a jitter back up
-    assert(step(&t, 200));           // back up part way, mid-list: still minimized, as the Music app's
-    assert(step(&t, 584));           // down again
-    assert(!step(&t, 2000));         // the foot expands
-    assert(!step(&t, 2080));         // pulled past it
-    assert(!step(&t, 1990));         // springing back and up a little
-    assert(!step(&t, 1500));         // up from the foot, expanded
-    assert(step(&t, 1524));          // 24 down from where it turned: minimized
+    assert(step(&t, 590));           // a jitter back up is not a scroll up
+    assert(!step(&t, 576));          // 24 back up from the lowest point, mid-list: expanded
+    assert(!step(&t, 560));          // still going up
+    assert(step(&t, 584));           // down again from where it turned
+    assert(step(&t, 2000));          // the foot
+    assert(step(&t, 2080));          // pulled past it
+    assert(step(&t, 2000));          // springing back is not a scroll up
     assert(!step(&t, -100));         // the top always expands
     assert(!step(&t, -140));         // pulled past the top
 
