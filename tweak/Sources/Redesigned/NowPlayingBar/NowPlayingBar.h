@@ -24,8 +24,8 @@ NSArray<SGModRow *> *SGRNowPlayingBarRows(void);
 CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius);
 // The round artwork on that card in `host`'s coordinates; CGRectNull when none was found.
 CGRect SGRNowPlayingArtworkFrameIn(UIView *host);
-// The card's glass, for the player's zoom transition to grow out of and shrink into (PlayerMorph.x). Nil while the
-// bar has no card.
+// The card's glass, for the player's close to settle the card it lands on (PlayerMorph.x). Nil while the bar has no
+// card.
 UIView *SGRNowPlayingCardView(void);
 // Lays the bar out again at once, into the minimized tab bar's slot or back above the bar
 // (Navbar.h's SGRTabBarInlineSlot); TabBar.x calls it inside its own animation.

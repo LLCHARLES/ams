@@ -99,11 +99,16 @@ static CGFloat screenRadius(void) {
 @property (nonatomic) CGRect releaseRect;   // the sheet where the finger let go of it
 @property (nonatomic) CGFloat releaseT;     // how far up the player was then
 @property (nonatomic, readonly) CGRect lastSheet;
+// When the frame being drawn will show (the display link's target): the release's spring is timed by it, so its steps
+// come even however late in the frame the main thread gets to it.
+@property (nonatomic) CFTimeInterval frameTime;
+- (void)pictureCard:(UIView *)bar;
 @end
 
 @implementation SGRPlayerMorph {
     __weak UIView *_container, *_overlay, *_bar;
     UIView *_sheet, *_fill;
+    UIImageView *_row;   // a picture of the card's content, standing in for Spotify's stand-in on a close
     CGRect _lastSheet;
     UIImageView *_cover;
     CALayer *_mask;
@@ -232,7 +237,7 @@ static CGFloat screenRadius(void) {
     } else if (closing) {
         CGFloat dip = -1;   // where the sheet's top is along its way to the card's, past 1 below it
         if (_released) {
-            double spring = releaseSpring(CACurrentMediaTime() - _releasedAt);
+            double spring = releaseSpring((_frameTime > 0 ? _frameTime : CACurrentMediaTime()) - _releasedAt);
             // The size never goes past the card's; the place does, the card dipping and settling back.
             c = MIN(1, spring);
             dip = spring;
@@ -254,13 +259,24 @@ static CGFloat screenRadius(void) {
     }
     _lastSheet = sheet;
     CGFloat scale = full.size.width > 0 ? sheet.size.width / full.size.width : 1;
+    // Closing into the card the player's content shrinks with the sheet's height too, centered across it: by its width
+    // alone, which hardly changes, the art stayed near its full size, cut off and to one side in the narrowing sheet (a
+    // screen recording).
+    CGFloat inset = 0;
+    if (closing && !whole && full.size.height > 0) {
+        CGFloat tall = sheet.size.height / full.size.height;
+        if (tall < scale) {
+            inset = (sheet.size.width - full.size.width * tall) / 2;
+            scale = tall;
+        }
+    }
     // The player's top goes to the sheet's: a mask clips nothing above the layer's bounds, so content
     // raised above Spotify's frame would show square corners. Spotify reads back only the player's
     // height (0x109815b4c, 0x109815c28), which stays.
     CGPoint origin = _follows ? _spotifyFrame.origin : CGPointMake(_spotifyFrame.origin.x, sheet.origin.y);
     CGSize size = overlay.bounds.size;
     CGPoint middle = CGPointMake(size.width / 2, size.height / 2);
-    CGPoint target = CGPointMake(sheet.origin.x - origin.x, sheet.origin.y - origin.y);
+    CGPoint target = CGPointMake(sheet.origin.x + inset - origin.x, sheet.origin.y - origin.y);
     // A point q of the player lands at middle + scale * (q - middle) + shift; the top left at target.
     CGPoint shift = CGPointMake(target.x - middle.x + scale * middle.x, target.y - middle.y + scale * middle.y);
 
@@ -272,7 +288,7 @@ static CGFloat screenRadius(void) {
         CGRect coverInPlayer = SGRPlayerCoverFrameIn(overlay);
 
         overlay.layer.sublayerTransform = CATransform3DScale(CATransform3DMakeTranslation(shift.x, shift.y, 0), scale, scale, 1);
-        self->_mask.frame = CGRectMake(target.x, target.y, sheet.size.width, sheet.size.height);
+        self->_mask.frame = CGRectMake(target.x - inset, target.y, sheet.size.width, sheet.size.height);
         self->_mask.cornerRadius = radius;
         if (!self->_follows) overlay.alpha = ramp(kHandFrom, kHandTo, t);
         // On 9.1.90 the player's own fade is Spotify's, which the spring's takeover plays where the slide is, at its very
@@ -312,6 +328,11 @@ static CGFloat screenRadius(void) {
             if (closing) frame.origin.x += (sheet.size.width - self->_card.size.width) / 2;
             bar.frame = frame;
             bar.alpha = whole ? 0 : closing ? ramp(0.2, 0.8, c) : 1 - ramp(kHandFrom - 0.05, kHandTo - 0.05, t);
+            if (self->_row) {
+                self->_row.frame = frame;
+                self->_row.alpha = bar.alpha;
+                bar.alpha = 0;
+            }
         }
 
         if (self->_cover) {
@@ -373,7 +394,47 @@ static CGFloat screenRadius(void) {
     [bar.layer addAnimation:settle forKey:@"sgr.settle"];
 }
 
+// Spotify's stand-in for the card on 9.1.90 is a live replica of the real bar, which Spotify hides while the player is up,
+// so it drew nothing and the sheet came down into the card empty, the card's content only showing once it was there (a
+// screen recording; the phone's log had it placed and opaque). On a close the real bar's content is drawn into a picture
+// before anything moves, and the picture goes with the sheet in the stand-in's place. The bar's glass does not draw into
+// it; the sheet is the glass.
+- (void)pictureCard:(UIView *)bar {
+    UIView *container = _container;
+    if (![bar isKindOfClass:UIView.class] || !container || bar.bounds.size.width < 1) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    BOOL hidden = bar.hidden;
+    CGFloat alpha = bar.alpha;
+    float opacity = bar.layer.opacity;
+    bar.hidden = NO;
+    bar.alpha = 1;
+    bar.layer.opacity = 1;
+    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
+    format.opaque = NO;
+    UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:bar.bounds.size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        for (CALayer *sub in bar.layer.sublayers) {
+            CGContextSaveGState(context.CGContext);
+            CGContextConcatCTM(context.CGContext, CGAffineTransformMakeTranslation(sub.frame.origin.x, sub.frame.origin.y));
+            [sub renderInContext:context.CGContext];
+            CGContextRestoreGState(context.CGContext);
+        }
+    }];
+    bar.hidden = hidden;
+    bar.alpha = alpha;
+    bar.layer.opacity = opacity;
+    [CATransaction commit];
+    _row = [[UIImageView alloc] initWithImage:image];
+    _row.userInteractionEnabled = NO;
+    _row.alpha = 0;
+    [container insertSubview:_row aboveSubview:_sheet];
+    static NSUInteger logged;
+    if (logged++ < 3) SGLog(@"player morph: the card drawn into a picture %@ for the close", NSStringFromCGSize(image.size));
+}
+
 - (void)tearDown {
+    [_row removeFromSuperview];
+    _row = nil;
     [self settleCard];
     UIView *overlay = _overlay;
     [CATransaction begin];
@@ -610,6 +671,7 @@ static void runFrom(CALayer *layer, CFTimeInterval local) {
     // reports the player where its slide ends, so that frame keeps the finger's place.
     BOOL letGo = !interactive && self.wasInteractive && !self.letGo;
     self.morph.dragging = interactive;
+    self.morph.frameTime = link.targetTimestamp;
     if (interactive) self.morph.dragged = YES;
     if (letGo) {
         self.letGo = YES;
@@ -624,7 +686,7 @@ static void runFrom(CALayer *layer, CFTimeInterval local) {
             self.morph.releaseRect = self.morph.lastSheet;
             self.morph.releaseT = self.lastTime > 0 ? self.lastT : 1;
             self.morph.releaseDuration = kReleaseSpring;
-            self.morph.releasedAt = CACurrentMediaTime();
+            self.morph.releasedAt = link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime();
             self.morph.released = YES;
             SGLog(@"player morph: let go at %.3f, the sheet from %@", self.morph.releaseT, NSStringFromCGRect(self.morph.releaseRect));
         }
@@ -708,6 +770,7 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
     if (!morph) return;
     [morph follow];
     morph.closing = !to.isBeingPresented;
+    if (morph.closing) [morph pictureCard:npbView];
     ((UIView *)ivarOf(transition, "tabBarSnapshotView")).alpha = 0;
     SGRMorphFollower *follower = [SGRMorphFollower new];
     follower.morph = morph;
@@ -737,43 +800,6 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
 - (void)startInteractiveTransition:(id<UIViewControllerContextTransitioning>)context {
     %orig;
     followTransition(self, context);
-}
-%end
-
-#pragma mark - zoom (prototype)
-
-// The player shown with the system's zoom transition (iOS 18): UIKit grows it out of the now playing card and shrinks it
-// back into it, a drag down included, as the Music app does and as SwiftUI's .navigationTransition(.zoom) gives a
-// recreation of it (AppleMusicBottombarSwiftUI). Spotify presents the player with a transitioning delegate of its own
-// (CompactOverlayTransition, which the morph above follows); here that is set aside before the presentation, so neither
-// Spotify's slide nor the morph runs. A prototype: off unless spotifyglass.redesign.player.zoom is set.
-#define SGRKeyPlayerZoom @"spotifyglass.redesign.player.zoom"
-
-static BOOL zoomWanted(UIViewController *presented) {
-    if (SGRReduceMotion() || !SGRNowPlayingCardView()) return NO;
-    if (presented.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular) return NO;
-    NSNumber *stored = [NSUserDefaults.standardUserDefaults objectForKey:SGRKeyPlayerZoom];
-    return stored.boolValue;
-}
-
-%hook UIViewController
-- (void)presentViewController:(UIViewController *)presented animated:(BOOL)animated completion:(void (^)(void))completion {
-    id delegate = presented.transitioningDelegate;
-    BOOL player = delegate && [NSStringFromClass([delegate class]) containsString:@"TabBarUIImpl"];
-    static NSUInteger logged;
-    if (logged++ < 6) SGLog(@"player zoom: %@ presents %@, its delegate %@", NSStringFromClass(self.class), NSStringFromClass(presented.class),
-                            delegate ? NSStringFromClass([delegate class]) : @"none");
-    if (animated && player && zoomWanted(presented)) {
-        if (@available(iOS 18.0, *)) {
-            presented.transitioningDelegate = nil;
-            presented.modalPresentationStyle = UIModalPresentationFullScreen;
-            presented.preferredTransition = [UIViewControllerTransition zoomWithOptions:nil sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context) {
-                return SGRNowPlayingCardView();
-            }];
-            SGLog(@"player zoom: %@ shown with the zoom transition", NSStringFromClass(presented.class));
-        }
-    }
-    %orig;
 }
 %end
 
