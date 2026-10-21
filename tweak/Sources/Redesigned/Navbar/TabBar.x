@@ -207,6 +207,19 @@ static void forwardTap(UIView *item) {
     }
 }
 
+#pragma mark - holding Home
+
+// Holding Home opens Mod Settings as a press and hold, as YTGlass's hold on YouTube's Home does: a little longer than
+// iOS's own press for a menu (some 0.5 s) and a firm tap when it opens, so the hold is felt and a slow tap is not taken
+// for one. Letting go before then is an ordinary tap.
+static const NSTimeInterval kHomeHold = 0.8;
+
+static void homeHeld(UIView *source) {
+    UIImpactFeedbackGenerator *tap = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [tap impactOccurred];
+    SGOpenModSettings(source);
+}
+
 #pragma mark - the system bar
 
 // A name too long for its tab (one of the user's own, a split tab's circle) shrinks a little before UIKit cuts
@@ -289,7 +302,7 @@ void SGRShrinkTabTitles(UIView *bar) {
 - (void)held:(UILongPressGestureRecognizer *)hold {
     if (hold.state == UIGestureRecognizerStateBegan) {
         self.holding = YES;
-        SGOpenModSettings(self);
+        homeHeld(self);
     } else if (hold.state != UIGestureRecognizerStateChanged) {
         // The bar may still pick Home as the finger lifts, after this.
         __weak typeof(self) weakSelf = self;
@@ -321,7 +334,7 @@ void SGRShrinkTabTitles(UIView *bar) {
 
 @implementation SGRHomeHold
 + (void)held:(SGRHomeHold *)hold {
-    if (hold.state == UIGestureRecognizerStateBegan) SGOpenModSettings(hold.view);
+    if (hold.state == UIGestureRecognizerStateBegan) homeHeld(hold.view);
 }
 @end
 
@@ -332,7 +345,9 @@ static void holdHome(UIView *stockBar) {
     for (UIGestureRecognizer *recognizer in home.gestureRecognizers) {
         if ([recognizer isKindOfClass:SGRHomeHold.class]) return;
     }
-    [home addGestureRecognizer:[[SGRHomeHold alloc] initWithTarget:SGRHomeHold.class action:@selector(held:)]];
+    SGRHomeHold *hold = [[SGRHomeHold alloc] initWithTarget:SGRHomeHold.class action:@selector(held:)];
+    hold.minimumPressDuration = kHomeHold;
+    [home addGestureRecognizer:hold];
 }
 
 static void logBarOnce(UITabBar *bar) {
@@ -440,6 +455,7 @@ static SGRSystemTabBar *makeBar(UIView *stockBar) {
     bar.delegate = bar;
     bar.stockBar = stockBar;
     UILongPressGestureRecognizer *hold = [[UILongPressGestureRecognizer alloc] initWithTarget:bar action:@selector(held:)];
+    hold.minimumPressDuration = kHomeHold;
     hold.delegate = bar;
     [bar addGestureRecognizer:hold];
     bar.hold = hold;
