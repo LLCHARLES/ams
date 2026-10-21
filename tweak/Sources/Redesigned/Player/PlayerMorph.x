@@ -109,6 +109,7 @@ static CGFloat screenRadius(void) {
     __weak UIView *_container, *_overlay, *_bar;
     UIView *_sheet, *_fill;
     UIImageView *_row;   // a picture of the card's content, standing in for Spotify's stand-in on a close
+    CGRect _rowRest;     // where the pictured view stands, in the container
     CGRect _lastSheet;
     UIImageView *_cover;
     CALayer *_mask;
@@ -116,6 +117,7 @@ static CGFloat screenRadius(void) {
     CGFloat _cardRadius, _spotifyAlpha;
     CGColorRef _overlayColor;
     BOOL _coverHidden;
+    BOOL _wholeShown;    // the player drawing itself whole under a finger (showWhole)
     BOOL _follows;   // 9.1.90: Spotify animates the player's frame and alpha, which the morph then only reads
 }
 
@@ -232,9 +234,11 @@ static CGFloat screenRadius(void) {
     // and faded as it was dragged low, and jumped to a half collapsed shape springing back (a screen recording).
     BOOL whole = closing && (_dragging || (_dragged && !_released));
     if (whole) {
-        sheet = CGRectMake(full.origin.x, lerp(_card.origin.y, full.origin.y, t), full.size.width, full.size.height);
-        radius = screenRadius();
-    } else if (closing) {
+        [self showWhole];
+        return;
+    }
+    if (_wholeShown) [self leaveWhole];
+    if (closing) {
         CGFloat dip = -1;   // where the sheet's top is along its way to the card's, past 1 below it
         if (_released) {
             double spring = releaseSpring((_frameTime > 0 ? _frameTime : CACurrentMediaTime()) - _releasedAt);
@@ -244,6 +248,12 @@ static CGFloat screenRadius(void) {
             // Never behind Spotify's player, which UIKit takes on at a pace of its own after a drag (quicker after a flick):
             // the animation is all in when the player is, so taking the sheet down shows no jump (the phone's log: the
             // slide ended 0.23 s in, before the animation's 0.3 s).
+            // Going back up after all (a spring back told late): the close is let go of, and the player stays whole.
+            if (t > _releaseT + 0.04) {
+                _released = NO;
+                [self apply:t];
+                return;
+            }
             if (_releaseT > 0.01) {
                 CGFloat behind = MIN(1, MAX(0, (_releaseT - t) / _releaseT));
                 c = MAX(c, behind);
@@ -329,7 +339,8 @@ static CGFloat screenRadius(void) {
             bar.frame = frame;
             bar.alpha = whole ? 0 : closing ? ramp(0.2, 0.8, c) : 1 - ramp(kHandFrom - 0.05, kHandTo - 0.05, t);
             if (self->_row) {
-                self->_row.frame = frame;
+                CGFloat dx = sheet.origin.x - self->_card.origin.x + (closing ? (sheet.size.width - self->_card.size.width) / 2 : 0);
+                self->_row.frame = CGRectOffset(self->_rowRest, dx, rise);
                 self->_row.alpha = bar.alpha;
                 bar.alpha = 0;
             }
@@ -399,9 +410,14 @@ static CGFloat screenRadius(void) {
 // screen recording; the phone's log had it placed and opaque). On a close the real bar's content is drawn into a picture
 // before anything moves, and the picture goes with the sheet in the stand-in's place. The bar's glass does not draw into
 // it; the sheet is the glass.
-- (void)pictureCard:(UIView *)bar {
+- (void)pictureCard:(UIView *)npb {
     UIView *container = _container;
-    if (![bar isKindOfClass:UIView.class] || !container || bar.bounds.size.width < 1) return;
+    // The card's own view, wherever it stands: in the minimized bar's row it is moved down out of the now playing bar's
+    // bounds (NowPlayingBar.x's placeInline), and a picture of those bounds came out empty, the card's content only
+    // showing once the close was over (a screen recording).
+    UIView *bar = SGRNowPlayingCardView().superview ?: ([npb isKindOfClass:UIView.class] ? npb : nil);
+    if (!bar || !container || bar.bounds.size.width < 1) return;
+    _rowRest = [bar convertRect:bar.bounds toView:container];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     BOOL hidden = bar.hidden;
@@ -430,6 +446,53 @@ static CGFloat screenRadius(void) {
     [container insertSubview:_row aboveSubview:_sheet];
     static NSUInteger logged;
     if (logged++ < 3) SGLog(@"player morph: the card drawn into a picture %@ for the close", NSStringFromCGSize(image.size));
+}
+
+// Under a finger the player moves whole and nothing about it needs reshaping, so it is left to draw itself, the sheet
+// moved into it so the two go as one: placed from the player's place read each frame, the sheet and the content were a
+// frame behind Spotify's moves under the finger, a band of the sheet's color showing at its top (its owner).
+- (void)showWhole {
+    UIView *overlay = _overlay, *bar = _bar;
+    if (!overlay) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    [UIView performWithoutAnimation:^{
+        overlay.layer.sublayerTransform = CATransform3DIdentity;
+        self->_mask.frame = overlay.layer.bounds;
+        self->_mask.cornerRadius = screenRadius();
+        self->_mask.opacity = 1;
+        if (self->_sheet.superview != overlay) [overlay insertSubview:self->_sheet atIndex:0];
+        self->_sheet.frame = overlay.bounds;
+        self->_sheet.layer.cornerRadius = screenRadius();
+        self->_sheet.alpha = 1;
+        self->_fill.alpha = 1;
+        bar.alpha = 0;
+        self->_row.alpha = 0;
+        self->_cover.hidden = YES;
+    }];
+    [CATransaction commit];
+    if (_coverHidden) {
+        SGRPlayerSetCoverHidden(NO);
+        _coverHidden = NO;
+    }
+    _wholeShown = YES;
+    // Where the sheet takes over from when the finger lets go: the player's own frame, as drawn.
+    CALayer *drawn = overlay.layer.presentationLayer ?: overlay.layer;
+    _lastSheet = drawn.frame;
+}
+
+// The sheet back under the player in the container, for the close to reshape (apply:).
+- (void)leaveWhole {
+    UIView *container = _container, *overlay = _overlay, *bar = _bar;
+    _wholeShown = NO;
+    if (!container || !overlay) return;
+    [container insertSubview:_sheet belowSubview:overlay];
+    UIView *standIn = bar;
+    while (standIn && standIn.superview != container) standIn = standIn.superview;
+    if (standIn && [container.subviews indexOfObject:standIn] < [container.subviews indexOfObject:_sheet]) {
+        [container insertSubview:_sheet belowSubview:standIn];
+    }
+    if (_row) [container insertSubview:_row aboveSubview:_sheet];
 }
 
 - (void)tearDown {
@@ -678,7 +741,10 @@ static void runFrom(CALayer *layer, CFTimeInterval local) {
         // Towards the card (Spotify's slide's model value is already its end), one animation of the morph's own takes the
         // sheet there from where it is. One springing back open is followed.
         CGFloat rest = self.morph.restY > 0 ? self.morph.restY : container.bounds.size.height;
-        BOOL towardsCard = overlay.layer.frame.origin.y > rest / 2;
+        // Which way UIKit takes it the transition itself says once the finger lifts: cancelled, it springs back open. Told
+        // by where Spotify's slide ends instead, which is not always set by then, a drag let go short collapsed towards
+        // the card for a frame and snapped back open (a screen recording).
+        BOOL towardsCard = !self.context.transitionWasCancelled && overlay.layer.frame.origin.y > rest / 2;
         // Spotify's slide is left at UIKit's pace: its clock is held while a finger drags, so what is left of it cannot be
         // read to set it to the animation's (the phone's log read the whole 0.3 s every time); the animation keeps up with it
         // instead (apply:). It sets off from where the finger left the sheet.
