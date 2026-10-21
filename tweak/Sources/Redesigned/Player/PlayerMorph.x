@@ -41,6 +41,23 @@
 static const CGFloat kScreenRadiusFallback = 55;
 // How far into an open the sheet has taken the screen's width (apply:).
 static const CGFloat kAcross = 0.4;
+// Where the player and the card hand over, near the card: the player's content and the sheet's color go together, so the
+// content clears straight into the card's glass with the card's row coming in. Faded apart (the content from 55% to 8%,
+// the color from 85% to 30%), the sheet near the card was a bare colored pane with the row on it (a screen recording).
+static const CGFloat kHandFrom = 0.25, kHandTo = 0.6;
+// A let go close's spring, as SwiftUI's .spring(duration:bounce:) takes one: some 0.35 s with a little give, so the card
+// dips a little past its place and settles back, as the Music app's mini player does. Its owner's recordings at 60 fps
+// put the Music app's dip at 2.5 to 3.5 pt, settled a tenth of a second later: a bounce of 0.15 (some 0.6% of the way, 5
+// pt on a close from the top); 0.25 dipped 22 pt.
+static const CFTimeInterval kReleaseSpring = 0.32, kReleaseSettle = 0.6;
+static const double kReleaseBounce = 0.2;
+
+// An underdamped spring from 0 to 1 at `elapsed`, from rest: it goes past 1 and settles back.
+static double releaseSpring(double elapsed) {
+    double zeta = 1 - kReleaseBounce, omega = 2 * M_PI / kReleaseSpring, wd = omega * sqrt(1 - zeta * zeta);
+    double e = MAX(0, elapsed);
+    return 1 - exp(-zeta * omega * e) * (cos(wd * e) + zeta * omega / wd * sin(wd * e));
+}
 
 static CGFloat lerp(CGFloat a, CGFloat b, CGFloat t) {
     return a + (b - a) * t;
@@ -72,12 +89,22 @@ static CGFloat screenRadius(void) {
 
 @interface SGRPlayerMorph : NSObject
 @property (nonatomic, readonly) CGFloat restY;
-@property (nonatomic) BOOL closing;   // the cover fades out at once on a close (apply:)
+@property (nonatomic) BOOL closing;   // a close animates the player's frame into the card's (apply:)
+// A finger dragging the player holds it whole (dragging); let go towards the card (released), one animation of its own
+// takes it there from where it was.
+@property (nonatomic) BOOL dragging;
+@property (nonatomic) BOOL dragged;   // a finger has had the player in this close
+@property (nonatomic) BOOL released;
+@property (nonatomic) CFTimeInterval releasedAt, releaseDuration;
+@property (nonatomic) CGRect releaseRect;   // the sheet where the finger let go of it
+@property (nonatomic) CGFloat releaseT;     // how far up the player was then
+@property (nonatomic, readonly) CGRect lastSheet;
 @end
 
 @implementation SGRPlayerMorph {
     __weak UIView *_container, *_overlay, *_bar;
     UIView *_sheet, *_fill;
+    CGRect _lastSheet;
     UIImageView *_cover;
     CALayer *_mask;
     CGRect _card, _barArtwork, _barRest, _spotifyFrame;
@@ -188,6 +215,44 @@ static CGFloat screenRadius(void) {
     CGRect sheet = CGRectMake(lerp(_card.origin.x, full.origin.x, across), lerp(_card.origin.y, full.origin.y, t),
                               lerp(_card.size.width, full.size.width, across), lerp(_card.size.height, full.size.height, t));
     CGFloat radius = lerp(_cardRadius, screenRadius(), t);
+    BOOL closing = _closing;
+    // A close as a recreation of the Music app's player goes (Sim-Radio-SwiftUI, AppleMusicStylePlayer): while a finger
+    // drags it the player only moves down, whole; let go, one smooth animation of 0.3 s takes its frame from where it is
+    // to the card's, every edge together, as the player's content fades out and the card's fades in over the same
+    // animation. Its own clock, not the player's place: Spotify's slide is made to end with it (tick:). A close from a tap
+    // is the same animation from the whole screen.
+    CGFloat c = 0;
+    // Under a finger, and springing back open after it, the player only moves down, whole: the screen's width and height,
+    // its foot off the screen, nothing in it shrinking or fading (Sim-Radio's offsetY). With the open's steps it narrowed
+    // and faded as it was dragged low, and jumped to a half collapsed shape springing back (a screen recording).
+    BOOL whole = closing && (_dragging || (_dragged && !_released));
+    if (whole) {
+        sheet = CGRectMake(full.origin.x, lerp(_card.origin.y, full.origin.y, t), full.size.width, full.size.height);
+        radius = screenRadius();
+    } else if (closing) {
+        CGFloat dip = -1;   // where the sheet's top is along its way to the card's, past 1 below it
+        if (_released) {
+            double spring = releaseSpring(CACurrentMediaTime() - _releasedAt);
+            // The size never goes past the card's; the place does, the card dipping and settling back.
+            c = MIN(1, spring);
+            dip = spring;
+            // Never behind Spotify's player, which UIKit takes on at a pace of its own after a drag (quicker after a flick):
+            // the animation is all in when the player is, so taking the sheet down shows no jump (the phone's log: the
+            // slide ended 0.23 s in, before the animation's 0.3 s).
+            if (_releaseT > 0.01) {
+                CGFloat behind = MIN(1, MAX(0, (_releaseT - t) / _releaseT));
+                c = MAX(c, behind);
+                if (dip < behind) dip = behind;
+            }
+        } else {
+            c = 1 - t;
+        }
+        CGRect from = _released ? _releaseRect : full;
+        sheet = lerpRect(from, _card, c);
+        if (dip >= 0) sheet.origin.y = lerp(from.origin.y, _card.origin.y, dip);
+        radius = lerp(screenRadius(), _cardRadius, c);
+    }
+    _lastSheet = sheet;
     CGFloat scale = full.size.width > 0 ? sheet.size.width / full.size.width : 1;
     // The player's top goes to the sheet's: a mask clips nothing above the layer's bounds, so content
     // raised above Spotify's frame would show square corners. Spotify reads back only the player's
@@ -209,12 +274,19 @@ static CGFloat screenRadius(void) {
         overlay.layer.sublayerTransform = CATransform3DScale(CATransform3DMakeTranslation(shift.x, shift.y, 0), scale, scale, 1);
         self->_mask.frame = CGRectMake(target.x, target.y, sheet.size.width, sheet.size.height);
         self->_mask.cornerRadius = radius;
-        if (!self->_follows) overlay.alpha = ramp(0.08, 0.55, t);
+        if (!self->_follows) overlay.alpha = ramp(kHandFrom, kHandTo, t);
         // On 9.1.90 the player's own fade is Spotify's, which the spring's takeover plays where the slide is, at its very
         // end: the player's header and cover stayed over the card's stand-in in the card's last frames (a screen
         // recording). Faded through the mask instead, as the sheet nears the card, the card alone is left, as in the
         // Music app's.
-        else self->_mask.opacity = ramp(0.08, 0.55, t);
+        else {
+            self->_mask.opacity = whole ? 1 : closing ? 1 - ramp(0, 0.6, c) : ramp(kHandFrom, kHandTo, t);
+            // Spotify fades the player on a schedule of its own as well (an opacity keyframe animation beside the slide,
+            // the phone's log), which went on top of the mask's and had the content gone before the sheet's color, a bare
+            // colored pane near the card. Taken off, the content and the color fade together (kHandFrom).
+            if ([overlay.layer animationForKey:@"opacity"]) [overlay.layer removeAnimationForKey:@"opacity"];
+            if (overlay.alpha != 1) overlay.alpha = 1;
+        }
 
         self->_sheet.frame = sheet;
         self->_sheet.layer.cornerRadius = radius;
@@ -222,7 +294,7 @@ static CGFloat screenRadius(void) {
         // close, the card had no glass for a few frames and the real card's glass blinked back in after (and the
         // other way round as an open began).
         self->_sheet.alpha = 1;
-        self->_fill.alpha = ramp(0.3, 0.85, t);
+        self->_fill.alpha = whole ? 1 : closing ? 1 - ramp(0, 0.6, c) : ramp(kHandFrom, kHandTo, t);
 
         // The card's top edge is the sheet's, and the card stays on it until the player has mostly come in, as the
         // Music app's mini player does. On 9.1.90 Spotify animates the stand-in itself, so its animations are lifted
@@ -236,8 +308,10 @@ static CGFloat screenRadius(void) {
             CGRect frame = self->_barRest;
             frame.origin.y += rise;
             frame.origin.x += sheet.origin.x - self->_card.origin.x;
+            // Closing, the row stands in the middle of the sheet's top edge while the sheet is wider than the card.
+            if (closing) frame.origin.x += (sheet.size.width - self->_card.size.width) / 2;
             bar.frame = frame;
-            bar.alpha = 1 - ramp(0.15, 0.45, t);
+            bar.alpha = whole ? 0 : closing ? ramp(0.2, 0.8, c) : 1 - ramp(kHandFrom - 0.05, kHandTo - 0.05, t);
         }
 
         if (self->_cover) {
@@ -257,23 +331,50 @@ static CGFloat screenRadius(void) {
                     self->_coverHidden = YES;
                 }
                 to = CGRectOffset(to, -sheet.origin.x, -sheet.origin.y);
-                self->_cover.frame = CGRectOffset(lerpRect(from, to, t), sheet.origin.x, sheet.origin.y);
+                // Closing, the cover stays the player's, riding the sheet and shrinking with it.
+                CGFloat coverT = closing ? 1 : t;
+                self->_cover.frame = CGRectOffset(lerpRect(from, to, coverT), sheet.origin.x, sheet.origin.y);
                 // The cover's corners are drawn under its paused shrink too.
-                self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, t);
-                // Over an animated artwork the player's cover is hidden: the flown one fades out on the
-                // way there instead of landing on an empty slot.
-                // Closing, it fades out over the first 30% of the way rather than shrinking down to the card (its owner; a
-                // tenth was too quick).
-                // With Animated artwork chosen there is no still cover to fly: it came in and faded on the way (its owner).
-                BOOL animated = SGRPlayerBackground() == SGRPlayerBackgroundAnimated || SGRPlayerMotionShowing();
-                self->_cover.alpha = animated ? 0 : self->_closing ? ramp(0.7, 1, t) : 1;
+                self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, coverT);
+                // Closing, it fades with the player's content as the player collapses into the card. While the track's
+                // animated artwork plays there is no still cover to fly at all: told by the clip itself, not the setting,
+                // since a track with none falls back to Fluid and flies its cover as usual. The clip stays loaded while the
+                // player is closed, so an open knows from the start.
+                BOOL animated = SGRPlayerMotionShowing();
+                self->_cover.alpha = animated ? 0 : whole ? 1 : closing ? 1 - ramp(0, 0.6, c) : 1;
             }
         }
     }];
     [CATransaction commit];
 }
 
+// Spotify's slide can end before the release's spring has settled: what is left of its dip goes onto the real card, an
+// animation of the system's on the bar's own view, so the card settles as the sheet would have.
+- (void)settleCard {
+    if (!_closing || !_released) return;
+    double from = CACurrentMediaTime() - _releasedAt;
+    if (from >= kReleaseSettle) return;
+    UIView *glass = SGRNowPlayingCardView(), *bar = glass.superview;
+    if (!bar) return;
+    CGFloat travel = CGRectGetMinY(_card) - CGRectGetMinY(_releaseRect);
+    NSMutableArray<NSNumber *> *values = [NSMutableArray array];
+    enum { kSteps = 40 };
+    for (int i = 0; i <= kSteps; i++) {
+        double at = from + (kReleaseSettle - from) * i / kSteps;
+        // Only the dip below its place: the sheet was never behind the player, so the card is there already.
+        [values addObject:@(MAX(0, releaseSpring(at) - 1) * travel)];
+    }
+    values[kSteps] = @0;
+    CAKeyframeAnimation *settle = [CAKeyframeAnimation animationWithKeyPath:@"transform.translation.y"];
+    settle.values = values;
+    settle.duration = kReleaseSettle - from;
+    settle.additive = YES;
+    settle.calculationMode = kCAAnimationLinear;
+    [bar.layer addAnimation:settle forKey:@"sgr.settle"];
+}
+
 - (void)tearDown {
+    [self settleCard];
     UIView *overlay = _overlay;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
@@ -337,7 +438,6 @@ static SGRPlayerMorph *morphFor(SPTBarOverlayPresentationTransition *transition,
 // has the player and morphs to match, so Spotify's frame, alpha and completion stay its own. It is let go once the
 // transition is no longer interactive and the player has no animation left and holds still a few frames.
 static const CFTimeInterval kGiveUp = 0.9;   // UIKit's presentation runs about 0.5 s
-static const float kCloseSpeed = 1.15;        // how much faster than Spotify's a close let go by a finger plays
 
 // The Music app's player opens and closes on a spring: in screen recordings at 60 fps its sheet sets off from rest, is
 // half way in some 0.1 s and eases in, each of its last frames some 75% of the one before (123, 87, 67, 55, 40, 35, 25
@@ -403,7 +503,7 @@ static CFTimeInterval animationsEnd(CALayer *layer, CALayer *space) {
 @property (nonatomic) NSInteger still;
 @property (nonatomic) CGFloat lastY;
 @property (nonatomic) CFTimeInterval settledSince;   // when it was last driven by a finger, or began
-@property (nonatomic) BOOL sped;                     // the container's layer runs at kCloseSpeed until let go
+@property (nonatomic) BOOL sped;                     // the container's layer runs at a pace of the morph's until let go
 @property (nonatomic) BOOL closing, wasInteractive;
 // The container's time set along the spring (warp): Spotify's slide's start and length and its ease's control points in
 // the container's time, where the slide already was, the end of all the player's animations, and since when.
@@ -414,19 +514,12 @@ static CFTimeInterval animationsEnd(CALayer *layer, CALayer *space) {
 @property (nonatomic) CGFloat lastT;                  // where a finger had the morph, and its pace, for a let go
 @property (nonatomic) CFTimeInterval lastTime;
 @property (nonatomic) double pace;
+@property (nonatomic) BOOL letGo;   // a finger has let go of the player
 @property (nonatomic) CFTimeInterval warpBegin, warpLength, warpTo, warpStart, warpDuration;
 @property (nonatomic) double warpFrom, ease1x, ease1y, ease2x, ease2y;
 @end
 
 @implementation SGRMorphFollower
-
-// The container's clock runs at kCloseSpeed from now on, continuing from where its animations are.
-static void runFaster(CALayer *layer) {
-    CFTimeInterval now = CACurrentMediaTime(), local = [layer convertTime:now fromLayer:nil];
-    layer.speed = kCloseSpeed;
-    layer.beginTime = layer.superlayer ? [layer.superlayer convertTime:now fromLayer:nil] : now;
-    layer.timeOffset = local;
-}
 
 // The container's clock runs on at its own pace from `local`.
 static void runFrom(CALayer *layer, CFTimeInterval local) {
@@ -510,28 +603,55 @@ static void runFrom(CALayer *layer, CFTimeInterval local) {
         [self finish];
         return;
     }
+    BOOL interactive = self.context.isInteractive;
+    // Let go: UIKit plays the rest of Spotify's slide on its own, faster for a close, and the morph follows where it has the
+    // player. Taken over as a tap's slide is, the player showed the whole screen as the finger lifted: UIKit's slide after
+    // a drag is not the one it starts with (screen recordings and the phone's log). On the frame the finger lifts UIKit
+    // reports the player where its slide ends, so that frame keeps the finger's place.
+    BOOL letGo = !interactive && self.wasInteractive && !self.letGo;
+    self.morph.dragging = interactive;
+    if (interactive) self.morph.dragged = YES;
+    if (letGo) {
+        self.letGo = YES;
+        // Towards the card (Spotify's slide's model value is already its end), one animation of the morph's own takes the
+        // sheet there from where it is. One springing back open is followed.
+        CGFloat rest = self.morph.restY > 0 ? self.morph.restY : container.bounds.size.height;
+        BOOL towardsCard = overlay.layer.frame.origin.y > rest / 2;
+        // Spotify's slide is left at UIKit's pace: its clock is held while a finger drags, so what is left of it cannot be
+        // read to set it to the animation's (the phone's log read the whole 0.3 s every time); the animation keeps up with it
+        // instead (apply:). It sets off from where the finger left the sheet.
+        if (self.closing && towardsCard) {
+            self.morph.releaseRect = self.morph.lastSheet;
+            self.morph.releaseT = self.lastTime > 0 ? self.lastT : 1;
+            self.morph.releaseDuration = kReleaseSpring;
+            self.morph.releasedAt = CACurrentMediaTime();
+            self.morph.released = YES;
+            SGLog(@"player morph: let go at %.3f, the sheet from %@", self.morph.releaseT, NSStringFromCGRect(self.morph.releaseRect));
+        }
+    }
     // Timed by when this frame will show, so the steps come even.
     BOOL warping = self.warping;
     [self stepWarp:link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime()];
     CALayer *drawn = overlay.layer.presentationLayer ?: overlay.layer;
     CGFloat y = drawn.frame.origin.y, rest = self.morph.restY > 0 ? self.morph.restY : container.bounds.size.height;
-    CGFloat followed = rest > 0 ? MIN(1, MAX(0, 1 - y / rest)) : 1;
-    [self.morph apply:warping ? self.warpT : followed];
-    BOOL interactive = self.context.isInteractive;
+    // A close is measured to where Spotify's slide brings the player to rest (its model value is already there), not the
+    // card's top: Spotify stops it 12 pt above (805 against 817), so the sheet stopped short of the card, 61 pt high to the
+    // card's 48, and jumped to it when taken down (the phone's log).
+    CGFloat end = overlay.layer.frame.origin.y;
+    // The same in the minimized bar's row, where the card stands lower than where Spotify stops the player.
+    if (self.closing && end > 1 && end < container.bounds.size.height) rest = end;
+    // After a finger lets go the morph follows where UIKit draws the player, but what it reads is this frame's place and
+    // what it sets shows on the next: the sheet trailed the player by a frame all the way (the phone's log). Led by one
+    // frame's movement, it keeps with it. Not while a finger drags (its steps are uneven), nor on the frame it lifts.
+    CGFloat ahead = y;
+    if (!interactive && self.letGo && !letGo && self.lastY < CGFLOAT_MAX / 2 && fabs(y - self.lastY) < 120) ahead = y + (y - self.lastY);
+    CGFloat followed = rest > 0 ? MIN(1, MAX(0, 1 - ahead / rest)) : 1;
+    CGFloat applied = warping ? self.warpT : letGo && self.lastTime > 0 ? self.lastT : followed;
+    [self.morph apply:applied];
     CFTimeInterval at = link.targetTimestamp > 0 ? link.targetTimestamp : CACurrentMediaTime();
     if (interactive) {
-        // The finger's pace, smoothed, for the spring to carry on at when it lets go.
-        if (self.lastTime > 0 && at > self.lastTime) self.pace = 0.6 * self.pace + 0.4 * (followed - self.lastT) / (at - self.lastTime);
         self.lastT = followed;
         self.lastTime = at;
-    } else if (self.wasInteractive && !self.warped) {
-        // Let go: UIKit plays the rest of Spotify's slide, played along the spring from where the finger left it, at its
-        // pace. Without the slide to go by, a close runs faster as before.
-        [self warpFrom:NAN pace:0];
-        if (!self.warped && self.closing && !self.sped) {
-            runFaster(container.layer);
-            self.sped = YES;
-        }
     }
     self.wasInteractive = interactive;
     BOOL moving = overlay.layer.animationKeys.count > 0 || fabs(y - self.lastY) > 0.5 || interactive || self.warping;
@@ -617,6 +737,43 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
 - (void)startInteractiveTransition:(id<UIViewControllerContextTransitioning>)context {
     %orig;
     followTransition(self, context);
+}
+%end
+
+#pragma mark - zoom (prototype)
+
+// The player shown with the system's zoom transition (iOS 18): UIKit grows it out of the now playing card and shrinks it
+// back into it, a drag down included, as the Music app does and as SwiftUI's .navigationTransition(.zoom) gives a
+// recreation of it (AppleMusicBottombarSwiftUI). Spotify presents the player with a transitioning delegate of its own
+// (CompactOverlayTransition, which the morph above follows); here that is set aside before the presentation, so neither
+// Spotify's slide nor the morph runs. A prototype: off unless spotifyglass.redesign.player.zoom is set.
+#define SGRKeyPlayerZoom @"spotifyglass.redesign.player.zoom"
+
+static BOOL zoomWanted(UIViewController *presented) {
+    if (SGRReduceMotion() || !SGRNowPlayingCardView()) return NO;
+    if (presented.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular) return NO;
+    NSNumber *stored = [NSUserDefaults.standardUserDefaults objectForKey:SGRKeyPlayerZoom];
+    return stored.boolValue;
+}
+
+%hook UIViewController
+- (void)presentViewController:(UIViewController *)presented animated:(BOOL)animated completion:(void (^)(void))completion {
+    id delegate = presented.transitioningDelegate;
+    BOOL player = delegate && [NSStringFromClass([delegate class]) containsString:@"TabBarUIImpl"];
+    static NSUInteger logged;
+    if (logged++ < 6) SGLog(@"player zoom: %@ presents %@, its delegate %@", NSStringFromClass(self.class), NSStringFromClass(presented.class),
+                            delegate ? NSStringFromClass([delegate class]) : @"none");
+    if (animated && player && zoomWanted(presented)) {
+        if (@available(iOS 18.0, *)) {
+            presented.transitioningDelegate = nil;
+            presented.modalPresentationStyle = UIModalPresentationFullScreen;
+            presented.preferredTransition = [UIViewControllerTransition zoomWithOptions:nil sourceViewProvider:^UIView *(UIZoomTransitionSourceViewProviderContext *context) {
+                return SGRNowPlayingCardView();
+            }];
+            SGLog(@"player zoom: %@ shown with the zoom transition", NSStringFromClass(presented.class));
+        }
+    }
+    %orig;
 }
 %end
 

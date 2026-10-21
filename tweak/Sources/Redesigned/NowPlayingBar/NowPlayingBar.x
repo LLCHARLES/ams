@@ -54,6 +54,11 @@ CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius) {
     return [host convertRect:glass.bounds fromView:glass];
 }
 
+UIView *SGRNowPlayingCardView(void) {
+    UIVisualEffectView *glass = sg_cardGlass;
+    return glass.window ? glass : nil;
+}
+
 CGRect SGRNowPlayingArtworkFrameIn(UIView *host) {
     UIView *artwork = sg_cardArtwork;
     if (!artwork.window || !host) return CGRectNull;
