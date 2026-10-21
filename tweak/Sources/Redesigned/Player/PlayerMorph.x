@@ -72,6 +72,7 @@ static CGFloat screenRadius(void) {
 
 @interface SGRPlayerMorph : NSObject
 @property (nonatomic, readonly) CGFloat restY;
+@property (nonatomic) BOOL closing;   // the cover fades out at once on a close (apply:)
 @end
 
 @implementation SGRPlayerMorph {
@@ -261,7 +262,11 @@ static CGFloat screenRadius(void) {
                 self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, t);
                 // Over an animated artwork the player's cover is hidden: the flown one fades out on the
                 // way there instead of landing on an empty slot.
-                self->_cover.alpha = SGRPlayerMotionShowing() ? 1 - ramp(0.6, 1, t) : 1;
+                // Closing, it fades out over the first 30% of the way rather than shrinking down to the card (its owner; a
+                // tenth was too quick).
+                // With Animated artwork chosen there is no still cover to fly: it came in and faded on the way (its owner).
+                BOOL animated = SGRPlayerBackground() == SGRPlayerBackgroundAnimated || SGRPlayerMotionShowing();
+                self->_cover.alpha = animated ? 0 : self->_closing ? ramp(0.7, 1, t) : 1;
             }
         }
     }];
@@ -277,6 +282,8 @@ static CGFloat screenRadius(void) {
     if (!_follows) overlay.alpha = _spotifyAlpha;
     if (overlay && !_follows) overlay.frame = _spotifyFrame;
     if (_follows) _bar.hidden = NO;
+    // The stand-in goes back where it started, so Spotify never shows it where the sheet's edge last took it.
+    if (_bar && !CGRectIsEmpty(_barRest)) _bar.frame = _barRest;
     if (!overlay.layer.backgroundColor) overlay.layer.backgroundColor = _overlayColor;
     CGColorRelease(_overlayColor);
     _overlayColor = NULL;
@@ -562,6 +569,7 @@ static id ivarOf(id object, const char *name) {
 
 static char kFollowerKey;
 
+
 static void followTransition(id transition, id<UIViewControllerContextTransitioning> context) {
     if (SGRReduceMotion() || !context) return;
     UIView *container = context.containerView;
@@ -571,9 +579,15 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
     if (!overlay || overlay.superview != container) return;
     SGRMorphFollower *old = objc_getAssociatedObject(transition, &kFollowerKey);
     [old finish];
-    SGRPlayerMorph *morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay bar:ivarOf(transition, "npbSnapshotView") barRest:CGRectZero];
+    // Where the card's stand-in starts is where the real now playing bar stands. Read from the stand-in, it was where
+    // Spotify's animation sends it, already set at the screen's top, and the stand-in showed there for an open's first
+    // frame, a second card over the status bar (its owner's screenshot).
+    UIView *npbView = ivarOf(transition, "npbView");
+    CGRect barRest = [npbView isKindOfClass:UIView.class] && npbView.window ? [npbView convertRect:npbView.bounds toView:container] : CGRectZero;
+    SGRPlayerMorph *morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay bar:ivarOf(transition, "npbSnapshotView") barRest:barRest];
     if (!morph) return;
     [morph follow];
+    morph.closing = !to.isBeingPresented;
     ((UIView *)ivarOf(transition, "tabBarSnapshotView")).alpha = 0;
     SGRMorphFollower *follower = [SGRMorphFollower new];
     follower.morph = morph;
