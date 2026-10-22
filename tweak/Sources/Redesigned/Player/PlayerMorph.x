@@ -18,8 +18,10 @@
 //   the bar     Spotify's stand-in riding the sheet's top edge until the player has mostly come in;
 //   the tab bar Spotify's stand-in hidden, since the real one stays in view around the sheet
 //               and the stand-in would be a second tab bar;
-//   the cover   a copy flown from the card's artwork to the player's cover, moved within the sheet,
-//               the player's own cover and shadow hidden meanwhile.
+//   the cover   a copy of the player's cover kept on the sheet, growing out of the card with it as it fades in
+//               on an open and shrinking back into it as it fades out on a close, the one the other played
+//               backwards; the player's own cover and shadow hidden meanwhile. Flown from the card's artwork
+//               on an open, it read as a second motion beside the sheet's.
 // All of it is taken down in -destroyTransitioningContext, which Spotify calls from -animationEnded:.
 //
 // Skipped on a regular width (Spotify's iPad branch), with Reduce Motion on, or while the bar has no
@@ -363,8 +365,8 @@ static CGFloat screenRadius(void) {
                     self->_coverHidden = YES;
                 }
                 to = CGRectOffset(to, -sheet.origin.x, -sheet.origin.y);
-                // Closing, the cover stays the player's, riding the sheet and shrinking with it.
-                CGFloat coverT = closing ? 1 : t;
+                // The cover stays the player's, riding the sheet and growing or shrinking with it.
+                CGFloat coverT = 1;
                 self->_cover.frame = CGRectOffset(lerpRect(from, to, coverT), sheet.origin.x, sheet.origin.y);
                 // The cover's corners are drawn under its paused shrink too.
                 self->_cover.layer.cornerRadius = lerp(from.size.width / 2, SGRRadiusArtwork * SGRPlayerCoverScale() * scale, coverT);
@@ -374,6 +376,8 @@ static CGFloat screenRadius(void) {
                 // player is closed, so an open knows from the start.
                 BOOL animated = SGRPlayerMotionShowing();
                 self->_cover.alpha = animated ? 0 : whole ? 1 : closing ? 1 - ramp(0, 0.6, c) : 1;
+                // An open fades it in as a close fades it out, backwards: in over the last 60% of the way.
+                if (!animated && !whole && !closing) self->_cover.alpha = 1 - ramp(0, 0.6, 1 - t);
             }
         }
     }];
