@@ -8,6 +8,8 @@ on:
         default: artifacts
         type: choice
         options: [artifacts, filebin, both]
+  push:
+    branches: [vitrine]
 
 env:
   THEOS: ${{ github.workspace }}/theos
@@ -58,7 +60,7 @@ jobs:
           find "$RUNNER_TEMP/deb" -name 'spotifyglass.dylib' | head -n 1
 
       - uses: actions/upload-artifact@v5
-        if: inputs.upload_method != 'filebin'
+        if: ${{ github.event_name == 'push' || inputs.upload_method != 'filebin' }}
         with:
           name: vitrine-deb-dylib
           path: |
@@ -67,7 +69,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to filebin.net
-        if: inputs.upload_method != 'artifacts'
+        if: ${{ github.event_name != 'push' && inputs.upload_method != 'artifacts' }}
         run: |
           BIN="vitrine-deb-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
