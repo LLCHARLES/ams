@@ -1,0 +1,79 @@
+name: Build .deb + dylib
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_method:
+        description: "Where to put the result"
+        default: artifacts
+        type: choice
+        options: [artifacts, filebin, both]
+
+env:
+  THEOS: ${{ github.workspace }}/theos
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - uses: actions/checkout@v5
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+
+      - name: Install tools
+        run: |
+          brew install make dpkg ldid
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Build the dylib
+        run: |
+          env -u MAKELEVEL gmake -C tweak SG_DRIVER=0
+          mkdir -p out
+          cp tweak/.theos/obj/spotifyglass.dylib out/spotifyglass.dylib
+          file out/spotifyglass.dylib
+          lipo -archs out/spotifyglass.dylib
+
+      - name: Package the .deb
+        run: |
+          env -u MAKELEVEL gmake -C tweak package FINALPACKAGE=1 SG_DRIVER=0
+          ls -la tweak/packages
+          cp tweak/packages/*.deb out/
+
+      - name: Validate
+        run: |
+          DEB="$(ls out/*.deb | head -n 1)"
+          [ -n "$DEB" ] || { echo "::error::No .deb produced"; exit 1; }
+          dpkg-deb --info "$DEB"
+          dpkg-deb --contents "$DEB"
+          # The dylib in the package is the one the tweak injects, and it is in the package's layout.
+          dpkg-deb -x "$DEB" "$RUNNER_TEMP/deb" 
+          find "$RUNNER_TEMP/deb" -name 'spotifyglass.dylib' | head -n 1
+
+      - uses: actions/upload-artifact@v5
+        if: inputs.upload_method != 'filebin'
+        with:
+          name: vitrine-deb-dylib
+          path: |
+            out/*.deb
+            out/spotifyglass.dylib
+          if-no-files-found: error
+
+      - name: Upload to filebin.net
+        if: inputs.upload_method != 'artifacts'
+        run: |
+          BIN="vitrine-deb-${{ github.run_id }}"
+          echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
+          for f in out/*.deb out/spotifyglass.dylib; do
+            [ -f "$f" ] || continue
+            curl -fsS -X POST -H "Content-Type: application/octet-stream" --data-binary "@$f" "https://filebin.net/$BIN/$(basename "$f")" >/dev/null
+            echo "- https://filebin.net/$BIN/$(basename "$f")" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "- _filebin deletes bins after a few days of inactivity, download promptly._" >> "$GITHUB_STEP_SUMMARY"
