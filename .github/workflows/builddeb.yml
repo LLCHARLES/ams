@@ -3,6 +3,11 @@ name: Build .deb + dylib
 on:
   workflow_dispatch:
     inputs:
+      ipa_url:
+        description: "Optional: a decrypted Spotify IPA. Only to read the remote-config flags from — the tweak links SGFlagList.m, which scripts/extract-flags.py generates out of an IPA. Without it the flags table is built empty."
+        required: false
+        default: ""
+        type: string
       upload_method:
         description: "Where to put the result"
         default: artifacts
@@ -34,6 +39,22 @@ jobs:
         run: |
           brew install make dpkg ldid
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+
+      - name: Generate the flags table
+        # SGFlagList.m is gitignored and generated from an IPA (scripts/extract-flags.py); the link fails
+        # without it. With an IPA the real table is read out of it; without one it is built empty, which
+        # leaves the flags pages listing nothing and changes nothing else.
+        run: |
+          if [ -n "${{ inputs.ipa_url }}" ]; then
+            mkdir -p ipa
+            curl -fsSL "${{ inputs.ipa_url }}" -o ipa/spotify.ipa
+            python3 scripts/extract-flags.py ipa/spotify.ipa
+          else
+            echo "no ipa_url: building with an empty flags table"
+            printf '#import "Flags.h"\nconst SGFlagDef SGFlagTable[] = {{0}};\nconst NSUInteger SGFlagCount = 0;\n' \
+              > tweak/Sources/Shared/Flags/SGFlagList.m
+          fi
+          wc -l tweak/Sources/Shared/Flags/SGFlagList.m
 
       - name: Build the dylib
         run: |
