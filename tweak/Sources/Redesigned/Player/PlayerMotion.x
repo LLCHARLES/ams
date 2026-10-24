@@ -55,12 +55,16 @@
 static const CGFloat kFootFrom = 0.9;
 // How far down a cover starts, as a share of the screen (the lock screen's, measured off recordings 2026-10-22),
 // and how far into it the blur over the band above reaches before it is gone. A Canvas still starts at the top.
-static const CGFloat kCoverDrop = 0.075, kTopBlurRamp = 45;
-// The share of the clip, from its top and from its bottom, stretched over the band above a cover and down from
-// the clip's foot; and how strong the blur over the top band is, a little under the foot's.
-static const CGFloat kHeadShare = 0.03, kFootShare = 0.03, kTopBlurStrength = 0.32;
-// The variable blur's radius where it is whole, and how far above a cover's top edge it starts easing off.
-static const CGFloat kVariableBlurRadius = 30;
+static const CGFloat kCoverDrop = 0.087, kTopBlurRamp = 45;
+// How much the clip's reflections past its ends are stretched: the lock screen mirrors the cover at both ends and
+// stretches the reflection away from the edge, about twice (its owner's unblurred photos, 2026-10-24: a mouth 110px
+// tall came back 220px below the cover's foot, its blur starting just under the mouth, about 60pt above the foot).
+static const CGFloat kMirrorStretch = 2;
+// The variable blur's radius where it is whole, in pixels (the filter's own): the lock screen's strongest, about a
+// 23px Gaussian, found by blurring its unblurred screen by known amounts until each row kept the detail its blurred
+// screen keeps (Gracie Abrams, 2026-10-24). Read as a share of detail lost instead, it came out at 90-120px, and the
+// foot smeared to one color. The whole radius is the top band's: three times the foot's, whose shares are a third.
+static const CGFloat kVariableBlurRadius = 72;
 // The scrim over a cover's band, the album page's (AlbumHeader.x) strength over a little more height: black
 // this strong at the top, gone this far down, so the status bar and the header keep on a white band.
 static const CGFloat kTopScrim = 180, kTopScrimAlpha = 0.28;
@@ -75,14 +79,25 @@ static const CGFloat kCanvasAspect = 1.5;
 // The blur starts at the seam, or this share of the screen down where that is higher, so it is under the
 // controls whatever the clip's shape; it is whole kBlurRamp points below its start.
 static const CGFloat kBlurByControls = 0.6, kBlurRamp = 96;
-// A cover's foot blurs out instead, as the lock screen's does: the blur starts this far above its bottom and is whole
-// at it, wherever that is, and goes on down under the controls.
-static const CGFloat kCoverBlurRamp = 90;
-// The foot's blur eases in rather than rising in a line, which drew the cover's bottom edge as a hard line: this
-// much of it at half the ramp. It is whole at the seam itself, as the top band's blur is at its strength there: the
-// rows past each end are drawn by their own player layers, which can show a frame the cover's layer is not yet on,
-// and a seam blurred any less showed that as a line now and then (device, 2026-10-22).
-static const CGFloat kFootBlurMidway = 0.25;
+// A cover's foot blurs out instead, as the lock screen's does: from a height on the screen, not the cover's foot, since
+// the lock screen's starts at the same height whatever the cover (a mouth sharp there on one, gloves soft just below
+// it on another, their feet at different heights; 2026-10-24).
+// Where the controls' dim is placed by, kept where it was before the blur moved down: from kFootBlurFrom, whole at
+// kDimWholeAt.
+static const CGFloat kFootBlurFrom = 0.57, kDimWholeAt = 0.69;
+// The lock screen's blur by height on the screen, as shares of kVariableBlurRadius, calibrated the same way: none down to
+// 57% of the screen, 2px at 60.7%, 6px at 62.8%, 10px at 65.9%, 14px at 69%, 17px at 75.3% and its whole from 83.7%.
+// Over the band above a cover it is barely there, about 1.5px to 15% of the screen: the band reads soft because it is
+// a stretched reflection, and a heavy blur there drew a flat band with a hard edge.
+// Tuned by eye from there with its owner (2026-10-24): starting at 55% of the screen and growing very slowly, barely
+// there until 65% (where it starts is settled), then on to the whole radius at the bottom, as the lock screen's
+// reflection is a smooth wash under its controls (the calibration read too little there, the wash having no detail).
+static const CGFloat kFootBlur[][2] = {{0.55, 0}, {0.6, 0.01}, {0.65, 0.03}, {0.7, 0.07}, {0.75, 0.25}, {0.8, 0.5},
+                                       {0.9, 1}};
+// The band above a cover, which the calibration could not read (a stretched reflection has no fine detail to lose):
+// about 10px at the cover's edge, easing off over the cover's top 45pt (to kTopBlurEnd of the screen), where it starts
+// and ends settled; heavier up at the status bar, where the lock screen smears the hair to blobs (2026-10-24).
+static const CGFloat kTopBlurTop = 0.6, kTopBlurEdge = 0.133, kTopBlurHold = 0.108, kTopBlurHeld = 0.07, kTopBlurEnd = 0.134;
 // Seconds a clip may be on screen in front without drawing a frame before it is given up.
 static const NSTimeInterval kGiveUp = 5;
 // Seconds the last track's clip stays on a skip for the next one's to come in over it.
@@ -93,6 +108,10 @@ static const CGFloat kDimLeast = 0.10, kDimMost = 0.80, kDimLyrics = 0.15;
 // off to nothing by this share of the screen below the clip's top, so the cover reads as bright as the lock screen
 // draws it. Behind the lyrics, which run the whole height, it is whole throughout.
 static const CGFloat kDimEaseFrom = 0.25;
+// The share of the dim kept under the controls: the whole of it, worked out for small white text at 4.5:1, turned the
+// clip's colors there to one dark brown, so the blurred foot showed none of the picture the lock screen shows (device,
+// 2026-10-24). The title is large text, readable at less. Behind the lyrics, and with Increase Contrast, it is whole.
+static const CGFloat kDimUnderControls = 0.55;
 // The frames measured for the dim besides the poster, in seconds into the clip (one past its end is skipped).
 static const double kMeasuredAt[] = {1, 2};
 
@@ -270,8 +289,9 @@ static UIBlurEffect *blurEffect(void) {
     CGFloat seam = top + round(height * kFootFrom), blurFrom = MIN(seam, round(screen * kBlurByControls));
     CGFloat blurRamp = kBlurRamp;
     if (top > 0) {
-        blurRamp = MIN(kCoverBlurRamp, height / 2);
-        blurFrom = top + height - blurRamp;
+        // The controls' dim is whole where the lock screen's blur is half.
+        blurFrom = round(screen * kFootBlurFrom);
+        blurRamp = round(screen * kDimWholeAt) - blurFrom;
     }
     _picture.frame = bounds;
     _seamBlur.frame = bounds;
@@ -284,12 +304,12 @@ static UIBlurEffect *blurEffect(void) {
     [CATransaction setDisableActions:YES];
     _still.frame = CGRectMake(0, top, width, height);
     _clip.frame = _still.bounds;
-    // The cover's copy above it: its first kHeadShare flipped about its top edge and stretched up to the top of the
-    // screen, a row y below that edge landing stretch * y above it. The rest of the copy is past the field.
+    // The cover's copy above it: flipped about its top edge and stretched kMirrorStretch times away from it, a row y
+    // below that edge landing kMirrorStretch * y above it. The rest of the copy is past the field.
     _footCopy.frame = bounds;
     _headCopy.frame = bounds;
     _headCopy.instanceCount = top > 0 ? 2 : 1;
-    _headCopy.instanceTransform = flipAbout(top, top / MAX(1, height * kHeadShare));
+    _headCopy.instanceTransform = flipAbout(top, kMirrorStretch);
     _scrim.hidden = top == 0;
     _scrim.frame = CGRectMake(0, 0, width, kTopScrim);
     _topMask.frame = bounds;
@@ -298,17 +318,27 @@ static UIBlurEffect *blurEffect(void) {
     // far below the field.
     CGFloat below = MAX(0, total - top - height);
     _footCopy.instanceCount = below > 0 ? 2 : 1;
-    _footCopy.instanceTransform = flipAbout(top + height, below / MAX(1, height * kFootShare));
+    _footCopy.instanceTransform = flipAbout(top + height, kMirrorStretch);
     _dim.frame = bounds;
     _dim.locations = @[@(MIN(1, (top + screen * kDimEaseFrom) / total)), @(MIN(1, (blurFrom + blurRamp) / total))];
     _seamMask.frame = bounds;
     _seamMask.locations = @[@(MIN(1, blurFrom / total)), @(MIN(1, (blurFrom + blurRamp) / total))];
     if (_variable) {
         // At its strength down to the cover's top edge and easing off inside it, so the cover keeps nearly all its height.
-        CGFloat band = top > 0 ? kTopBlurStrength : 0;
-        CGFloat stops[][2] = {{0, band}, {top, band}, {top + kTopBlurRamp, 0},
-                              {blurFrom, 0}, {blurFrom + blurRamp / 2, kFootBlurMidway}, {blurFrom + blurRamp, 1}, {total, 1}};
-        [self variableBlur:stops count:7 size:bounds.size];
+        // The lock screen's, by height on the screen (kFootBlur, kTopBlur...).
+        BOOL band = top > 0;
+        CGFloat hold = MAX(top, round(screen * kTopBlurHold)), end = MAX(hold + 1, round(screen * kTopBlurEnd));
+        CGFloat stops[12][2] = {{0, band ? kTopBlurTop : 0}, {top, band ? kTopBlurEdge : 0}, {hold, band ? kTopBlurHeld : 0}, {end, 0}};
+        NSUInteger count = 4;
+        for (NSUInteger i = 0; i < sizeof(kFootBlur) / sizeof(kFootBlur[0]); i++) {
+            stops[count][0] = round(screen * kFootBlur[i][0]);
+            stops[count][1] = kFootBlur[i][1];
+            count++;
+        }
+        stops[count][0] = total;
+        stops[count][1] = kFootBlur[sizeof(kFootBlur) / sizeof(kFootBlur[0]) - 1][1];
+        count++;
+        [self variableBlur:stops count:count size:bounds.size];
     }
     [CATransaction commit];
 }
@@ -357,8 +387,9 @@ static UIBlurEffect *blurEffect(void) {
 }
 
 - (void)updateDim {
-    CGFloat dim = SGRPlayerClipDim(brightEnd(_luminances), UIAccessibilityDarkerSystemColorsEnabled(), _lyricsUp);
-    _dim.opacity = (float)dim;
+    BOOL contrast = UIAccessibilityDarkerSystemColorsEnabled();
+    CGFloat dim = SGRPlayerClipDim(brightEnd(_luminances), contrast, _lyricsUp);
+    _dim.opacity = (float)(_lyricsUp || contrast ? dim : dim * kDimUnderControls);
     CGFloat top = _lyricsUp ? 1 : 0;
     _dim.colors = @[(id)[UIColor colorWithWhite:0 alpha:top].CGColor, (id)UIColor.blackColor.CGColor];
 }
@@ -372,8 +403,8 @@ static UIBlurEffect *blurEffect(void) {
     if ([key isEqualToString:_blurKey]) return;
     _blurKey = key;
     NSMutableArray *colors = [NSMutableArray array];
-    CGFloat locations[8];
-    for (NSUInteger i = 0; i < count && i < 8; i++) {
+    CGFloat locations[12];
+    for (NSUInteger i = 0; i < count && i < 12; i++) {
         [colors addObject:(id)[UIColor colorWithWhite:0 alpha:stops[i][1]].CGColor];
         locations[i] = MIN(1, MAX(0, stops[i][0] / size.height));
     }
