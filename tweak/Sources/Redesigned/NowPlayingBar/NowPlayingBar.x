@@ -281,7 +281,8 @@ static void tuckExtras(UIView *bar, BOOL tuck) {
 }
 
 // The Music app's two lines, the title over the artists, in place of Spotify's "title • artists" and the
-// device line under it; the title alone in the minimized row. Each swipe page holds its own track's labels,
+// device line under it, in the minimized row too, as the Music app's compact card has both (its owner's recording,
+// 2026-10-24; the title alone there before). Each swipe page holds its own track's labels,
 // so the text is read from them and drawn over them page by page. The page reads its own VoiceOver label.
 static NSString *const kPageId = @"now-playing-bar-page";
 static NSString *const kUnitId = @"Components.UI.PageInformationUnitNowPlayingBar";
@@ -314,7 +315,7 @@ static char kTextKey;
     [super layoutSubviews];
     CGSize size = self.bounds.size;
     CGFloat titleHeight = ceil(_title.font.lineHeight), artistsHeight = ceil(_artists.font.lineHeight);
-    BOOL two = !_inRow && _artists.text.length;
+    BOOL two = _artists.text.length > 0;
     // The lines share 2pt of their leading, set as close as the Music app sets its card's.
     CGFloat shared = 2;
     CGFloat top = round((size.height - titleHeight - (two ? artistsHeight - shared : 0)) / 2);
