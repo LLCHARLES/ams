@@ -25,6 +25,8 @@ static __weak UIView *sg_stockBar;
 static CGFloat sg_room, sg_glassHeight;   // see "room for the glass bar"
 // See "minimized". sg_keepApart holds the second bar on screen while the main one grows back under it.
 static BOOL sg_minimized, sg_keepApart;
+// The Search circle of a bar without split tabs sliding back into the row as it grows, kept on screen until it has.
+static BOOL sg_apartLeaving;
 
 @interface SGRSystemTabBar : UITabBar <UITabBarDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, weak) UIView *stockBar;
@@ -485,8 +487,16 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
     BOOL missing = NO;
     for (NSUInteger i = 0; i < sources.count; i++) {
         UITabBarItem *item = bar.items[i];
-        if (!item.image) item.image = lit ? [glyphOf(sources[i], YES) imageWithTintColor:SGRAccent() renderingMode:UIImageRenderingModeAlwaysOriginal]
-                                          : glyphOf(sources[i], NO);
+        // Drawn again when it goes lit or unlit: Search's circle keeps its item, lit while Search is the tab.
+        static char kLitKey;
+        if (!item.image || [objc_getAssociatedObject(item, &kLitKey) boolValue] != lit) {
+            UIImage *image = lit ? [glyphOf(sources[i], YES) imageWithTintColor:SGRAccent() renderingMode:UIImageRenderingModeAlwaysOriginal]
+                                 : glyphOf(sources[i], NO);
+            if (image) {
+                item.image = image;
+                objc_setAssociatedObject(item, &kLitKey, @(lit), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
         if (!item.selectedImage || item.selectedImage == item.image) item.selectedImage = glyphOf(sources[i], YES);
         missing |= !item.image || !item.selectedImage;
         item.accessibilityLabel = labelIn(sources[i]).text;
@@ -505,6 +515,20 @@ static void selectActive(SGRSystemTabBar *bar, UIView *active) {
     UITabBarItem *item = index == NSNotFound ? nil : bar.items[index];
     if (active && bar.selectedItem != item) bar.selectedItem = item;
     if (active && item) bar.shown = item;
+}
+
+static BOOL hasSplitTabs(UIView *stockBar) {
+    for (UIView *source in tabItems(stockBar)) if (SGRTabIsApart(source)) return YES;
+    return NO;
+}
+
+// The Search tab, told by its name (Spotify's tabs carry nothing else that says which they are), else none.
+static UIView *searchSource(NSArray<UIView *> *sources) {
+    for (UIView *source in sources) {
+        NSString *name = labelIn(source).text;
+        if (name && [name localizedCaseInsensitiveCompare:@"Search"] == NSOrderedSame) return source;
+    }
+    return nil;
 }
 
 // The tab a bar shows selected, when Spotify paints none: a tab of the mod's own.
@@ -616,11 +640,12 @@ static void syncBar(UIView *stockBar) {
         [apart removeAllObjects];
     }
     // Minimized, the bar keeps the tab it is on, glyph only, on a circle at the leading end, and the last
-    // split tab on one at the trailing end when there are any, the way the Music app keeps Search. Without
-    // split tabs the now playing card has the rest of the row.
+    // split tab on one at the trailing end, the way the Music app keeps Search. Without split tabs Search takes
+    // that circle itself, sliding out of the row to it as the card comes down between the two (its owner asked for
+    // this without split tabs, 2026-10-24); with no Search tab the card has the rest of the row.
     BOOL minimized = sg_minimized && sources.count >= 2;
     if (minimized) {
-        UIView *last = apart.lastObject;
+        UIView *last = apart.lastObject ?: (sources.count >= 3 ? searchSource(main) : nil);
         main = [NSMutableArray arrayWithObject:active && active != last ? active : main.firstObject];
         apart = last ? [NSMutableArray arrayWithObject:last] : [NSMutableArray array];
         hideLabels = YES;
@@ -632,8 +657,10 @@ static void syncBar(UIView *stockBar) {
         bar.partner = apartBar;
         [host addSubview:apartBar];
     }
-    apartBar.hidden = !apart.count && !sg_keepApart;
-    if (apartBar.hidden) apartBar.sources = nil;
+    apartBar.hidden = !apart.count && !sg_keepApart && !sg_apartLeaving;
+    // Search's circle on a bar without split tabs keeps its item while hidden: made again each time it came, its glyph
+    // was missing for the circle's first frames, an empty disc beside the row (a recording at 30 fps, 2026-10-24).
+    if (apartBar.hidden && hasSplitTabs(stockBar)) apartBar.sources = nil;
 
     CGRect bounds = stockBar.bounds;
     CGFloat width = bounds.size.width;
@@ -658,9 +685,10 @@ static void syncBar(UIView *stockBar) {
     // is made in and never again when the bar grows, so items made while a bar was still a circle kept "…" for
     // their names at full width (harness/tabbar, `names`).
     [host layoutIfNeeded];
-    BOOL missing = fillBar(bar, main, hideLabels, minimized);
+    // Minimized, each circle is lit when it holds the tab the page is on: the leading one its tab, Search's circle Search.
+    BOOL missing = fillBar(bar, main, hideLabels, minimized && (!active || main.firstObject == active));
     fillPlatter(bar, minimized);
-    if (apart.count) missing |= fillBar(apartBar, apart, hideLabels, NO);
+    if (apart.count) missing |= fillBar(apartBar, apart, hideLabels, minimized && active && apart.firstObject == active);
     // The minimized bar's circle holds the tab it is on, lit, with no bubble round it: the Music app's circle is
     // its glass and the glyph. Selected, UIKit drew its bubble inside the circle, a dark disc in a ring.
     if (minimized) {
@@ -671,7 +699,10 @@ static void syncBar(UIView *stockBar) {
         if (apart.count) selectActive(apartBar, active);
     }
     shrinkCircle(bar, minimized);
-    shrinkCircle(apartBar, minimized && apart.count);
+    // Without split tabs that bar is only ever Search's circle, and stays one: grown back to a bar's platter as a split
+    // bar is, it swelled to a ringed disc beside the row as it went back in, and shrank from one, lit, the next time it
+    // came out (a recording at 30 fps, 2026-10-24).
+    shrinkCircle(apartBar, (minimized && apart.count) || !hasSplitTabs(stockBar));
     // An icon view Spotify has not built yet is looked for again shortly, not on the next touch.
     static NSUInteger retries;
     if (missing && retries++ < 40) {
@@ -749,6 +780,8 @@ typedef struct {
 static const NSTimeInterval kArriveSweep = 0.15, kArriveFade = 0.15, kLeaveSweep = 0.08, kLeaveFade = 0.1;
 // How far the card trails the bars into a minimize, and the bars trail the card out of it (setMinimized).
 static const NSTimeInterval kCardLag = 0.05, kBarLag = 0.03;
+// When Search's circle fades into the growing row on a bar without split tabs, and over how long.
+static const NSTimeInterval kMergeDelay = 0.03, kMergeFade = 0.12;
 
 // UIKit draws every tab twice, the second time in the accent under the selection's bubble only.
 static BOOL isLitCopy(UIView *view, UIView *host) {
@@ -930,13 +963,30 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), NSTi
     SGLog(@"tab bar: %lu tabs fade out, %lu fade in", (unsigned long)gone.count, (unsigned long)faded.count);
 }
 
+// The middle, in the host, of the trailing tab a bar shows (Search, on a bar without split tabs), where it is laid out.
+static BOOL trailingTabCenter(UIView *bar, UIView *host, CGPoint *center) {
+    __block CGFloat best = -CGFLOAT_MAX;
+    SGForEachView(bar, ^(UIView *v) {
+        if (!v.window || !isTabButton(v) || isLitCopy(v, host)) return;
+        CGRect frame = [v convertRect:v.bounds toView:host];
+        if (CGRectGetMidX(frame) <= best) return;
+        best = CGRectGetMidX(frame);
+        *center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    });
+    return best > -CGFLOAT_MAX;
+}
+
 static void setMinimized(BOOL minimized, BOOL animated) {
     UIView *stockBar = sg_stockBar;
     if (minimized == sg_minimized) return;
     // Spotify's regular width bar is not the glass one's row of tabs; it stays as it is.
     if (minimized && (!stockBar.window || stockBar.traitCollection.horizontalSizeClass != UIUserInterfaceSizeClassCompact)) return;
     sg_minimized = minimized;
-    sg_keepApart = !minimized;
+    // Split tabs keep their bar while the main one grows back under it. Without them the trailing circle is Search,
+    // which goes back into the row instead: kept, it stood beside the grown row as a second Search until the spring
+    // ended, where the Music app's slides into the row (a screen recording beside the Music app's, 2026-10-24).
+    BOOL split = stockBar && hasSplitTabs(stockBar);
+    sg_keepApart = !minimized && split;
     SGLog(@"tab bar: %@", minimized ? @"minimized" : @"expanded");
     if (!stockBar) return;
     UIView *host = objc_getAssociatedObject(stockBar, &kHostKey);
@@ -948,6 +998,11 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     animated &= host.window != nil;
     SGRBarState before = animated ? barState(host) : (SGRBarState){0};
     UIView *mainBar = objc_getAssociatedObject(stockBar, &kBarKey), *apartBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
+    // Minimizing, Search's circle sets off from where Search stands in the row; growing, it heads back there.
+    CGPoint searchInRow = CGPointZero;
+    BOOL fromRow = animated && minimized && !split && trailingTabCenter(mainBar, host, &searchInRow);
+    BOOL leaving = animated && !minimized && !split && apartBar && !apartBar.hidden;
+    if (leaving) sg_apartLeaving = YES;
     CALayer *mainShown = mainBar.layer.presentationLayer ?: mainBar.layer, *apartShown = apartBar.layer.presentationLayer ?: apartBar.layer;
     NSValue *mainWas = [NSValue valueWithCATransform3D:mainShown.sublayerTransform], *apartWas = [NSValue valueWithCATransform3D:apartShown.sublayerTransform];
     // The items are made where the bars are going, before anything moves. UIKit sizes a tab's name by the platter
@@ -959,7 +1014,7 @@ static void setMinimized(BOOL minimized, BOOL animated) {
         [host layoutIfNeeded];
         if (!minimized) {
             ((SGRSystemTabBar *)objc_getAssociatedObject(stockBar, &kBarKey)).sources = nil;
-            ((SGRSystemTabBar *)objc_getAssociatedObject(stockBar, &kApartBarKey)).sources = nil;
+            if (hasSplitTabs(stockBar)) ((SGRSystemTabBar *)objc_getAssociatedObject(stockBar, &kApartBarKey)).sources = nil;
             syncBar(stockBar);
             [host layoutIfNeeded];
         }
@@ -972,6 +1027,31 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     // The Music app's bar leads a minimize, drawing in before the card comes down into its row, and the card leads
     // an expand, lifting off before the bar grows under it. Set off together, the two glasses lay over each other
     // half the way (a screen recording at 60 fps).
+    UIView *searchBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
+    CGFloat side = kApartItemWidth + 2 * kPlatterInset;
+    if (fromRow && searchBar && !searchBar.hidden) {
+        CGRect to = searchBar.frame, from = CGRectMake(searchInRow.x - side / 2, to.origin.y, to.size.width, to.size.height);
+        [before.frames removeObjectForKey:searchBar];
+        [UIView performWithoutAnimation:^{ searchBar.frame = from; }];
+        SGRAnimateBarAfter(0, ^{ searchBar.frame = to; }, nil);
+    }
+    if (leaving) {
+        CGPoint target = CGPointZero;
+        if (trailingTabCenter(mainBar, host, &target)) {
+            CGRect to = CGRectMake(target.x - side / 2, searchBar.frame.origin.y, searchBar.frame.size.width, searchBar.frame.size.height);
+            [before.frames removeObjectForKey:searchBar];
+            SGRAnimateBarAfter(kBarLag, ^{ searchBar.frame = to; }, nil);
+        }
+        // Gone as the row's edge reaches it, the Music app's two merging in a couple of frames, where after the sweep it
+        // stood beside the row's own Search a while.
+        [UIView animateWithDuration:kMergeFade delay:kBarLag + kMergeDelay options:UIViewAnimationOptionBeginFromCurrentState
+                         animations:^{ searchBar.alpha = 0; }
+                         completion:^(BOOL finished) {
+            sg_apartLeaving = NO;
+            searchBar.alpha = 1;
+            if (!sg_minimized) syncBar(stockBar);
+        }];
+    }
     moveFrom(host, before, ^{ SGRNowPlayingBarFollowTabBar(); }, minimized ? kCardLag : 0, minimized ? 0 : kBarLag, settle);
     // The circles grow and shrink on the bars' spring.
     for (UIView *bar in @[mainBar ?: NSNull.null, apartBar ?: NSNull.null]) {
