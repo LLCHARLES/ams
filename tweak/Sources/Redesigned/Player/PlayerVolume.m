@@ -16,8 +16,30 @@
 static const CGFloat kRowHeight = 34, kGlyphSize = 13, kGlyphGap = 10, kTrack = 4;
 // Half the footer glyphs' height: the row stops this far above their middle.
 static const CGFloat kGlyphsHalf = 14;
-// The slider draws its track this far above its own middle (6.5px measured on the phone), so the glyphs go up with it.
-static const CGFloat kTrackAbove = 2;
+
+// iOS 26's thumbless slider is the one the progress bar above and the Music app's volume use: it grows under the finger
+// and drags from anywhere on the track. MPVolumeView makes its slider when it lays out and may make another later, so
+// the style goes on after each of its layouts.
+@interface SGRVolumeView : MPVolumeView
+@end
+
+@implementation SGRVolumeView
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (@available(iOS 26.0, *)) {
+        for (UISlider *slider in self.subviews) {
+            if (![slider isKindOfClass:UISlider.class] || slider.sliderStyle == UISliderStyleThumbless) continue;
+            slider.sliderStyle = UISliderStyleThumbless;
+            slider.minimumTrackTintColor = UIColor.whiteColor;
+            slider.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.22];
+        }
+    }
+    // The row's glyphs follow the slider, which this layout may have made or moved.
+    [self.superview setNeedsLayout];
+}
+
+@end
 
 @interface SGRVolumeRow : UIView
 @end
@@ -57,14 +79,17 @@ static UIImageView *glyph(NSString *symbol) {
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
-    _volume = [MPVolumeView new];
+    _volume = [SGRVolumeView new];
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
     _volume.showsRouteButton = NO;
 #pragma clang diagnostic pop
-    [_volume setMinimumVolumeSliderImage:trackImage(UIColor.whiteColor) forState:UIControlStateNormal];
-    [_volume setMaximumVolumeSliderImage:trackImage([UIColor colorWithWhite:1 alpha:0.22]) forState:UIControlStateNormal];
-    [_volume setVolumeThumbImage:thumbImage() forState:UIControlStateNormal];
+    if (@available(iOS 26.0, *)) {
+    } else {
+        [_volume setMinimumVolumeSliderImage:trackImage(UIColor.whiteColor) forState:UIControlStateNormal];
+        [_volume setMaximumVolumeSliderImage:trackImage([UIColor colorWithWhite:1 alpha:0.22]) forState:UIControlStateNormal];
+        [_volume setVolumeThumbImage:thumbImage() forState:UIControlStateNormal];
+    }
     _quiet = glyph(@"speaker.fill");
     _loud = glyph(@"speaker.wave.3.fill");
     [self addSubview:_quiet];
@@ -76,14 +101,20 @@ static UIImageView *glyph(NSString *symbol) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
-    CGFloat side = kRowHeight, middle = CGRectGetMidY(bounds), glyphs = middle - kTrackAbove;
-    _quiet.frame = CGRectMake(0, glyphs - side / 2, side / 2 + kGlyphSize / 2, side);
-    _loud.frame = CGRectMake(CGRectGetMaxX(bounds) - side / 2 - kGlyphSize, glyphs - side / 2, side / 2 + kGlyphSize, side);
-    CGFloat left = CGRectGetMaxX(_quiet.frame) + kGlyphGap, right = CGRectGetMinX(_loud.frame) - kGlyphGap;
+    CGFloat side = kRowHeight, middle = CGRectGetMidY(bounds);
+    CGFloat left = side / 2 + kGlyphSize / 2 + kGlyphGap, right = CGRectGetMaxX(bounds) - side / 2 - kGlyphSize - kGlyphGap;
     // MPVolumeView draws its slider at the top of its bounds, not in the middle: it gets the slider's own height,
     // centered, so the track lines up with the glyphs (it sat 9pt above them).
     CGFloat sliderHeight = MIN(side, [_volume sizeThatFits:CGSizeMake(MAX(0, right - left), side)].height ?: side);
     _volume.frame = CGRectMake(left, round(middle - sliderHeight / 2), MAX(0, right - left), sliderHeight);
+    // MPVolumeView places its slider off its own middle (8pt above it on iOS 26, issue #86) and the track is centered
+    // in the slider, so the glyphs stand on the slider's middle.
+    CGFloat glyphs = middle;
+    for (UISlider *slider in _volume.subviews) {
+        if ([slider isKindOfClass:UISlider.class]) glyphs = CGRectGetMidY([_volume convertRect:slider.frame toView:self]);
+    }
+    _quiet.frame = CGRectMake(0, glyphs - side / 2, side / 2 + kGlyphSize / 2, side);
+    _loud.frame = CGRectMake(CGRectGetMaxX(bounds) - side / 2 - kGlyphSize, glyphs - side / 2, side / 2 + kGlyphSize, side);
 }
 
 @end
