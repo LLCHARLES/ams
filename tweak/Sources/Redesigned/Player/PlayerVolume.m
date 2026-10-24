@@ -16,6 +16,11 @@
 static const CGFloat kRowHeight = 34, kGlyphSize = 13, kGlyphGap = 10, kTrack = 4;
 // Half the footer glyphs' height: the row stops this far above their middle.
 static const CGFloat kGlyphsHalf = 14;
+// The gap between the row and the footer glyphs' top: the row stands on the footer, which the footer's layout places
+// and nothing else moves. Halfway to the play button's bottom it took wherever the button stood that moment, and Spotify
+// moves the controls on its own (a ✕ for a recommended track coming in, say): placed mid-move, the row stayed over the
+// buttons until the next pass (device, 2026-10-24). 13.5 is that halfway on a settled player, 61pt of room.
+static const CGFloat kAboveFooter = 13.5;
 
 // iOS 26's thumbless slider is the one the progress bar above and the Music app's volume use: it grows under the finger
 // and drags from anywhere on the track. MPVolumeView makes its slider when it lays out and may make another later, so
@@ -164,9 +169,10 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
         objc_setAssociatedObject(stack, &kVolumeKey, volume, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (volume.superview != stack) [stack addSubview:volume];
-    // Halfway between the play button's bottom and the footer glyphs' top, each where it is drawn (convertRect: takes
-    // the moves' transforms in). Without the button there is nothing to stand under: a guess from the controls' unit
-    // put the row across the buttons on an iPhone 13 Pro with iOS 17 (issue #32) and took their taps, so no row.
+    // kAboveFooter over the footer glyphs' top; the play button, each where it is drawn (convertRect: takes the moves'
+    // transforms in), says only whether there is room. Without the button there is no telling: a guess from the
+    // controls' unit put the row across the buttons on an iPhone 13 Pro with iOS 17 (issue #32) and took their taps, so
+    // no row.
     UIView *play = SGRFindByIdentifier(controls, @"SPTNowPlayingPlayButton", &kPlayKey);
     if (!play) {
         static BOOL logged;
@@ -180,7 +186,7 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
     CGFloat above = CGRectGetMaxY([play convertRect:play.bounds toView:stack]);
     CGFloat below = [row convertPoint:CGPointMake(CGRectGetMidX(row.bounds), CGRectGetMidY(row.bounds)) toView:stack].y - kGlyphsHalf;
     CGFloat height = kRowHeight, room = below - above;
-    CGRect frame = CGRectMake(margin, round((above + below - height) / 2), MAX(0, stack.bounds.size.width - 2 * margin), height);
+    CGRect frame = CGRectMake(margin, round(below - kAboveFooter - height), MAX(0, stack.bounds.size.width - 2 * margin), height);
     BOOL moved = !CGRectEqualToRect(volume.frame, frame);
     if (moved) volume.frame = frame;
     settle(stack, row, moved, frame);
