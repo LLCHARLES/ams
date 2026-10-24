@@ -7,6 +7,11 @@
 // chips are FloatingElementsUnit's (Redesigned/Player/PlayerLyrics.x), a unit of Spotify's player that both
 // looks keep, so its pass looks for it there. It goes by alpha, not hidden, since it may sit in one of
 // Spotify's stacks (AGENTS.md), and takes no touches and says nothing to VoiceOver.
+//
+// On 9.1.90 the chip is a NowPlaying_ElementsKit NowPlaying.Button.Primary with that identifier, the one view of an
+// Element_UIKit ElementView of AudioVideoElementProps (the device's log, 2026-10-24). The pass hid it, but Spotify
+// faded it back in after, so the button is hooked as well and kept at no alpha whatever Spotify sets while it carries
+// the identifier, and its element view with it.
 #import "Core/SGCore.h"
 #import "PlayerSettings.h"
 
@@ -22,24 +27,49 @@ static UIView *switchIn(UIView *root, int depth) {
     return nil;
 }
 
+static BOOL isSwitch(UIView *view) {
+    return [view.accessibilityIdentifier isEqualToString:kSwitchIdentifier];
+}
+
+static void hideSwitch(UIView *videoSwitch) {
+    if (videoSwitch.alpha != 0) videoSwitch.alpha = 0;
+    videoSwitch.userInteractionEnabled = NO;
+    videoSwitch.accessibilityElementsHidden = YES;
+    UIView *element = videoSwitch.superview;
+    if ([NSStringFromClass(element.class) containsString:@"AudioVideoElementProps"]) {
+        if (element.alpha != 0) element.alpha = 0;
+        element.userInteractionEnabled = NO;
+    }
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        SGLog(@"player: Switch to video hidden, %@ in %@", NSStringFromClass(videoSwitch.class), NSStringFromClass(element.class));
+    });
+}
+
+%hook _TtCCO22NowPlaying_ElementsKit10NowPlaying6Button7Primary
+- (void)didMoveToWindow {
+    %orig;
+    if (isSwitch((UIView *)self)) hideSwitch((UIView *)self);
+}
+- (void)layoutSubviews {
+    %orig;
+    if (isSwitch((UIView *)self)) hideSwitch((UIView *)self);
+}
+- (void)setAlpha:(CGFloat)alpha {
+    %orig(isSwitch((UIView *)self) ? 0 : alpha);
+}
+%end
+
 %hook _TtC20NowPlaying_ModesImpl20FloatingElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
     UIView *videoSwitch = switchIn(((UIViewController *)self).viewIfLoaded, 0);
-    if (!videoSwitch) return;
-    static BOOL logged;
-    if (!logged) {
-        logged = YES;
-        SGLog(@"player: Switch to video hidden, %@ %@", NSStringFromClass(videoSwitch.class), NSStringFromCGRect(videoSwitch.frame));
-    }
-    videoSwitch.alpha = 0;
-    videoSwitch.userInteractionEnabled = NO;
-    videoSwitch.accessibilityElementsHidden = YES;
+    if (videoSwitch) hideSwitch(videoSwitch);
 }
 %end
 
 %ctor {
     if (!SGHidden(SGKeyHideVideoSwitch)) return;
     %init;
-    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl20FloatingElementsUnit"]);
+    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl20FloatingElementsUnit", @"_TtCCO22NowPlaying_ElementsKit10NowPlaying6Button7Primary"]);
 }
