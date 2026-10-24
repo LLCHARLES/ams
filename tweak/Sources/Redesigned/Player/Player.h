@@ -118,6 +118,9 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
 // Off until switched on, read at launch. The cover's color (a gray one gives the accent back), and a paint of Spotify's
 // bottom stack, which the footer's layout asks for.
 #define SGRKeyPlayerFollowsCover @"spotifyglass.redesign.player.followsCover"
+// Inspect the cover (PlayerArtwork.x): a tap on the player's cover opens Spotify's full-screen cover, tilting with the
+// iPhone. On until switched off, read at launch; off turns off the taps that open it.
+#define SGRKeyPlayerInspectCover @"spotifyglass.redesign.player.inspectCover"
 BOOL SGRPlayerFollowsCover(void);
 void SGRPlayerSetCoverAccent(UIColor *cover);
 void SGRPlayerPaintCover(UIView *stack);
