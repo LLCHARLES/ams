@@ -471,7 +471,7 @@ static void report(SGHarnessChrome *chrome, NSString *moment) {
     }
     UIView *strip = sgJamStrip;
     if (strip.window) NSLog(@"[harness] %@ strip %@", moment, NSStringFromCGRect([strip convertRect:strip.bounds toView:window]));
-    // Every glass platter on the bar: with `split`, the main bar's and the split bar's.
+    // Every glass platter on the bar: minimized, the leading circle's and the trailing one's.
     NSMutableString *platters = [NSMutableString stringWithFormat:@"[harness] %@ platters", moment];
     NSMutableArray<UIView *> *found = [NSMutableArray array];
     NSMutableArray<UIView *> *walk = [NSMutableArray arrayWithObject:stock];
@@ -576,11 +576,11 @@ static UIView *firstOf(UIView *root, BOOL (^match)(UIView *)) {
 }
 
 // `motion`: the presentation frames of what moves, sampled every frame across a stretch: the main bar's platter, its
-// leading glyph, the split bar's platter and the card's glass. Each stretch logs the largest change from one frame to
+// leading glyph, the trailing circle's platter and the card's glass. Each stretch logs the largest change from one frame to
 // the next (x, y, width or height), when it was, and how many times the view under watch was a new one. A spring
 // moves these some 20 pt a frame at most; more is a reversal snapping to the old target, or a view made anew
 // somewhere else.
-static NSString *const kWatched[4] = {@"platter", @"glyph", @"split platter", @"card"};
+static NSString *const kWatched[4] = {@"platter", @"glyph", @"trailing platter", @"card"};
 
 @interface SGHarnessSampler : NSObject {
 @public
@@ -731,7 +731,7 @@ static void after(double seconds, dispatch_block_t block) {
                 for (UIGestureRecognizer *r in v.gestureRecognizers) NSLog(@"[harness]   recognizer %@ on %@", NSStringFromClass(r.class), NSStringFromClass(v.class));
                 if ([v isKindOfClass:UIControl.class]) NSLog(@"[harness]   control %@", NSStringFromClass(v.class));
             }
-            // With `split`, the trailing circle keeps its own touches too.
+            // The trailing circle keeps its own touches too.
             for (UITabBar *other in systemBarsIn(chrome.tabs.bar)) {
                 UIView *otherPlatter = other == bar || other.hidden ? nil : platterIn(other);
                 if (!otherPlatter) continue;
@@ -835,7 +835,7 @@ static void after(double seconds, dispatch_block_t block) {
         after(5.6, ^{ check(chrome, @"expanded in a slow animation block"); });
     }
     // `names`: the titles at rest, after a minimize and expand, after scrolls that turn the bar back before
-    // it settles, and mid-expand; `split`, `five` and `long` change the bar. Every report should say 0 cut.
+    // it settles, and mid-expand; `five` and `long` change the bar. Every report should say 0 cut.
     if ([mode isEqualToString:@"names"]) {
         after(1.0, ^{ reportNames(chrome, @"at rest"); });
         after(1.2, ^{ SGRSetTabBarMinimized(YES, YES); });

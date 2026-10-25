@@ -36,10 +36,10 @@ logged in window points, with the gap between the bottom of the now playing card
 glass bar's platter (8 pt is the redesign's own, on a Face ID phone with nothing under the bar), and
 half way through a slide what the screen shows of the message bar, the tab bar and the now playing bar:
 
-`split` after the first word makes Search a split tab (stubs.m answers `SGRTabIsApart` for it), so it
-stands on a glass bar of its own, and the platters of both bars are logged. `pick` picks Search at 2 s and
+Minimized, the row's last tab stands on a glass circle of its own at the trailing end, and the platters of
+both bars are logged. `pick` picks Search at 2 s and
 Home at 4 s through the system bar's delegate, the mock tab repainting its label white as Spotify's does,
-and logs which bar selects what after each: `xcrun simctl launch <udid> com.vojta.tabbarharness pick split`.
+and logs which bar selects what after each: `xcrun simctl launch <udid> com.vojta.tabbarharness pick`.
 `lit` has Your Library stand in for a tab of the mod's own whose page is up (stubs.m answers `SGRNavbarLitTab`
 with it) at 2 s, while Home's label stays white: the selection logged at 2.5 s should be Your Library. Home is
 picked at 3.5 s, which forgets the lit tab, and the selection at 4.5 s should be Home.
@@ -56,10 +56,9 @@ frames, so how Spotify's own content takes the narrower card is not shown here.
 `names` logs every title the glass bars show and whether UIKit cut it short ("CUT", against the width the text
 needs at the smallest size its label may shrink to): at rest, as the bar starts to expand from minimized, mid-way,
 once expanded, after four turns 0.1 s apart, after a minimize and an expand with no animation (the player opening
-and closing), and after another layout pass. Each line ends with how many are cut, which should be 0. `split2`
-sets Create apart as well as Search, `five` adds a fifth tab and `long` gives two tabs long names (`names split2`,
-`names split five long`). The log is read most reliably from the console:
-`xcrun simctl launch --console-pty <udid> com.vojta.tabbarharness names split2`.
+and closing), and after another layout pass. Each line ends with how many are cut, which should be 0. `five`
+adds a fifth tab and `long` gives two tabs long names (`names five long`). The log is read most reliably from the
+console: `xcrun simctl launch --console-pty <udid> com.vojta.tabbarharness names five`.
 
 2026-10-06, iPhone 17 Pro on iOS 27.0, before the fix: every name read "…" while the bar grew (8 cut), Search and Your Library stayed cut after the minimize and expand with no animation, and with two
 split tabs their names stayed "Sea…" and "Cre…" at rest for good. A split Search (32 pt for 35) and long names
@@ -70,8 +69,8 @@ Downloads" beside a split tab), which UIKit still cuts.
 UIKit's gesture recognizers read, the private calls KIF makes), so the scenarios below tap the glass bar and
 fling the list through UIKit's own recognizers and scrolling. Checked on iOS 27.0 in the simulator only.
 
-`tap` minimizes the bar at 1 s, logs at 2.5 s what a finger on the leading circle lands on (and with `split`
-on the trailing one), and taps it. Both should land on a `_UITabButton` of their own glass bar, and after
+`tap` minimizes the bar at 1 s, logs at 2.5 s what a finger on the leading circle lands on (and on the
+trailing one), and taps it. Both should land on a `_UITabButton` of their own glass bar, and after
 the tap at 3.5 s and 5 s the bar should be expanded with Home selected, as `none` has it. 2026-10-06, iPhone
 17 Pro on iOS 27.0, before the fix: the leading circle's touch landed on the now playing bar's container
 view (a plain `UIView` here), which the hook on `TouchPassthroughView` handed it because that view keeps the
@@ -89,7 +88,7 @@ before the fix: `nested` stopped with the circle at x 107 on its way along the r
 the block's 3 s. After it, every check IN STEP with one animation (UIKit's own), at rest at once.
 
 `motion` samples what the screen shows (the presentation layers) every 1/60 s: the main bar's platter, its
-leftmost glyph, the split bar's platter and the card's glass, across six stretches of 1 s: a minimize, an
+leftmost glyph, the trailing circle's platter and the card's glass, across six stretches of 1 s: a minimize, an
 expand, each of them turned back 0.15 s in, a minimize again, and four turns 0.1 s apart. Each logs the largest
 change in x, y, width or height from one frame to the next (a frame the simulator skipped counts as that many)
 and how often the view watched was a new one, then a check and the names. `timeline` logs every sample. The

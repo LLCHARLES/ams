@@ -684,8 +684,7 @@ App:
     Onboarding/    the welcome page over Home on the first launch, opening on the logo in glass, with Redesigned UI and
                    a No ads switch that sets Hide ads, Hide upsells and Spoof Premium together (off leaves each as it is;
                    on, like a changed look, ends the tour in a restart, as all are read at launch), and under "Easy to miss"
-                   a card of pointers, each what it is and where in Mod Settings: Split Tabs (with the redesign picked),
-                   Lyrics (sources, lyrics for every track, the redesign's live preview with it picked) and AirPods
+                   a card of pointers, each what it is and where in Mod Settings: Lyrics (sources, lyrics for every track, the redesign's live preview with it picked) and AirPods
                    gestures with the Live Activity (iOS 17 on);
                    on the first launch of a new version instead, What's new (WhatsNew.m), this version's section of
                    CHANGELOG.md, which scripts/whats-new.sh writes into a gitignored header at each make (a section
@@ -916,19 +915,20 @@ The tab editor on the Tab bar page is the exception and applies as soon as the b
 the bar shows them: drag to reorder, tap to hide or show, and Add a tab puts a page of Spotify's or
 any `spotify:` link on the bar. It is a sheet: a name, a link picked from Spotify's pages or pasted (one
 Spotify's router cannot open is refused there), and an icon picked from Encore's glyphs or the SF Symbols,
-searchable. Split tabs sets chosen tabs apart at the right end of the bar: after a gap in the native look,
-on a glass bar of their own in the redesign, like Search in the Music app. Spotify's own tabs are kept by the
+searchable. In the native look, Split tabs sets chosen tabs apart at the right end of the bar, after a gap; the
+redesign has none, and its minimized bar keeps the row's last tab on a circle of its own at the trailing end, as the
+Music app keeps Search. Spotify's own tabs are kept by the
 name under their icon, so they can be hidden but never removed, and switching the app's language
 starts the order over. A tab of the mod's own opens its link through Spotify's link dispatcher. In the native
 look it never lights up as the tab you are on; on the redesign's glass bar it does while the page it opened is
 up, and a second tap goes back to that page. In the redesign (Redesigned/Navbar/NavbarSettings.m) the page leads
 with a preview of the glass bar, drawn by the same system UITabBar as the bar itself from the list as it
-stands, the split tabs on a bar of their own, and changing with every change on the page; then Custom tab
+stands, and changing with every change on the page; then Custom tab
 bar (off, the bar is Spotify's own tabs in Spotify's order, the list kept); two picture cards for the labels,
 Icons and names or Icons only (the glass bar's names hidden, applying straight away); the tabs, each with a
 check circle that shows or hides it, its glyph (TabBar.x draws Spotify's own off their items on the bar) and
 the drag handle, a tap on a tab of the mod's own opening the Add a Tab sheet as Edit Tab, with Save and Remove
-Tab; Add a tab and Use Spotify's tabs; and Split tabs. Spotify's own tabs keep their names and icons. Checked
+Tab; and Add a tab and Use Spotify's tabs. Spotify's own tabs keep their names and icons. Checked
 in the simulator against harness/addtab/ (`navbar`, `icons`, `off`, `hide`, `edit`, `remove`, `links`).
 
 ## Adding a feature

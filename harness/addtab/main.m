@@ -93,7 +93,6 @@ static void runNavbar(UIViewController *root, NSString *mode) {
         @{SGRNavbarID: @"Your Library", SGRNavbarTitle: @"Your Library"},
         @{SGRNavbarID: @"Create", SGRNavbarTitle: @"Create", SGRNavbarHidden: @YES},
     ]);
-    SGRSetNavbarSplit(@[@"Search"]);
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:SGRNavbarSettingsPage()];
     nav.modalPresentationStyle = UIModalPresentationFullScreen;
     nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;

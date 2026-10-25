@@ -16,15 +16,11 @@ extern NSString *const SGRNavbarIconSet; // NSString, SGTabIconSetSymbols when t
 extern NSString *const SGRNavbarHidden;  // NSNumber
 NSArray<NSDictionary *> *SGRNavbarLayout(void);
 void SGRSetNavbarLayout(NSArray<NSDictionary *> *layout);
-// The tabs set apart at the trailing end of the bar (Split tabs): a list of entries of their own, apart from
-// SGRNavbarLayout's. A tab of the mod's own here is independent of the bar's; one of Spotify's can stand in one
-// place only, so it leaves the bar's list while it is here.
-NSArray<NSDictionary *> *SGRNavbarSplit(void);
-void SGRSetNavbarSplit(NSArray<NSDictionary *> *split);
-// The split tabs as they were stored before they had a list of their own (.split, the identities of entries of the
-// bar's list) moved over to that list, once: when .split is there and the list is not. Run at launch, so a settings
-// backup from before, which an import writes back before it restarts, is moved over too.
-void SGRMigrateNavbarSplit(void);
+// Split tabs, the tabs once set apart at the trailing end of the bar, are gone: the minimized bar's trailing circle is
+// the row's last tab. Whatever was saved on their list goes to the end of the bar's list, shown, so those tabs stay on
+// the right; their keys are then removed. Run at launch, so a settings backup from before, which an import writes back
+// before it restarts, is folded in too.
+void SGRFoldNavbarSplit(void);
 // Spotify's own tabs in Spotify's order, as Navbar.x last saw them on the bar.
 NSArray<NSString *> *SGRNavbarStock(void);
 void SGRSetNavbarStock(NSArray<NSString *> *stock);
@@ -38,8 +34,6 @@ void SGRComposeTabBar(UIView *tabBar);
 void SGRLogTabBarRow(UIView *tabBar);
 // Lays the bar out again after the Navbar page changes something, so it does not wait for a touch.
 void SGRRefreshTabBar(void);
-// Whether a tab of the composed row is one of the split tabs at its trailing end, for TabBar.x's second bar.
-BOOL SGRTabIsApart(UIView *item);
 // The tab of the mod's own whose page is on screen, which the glass bar shows selected; nil when none is.
 UIView *SGRNavbarLitTab(void);
 // A tap on one of Spotify's tabs: no tab of the mod's own is lit any more.
