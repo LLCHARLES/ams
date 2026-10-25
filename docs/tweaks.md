@@ -787,7 +787,7 @@ the simulator by harness/driver/.
 
 ## Mod Settings
 
-Mod Settings, opened by holding Home on the tab bar or from the first row of the side drawer and the
+Mod Settings, opened by holding Home on the tab bar (the redesign's first tab, whichever it is) or from the first row of the side drawer and the
 last row of Spotify's Settings, looks like the system Settings app in its dark appearance under either look:
 cards of #1C1C1E on black, 17pt rows that follow Dynamic Type up to xxxLarge and the app font, each part of
 Spotify behind a symbol on a tile of its own color, gray chevrons and footnote headers. It has no account

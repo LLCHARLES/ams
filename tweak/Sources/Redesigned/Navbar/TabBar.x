@@ -54,9 +54,9 @@ static NSArray<UIView *> *tabItems(UIView *tabBar) {
     }];
 }
 
-// Navbar.x never reorders Spotify's row and appends the mod's own tabs after it, so Home stays first.
-static BOOL isHome(UIView *item, UIView *tabBar) {
-    return item && item == SGRowIn(tabBar).arrangedSubviews.firstObject;
+// The first tab the bar shows, whichever the tab editor put there: the one held for Mod Settings.
+static BOOL isFirstTab(UIView *item, UIView *tabBar) {
+    return item && item == tabItems(tabBar).firstObject;
 }
 
 static UILabel *labelIn(UIView *item) {
@@ -209,14 +209,15 @@ static void forwardTap(UIView *item) {
     }
 }
 
-#pragma mark - holding Home
+#pragma mark - holding the first tab
 
-// Holding Home opens Mod Settings as a press and hold, as YTGlass's hold on YouTube's Home does: a little longer than
+// Holding the first tab (Home, unless the tab editor moved another there; its owner asked for the first, 2026-10-25)
+// opens Mod Settings as a press and hold, as YTGlass's hold on YouTube's Home does: a little longer than
 // iOS's own press for a menu (some 0.5 s) and a firm tap when it opens, so the hold is felt and a slow tap is not taken
 // for one. Letting go before then is an ordinary tap.
-static const NSTimeInterval kHomeHold = 0.8;
+static const NSTimeInterval kFirstTabHold = 0.8;
 
-static void homeHeld(UIView *source) {
+static void firstTabHeld(UIView *source) {
     UIImpactFeedbackGenerator *tap = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [tap impactOccurred];
     SGOpenModSettings(source);
@@ -294,7 +295,7 @@ void SGRShrinkTabTitles(UIView *bar) {
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
     if (recognizer != self.hold) return [super gestureRecognizerShouldBegin:recognizer];
     NSUInteger index = [self.items indexOfObject:[self itemAt:[recognizer locationInView:self]]];
-    return index < self.sources.count && isHome(self.sources[index], self.stockBar);
+    return index < self.sources.count && isFirstTab(self.sources[index], self.stockBar);
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
@@ -304,9 +305,9 @@ void SGRShrinkTabTitles(UIView *bar) {
 - (void)held:(UILongPressGestureRecognizer *)hold {
     if (hold.state == UIGestureRecognizerStateBegan) {
         self.holding = YES;
-        homeHeld(self);
+        firstTabHeld(self);
     } else if (hold.state != UIGestureRecognizerStateChanged) {
-        // The bar may still pick Home as the finger lifts, after this.
+        // The bar may still pick the tab as the finger lifts, after this.
         __weak typeof(self) weakSelf = self;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             weakSelf.holding = NO;
@@ -331,25 +332,31 @@ void SGRShrinkTabTitles(UIView *bar) {
 }
 @end
 
-@interface SGRHomeHold : UILongPressGestureRecognizer
+@interface SGRFirstTabHold : UILongPressGestureRecognizer
 @end
 
-@implementation SGRHomeHold
-+ (void)held:(SGRHomeHold *)hold {
-    if (hold.state == UIGestureRecognizerStateBegan) homeHeld(hold.view);
+@implementation SGRFirstTabHold
++ (void)held:(SGRFirstTabHold *)hold {
+    if (hold.state == UIGestureRecognizerStateBegan) firstTabHeld(hold.view);
 }
 @end
 
-// On Spotify's own bar a hold that begins fails the item's tap recognizer, so Home is not tapped too.
-static void holdHome(UIView *stockBar) {
-    UIView *home = SGRowIn(stockBar).arrangedSubviews.firstObject;
-    if (!home) return;
-    for (UIGestureRecognizer *recognizer in home.gestureRecognizers) {
-        if ([recognizer isKindOfClass:SGRHomeHold.class]) return;
+// On Spotify's own bar a hold that begins fails the item's tap recognizer, so the tab is not tapped too. It moves with
+// the first tab when the tab editor changes which that is.
+static void holdFirstTab(UIView *stockBar) {
+    UIView *first = tabItems(stockBar).firstObject;
+    BOOL held = NO;
+    for (UIView *item in SGRowIn(stockBar).arrangedSubviews) {
+        for (UIGestureRecognizer *recognizer in item.gestureRecognizers.copy) {
+            if (![recognizer isKindOfClass:SGRFirstTabHold.class]) continue;
+            if (item == first) held = YES;
+            else [item removeGestureRecognizer:recognizer];
+        }
     }
-    SGRHomeHold *hold = [[SGRHomeHold alloc] initWithTarget:SGRHomeHold.class action:@selector(held:)];
-    hold.minimumPressDuration = kHomeHold;
-    [home addGestureRecognizer:hold];
+    if (!first || held) return;
+    SGRFirstTabHold *hold = [[SGRFirstTabHold alloc] initWithTarget:SGRFirstTabHold.class action:@selector(held:)];
+    hold.minimumPressDuration = kFirstTabHold;
+    [first addGestureRecognizer:hold];
 }
 
 static void logBarOnce(UITabBar *bar) {
@@ -457,7 +464,7 @@ static SGRSystemTabBar *makeBar(UIView *stockBar) {
     bar.delegate = bar;
     bar.stockBar = stockBar;
     UILongPressGestureRecognizer *hold = [[UILongPressGestureRecognizer alloc] initWithTarget:bar action:@selector(held:)];
-    hold.minimumPressDuration = kHomeHold;
+    hold.minimumPressDuration = kFirstTabHold;
     hold.delegate = bar;
     [bar addGestureRecognizer:hold];
     bar.hold = hold;
@@ -1103,7 +1110,7 @@ static BOOL sg_itemsLaidOut;
     if (sg_itemsLaidOut) SGRComposeTabBar(bar);
     sg_passBar = outer;
     sg_itemsLaidOut = outerLaidOut;
-    holdHome(bar);
+    holdFirstTab(bar);
     syncBar(bar);
     SGRLogTabBarRow(bar);
 }
@@ -1119,7 +1126,7 @@ static void itemDidLayOut(UIView *item) {
         return;
     }
     SGRComposeTabBar(bar);
-    holdHome(bar);
+    holdFirstTab(bar);
     syncBar(bar);
     SGRLogTabBarRow(bar);
 }
