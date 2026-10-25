@@ -191,8 +191,10 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
     if (moved) volume.frame = frame;
     settle(stack, row, moved, frame);
     // The lyrics fade the stack's views by their alpha and bring back only the ones they faded.
-    // The track and thumb are 14pt of the row's 34: it fits with the glyphs' and buttons' own clearance around it.
-    BOOL fits = room >= height * 0.6;
+    // The track and thumb are 14pt of the row's 34, its middle 17pt over the row's bottom, which stands kAboveFooter over
+    // the footer: it fits when the track clears the play button by the glyphs' and buttons' own clearance (61pt of room on
+    // a 956pt tall iPhone, 40.7 needed).
+    BOOL fits = room >= kAboveFooter + height * 0.8;
     if (!fits) volume.alpha = 0;
     else if (volume.alpha < 0.01 && controls.alpha > 0.99) volume.alpha = 1;
     return fits;

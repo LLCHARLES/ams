@@ -517,18 +517,27 @@ static void selectActive(SGRSystemTabBar *bar, UIView *active) {
     if (active && item) bar.shown = item;
 }
 
+// The item a bar holds for the tab the page is on, as shown without selecting it; none when the page is on another
+// bar's tab, and left as it is when Spotify paints no tab.
+static void noteShown(SGRSystemTabBar *bar, UIView *active) {
+    if (!active) return;
+    NSUInteger index = [bar.sources indexOfObject:active];
+    UITabBarItem *item = index == NSNotFound || index >= bar.items.count ? nil : bar.items[index];
+    if (bar.shown != item) bar.shown = item;
+}
+
 static BOOL hasSplitTabs(UIView *stockBar) {
     for (UIView *source in tabItems(stockBar)) if (SGRTabIsApart(source)) return YES;
     return NO;
 }
 
-// The Search tab, told by its name (Spotify's tabs carry nothing else that says which they are), else none.
-static UIView *searchSource(NSArray<UIView *> *sources) {
-    for (UIView *source in sources) {
-        NSString *name = labelIn(source).text;
-        if (name && [name localizedCaseInsensitiveCompare:@"Search"] == NSOrderedSame) return source;
-    }
-    return nil;
+// The Search tab among `sources`, else none. Spotify's tabs carry nothing that says which they are and their names are
+// in the app's language, but Navbar.x leaves Spotify's row in the order Spotify built it (Home, Search, Library,
+// Create), so Search is its second item whatever the bar shows it as.
+static UIView *searchSource(UIView *stockBar, NSArray<UIView *> *sources) {
+    NSArray<UIView *> *row = SGRowIn(stockBar).arrangedSubviews;
+    UIView *search = row.count > 1 ? row[1] : nil;
+    return search && [sources containsObject:search] ? search : nil;
 }
 
 // The tab a bar shows selected, when Spotify paints none: a tab of the mod's own.
@@ -645,8 +654,11 @@ static void syncBar(UIView *stockBar) {
     // this without split tabs, 2026-10-24); with no Search tab the card has the rest of the row.
     BOOL minimized = sg_minimized && sources.count >= 2;
     if (minimized) {
-        UIView *last = apart.lastObject ?: (sources.count >= 3 ? searchSource(main) : nil);
-        main = [NSMutableArray arrayWithObject:active && active != last ? active : main.firstObject];
+        UIView *last = apart.lastObject ?: (sources.count >= 3 ? searchSource(stockBar, main) : nil);
+        // The leading circle never holds the trailing one's tab, Search moved to the front of the row included.
+        UIView *lead = active && active != last ? active : nil;
+        for (UIView *source in main) if (!lead && source != last) lead = source;
+        main = [NSMutableArray arrayWithObject:lead ?: main.firstObject];
         apart = last ? [NSMutableArray arrayWithObject:last] : [NSMutableArray array];
         hideLabels = YES;
     }
@@ -691,9 +703,12 @@ static void syncBar(UIView *stockBar) {
     if (apart.count) missing |= fillBar(apartBar, apart, hideLabels, minimized && active && apart.firstObject == active);
     // The minimized bar's circle holds the tab it is on, lit, with no bubble round it: the Music app's circle is
     // its glass and the glyph. Selected, UIKit drew its bubble inside the circle, a dark disc in a ring.
+    // It still keeps the item it is on as shown, so a tap on a lit circle is told from one that changes the tab.
     if (minimized) {
         if (bar.selectedItem) bar.selectedItem = nil;
         if (apartBar.selectedItem) apartBar.selectedItem = nil;
+        noteShown(bar, active);
+        if (apart.count) noteShown(apartBar, active);
     } else {
         selectActive(bar, active);
         if (apart.count) selectActive(apartBar, active);
@@ -963,17 +978,22 @@ static void moveFrom(UIView *host, SGRBarState before, void (^along)(void), NSTi
     SGLog(@"tab bar: %lu tabs fade out, %lu fade in", (unsigned long)gone.count, (unsigned long)faded.count);
 }
 
-// The middle, in the host, of the trailing tab a bar shows (Search, on a bar without split tabs), where it is laid out.
-static BOOL trailingTabCenter(UIView *bar, UIView *host, CGPoint *center) {
-    __block CGFloat best = -CGFLOAT_MAX;
+// The middle, in the host, of the Search tab the row shows, where it is laid out: its buttons left to right stand for
+// its sources in order, wherever the tab editor put Search.
+static BOOL searchTabCenter(SGRSystemTabBar *bar, UIView *stockBar, UIView *host, CGPoint *center) {
+    NSUInteger index = [bar.sources indexOfObject:searchSource(stockBar, bar.sources)];
+    if (index == NSNotFound) return NO;
+    NSMutableArray<UIView *> *buttons = [NSMutableArray array];
     SGForEachView(bar, ^(UIView *v) {
-        if (!v.window || !isTabButton(v) || isLitCopy(v, host)) return;
-        CGRect frame = [v convertRect:v.bounds toView:host];
-        if (CGRectGetMidX(frame) <= best) return;
-        best = CGRectGetMidX(frame);
-        *center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        if (v.window && isTabButton(v) && !isLitCopy(v, host)) [buttons addObject:v];
     });
-    return best > -CGFLOAT_MAX;
+    if (buttons.count != bar.sources.count) return NO;
+    [buttons sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        return [@(CGRectGetMidX([a convertRect:a.bounds toView:host])) compare:@(CGRectGetMidX([b convertRect:b.bounds toView:host]))];
+    }];
+    CGRect frame = [buttons[index] convertRect:buttons[index].bounds toView:host];
+    *center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    return YES;
 }
 
 static void setMinimized(BOOL minimized, BOOL animated) {
@@ -1000,7 +1020,7 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     UIView *mainBar = objc_getAssociatedObject(stockBar, &kBarKey), *apartBar = objc_getAssociatedObject(stockBar, &kApartBarKey);
     // Minimizing, Search's circle sets off from where Search stands in the row; growing, it heads back there.
     CGPoint searchInRow = CGPointZero;
-    BOOL fromRow = animated && minimized && !split && trailingTabCenter(mainBar, host, &searchInRow);
+    BOOL fromRow = animated && minimized && !split && searchTabCenter((SGRSystemTabBar *)mainBar, stockBar, host, &searchInRow);
     BOOL leaving = animated && !minimized && !split && apartBar && !apartBar.hidden;
     if (leaving) sg_apartLeaving = YES;
     CALayer *mainShown = mainBar.layer.presentationLayer ?: mainBar.layer, *apartShown = apartBar.layer.presentationLayer ?: apartBar.layer;
@@ -1037,7 +1057,7 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     }
     if (leaving) {
         CGPoint target = CGPointZero;
-        if (trailingTabCenter(mainBar, host, &target)) {
+        if (searchTabCenter((SGRSystemTabBar *)mainBar, stockBar, host, &target)) {
             CGRect to = CGRectMake(target.x - side / 2, searchBar.frame.origin.y, searchBar.frame.size.width, searchBar.frame.size.height);
             [before.frames removeObjectForKey:searchBar];
             SGRAnimateBarAfter(kBarLag, ^{ searchBar.frame = to; }, nil);
