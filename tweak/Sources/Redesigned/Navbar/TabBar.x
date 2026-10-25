@@ -1107,23 +1107,41 @@ static UIView *tabBarOf(UIView *item) {
     return nil;
 }
 
+// The bar in its own pass, and whether one of its items laid out during it.
+static __weak UIView *sg_passBar;
+static BOOL sg_itemsLaidOut;
+
 %hook _TtC23NavigationUI_TabBarImpl10TabBarView
 - (void)layoutSubviews {
+    // A pass nested in another (an item's layoutIfNeeded) hands both back, so the outer one still composes.
+    UIView *bar = (UIView *)self, *outer = sg_passBar;
+    BOOL outerLaidOut = sg_itemsLaidOut;
+    sg_passBar = bar;
     %orig;
-    SGRComposeTabBar((UIView *)self);
-    for (UIView *sub in ((UIView *)self).subviews) {
+    SGRComposeTabBar(bar);
+    sg_itemsLaidOut = NO;
+    for (UIView *sub in bar.subviews) {
         if (![sub isKindOfClass:SGRTabBarHost.class] && ![sub isKindOfClass:SGRBarFade.class]) [sub layoutIfNeeded];
     }
-    holdHome((UIView *)self);
-    syncBar((UIView *)self);
-    SGRLogTabBarRow((UIView *)self);
+    // Items the row's pass laid out are composed once, all together, rather than once each.
+    if (sg_itemsLaidOut) SGRComposeTabBar(bar);
+    sg_passBar = outer;
+    sg_itemsLaidOut = outerLaidOut;
+    holdHome(bar);
+    syncBar(bar);
+    SGRLogTabBarRow(bar);
 }
 %end
 
-// The bar's own pass runs before Spotify has filled the row; the items lay out as they arrive.
+// The bar's own pass runs before Spotify has filled the row; the items lay out as they arrive. Inside the bar's
+// pass, the pass composes once after them; outside it, the item composes at once, so no frame shows Spotify's row.
 static void itemDidLayOut(UIView *item) {
     UIView *bar = tabBarOf(item);
     if (!bar) return;
+    if (bar == sg_passBar) {
+        sg_itemsLaidOut = YES;
+        return;
+    }
     SGRComposeTabBar(bar);
     holdHome(bar);
     syncBar(bar);

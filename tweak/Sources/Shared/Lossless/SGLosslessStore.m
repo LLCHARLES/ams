@@ -19,7 +19,8 @@ static NSString *folded(NSString *text) {
         stringByFoldingWithOptions:NSCaseInsensitiveSearch | NSWidthInsensitiveSearch locale:nil];
 }
 
-// A file's title tag and length, read once per file and kept by name and modification date.
+// A file's title tag and length, read once per file and kept by name and modification date. Lossless.x
+// looks things up on one serial queue, which is all that touches the cache.
 static NSDictionary *tags(NSString *path) {
     static NSMutableDictionary<NSString *, NSDictionary *> *cache;
     if (!cache) cache = [NSMutableDictionary dictionary];

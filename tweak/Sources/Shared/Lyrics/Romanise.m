@@ -11,12 +11,21 @@
 
 NSNotificationName const SGLyricsRomanisedDidChangeNotification = @"spotifyglass.lyricsRomanisedDidChange";
 
-static BOOL has(NSString *text, NSString *pattern) {
-    return [text rangeOfString:pattern options:NSRegularExpressionSearch].location != NSNotFound;
+typedef NS_ENUM(NSUInteger, SGScript) { SGScriptKana, SGScriptNotLatin, SGScriptHan };
+
+// Compiled once: every line on the page is looked at.
+static BOOL has(NSString *text, SGScript script) {
+    static NSRegularExpression *patterns[3];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSArray<NSString *> *sources = @[@"[\\p{Hiragana}\\p{Katakana}]", @"[\\p{L}&&[^\\p{Latin}]]", @"\\p{Han}"];
+        for (NSUInteger i = 0; i < 3; i++) patterns[i] = [NSRegularExpression regularExpressionWithPattern:sources[i] options:0 error:NULL];
+    });
+    return [patterns[script] rangeOfFirstMatchInString:text options:0 range:NSMakeRange(0, text.length)].location != NSNotFound;
 }
 
 static BOOL hasKana(NSString *text) {
-    return has(text, @"[\\p{Hiragana}\\p{Katakana}]");
+    return has(text, SGScriptKana);
 }
 
 BOOL SGLyricsLooksJapanese(NSArray<SGKaraokeLine *> *lines) {
@@ -50,18 +59,22 @@ static NSString *readJapanese(NSString *text) {
 }
 
 NSString *SGLyricsRomanised(NSString *text, BOOL japanese) {
-    // Only a line with a letter of another script: Latin with accents (German, Vietnamese) is left alone.
-    if (!text.length || !has(text, @"[\\p{L}&&[^\\p{Latin}]]")) return nil;
+    if (!text.length) return nil;
     static NSCache<NSString *, NSString *> *kept;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ kept = [NSCache new]; });
     NSString *key = japanese ? [@"ja:" stringByAppendingString:text] : text;
     NSString *romanised = [kept objectForKey:key];
     if (romanised) return romanised.length ? romanised : nil;
+    // Only a line with a letter of another script: Latin with accents (German, Vietnamese) is left alone.
+    if (!has(text, SGScriptNotLatin)) {
+        [kept setObject:@"" forKey:key];
+        return nil;
+    }
     BOOL kana = japanese || hasKana(text);
     NSString *source = kana ? readJapanese(text) : text;
     // Han left over is Chinese: its pinyin keeps the tones, and only its punctuation is made ASCII.
-    NSString *transform = !kana && has(text, @"\\p{Han}") ? @"Any-Latin; [[:P:][:Zs:]] Latin-ASCII" : @"Any-Latin; Latin-ASCII";
+    NSString *transform = !kana && has(text, SGScriptHan) ? @"Any-Latin; [[:P:][:Zs:]] Latin-ASCII" : @"Any-Latin; Latin-ASCII";
     romanised = [[source stringByApplyingTransform:transform reverse:NO]
                  stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"";
     if ([romanised caseInsensitiveCompare:text] == NSOrderedSame) romanised = @"";

@@ -92,7 +92,7 @@ static void fillFront(UIScrollView *list) {
     BOOL player = NO;
     for (UIView *view = tilt.superview; view; view = view.superview) {
         if (isCoverCell(view)) return;
-        player = player || [NSStringFromClass(view.class) containsString:@"NowPlaying"];
+        player = player || SGClassNamed(view.class, @"NowPlaying");
     }
     if (player) fill(largestImageIn(tilt));
 }

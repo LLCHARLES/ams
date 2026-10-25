@@ -21,47 +21,41 @@ static BOOL onArtistPage(UIView *view) {
     return NO;
 }
 
-static UIView *identNamed(UIView *root, NSString *ident) {
-    __block UIView *found = nil;
-    SGForEachView(root, ^(UIView *v) {
-        if (!found && [v.accessibilityIdentifier hasPrefix:ident]) found = v;
-    });
-    return found;
-}
-
 #pragma mark - header
 
-static void hide(UIView *view, NSString *key) {
-    if (view && SGHidden(key)) view.hidden = YES;
-}
+static const struct { __unsafe_unretained NSString *ident, *key; } buttons[] = {
+    {@"Components.UI.WatchFeedEntityExplorerButton", SGHideArtistExplore},
+    {@"Curation.FollowButtonElementKit.FollowButton", SGHideArtistFollow},
+    {@"Components.UI.ContextMenuButton", SGHideArtistMore},
+    {@"Components.UI.ShuffleButton", SGHideArtistShuffle},
+};
+enum { kButtons = sizeof(buttons) / sizeof(buttons[0]) };
+
+// The header's parts, each remembered on the header once found (Core/SGViewTree.h).
+static char kBadgeKey, kMetadataKey, kTitleKey, kArtworkKey, kButtonKeys[kButtons];
+static NSString *const kBadge = @"ImageHeaderView.VerifiedBadge", *const kMetadata = @"Components.Header.UI.Metadata";
 
 // The identifier sits on the button; the action is the view the button row arranges around it.
 static UIView *actionHolding(UIView *button, UIView *header) {
     for (UIView *v = button; v.superview && v.superview != header; v = v.superview) {
         if (v.superview.superview == header) return v;
-        if ([NSStringFromClass(v.superview.class) containsString:@"OverflowStackView"]) return v;
+        if (SGClassNamed(v.superview.class, @"OverflowStackView")) return v;
     }
     return nil;
 }
 
 static void applyHeader(UIView *header) {
-    hide(identNamed(header, @"ImageHeaderView.VerifiedBadge"), SGHideArtistVerified);
+    if (SGHidden(SGHideArtistVerified)) SGFindIdentifier(header, kBadge, &kBadgeKey).hidden = YES;
     // Its AutoLayoutStackView traps like OverflowStackView below once the label goes hidden.
-    if (SGHidden(SGHideArtistListeners)) identNamed(header, @"Components.Header.UI.Metadata").alpha = 0;
+    if (SGHidden(SGHideArtistListeners)) SGFindIdentifier(header, kMetadata, &kMetadataKey).alpha = 0;
 
-    static const struct { __unsafe_unretained NSString *ident, *key; } buttons[] = {
-        {@"Components.UI.WatchFeedEntityExplorerButton", SGHideArtistExplore},
-        {@"Curation.FollowButtonElementKit.FollowButton", SGHideArtistFollow},
-        {@"Components.UI.ContextMenuButton", SGHideArtistMore},
-        {@"Components.UI.ShuffleButton", SGHideArtistShuffle},
-    };
-    for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i++) {
+    for (size_t i = 0; i < kButtons; i++) {
         if (!SGHidden(buttons[i].key)) continue;
-        UIView *action = actionHolding(identNamed(header, buttons[i].ident), header);
+        UIView *action = actionHolding(SGFindIdentifier(header, buttons[i].ident, &kButtonKeys[i]), header);
         if (!action) continue;
         // OverflowStackView traps in updateConstraints once its views go hidden (crash 2026-09-15),
         // so those only turn invisible and keep their place.
-        if ([NSStringFromClass(action.superview.class) containsString:@"OverflowStackView"]) {
+        if (SGClassNamed(action.superview.class, @"OverflowStackView")) {
             action.alpha = 0;
             action.userInteractionEnabled = NO;
         } else {
@@ -85,11 +79,13 @@ static UIView *childOfHeader(UIView *view, UIView *header) {
 // the photo: the title block slides down to sit where the lowest of them sat. Transforms, because
 // the header's stack views crash on anything that changes their layout.
 static void closeUpTitle(UIView *header) {
-    UIView *title = childOfHeader(identNamed(header, @"Encore.AdaptiveTitle"), header);
-    UIView *badge = identNamed(header, @"ImageHeaderView.VerifiedBadge");
-    UIView *listeners = identNamed(header, @"Components.Header.UI.Metadata");
+    // The badge first: an artist without one is left alone before anything else is looked for.
+    UIView *badge = SGFindIdentifier(header, kBadge, &kBadgeKey);
+    if (!badge || badge.superview != header) return;
+    UIView *title = childOfHeader(SGFindIdentifier(header, @"Encore.AdaptiveTitle", &kTitleKey), header);
+    UIView *listeners = SGFindIdentifier(header, kMetadata, &kMetadataKey);
     UIView *metadata = childOfHeader(listeners, header);
-    if (!title || !badge || !metadata || badge.superview != header) return;
+    if (!title || !metadata) return;
 
     // Walks up from the listeners' line: each shown line lands on the bottom edge the line under it
     // left free, keeping its own gap to the line above.
@@ -135,7 +131,7 @@ static CAGradientLayer *fadeMask(CALayer *host, NSArray<NSNumber *> *locations) 
 
 static void applyPhotoFade(UIView *header) {
     if (!SGFlag(SGKeyArtistPhotoFade, NO)) return;
-    UIView *artwork = identNamed(header, @"Components.Header.UI.ArtworkImage");
+    UIView *artwork = SGFindIdentifier(header, @"Components.Header.UI.ArtworkImage", &kArtworkKey);
     UIView *clip = childOfHeader(artwork, header);
     if (!artwork || !clip || clip == artwork) return;
     __block UIImageView *source = nil;
@@ -192,7 +188,7 @@ static void applyPhotoFade(UIView *header) {
 - (void)layoutSubviews {
     %orig;
     UIView *header = self.superview;
-    if (![NSStringFromClass(header.class) containsString:@"ImageHeaderKit"]) return;
+    if (!SGClassNamed(header.class, @"ImageHeaderKit")) return;
     applyHeader(header);
     closeUpTitle(header);
 }
@@ -264,7 +260,7 @@ static BOOL anySectionSwitch(void) {
 static NSString *headingIn(UIView *cell) {
     __block NSString *title = nil;
     SGForEachView(cell, ^(UIView *v) {
-        if (!title && v.accessibilityLabel.length && [NSStringFromClass(v.class) containsString:@"SectionHeadingHome"]) {
+        if (!title && SGClassNamed(v.class, @"SectionHeadingHome") && v.accessibilityLabel.length) {
             title = v.accessibilityLabel;
         }
     });
@@ -301,12 +297,15 @@ static UICollectionView *listOf(UIView *cell) {
 }
 
 static BOOL collapsed(UICollectionViewCell *cell, NSIndexPath *path) {
+    BOOL hideLiked = SGHidden(SGHideArtistLikedSongs), anySection = anySectionSwitch();
+    if (!hideLiked && !anySection) return NO;
     for (UIView *v = cell.superview; v; v = v.superview) {
         if ([v isKindOfClass:cell.class]) return NO;   // a card inside a carousel: its row decides
     }
     if (!onArtistPage(cell)) return NO;
-    if (SGHidden(SGHideArtistLikedSongs) && identNamed(cell, @"Components.UI.LikedSongs.Row")) return YES;
-    if (!anySectionSwitch() || !path) return NO;
+    static char likedKey;
+    if (hideLiked && SGFindIdentifier(cell, @"Components.UI.LikedSongs.Row", &likedKey)) return YES;
+    if (!anySection || !path) return NO;
 
     UICollectionView *list = listOf(cell);
     if (!list) return NO;

@@ -44,6 +44,18 @@ static NSString *wordIn(UIView *button) {
     return word;
 }
 
+// The capsule's word, made again only when the text size changes: the header feeds the capsule on every step of its collapse.
+static UIFont *capsuleFont(void) {
+    static UIFont *font;
+    static UIContentSizeCategory madeFor;
+    UIContentSizeCategory category = UIApplication.sharedApplication.preferredContentSizeCategory;
+    if (!font || ![category isEqualToString:madeFor]) {
+        font = SGRFont(UIFontTextStyleSubheadline, UIFontWeightSemibold, UIContentSizeCategoryLarge);
+        madeFor = category;
+    }
+    return font;
+}
+
 #pragma mark - the Play capsule
 
 @implementation SGRPlayCapsule {
@@ -110,7 +122,7 @@ static NSString *wordIn(UIView *button) {
     CGSize size = source.bounds.size;
     UIImageView *glyph = glyphIn(source, MIN(size.width, size.height));
 
-    UIFont *font = SGRFont(UIFontTextStyleSubheadline, UIFontWeightSemibold, UIContentSizeCategoryLarge);
+    UIFont *font = capsuleFont();
     if (![_title.font isEqual:font]) _title.font = font;
     UIColor *content = self.contentColor ?: SGRAccent();
     if (![_title.textColor isEqual:content]) _title.textColor = content;

@@ -14,6 +14,7 @@
 // community translations are asked in (the redesign's lyrics being where translations show), whether lines timed only by the line are swept word by word, whether lines in other alphabets show again in Latin letters, and how much later than the song every line shows.
 SGModSection *SGLyricsSourcesSection(BOOL namingSource);
 SGModRow *SGLockScreenLyricsRow(void);
+SGModRow *SGLockScreenTranslationRow(void);
 SGModRow *SGLyricsTranslationLanguageRow(void);
 SGModRow *SGLyricsWordTimingRow(void);
 SGModRow *SGLyricsRomanisedRow(void);
@@ -95,6 +96,13 @@ NSInteger SGKaraokeSungEnd(SGKaraokeLine *line);
 // this is the earliest line still being sung; between lines, the last one begun; -1 before the first.
 // The lock screen and the Live Activity show this one.
 NSInteger SGKaraokeLeadLine(NSArray<SGKaraokeLine *> *lines, NSInteger ms);
+// Past a line's end by this much, with the next line at least this far off, the lock screen lets the line go.
+static const NSInteger SGKaraokeBreakMs = 4000;
+// The ms after `position` at which the lock screen's line can next change, -1 for never: where SGKaraokeLeadLine
+// or a break turns over (each line's start, SGKaraokeBreakMs before it, its sung end, and a ms past
+// SGKaraokeBreakMs after its end and its sung end), and the word starts of line `wordsOf`, -1 for none. Some are
+// only a wake that finds the same line.
+NSInteger SGKaraokeMsToChange(NSArray<SGKaraokeLine *> *lines, NSInteger position, NSInteger wordsOf);
 // Whether the text is written in a script that does not space its words, so the pieces of a line
 // are words in their own right rather than halves of one.
 BOOL SGKaraokeUnspacedScript(NSString *text);
@@ -174,5 +182,5 @@ id SGKaraokePlayer(void);                // SPTEsperantoPlayer, nil before the a
 // A track the player has reported, by its base62 id; nil for one it has not played this session.
 @class SPTPlayerTrack;
 SPTPlayerTrack *SGKaraokeTrackFor(NSString *trackID);
-// Keeps a track seen elsewhere, so a source can name it before the player has reported it.
-void SGKaraokeRememberTrack(SPTPlayerTrack *track);
+// Keeps a track seen elsewhere, by its base62 id, so a source can name it before the player has reported it.
+void SGKaraokeRememberTrack(SPTPlayerTrack *track, NSString *trackID);

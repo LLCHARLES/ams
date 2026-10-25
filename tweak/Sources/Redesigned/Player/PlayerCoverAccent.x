@@ -14,7 +14,7 @@
 
 static NSInteger sg_cover = -1;   // 0xRRGGBB while a cover gives one, else -1
 static __weak UIView *sg_stack;   // the bottom stack last painted
-static char kOriginalKey, kTintedKey, kTintedCoverKey, kAccentImageKey, kOriginalFillKey, kOriginalStrokeKey;
+static char kOriginalKey, kTintedKey, kTintedCoverKey, kAccentImageKey, kInkKey, kOriginalFillKey, kOriginalStrokeKey;
 
 BOOL SGRPlayerFollowsCover(void) {
     static BOOL on;
@@ -29,28 +29,50 @@ static void unpack(NSInteger rgb, CGFloat *r, CGFloat *g, CGFloat *b) {
     *b = (rgb & 0xFF) / 255.0;
 }
 
+// Made once per cover color: every pass over the stack hands it out.
 static UIColor *coverColor(void) {
+    static NSInteger madeFor = -1;
+    static UIColor *made;
+    if (made && madeFor == sg_cover) return made;
     CGFloat r, g, b;
     unpack(sg_cover, &r, &g, &b);
-    return [UIColor colorWithRed:r green:g blue:b alpha:1];
+    made = [UIColor colorWithRed:r green:g blue:b alpha:1];
+    madeFor = sg_cover;
+    return made;
+}
+
+// -[UIColor getHue:saturation:brightness:alpha:] worked out from the components, without making a color for it.
+static void hsv(CGFloat r, CGFloat g, CGFloat b, CGFloat *h, CGFloat *s, CGFloat *v) {
+    CGFloat high = MAX(r, MAX(g, b)), low = MIN(r, MIN(g, b)), range = high - low;
+    *v = high;
+    *s = high > 0 ? range / high : 0;
+    if (range <= 0 || high <= 0) *h = 0;
+    else if (high == r) *h = (g - b) / range;
+    else if (high == g) *h = 2 + (b - r) / range;
+    else *h = 4 + (r - g) / range;
+    *h /= 6;
+    if (*h < 0) *h += 1;
 }
 
 // Whether a color is the accent's: its hue within kHueNear, and colorful. Darker shades of it count (a pressed state).
+// A color made from Spotify's green comes out as the accent (Kit/SGRAccent.x), so that green is judged as the accent.
 static const CGFloat kHueNear = 0.05, kColorful = 0.35;
 static BOOL accentLike(CGFloat r, CGFloat g, CGFloat b) {
     static CGFloat accentHue = -1;
     if (accentHue < 0) {
-        CGFloat ar, ag, ab, s, v, a;
+        CGFloat ar, ag, ab, s, v;
         unpack(SGRAccentRGB(), &ar, &ag, &ab);
-        [[UIColor colorWithRed:ar green:ag blue:ab alpha:1] getHue:&accentHue saturation:&s brightness:&v alpha:&a];
+        SGRAccentSwap(&ar, &ag, &ab);
+        hsv(ar, ag, ab, &accentHue, &s, &v);
     }
-    CGFloat h, s, v, a;
-    if (![[UIColor colorWithRed:r green:g blue:b alpha:1] getHue:&h saturation:&s brightness:&v alpha:&a]) return NO;
+    CGFloat h, s, v;
+    SGRAccentSwap(&r, &g, &b);
+    hsv(r, g, b, &h, &s, &v);
     CGFloat d = fabs(h - accentHue);
     return MIN(d, 1 - d) < kHueNear && s > kColorful && v > 0.2;
 }
 
-static BOOL colorAccentLike(UIColor *color) {
+BOOL SGRPlayerAccentLike(UIColor *color) {
     CGFloat r, g, b, a;
     return color && [color getRed:&r green:&g blue:&b alpha:&a] && a > 0.5 && accentLike(r, g, b);
 }
@@ -61,16 +83,15 @@ static BOOL cgAccentLike(CGColorRef color) {
     return c[3] > 0.5 && accentLike(c[0], c[1], c[2]);
 }
 
-// Whether an image is drawn in the accent: the average of its opaque pixels, read once at 16 by 16 and kept on it.
-static BOOL imageAccentLike(UIImage *image) {
-    NSNumber *known = objc_getAssociatedObject(image, &kAccentImageKey);
-    if (known) return known.boolValue;
+UIColor *SGRPlayerImageInk(UIImage *image) {
+    id known = objc_getAssociatedObject(image, &kInkKey);
+    if (known) return known == NSNull.null ? nil : known;
     enum { kSide = 16 };
     uint8_t pixels[kSide * kSide * 4] = {0};
     CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(pixels, kSide, kSide, 8, kSide * 4, space, (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
     CGColorSpaceRelease(space);
-    BOOL accent = NO;
+    UIColor *ink = nil;
     if (context && image.CGImage) {
         CGContextDrawImage(context, CGRectMake(0, 0, kSide, kSide), image.CGImage);
         double r = 0, g = 0, b = 0, n = 0;
@@ -82,9 +103,18 @@ static BOOL imageAccentLike(UIImage *image) {
             b += pixels[i * 4 + 2] / (double)alpha;
             n++;
         }
-        accent = n >= 4 && accentLike(r / n, g / n, b / n);
+        if (n >= 4) ink = [UIColor colorWithRed:r / n green:g / n blue:b / n alpha:1];
     }
     if (context) CGContextRelease(context);
+    objc_setAssociatedObject(image, &kInkKey, ink ?: NSNull.null, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return ink;
+}
+
+// Whether an image is drawn in the accent, judged once and kept on it.
+static BOOL imageAccentLike(UIImage *image) {
+    NSNumber *known = objc_getAssociatedObject(image, &kAccentImageKey);
+    if (known) return known.boolValue;
+    BOOL accent = SGRPlayerAccentLike(SGRPlayerImageInk(image));
     objc_setAssociatedObject(image, &kAccentImageKey, @(accent), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return accent;
 }
@@ -110,12 +140,13 @@ static void paintImageView(UIImageView *view) {
 static void paintBackground(UIView *view) {
     UIColor *original = objc_getAssociatedObject(view, &kOriginalKey);
     UIColor *current = view.backgroundColor;
-    if (!original && !colorAccentLike(current)) return;
+    if (!original && !SGRPlayerAccentLike(current)) return;
     if (!original) {
         original = current;
         objc_setAssociatedObject(view, &kOriginalKey, original, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    view.backgroundColor = sg_cover < 0 ? original : coverColor();
+    UIColor *color = sg_cover < 0 ? original : coverColor();
+    if (![view.backgroundColor isEqual:color]) view.backgroundColor = color;
 }
 
 static void paintShape(CAShapeLayer *layer) {
@@ -129,6 +160,7 @@ static void paintShape(CAShapeLayer *layer) {
             objc_setAssociatedObject(layer, key, original, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         CGColorRef color = sg_cover < 0 ? (__bridge CGColorRef)original : coverColor().CGColor;
+        if (CGColorEqualToColor(current, color)) continue;
         if (stroke) layer.strokeColor = color;
         else layer.fillColor = color;
     }

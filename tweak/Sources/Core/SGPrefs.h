@@ -18,6 +18,10 @@ void SGSetEnabled(NSString *key, BOOL on);
 NSInteger SGInt(NSString *key, NSInteger fallback);
 void SGSetInt(NSString *key, NSInteger value);
 
+// The accessors keep what they read until the defaults change. An observer of NSUserDefaultsDidChangeNotification
+// that reads them calls this first, as observers are not called in a set order.
+void SGPrefsChanged(void);
+
 // Overrides of Spotify's remote-config flags, stored under SGFlagOverridePrefix + flag key;
 // nil keeps Spotify's value. Shared/Flags reads them, the All flags page and flag rows write them.
 extern NSString *const SGFlagOverridePrefix;

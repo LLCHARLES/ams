@@ -443,7 +443,8 @@ static void finish(SGLyricsWalk *walk) {
 // Whether the walk has its answer. walk.merged is the best seen so far: betterLines keeps the finest timed
 // lines, the first in the order among equals, so a walk run to the end takes words over a line's start over
 // plain text. It stops at the first timed answer, or with Prefer word-by-word timing at the first with words
-// timed. A source picked for the track is asked first, and its answer ends the walk in step.
+// timed. A source picked for the track is asked first, and its answer ends the walk in step, as a timed
+// imported LRC does.
 static BOOL settled(SGLyricsWalk *walk) {
     SGLyricsResult *merged = walk.merged;
     if (!(merged.synced && merged.texts.count && merged.karaokeLines.count)) return NO;
@@ -502,11 +503,14 @@ static void step(SGLyricsWalk *walk) {
         }
         // The pick stands timed or not, so a timed source lower in the order cannot replace it. A pick made while
         // the walk runs is left to finish, which keeps the order's answer for Automatic.
-        if (fresh.karaokeLines.count && [provider.key isEqualToString:walk.picked]
-            && [walk.picked isEqualToString:SGLyricsChosenSource(query.trackID)]) {
+        BOOL pick = [provider.key isEqualToString:walk.picked] && [walk.picked isEqualToString:SGLyricsChosenSource(query.trackID)];
+        // The user's own timed file is the answer too: Prefer word-by-word timing looks past the sources' line timing,
+        // not past lyrics the user imported for the song (#111). Below a source as finely timed, the order still wins.
+        BOOL imported = fresh.synced && [provider.key isEqualToString:SGImportedLRCKey] && betterLines(merged, fresh);
+        if (fresh.karaokeLines.count && (pick || imported)) {
             if (!fresh.provider) fresh.provider = provider.name;
             walk.merged = fresh;
-            walk.pickedAnswered = YES;
+            walk.pickedAnswered = pick;
             finish(walk);
             return;
         }

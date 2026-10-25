@@ -95,6 +95,14 @@ static NSDate *sg_lastSent;
 static SGLiveActivityTab sg_tab;
 
 static void tick(void) API_AVAILABLE(ios(17.0));
+// When ActivityKit last said none is showing, with the app in the background; until kRefresh on, nothing is sent.
+static NSDate *sg_noneAt;
+
+// In the background with none showing, as ActivityKit said within kRefresh: send() sends nothing.
+static BOOL heldBack(void) {
+    return sg_noneAt && -sg_noneAt.timeIntervalSinceNow < kRefresh
+        && UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
+}
 
 // An NSTimer cannot be asked to change pace, so changing it is putting one down and another up.
 static void startTimer(NSTimeInterval every) API_AVAILABLE(ios(17.0)) {
@@ -110,10 +118,9 @@ static void send(NSString *shown, void (^show)(void)) API_AVAILABLE(ios(17.0)) {
     // ActivityKit is asked only when there is something to send: each question is a round trip to the system,
     // and this runs four times a second. An activity ended from outside is started again within kRefresh.
     if ([shown isEqualToString:sg_shown] && -sg_lastSent.timeIntervalSinceNow < kRefresh) return;
-    static NSDate *noneAt;   // when ActivityKit last said none is showing, with the app in the background
+    if (heldBack()) return;
+    sg_noneAt = nil;
     BOOL background = UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
-    if (background && noneAt && -noneAt.timeIntervalSinceNow < kRefresh) return;
-    noneAt = nil;
     BOOL showing = SGLiveActivityBridge.isShowing;
     NSDate *started = showing ? SGLiveActivityBridge.startedAt : nil;
     NSTimeInterval age = started ? -started.timeIntervalSinceNow : 0;
@@ -129,7 +136,7 @@ static void send(NSString *shown, void (^show)(void)) API_AVAILABLE(ios(17.0)) {
             // Nothing to send to, and none can start in the background: asked again after kRefresh.
             static NSUInteger told;
             if (told++ < 5) SGLog(@"live activity: none showing, not sent in the background");
-            noneAt = [NSDate date];
+            sg_noneAt = [NSDate date];
             return;
         }
         if (sg_lastStart && -sg_lastStart.timeIntervalSinceNow < kStartRetry) return;
@@ -286,6 +293,12 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
     // Only the lyrics follow the song line by line; the other views' bar runs by itself from its dates.
     NSTimeInterval every = paused || view != SGLiveActivityLyrics ? kPausedTick : kTick;
     if (sg_timer && sg_tickEvery != every) startTimer(every);
+    // send() would send nothing yet, so nothing is worked out for it.
+    // The lyrics are still asked for, so they are there when it sends again.
+    if (heldBack()) {
+        if (view == SGLiveActivityLyrics && !SGKaraokeLinesForTrack(trackID)) SGKaraokeRequestLyrics(trackID);
+        return;
+    }
     NSString *line = @"", *next = @"", *translation = nil;
     BOOL noLyrics = NO;
     if (view == SGLiveActivityLyrics) line = lyricsLine(trackID, &next, &translation, &noLyrics);
@@ -531,8 +544,10 @@ void SGSetLiveActivityEnabled(BOOL on) {
         // long gone. On, a fresh one starts once it is: until then the first ticks update the leftover, which is
         // harmless, an update after the end being ignored. A launch in the background (a play from AirPods,
         // CarPlay or the lock screen) keeps it, since no new one can start there, and the first tick updates it.
+        // Off, it is ended only if one shows, so nothing is queued for the many who never turned it on.
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (!on || UIApplication.sharedApplication.applicationState != UIApplicationStateBackground) [SGLiveActivityBridge end];
+            if ((!on && SGLiveActivityBridge.isShowing) || (on && UIApplication.sharedApplication.applicationState != UIApplicationStateBackground))
+                [SGLiveActivityBridge end];
             if (on) SGSetLiveActivityEnabled(YES);
         });
     }

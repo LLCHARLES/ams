@@ -53,12 +53,19 @@ static NSString *string(id value) {
     return [value isKindOfClass:NSString.class] ? value : nil;
 }
 
+static const NSInteger kDefaultAITimeout = 120;
+
+static NSTimeInterval aiTimeout(void) {
+    NSInteger seconds = [NSUserDefaults.standardUserDefaults integerForKey:SGKeyAITimeout];
+    return seconds > 0 ? seconds : kDefaultAITimeout;
+}
+
 static NSMutableURLRequest *post(NSString *url, NSDictionary *body) {
     NSURL *endpoint = url ? [NSURL URLWithString:url] : nil;
     if (!endpoint) return nil;
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:endpoint];
     request.HTTPMethod = @"POST";
-    request.timeoutInterval = 60;
+    request.timeoutInterval = aiTimeout();
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
     return request;
@@ -68,6 +75,12 @@ static NSMutableURLRequest *post(NSString *url, NSDictionary *body) {
 static NSDictionary *linesSchema(void) {
     return @{@"type": @"object", @"properties": @{@"lines": @{@"type": @"array", @"items": @{@"type": @"string"}}},
              @"required": @[@"lines"], @"additionalProperties": @NO};
+}
+
+static NSString *geminiThinkingLevel(void) {
+    // Only the menu's levels: a stored "minimal" from an early build of this row would make 3.8 Flash answer 400 every ask.
+    NSString *level = [NSUserDefaults.standardUserDefaults stringForKey:SGKeyAIThinking];
+    return [@[@"medium", @"high"] containsObject:level] ? level : @"low";
 }
 
 // Gemini: generateContent, the key in x-goog-api-key, a bare array forced by responseSchema.
@@ -83,7 +96,7 @@ static NSMutableURLRequest *geminiRequest(NSString *model, NSString *prompt, NSS
                                      @"responseSchema": @{@"type": @"ARRAY", @"items": @{@"type": @"STRING"}}} mutableCopy];
     // Gemini 3 thinks at length by default, which a whole song's translation does not need and which made it
     // slow enough to time out. Plain: a model named in Other… that does not know the field.
-    if (!plain) config[@"thinkingConfig"] = @{@"thinkingLevel": @"low"};
+    if (!plain) config[@"thinkingConfig"] = @{@"thinkingLevel": geminiThinkingLevel()};
     NSMutableURLRequest *request = post([NSString stringWithFormat:@"https://generativelanguage.googleapis.com/v1beta/models/%@:generateContent", model],
                                         @{@"contents": @[@{@"parts": @[@{@"text": prompt}]}], @"safetySettings": safety, @"generationConfig": config});
     [request setValue:key forHTTPHeaderField:@"x-goog-api-key"];
@@ -185,7 +198,7 @@ static const SGAIProvider kProviders[] = {
      @"Answer with a JSON array of the {count} translations as strings.",
      // A pinned id first, the one users report working. gemini-flash-latest follows each Flash release, preview
      // ones included, with notice only by email to the key's owner, so it is offered but not the default.
-     {@"gemini-3.6-flash", @"gemini-3.5-flash-lite", @"gemini-flash-latest"}, {@"3.6 Flash", @"3.5 Flash-Lite", @"Flash (latest)"},
+     {@"gemini-3.8-flash", @"gemini-3.5-flash-lite", @"gemini-flash-latest"}, {@"3.8 Flash", @"3.5 Flash-Lite", @"Flash (latest)"},
      YES, {@"thinking"}, geminiRequest, geminiAnswer},
     {@"openai", @"OpenAI-compatible", nil, @"Vitrine.OpenAI",
      @"Sends the song's lyrics to the server below: OpenAI's own unless you name another, such as OpenRouter, or an "
@@ -390,7 +403,9 @@ NSArray<NSString *> *SGAITranslationsIn(NSString *provider, id root, NSInteger s
     // {"error": {"message": ...}} from all three; a bare string from some compatible servers.
     NSString *says = string(dig(reply, @[@"error", @"message"])) ?: string(reply[@"error"]);
     if (error) {
-        *problem = [NSString stringWithFormat:@"%@ could not be reached.", who];
+        *problem = error.code == NSURLErrorTimedOut
+            ? [NSString stringWithFormat:@"%@ timed out. Try a longer timeout on the Lyrics page.", who]
+            : [NSString stringWithFormat:@"%@ could not be reached.", who];
     } else if (status == 401 || status == 403 || (status == 400 && [says localizedCaseInsensitiveContainsString:@"API key"])) {
         *problem = [NSString stringWithFormat:@"%@ turned the key down. Check it on the Lyrics page.", who];
     } else if (status == 400 || status == 404) {
@@ -439,7 +454,7 @@ static void send(const SGAIProvider *p, NSURLRequest *request, NSURLRequest *pla
     }] resume];
 }
 
-// Per launch, by "track|language|" and then the provider, server, model and prompt: a translation asked again
+// Per launch, by "track|language|" and then the provider, server, model, Gemini's thinking and prompt: a translation asked again
 // after any of them changed is a new one.
 static NSMutableDictionary<NSString *, NSArray<NSString *> *> *sg_done;
 
@@ -461,8 +476,9 @@ void SGLyricsTranslateWithAI(NSString *trackID, NSArray<SGKaraokeLine *> *lines,
         return;
     }
     if (!sg_done) sg_done = [NSMutableDictionary dictionary];
-    NSString *memo = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@", trackID, languageTag, p->tag,
-                      isOpenAI(p) ? openAIServer() : @"", modelID, template];
+    NSString *memo = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@|%@", trackID, languageTag, p->tag,
+                      isOpenAI(p) ? openAIServer() : @"", modelID,
+                      [p->tag isEqualToString:@"gemini"] ? geminiThinkingLevel() : @"", template];
     if (trackID && sg_done[memo].count == lines.count) {
         done(sg_done[memo], nil);
         return;
@@ -744,5 +760,25 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
         SGPresentDark(nav);
         [SGTopController() presentViewController:nav animated:YES completion:nil];
     });
-    return @[provider, key, models, prompt];
+    // Low first: 3.8 Flash refuses minimal.
+    NSArray<NSString *> *thinkingLevels = @[@"Low", @"Medium", @"High"];
+    SGModRow *thinking = SGMenuRow(@"Thinking", thinkingLevels, ^NSString *{
+        return geminiThinkingLevel().capitalizedString;
+    }, ^(NSInteger index) {
+        if (index == 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyAIThinking];
+        else [NSUserDefaults.standardUserDefaults setObject:thinkingLevels[index].lowercaseString forKey:SGKeyAIThinking];
+        translatorChanged();
+    });
+    thinking.visible = ^{ return [chosen()->tag isEqualToString:@"gemini"]; };
+    NSArray<NSNumber *> *timeoutSeconds = @[@30, @60, @90, @(kDefaultAITimeout), @180, @240, @300];
+    NSMutableArray<NSString *> *timeouts = [NSMutableArray array];
+    for (NSNumber *seconds in timeoutSeconds) [timeouts addObject:[NSString stringWithFormat:@"%@ s", seconds]];
+    SGModRow *timeout = SGMenuRow(@"Timeout", timeouts, ^NSString *{
+        return [NSString stringWithFormat:@"%ld s", (long)aiTimeout()];
+    }, ^(NSInteger index) {
+        NSInteger seconds = timeoutSeconds[index].integerValue;
+        if (seconds == kDefaultAITimeout) [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyAITimeout];
+        else [NSUserDefaults.standardUserDefaults setInteger:seconds forKey:SGKeyAITimeout];
+    });
+    return @[provider, key, models, thinking, timeout, prompt];
 }

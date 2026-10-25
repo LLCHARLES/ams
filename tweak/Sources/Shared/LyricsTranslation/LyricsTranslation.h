@@ -24,6 +24,9 @@ NSArray<SGModRow *> *SGOnDeviceTranslatorRows(void);
 // is kept in the Keychain beside its key, not here. All read at each translation.
 #define SGKeyAITranslator @"spotifyglass.lyrics.ai"
 #define SGKeyAIPrompt @"spotifyglass.lyrics.prompt"
+// Gemini's thinking level (unset: low) and the request timeout in seconds for every provider (unset: 120).
+#define SGKeyAIThinking @"spotifyglass.lyrics.gemini.thinking"
+#define SGKeyAITimeout @"spotifyglass.lyrics.ai.timeout"
 
 // Who made a translation: an AI provider's id with its model, or one of the two on the iPhone. A translation
 // saved before sources were kept has neither, and reads as unknown.
@@ -78,7 +81,8 @@ NSArray<SGModRow *> *SGAITranslatorRows(void);
 @interface SGOnDeviceTranslation : NSObject
 @property (class, readonly) BOOL translationAvailable;
 + (BOOL)appleIntelligenceAvailable:(NSString *)languageTag;
-+ (void)translate:(NSArray<NSString *> *)lines to:(NSString *)languageTag done:(void (^)(NSArray<NSString *> *lines, NSString *error))done;
++ (void)openTranslateSettings;
++ (void)translate:(NSArray<NSString *> *)lines to:(NSString *)languageTag from:(UIView *)view done:(void (^)(NSArray<NSString *> *lines, NSString *error))done;
 // Apple Intelligence works through the song a batch at a time: `progress` gets the lines so far, "" for the rest.
 + (void)translateWithAppleIntelligence:(NSArray<NSString *> *)lines to:(NSString *)languageTag song:(NSString *)song
                               progress:(void (^)(NSArray<NSString *> *lines))progress
