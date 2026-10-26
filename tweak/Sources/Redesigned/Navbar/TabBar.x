@@ -1155,16 +1155,23 @@ static void setMinimized(BOOL minimized, BOOL animated) {
     CALayer *mainShown = mainBar.layer.presentationLayer ?: mainBar.layer;
     NSValue *mainWas = [NSValue valueWithCATransform3D:mainShown.sublayerTransform];
     // The items are made where the bars are going, before anything moves. UIKit sizes a tab's name by the platter
-    // its item is made in and never again, and the first pass made the expanding row's items while the bar still
-    // held the circle's one item, its platter a circle: "Your Library" stayed cut. So they are made a second time,
-    // the platters now the full row's, and the names are whole all the way.
+    // its item is made in, and the first pass made the expanding row's items while the bar still held the circle's one
+    // item, its platter a circle: "Your Library" stayed cut. They were made a second time for that, which was a third of
+    // the expand's stall; now each name is set again once the row is laid out, which measures it anew (its owner asked
+    // for the stall cut, 2026-10-26). Checked on the phone: every name its full width over six expands.
     [UIView performWithoutAnimation:^{
         syncBar(stockBar);
         [host layoutIfNeeded];
         if (!minimized) {
-            ((SGRSystemTabBar *)objc_getAssociatedObject(stockBar, &kBarKey)).sources = nil;
-            syncBar(stockBar);
+            SGRSystemTabBar *row = objc_getAssociatedObject(stockBar, &kBarKey);
+            for (UITabBarItem *item in row.items) {
+                NSString *title = item.title;
+                if (!title.length) continue;
+                item.title = nil;
+                item.title = title;
+            }
             [host layoutIfNeeded];
+            SGRShrinkTabTitles(row);
         }
         if (!animated) SGRNowPlayingBarFollowTabBar();
     }];
