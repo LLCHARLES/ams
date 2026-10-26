@@ -910,16 +910,25 @@ static void styleNowPlayingBar(UIViewController *container) {
 // on the bar is turned away, its pages' sideways scroll for the next track kept. With the card in the minimized bar's
 // row, Spotify's tap sits on a view of the bar's page that the row's move leaves where it was, so it starts only on the
 // card's glass (a screen recording: a swipe where the card used to stand opened the player).
+// Asked at every touch of every pan and tap in the app. A recognizer on a view above the bar is judged by its view's
+// class names once and the answer kept on it, for its view: named afresh at each touch, it built up to six strings a tap.
+static char kInBarKey;
+
 static BOOL inBar(UIGestureRecognizer *recognizer) {
     UIView *view = recognizer.view, *bar = sg_container.viewIfLoaded;
-    if (!view || !bar) return NO;
+    if (!view || !bar || view.window != bar.window) return NO;
     if ([view isDescendantOfView:bar]) return YES;
     if (![bar isDescendantOfView:view]) return NO;
+    // The view by its address, not held: it holds the recognizer.
+    NSArray<NSValue *> *kept = objc_getAssociatedObject(recognizer, &kInBarKey);
+    if (kept.firstObject.nonretainedObjectValue == view) return [(NSNumber *)kept.lastObject boolValue];
+    BOOL named = NO;
     NSUInteger levels = 0;
-    for (UIView *v = view; v && levels < 6; v = v.superview, levels++) {
-        if ([NSStringFromClass(v.class) containsString:@"NowPlaying"]) return YES;
+    for (UIView *v = view; v && levels < 6 && !named; v = v.superview, levels++) {
+        named = [NSStringFromClass(v.class) containsString:@"NowPlaying"];
     }
-    return NO;
+    objc_setAssociatedObject(recognizer, &kInBarKey, @[[NSValue valueWithNonretainedObject:view], @(named)], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return named;
 }
 
 static BOOL isBarSwipe(UIGestureRecognizer *recognizer) {

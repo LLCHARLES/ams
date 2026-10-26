@@ -140,8 +140,39 @@ static UIImage *glyphOf(UIView *item, BOOL active) {
             return image;
         }
     }
-    // Tabs of the mod's own draw a UIImageView, or an icon Encore would not draw off screen.
-    return size.width >= 2 ? renderLayer(live.layer, size) : nil;
+    // Tabs of the mod's own draw a UIImageView, or an icon Encore would not draw off screen. On 9.1.90 Spotify's own
+    // icon views name no icon, so its tab is pictured off the live view, which shows its filled icon only while its tab
+    // is the one Spotify is on: a tab picked kept the hollow picture it was made with (its owner, 2026-10-26). So the
+    // live view is drawn in the state asked for, its state set for the drawing and given back at once, without
+    // animation, and both pictures are kept per tab: UIKit then shows the filled one in the lens's lit copy as the lens
+    // passes over it, as YouTube's glass bar does (its owner's recording).
+    if (size.width < 2) return nil;
+    BOOL toggles = [live isKindOfClass:viewClass] && [live respondsToSelector:@selector(setIsActive:)] && [live respondsToSelector:@selector(isActive)];
+    if (!toggles) return renderLayer(live.layer, size);
+    static NSCache<NSString *, UIImage *> *pictures;
+    if (!pictures) pictures = [NSCache new];
+    NSString *key = [NSString stringWithFormat:@"%@ %d %@", labelIn(item).text ?: @"", active, NSStringFromCGSize(size)];
+    UIImage *kept = [pictures objectForKey:key];
+    if (kept) return kept;
+    SPTEncoreIconView *spotify = (SPTEncoreIconView *)live;
+    BOOL was = [spotify isActive];
+    __block UIImage *image = nil;
+    [UIView performWithoutAnimation:^{
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        if (was != active) {
+            [spotify setIsActive:active];
+            [spotify layoutIfNeeded];
+        }
+        image = renderLayer(spotify.layer, size);
+        if (was != active) {
+            [spotify setIsActive:was];
+            [spotify layoutIfNeeded];
+        }
+        [CATransaction commit];
+    }];
+    if (image) [pictures setObject:image forKey:key];
+    return image;
 }
 
 // For the Tab bar page's list and preview: a tab of Spotify's drawn from its item on the bar, hidden or not,
@@ -521,7 +552,9 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
     BOOL missing = NO;
     for (NSUInteger i = 0; i < sources.count; i++) {
         UITabBarItem *item = bar.items[i];
-        // Drawn again when it goes lit or unlit: the trailing circle keeps its item, lit while its tab is the page's.
+        // Drawn again when it goes lit or unlit: the trailing circle keeps its item, lit while its tab is the page's. The
+        // hollow and filled pictures are each tab's own (glyphOf), so a tab change sets nothing: set mid slide, they had
+        // the lens stutter (its owner, 2026-10-26).
         static char kLitKey;
         if (!item.image || [objc_getAssociatedObject(item, &kLitKey) boolValue] != lit) {
             UIImage *image = lit ? [glyphOf(sources[i], YES) imageWithTintColor:SGRAccent() renderingMode:UIImageRenderingModeAlwaysOriginal]
@@ -596,8 +629,12 @@ static char kNaturalKey;
 
 // How far a frame UIKit gives a view of a widened platter is stretched, from the platter UIKit laid out to the one it
 // has; 1 for any other view. `platterOut` is the platter.
+// Whether any bar has had its platter widened: until one has, the hooks below have nothing to do. They run for every
+// tab button and lens in the app, and iOS 26 lenses a slider's thumb too, so a volume drag ran them every frame.
+static BOOL sg_anyWidened;
+
 static CGFloat stretchFor(UIView *view, UIView **platterOut) {
-    if (sg_minimized) return 1;
+    if (sg_minimized || !sg_anyWidened) return 1;
     UIView *platter = nil;
     SGRSystemTabBar *bar = nil;
     NSUInteger depth = 0;
@@ -709,6 +746,7 @@ static void widenPlatter(UITabBar *bar) {
     if (fabs(frame.size.width - room) <= 0.5 && fabs(frame.origin.x - kPlatterInset) <= 0.5) return;
     // The width UIKit just gave it, which its rows are laid out to.
     objc_setAssociatedObject(bar, &kNaturalKey, @(frame.size.width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    sg_anyWidened = YES;
     objc_setAssociatedObject(platter, &kPlacedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(platter, &kPlacedWidthKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject(platter, &kSlotsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -797,6 +835,36 @@ static void syncBar(UIView *stockBar) {
     // one at the trailing end, the way the Music app keeps Search, sliding out of the row to it as the card comes down
     // between the two (its owner asked for the last tab, 2026-10-25). On the last tab, the leading circle has the first.
     BOOL minimized = sg_minimized && sources.count >= 2;
+
+    // Spotify lays its bar out far more often than anything on it changes, and each pass re-laid and re-filled both glass
+    // bars. What the pass below reads is kept, and when none of it changed since a pass that drew everything, only the
+    // glass is kept in front and the room under it made.
+    static NSArray<UIView *> *lastSources;
+    static __weak UIView *lastActive;
+    static __weak id lastItems, lastSelected, lastTrailItems;
+    static NSString *lastLabels;
+    static UIColor *lastAccent;
+    static CGRect lastBounds;
+    static CGFloat lastSafe, lastRoom;
+    static BOOL lastMinimized, lastHide, lastLeaving, lastInWindow, lastMissing = YES;
+    NSMutableString *labels = [NSMutableString string];
+    for (UIView *source in sources) [labels appendFormat:@"%@\n", labelIn(source).text ?: @""];
+    UIColor *accent = SGRAccent();
+    BOOL same = !lastMissing && [sources isEqualToArray:lastSources] && active == lastActive && minimized == lastMinimized
+        && hideLabels == lastHide && sg_trailLeaving == lastLeaving && (stockBar.window != nil) == lastInWindow
+        && CGRectEqualToRect(stockBar.bounds, lastBounds) && stockBar.safeAreaInsets.bottom == lastSafe && sg_room == lastRoom
+        && bar.sources == lastItems && bar.selectedItem == lastSelected && trailBar.sources == lastTrailItems
+        && [labels isEqualToString:lastLabels] && [accent isEqual:lastAccent];
+    static NSUInteger runs, skips;
+    runs++;
+    if (same) {
+        skips++;
+        if (runs % 200 == 0 && runs <= 2000) SGLog(@"tab bar: %lu of %lu passes found nothing changed", (unsigned long)skips, (unsigned long)runs);
+        if (host.superview != stockBar) [stockBar addSubview:host];
+        else if (stockBar.subviews.lastObject != host) [stockBar bringSubviewToFront:host];
+        makeRoom(containerOf(stockBar));
+        return;
+    }
     NSArray<UIView *> *main = sources, *trail = @[];
     if (minimized) {
         UIView *last = sources.lastObject;
@@ -853,6 +921,21 @@ static void syncBar(UIView *stockBar) {
     // The trailing bar is only ever a circle: grown back to a bar's platter, it swelled to a ringed disc beside the
     // row as it went back in (a recording at 30 fps, 2026-10-24).
     shrinkCircle(trailBar, YES);
+    lastSources = sources;
+    lastActive = active;
+    lastMinimized = minimized;
+    lastHide = SGHidden(SGRKeyNavbarHideLabels);
+    lastLeaving = sg_trailLeaving;
+    lastInWindow = stockBar.window != nil;
+    lastBounds = stockBar.bounds;
+    lastSafe = stockBar.safeAreaInsets.bottom;
+    lastRoom = sg_room;
+    lastItems = bar.sources;
+    lastSelected = bar.selectedItem;
+    lastTrailItems = trailBar.sources;
+    lastLabels = labels;
+    lastAccent = accent;
+    lastMissing = missing;
     // An icon view Spotify has not built yet is looked for again shortly, not on the next touch.
     static NSUInteger retries;
     if (missing && retries++ < 40) {
@@ -962,7 +1045,14 @@ static BOOL isTabButton(UIView *view) {
 
 // A glyph's shape: its alpha on a 16 pt grid, the same for the same icon whatever its color or UIImage copy.
 static NSString *glyphShape(UIView *button) {
-    CGImageRef image = glyphView(button).image.CGImage;
+    // Kept per picture: UIKit hands the same image to a tab's buttons from one move to the next while its items stay,
+    // and each was drawn at 16 by 16 at every move.
+    static NSMapTable<id, NSString *> *shapes;
+    if (!shapes) shapes = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality valueOptions:NSPointerFunctionsStrongMemory];
+    UIImage *picture = glyphView(button).image;
+    NSString *known = picture ? [shapes objectForKey:picture] : nil;
+    if (known) return known;
+    CGImageRef image = picture.CGImage;
     if (!image) return nil;
     enum { kSide = 16 };
     uint8_t alpha[kSide * kSide] = {0};
@@ -971,7 +1061,9 @@ static NSString *glyphShape(UIView *button) {
     CGContextRelease(context);
     uint64_t hash = 1469598103934665603ULL;
     for (int i = 0; i < kSide * kSide; i++) hash = (hash ^ (alpha[i] > 127)) * 1099511628211ULL;
-    return [NSString stringWithFormat:@"%llx", hash];
+    NSString *shape = [NSString stringWithFormat:@"%llx", hash];
+    [shapes setObject:shape forKey:picture];
+    return shape;
 }
 
 // Which old button a new one takes over from, in each of the two copies. A tab that stays slides from where its
@@ -1006,7 +1098,7 @@ static CGRect shownIn(UIView *view, UIView *host) {
     return [layer convertRect:layer.bounds toLayer:top];
 }
 
-static SGRBarState barState(UIView *host) {
+static SGRBarState barState(UIView *host, BOOL pictured) {
     SGRBarState state = {
         [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsWeakMemory | NSPointerFunctionsObjectPointerPersonality valueOptions:NSPointerFunctionsStrongMemory],
         [NSMutableDictionary dictionary],
@@ -1021,8 +1113,10 @@ static SGRBarState barState(UIView *host) {
         NSArray<NSString *> *keys = tabKeys(v, host);
         for (NSString *key in keys) state.glyphs[key] = [NSValue valueWithCGPoint:CGPointMake(CGRectGetMidX(glyph), CGRectGetMidY(glyph))];
         [state.keys setObject:keys forKey:v];
-        // The lit copy is left out, or its picture would show the tab lit outside the bubble.
-        if (isLitCopy(v, host)) return;
+        // The lit copy is left out, or its picture would show the tab lit outside the bubble. Pictured now, while it is
+        // whole: pictured once it went, UIKit had already squeezed it into the circle, a gray block fading out (a screen
+        // recording, 2026-10-26). Only a minimize has tabs that go, so an expand pictures none.
+        if (!pictured || isLitCopy(v, host)) return;
         UIView *picture = pictureOf(v);
         if (picture) {
             picture.frame = shown;
@@ -1143,7 +1237,7 @@ static void setMinimized(BOOL minimized, BOOL animated) {
         syncBar(stockBar);
     };
     animated &= host.window != nil;
-    SGRBarState before = animated ? barState(host) : (SGRBarState){0};
+    SGRBarState before = animated ? barState(host, minimized) : (SGRBarState){0};
     UIView *mainBar = objc_getAssociatedObject(stockBar, &kBarKey), *trailBar = objc_getAssociatedObject(stockBar, &kTrailBarKey);
     // Minimizing, the trailing circle sets off from where the last tab stands in the row; growing, it heads back there
     // and goes into the row: kept, it stood beside the grown row as a second copy until the spring ended, where the
