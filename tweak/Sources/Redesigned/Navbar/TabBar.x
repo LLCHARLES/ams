@@ -27,6 +27,7 @@ static CGFloat sg_room, sg_glassHeight;   // see "room for the glass bar"
 static BOOL sg_minimized;
 // The trailing circle sliding back into the row as the bar grows, kept on screen until it has.
 static BOOL sg_trailLeaving;
+static BOOL sg_fingerOnBar;
 
 @interface SGRSystemTabBar : UITabBar <UITabBarDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, weak) UIView *stockBar;
@@ -308,6 +309,11 @@ static UIImageView *glyphView(UIView *button);
     return YES;
 }
 
+- (void)fingerMoved:(UILongPressGestureRecognizer *)finger {
+    UIGestureRecognizerState state = finger.state;
+    sg_fingerOnBar = state == UIGestureRecognizerStateBegan || state == UIGestureRecognizerStateChanged;
+}
+
 - (void)held:(UILongPressGestureRecognizer *)hold {
     if (hold.state == UIGestureRecognizerStateBegan) {
         self.holding = YES;
@@ -476,6 +482,15 @@ static SGRSystemTabBar *makeBar(UIView *stockBar) {
     hold.delegate = bar;
     [bar addGestureRecognizer:hold];
     bar.hold = hold;
+    // Whether a finger is on the row, which the lens follows rather than a tab while it is (placedCenter).
+    UILongPressGestureRecognizer *finger = [[UILongPressGestureRecognizer alloc] initWithTarget:bar action:@selector(fingerMoved:)];
+    finger.minimumPressDuration = 0;
+    finger.allowableMovement = CGFLOAT_MAX;
+    finger.cancelsTouchesInView = NO;
+    finger.delaysTouchesBegan = NO;
+    finger.delaysTouchesEnded = NO;
+    finger.delegate = bar;
+    [bar addGestureRecognizer:finger];
     return bar;
 }
 
@@ -568,12 +583,12 @@ static UIView *platterOf(UIView *bar) {
 // Centered with a wider itemWidth widens it (Centered at 130 pt made it 227 pt), so after UIKit's own pass the
 // platter is given the bar's width. UIKit keeps laying the tabs and the selection's lens out on its own narrower
 // platter, in passes of the platter's rows that a tab change runs without this one: set here once, the tabs went back
-// to UIKit's places, bunched at the leading end, on the next tab picked (screen recordings, 2026-10-26). So every frame
+// to UIKit's places, bunched at the leading end, on the next tab picked (screen recordings, 2026-10-26). So every place
 // UIKit gives a tab button or the lens in a widened platter is stretched from its platter's width to the bar's, the
 // same mapping for both, so the lens still lands on its tab and slides between them as UIKit moves it. Minimized, a
 // circle keeps UIKit's own width.
 static const CGFloat kTabInset = 4;
-static char kNaturalKey, kStretchedKey;
+static char kNaturalKey;
 
 // How far a frame UIKit gives a view of a widened platter is stretched, from the platter UIKit laid out to the one it
 // has; 1 for any other view. `platterOut` is the platter.
@@ -597,29 +612,92 @@ static CGFloat stretchFor(UIView *view, UIView **platterOut) {
     return (room - 2 * kTabInset) / (natural - 2 * kTabInset);
 }
 
-static CGRect stretched(CGRect frame, CGFloat stretch) {
-    frame.origin.x = kTabInset + (frame.origin.x - kTabInset) * stretch;
-    frame.size.width *= stretch;
-    return frame;
+// The center to set on a tab button or the lens for the one UIKit asks for: stretched, unless it is one this file has
+// already stretched for the same bar. UIKit sets a center again from one it reads back, and puts the lens on the center
+// it reads off the selected tab, which is a stretched one: stretched again, the lens stood a tab's width past its tab
+// (105 pt for Home's 73, the phone's log, 2026-10-26). The lens is kept on the row whatever it is given.
+static char kPlacedKey, kPlacedWidthKey;
+
+// Whether `value` is one this file set for the platter under `key`; if not, it is noted as set once stretched.
+static NSMutableArray<NSNumber *> *placedList(UIView *platter, const void *key) {
+    NSMutableArray<NSNumber *> *placed = objc_getAssociatedObject(platter, key);
+    if (!placed) {
+        placed = [NSMutableArray array];
+        objc_setAssociatedObject(platter, key, placed, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return placed;
 }
 
-// The frame to set on a tab button or the lens for the one UIKit asks for: stretched, unless it is the stretched one
-// already (set again by a pass of this file's).
-static CGRect placedFrame(UIView *view, CGRect frame) {
-    CGFloat stretch = stretchFor(view, NULL);
-    if (stretch == 1) {
-        objc_setAssociatedObject(view, &kStretchedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        return frame;
+static char kSlotsKey;
+
+static CGPoint placedCenter(UIView *view, CGPoint center) {
+    UIView *platter = nil;
+    CGFloat stretch = stretchFor(view, &platter);
+    if (stretch == 1) return center;
+    NSMutableArray<NSNumber *> *placed = placedList(platter, &kPlacedKey);
+    for (NSNumber *x in placed) if (fabs(x.doubleValue - center.x) < 0.5) return center;
+    // UIKit's own slots are the centers it gives the tabs. UIKit moves the lens between them a frame at a time on its own
+    // narrow row, so those steps are stretched too: left alone the lens jumped back towards UIKit's places mid-slide (a
+    // screen recording, 2026-10-26). Under a finger it is where the finger is, which is on the widened row already, so
+    // then only a tab's own slot is stretched: stretched again it ran ahead of the finger (211 set as 287, the log).
+    NSMutableArray<NSNumber *> *slots = placedList(platter, &kSlotsKey);
+    if ([view isKindOfClass:%c(_UITabButton)]) {
+        BOOL known = NO;
+        for (NSNumber *x in slots) if (fabs(x.doubleValue - center.x) < 0.5) known = YES;
+        if (!known) {
+            [slots addObject:@(center.x)];
+            if (slots.count > 12) [slots removeObjectAtIndex:0];
+        }
+    } else {
+        BOOL slot = NO;
+        for (NSNumber *x in slots) if (fabs(x.doubleValue - center.x) < 0.5) slot = YES;
+        if (!slot && sg_fingerOnBar) return center;
     }
-    NSValue *mine = objc_getAssociatedObject(view, &kStretchedKey);
-    if (mine && CGRectEqualToRect(mine.CGRectValue, frame)) return frame;
-    CGRect place = stretched(frame, stretch);
-    objc_setAssociatedObject(view, &kStretchedKey, [NSValue valueWithCGRect:place], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return place;
+    center.x = kTabInset + (center.x - kTabInset) * stretch;
+    CGFloat half = view.bounds.size.width / 2;
+    CGFloat width = platter.bounds.size.width;
+    if (half > 0 && width > 2 * (kTabInset + half)) center.x = MIN(MAX(center.x, kTabInset + half), width - kTabInset - half);
+    [placed addObject:@(center.x)];
+    if (placed.count > 24) [placed removeObjectAtIndex:0];
+    return center;
+}
+
+// The width to give a tab button or the lens: stretched once, as their centers are, so the lens fills its tab's share of
+// the row as the Music app's does (138 pt of a three tab row, its owner's recording, 2026-10-26), and a tab takes its
+// whole share for touches. A width this file set, read back and set again, is left as it is.
+static char kSlotWidthKey;
+
+static CGRect placedBounds(UIView *view, CGRect bounds) {
+    UIView *platter = nil;
+    CGFloat stretch = stretchFor(view, &platter);
+    if (stretch == 1) return bounds;
+    NSMutableArray<NSNumber *> *placed = placedList(platter, &kPlacedWidthKey);
+    for (NSNumber *w in placed) if (fabs(w.doubleValue - bounds.size.width) < 0.5) return bounds;
+    CGFloat width = bounds.size.width;
+    if ([view isKindOfClass:%c(_UITabButton)]) {
+        objc_setAssociatedObject(platter, &kSlotWidthKey, @(width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        width *= stretch;
+    } else {
+        // The lens grows past a tab's width while it slides and under a finger: the slot's stretch is added to it, not
+        // multiplied in, or the growth was stretched too and the lens ran over two tabs (233 pt, a screen recording).
+        CGFloat slot = [objc_getAssociatedObject(platter, &kSlotWidthKey) doubleValue] ?: width;
+        width += slot * (stretch - 1);
+    }
+    bounds.size.width = MIN(width, platter.bounds.size.width - 2 * kTabInset);
+    [placed addObject:@(bounds.size.width)];
+    if (placed.count > 24) [placed removeObjectAtIndex:0];
+    return bounds;
 }
 
 static void widenPlatter(UITabBar *bar) {
     NSUInteger count = bar.items.count;
+    // The lens shows only on the full row: on a minimized circle, where nothing is selected, it stood as a dark blob at
+    // the circle's edge, left where the stretched row had it (a screen recording, 2026-10-26).
+    for (UIView *pane in platterOf(bar).subviews) {
+        if (![NSStringFromClass(pane.class) containsString:@"LiquidLens"]) continue;
+        CGFloat shown = sg_minimized ? 0 : 1;
+        if (pane.alpha != shown) pane.alpha = shown;
+    }
     UIView *platter = count >= 2 ? platterOf(bar) : nil;
     CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
     if (!platter || room < 100 || sg_minimized) return;
@@ -627,10 +705,14 @@ static void widenPlatter(UITabBar *bar) {
     if (fabs(frame.size.width - room) <= 0.5 && fabs(frame.origin.x - kPlatterInset) <= 0.5) return;
     // The width UIKit just gave it, which its rows are laid out to.
     objc_setAssociatedObject(bar, &kNaturalKey, @(frame.size.width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(platter, &kPlacedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(platter, &kPlacedWidthKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(platter, &kSlotsKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(platter, &kSlotWidthKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     frame.origin.x = kPlatterInset;
     frame.size.width = room;
     platter.frame = frame;
-    // UIKit's rows and lens laid out again now, through the stretch in their frames' hooks.
+    // UIKit's rows and lens laid out again now, through the stretch in their hooks.
     for (UIView *pane in platter.subviews) [pane setNeedsLayout];
     [platter setNeedsLayout];
     [platter layoutIfNeeded];
@@ -843,7 +925,9 @@ typedef struct {
 // from the leading end, and how long the fade takes. The platter covers most of its way in some 0.15 s.
 static const NSTimeInterval kArriveSweep = 0.15, kArriveFade = 0.15, kLeaveSweep = 0.08, kLeaveFade = 0.1;
 // How far the card trails the bars into a minimize, and the bars trail the card out of it (setMinimized).
-static const NSTimeInterval kCardLag = 0.05, kBarLag = 0.03;
+// The Music app's card sets off some 0.09 s after its bar on a minimize (a recording at 50 fps, 2026-10-26); 0.07 by its
+// owner's pick.
+static const NSTimeInterval kCardLag = 0.07, kBarLag = 0.03;
 // When the trailing circle fades into the growing row, and over how long.
 static const NSTimeInterval kMergeDelay = 0.03, kMergeFade = 0.12;
 
@@ -1256,16 +1340,24 @@ static void itemDidLayOut(UIView *item) {
 %end
 %end
 
-// The tab buttons and the selection's lens UIKit lays out in a widened platter, stretched to it (widenPlatter).
+// The tab buttons and the selection's lens UIKit lays out in a widened platter, stretched to it (widenPlatter). UIKit
+// places them by bounds and center, never by frame (the phone's log, 2026-10-26: 94 pt bounds and centers 51, 137 and
+// 223 in a 274 pt platter, the lens on the selected one's center); their centers are spread over the bar.
 %hook _UITabButton
-- (void)setFrame:(CGRect)frame {
-    %orig(placedFrame((UIView *)self, frame));
+- (void)setCenter:(CGPoint)center {
+    %orig(placedCenter((UIView *)self, center));
+}
+- (void)setBounds:(CGRect)bounds {
+    %orig(placedBounds((UIView *)self, bounds));
 }
 %end
 
 %hook _UILiquidLensView
-- (void)setFrame:(CGRect)frame {
-    %orig(placedFrame((UIView *)self, frame));
+- (void)setCenter:(CGPoint)center {
+    %orig(placedCenter((UIView *)self, center));
+}
+- (void)setBounds:(CGRect)bounds {
+    %orig(placedBounds((UIView *)self, bounds));
 }
 %end
 

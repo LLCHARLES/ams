@@ -21,9 +21,12 @@ static const NSTimeInterval kLayoutDuration = 0.45, kPressDuration = 0.32;
 // 29% of the way in 0.04 s, 61% in 0.07, 90% in 0.12, overshot by 4% at 0.2 s and had settled by 0.4, an
 // underdamped spring of some 0.3 s with a damping ratio of 0.7. A spring that settles in 0.26 s with no overshoot
 // took the card most of the way in two frames and read as a snap; one of 0.42 s with a bounce of 0.1 got there at
-// half the Music app's pace and read as a glide.
+// half the Music app's pace and read as a glide. A later recording of the Music app minimizing at 50 fps had its bar
+// shrink to the circles 12% of the way at 0.03 s, 38% at 0.07, 65% at 0.11, 86% at 0.15 and 96% at 0.19, with no
+// overshoot to speak of (0.2%): a spring of about 0.3 s, all but critically damped. Its owner asked for the bar closer
+// to it, and then picked the bounce by eye on the phone: 0.25 (2026-10-26).
 static const NSTimeInterval kBarDuration = 0.3;
-static const CGFloat kBarBounce = 0.3;
+static const CGFloat kBarBounce = 0.25;
 static const CGFloat kPressDamping = 0.62;
 // A response lands within the press feedback's budget, on a curve that is most of the way there at once.
 static const NSTimeInterval kRespondDuration = 0.2;

@@ -57,8 +57,8 @@ typedef NS_ENUM(NSInteger, SGRMotion) {
     // An ease out over 0.15 s, for what goes once the finger has let it go (the hold's 2x badge): nothing is
     // watched on its way out. Kept under Reduce Motion like a fade.
     SGRMotionExit,
-    // A lively spring of 0.3 s that overshoots a little, for the tab bar minimizing and expanding with the now
-    // playing card, fitted to the Music app's. At once under Reduce Motion.
+    // A spring of 0.3 s that barely overshoots, for the tab bar minimizing and expanding with the now playing card,
+    // fitted to the Music app's. At once under Reduce Motion.
     SGRMotionBar,
 };
 // Runs `animations` with the motion's timing, or at once under Reduce Motion (except a fade, a response or an exit), and
