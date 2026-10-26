@@ -566,10 +566,57 @@ static UIView *platterOf(UIView *bar) {
 // them: with three tabs the platter was 293 pt of a 440 pt bar (the phone's log), where the Music app's runs the
 // width of the screen, 21 pt in from each side, as the card above it does (SGRTabBarFullSlot). Neither Fill nor
 // Centered with a wider itemWidth widens it (Centered at 130 pt made it 227 pt), so after UIKit's own pass the
-// platter is given the bar's width and its tabs equal shares of it, in each of the platter's copies of the row (the
-// plain one and the selected one under the lens), and the lens is put on the selected tab's new place. Minimized, a
+// platter is given the bar's width. UIKit keeps laying the tabs and the selection's lens out on its own narrower
+// platter, in passes of the platter's rows that a tab change runs without this one: set here once, the tabs went back
+// to UIKit's places, bunched at the leading end, on the next tab picked (screen recordings, 2026-10-26). So every frame
+// UIKit gives a tab button or the lens in a widened platter is stretched from its platter's width to the bar's, the
+// same mapping for both, so the lens still lands on its tab and slides between them as UIKit moves it. Minimized, a
 // circle keeps UIKit's own width.
 static const CGFloat kTabInset = 4;
+static char kNaturalKey, kStretchedKey;
+
+// How far a frame UIKit gives a view of a widened platter is stretched, from the platter UIKit laid out to the one it
+// has; 1 for any other view. `platterOut` is the platter.
+static CGFloat stretchFor(UIView *view, UIView **platterOut) {
+    if (sg_minimized) return 1;
+    UIView *platter = nil;
+    SGRSystemTabBar *bar = nil;
+    NSUInteger depth = 0;
+    for (UIView *up = view.superview; up && depth < 6; up = up.superview, depth++) {
+        if (!platter && [NSStringFromClass(up.class) hasSuffix:@"PlatterView"]) platter = up;
+        if ([up isKindOfClass:SGRSystemTabBar.class]) {
+            bar = (SGRSystemTabBar *)up;
+            break;
+        }
+    }
+    if (!bar || !platter || bar.items.count < 2) return 1;
+    CGFloat natural = [objc_getAssociatedObject(bar, &kNaturalKey) doubleValue];
+    CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
+    if (natural <= 2 * kTabInset + 1 || room <= natural) return 1;
+    if (platterOut) *platterOut = platter;
+    return (room - 2 * kTabInset) / (natural - 2 * kTabInset);
+}
+
+static CGRect stretched(CGRect frame, CGFloat stretch) {
+    frame.origin.x = kTabInset + (frame.origin.x - kTabInset) * stretch;
+    frame.size.width *= stretch;
+    return frame;
+}
+
+// The frame to set on a tab button or the lens for the one UIKit asks for: stretched, unless it is the stretched one
+// already (set again by a pass of this file's).
+static CGRect placedFrame(UIView *view, CGRect frame) {
+    CGFloat stretch = stretchFor(view, NULL);
+    if (stretch == 1) {
+        objc_setAssociatedObject(view, &kStretchedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return frame;
+    }
+    NSValue *mine = objc_getAssociatedObject(view, &kStretchedKey);
+    if (mine && CGRectEqualToRect(mine.CGRectValue, frame)) return frame;
+    CGRect place = stretched(frame, stretch);
+    objc_setAssociatedObject(view, &kStretchedKey, [NSValue valueWithCGRect:place], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return place;
+}
 
 static void widenPlatter(UITabBar *bar) {
     NSUInteger count = bar.items.count;
@@ -577,48 +624,25 @@ static void widenPlatter(UITabBar *bar) {
     CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
     if (!platter || room < 100 || sg_minimized) return;
     CGRect frame = platter.frame;
-    if (fabs(frame.size.width - room) > 0.5 || fabs(frame.origin.x - kPlatterInset) > 0.5) {
-        frame.origin.x = kPlatterInset;
-        frame.size.width = room;
-        platter.frame = frame;
-    }
-    // UIKit lays the platter's rows out again for the new width in their own pass, which ran after this one and put
-    // the tabs back to its widths, bunched at the leading end (a screen recording, 2026-10-26): it runs now, first.
+    if (fabs(frame.size.width - room) <= 0.5 && fabs(frame.origin.x - kPlatterInset) <= 0.5) return;
+    // The width UIKit just gave it, which its rows are laid out to.
+    objc_setAssociatedObject(bar, &kNaturalKey, @(frame.size.width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    frame.origin.x = kPlatterInset;
+    frame.size.width = room;
+    platter.frame = frame;
+    // UIKit's rows and lens laid out again now, through the stretch in their frames' hooks.
+    for (UIView *pane in platter.subviews) [pane setNeedsLayout];
+    [platter setNeedsLayout];
     [platter layoutIfNeeded];
-    CGFloat share = (room - 2 * kTabInset) / count;
-    NSUInteger selected = bar.selectedItem ? [bar.items indexOfObject:bar.selectedItem] : NSNotFound;
-    for (UIView *pane in platter.subviews) {
-        NSString *name = NSStringFromClass(pane.class);
-        if ([name containsString:@"LiquidLens"]) {
-            // The lens and its punch-out ride the selected tab; while UIKit moves them they are left to it.
-            if (selected == NSNotFound || pane.layer.animationKeys.count) continue;
-            CGRect lens = pane.frame;
-            lens.origin.x = kTabInset + selected * share;
-            lens.size.width = share;
-            if (!CGRectEqualToRect(pane.frame, lens)) pane.frame = lens;
-            continue;
-        }
-        NSMutableArray<UIView *> *buttons = [NSMutableArray array];
-        for (UIView *v in pane.subviews) if (isTabButton(v)) [buttons addObject:v];
-        if (buttons.count != count) continue;
-        [buttons sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) { return [@(a.frame.origin.x) compare:@(b.frame.origin.x)]; }];
-        [buttons enumerateObjectsUsingBlock:^(UIView *button, NSUInteger i, BOOL *stop) {
-            CGRect place = button.frame;
-            place.origin.x = kTabInset + i * share;
-            place.size.width = share;
-            if (!CGRectEqualToRect(button.frame, place)) button.frame = place;
-            // The glyph and name inside follow the button's new width now, not on a later pass.
-            [button layoutIfNeeded];
-        }];
-    }
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableString *panes = [NSMutableString string];
         for (UIView *pane in platter.subviews) {
             [panes appendFormat:@"\n  %@ %@:", NSStringFromClass(pane.class), NSStringFromCGRect(pane.frame)];
-            for (UIView *v in pane.subviews) if (isTabButton(v)) [panes appendFormat:@" %@ glyph %@", NSStringFromCGRect(v.frame), NSStringFromCGRect(glyphView(v).frame)];
+            for (UIView *v in pane.subviews) if (isTabButton(v)) [panes appendFormat:@" %@", NSStringFromCGRect(v.frame)];
         }
-        SGLogLong(@"navbar", [NSString stringWithFormat:@"tab bar: platter widened to %.0f pt for %lu tabs, %.0f pt each%@", room, (unsigned long)count, share, panes]);
+        SGLogLong(@"navbar", [NSString stringWithFormat:@"tab bar: platter widened from %.0f to %.0f pt for %lu tabs%@",
+                              [objc_getAssociatedObject(bar, &kNaturalKey) doubleValue], room, (unsigned long)count, panes]);
     });
 }
 
@@ -1230,6 +1254,19 @@ static void itemDidLayOut(UIView *item) {
     %orig(0);
 }
 %end
+%end
+
+// The tab buttons and the selection's lens UIKit lays out in a widened platter, stretched to it (widenPlatter).
+%hook _UITabButton
+- (void)setFrame:(CGRect)frame {
+    %orig(placedFrame((UIView *)self, frame));
+}
+%end
+
+%hook _UILiquidLensView
+- (void)setFrame:(CGRect)frame {
+    %orig(placedFrame((UIView *)self, frame));
+}
 %end
 
 %ctor {
