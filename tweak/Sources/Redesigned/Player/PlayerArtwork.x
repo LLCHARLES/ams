@@ -119,14 +119,21 @@ static BOOL sg_coverKeptHidden;
 
 void SGRPlayerSetCoverHidden(BOOL hidden) {
     sg_hiddenCover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
-    sg_hiddenPlate.alpha = 1;
+    // The stand-in that flew in has no shadow, so the cover's fades in as it takes over: set at once, it appeared
+    // under the cover in one frame as the player finished opening (its owner's screen recording, 2026-10-26).
+    UIView *plate = sg_hiddenPlate;
+    if (plate && plate.alpha < 1) {
+        if (hidden) plate.alpha = 1;
+        else SGRAnimate(SGRMotionFade, ^{ plate.alpha = 1; }, nil);
+    }
     sg_hiddenCover = sg_hiddenPlate = nil;
     sg_coverKeptHidden = hidden;
     if (!hidden) return;
     UIView *tilt = showingTilt();
     UIView *cover = coverIn(tilt);
     if (!cover) return;
-    UIView *plate = SGRShadowPlateIn(tilt, &kPlateKey);
+    plate = SGRShadowPlateIn(tilt, &kPlateKey);
+    [plate.layer removeAllAnimations];
     cover.alpha = 0;
     plate.alpha = 0;
     sg_hiddenCover = cover;
