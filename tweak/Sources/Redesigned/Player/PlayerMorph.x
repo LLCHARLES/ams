@@ -523,6 +523,14 @@ static CGFloat screenRadius(void) {
         for (CALayer *sub in bar.layer.sublayers) {
             CGContextSaveGState(context.CGContext);
             CGContextConcatCTM(context.CGContext, CGAffineTransformMakeTranslation(sub.frame.origin.x, sub.frame.origin.y));
+            // renderInContext: draws no mask, and in the minimized bar's row the now playing bar is masked to its card
+            // (NowPlayingBar.x's placeCardGlass), the rest of its full width left out: clipped here to the same shape.
+            UIView *view = [sub.delegate isKindOfClass:UIView.class] ? (UIView *)sub.delegate : nil;
+            UIView *mask = view.maskView;
+            if (mask) {
+                CGContextAddPath(context.CGContext, [UIBezierPath bezierPathWithRoundedRect:mask.frame cornerRadius:mask.layer.cornerRadius].CGPath);
+                CGContextClip(context.CGContext);
+            }
             [sub renderInContext:context.CGContext];
             CGContextRestoreGState(context.CGContext);
         }

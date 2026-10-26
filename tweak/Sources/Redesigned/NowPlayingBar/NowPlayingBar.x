@@ -53,6 +53,17 @@ static __weak UIView *sg_progress;
 static __weak UIViewController *sg_container;
 // The container's view while it stands in the minimized tab bar's row, below the page that holds it.
 static __weak UIView *sg_inline;
+// The row without Spotify's layout. Narrowed by its edges, the bar had Spotify lay its pages, labels and buttons out
+// again at every minimize and expand, 6 to 19 ms of the 20 to 35 ms each one stalled the screen for (the phone's log,
+// 2026-10-26). So outside a Jam the bar keeps the width it has above the expanded tab bar, and in the row only things
+// that draw move: the card's glass goes to the slot, the bar is masked to it, the cover and text slide in by sg_rowLeft
+// and the trailing buttons by sg_rowRight, and the text is narrowed to end short of them (sg_playLeft, in the bar's
+// space, 0 out of the row). All of it rides the tab bar's spring as it is. A Jam's strip is the bar's width, so in a
+// Jam the row is still made by the edges (sg_rowByEdges), Spotify laying the bar out.
+static CGRect sg_wideGlass = {{INFINITY, INFINITY}, {0, 0}};   // the card's glass above the expanded bar, in the container
+static CGRect sg_rowGlass = {{INFINITY, INFINITY}, {0, 0}};    // in the row, in the container; null out of it
+static CGFloat sg_rowLeft, sg_rowRight, sg_playLeft;
+static BOOL sg_rowByEdges;
 
 CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius) {
     UIVisualEffectView *glass = sg_cardGlass;
@@ -271,7 +282,7 @@ static BOOL setEdges(UIView *bar, CGFloat left, CGFloat right) {
 // Player page's Device button asks for it (SGRKeyBarInlineConnect). Only what this hid is shown again.
 static NSHashTable<UIView *> *sg_tucked;
 
-static void tuckExtras(UIView *bar, BOOL tuck) {
+static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
     if (!sg_tucked) sg_tucked = [NSHashTable weakObjectsHashTable];
     // A stack hides an item only once the animation it was hidden in ends, so the buttons also fade on
     // their own, out as the card heads for the row and back in after it leaves.
@@ -290,8 +301,10 @@ static void tuckExtras(UIView *bar, BOOL tuck) {
         // The stack's own item, so the stack closes the gap.
         UIView *item = v;
         while (item.superview && item.superview != bar && ![item.superview isKindOfClass:UIStackView.class]) item = item.superview;
-        if (![item.superview isKindOfClass:UIStackView.class] || item.hidden) return;
-        item.hidden = YES;
+        if (![item.superview isKindOfClass:UIStackView.class] || item.hidden || [sg_tucked containsObject:item]) return;
+        // Hidden, the stack closes the gap, which is a layout of Spotify's; out of a Jam the buttons only fade, the
+        // trailing ones sliding over their place.
+        if (collapse) item.hidden = YES;
         SGRAnimate(SGRMotionExit, ^{ item.alpha = 0; }, nil);
         [sg_tucked addObject:item];
     });
@@ -399,17 +412,30 @@ static void placeText(UIView *page) {
     }
     // Inside Spotify's unit, so the text moves and fades with it as Spotify slides a page's in and out: the page's
     // height, which the card shows whole, and a line of text wide.
-    CGRect frame = CGRectMake(0, -SGFrameIn(unit, page).origin.y, unit.bounds.size.width, page.bounds.size.height);
+    CGFloat width = unit.bounds.size.width, lead = sg_rowShift + sg_rowLeft;
+    UIView *root = sgr_nowPlayingRoot, *pages = page.superview;
+    // In the row the text ends short of the trailing buttons, measured from where the page stands at rest (its list's
+    // place), so a page off to the side is sized as the one showing.
+    if (sg_playLeft > 0 && root && pages.superview) {
+        CGFloat left = [pages.superview convertPoint:pages.frame.origin toView:root].x + SGFrameIn(unit, page).origin.x + lead;
+        width = MAX(40, MIN(width, sg_playLeft - 8 - left));
+    }
+    CGRect frame = CGRectMake(0, -SGFrameIn(unit, page).origin.y, width, page.bounds.size.height);
     BOOL inRow = sg_inline != nil;
     void (^place)(void) = ^{
         if (text.superview != unit) [unit addSubview:text];
         else if (unit.subviews.lastObject != text) [unit bringSubviewToFront:text];
-        if (!CGRectEqualToRect(text.frame, frame)) text.frame = frame;
+        // By bounds and center: set through its frame, a text already slid into the row went back to the page's edge, the
+        // frame of a moved view being the moved one (its owner's recording, 2026-10-26).
+        CGRect bounds = (CGRect){CGPointZero, frame.size};
+        CGPoint center = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        if (!CGRectEqualToRect(text.bounds, bounds)) text.bounds = bounds;
+        if (!CGPointEqualToPoint(text.center, center)) text.center = center;
         text.title.text = title;
         text.artists.text = artists ?: @"";
         // Every pass: the artists can come in after the title.
         text.inRow = inRow;
-        CGAffineTransform shift = CGAffineTransformMakeTranslation(sg_rowShift, 0);
+        CGAffineTransform shift = CGAffineTransformMakeTranslation(lead, 0);
         if (!CGAffineTransformEqualToTransform(text.transform, shift)) text.transform = shift;
         [text setNeedsLayout];
         [text layoutIfNeeded];
@@ -448,7 +474,8 @@ static void scaleRowContent(UIView *bar, BOOL inRow) {
         CGFloat shift = kRowCardHeight / 2 - center;
         if (inRow && fabs(shift) < 20) sg_rowShift = shift;
         CGAffineTransform transform = CGAffineTransformIdentity;
-        if (inRow && side > kRowCover) transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(sg_rowShift, 0), kRowCover / side, kRowCover / side);
+        if (inRow && side > kRowCover) transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(sg_rowShift + sg_rowLeft, 0), kRowCover / side, kRowCover / side);
+        else if (sg_rowLeft != 0) transform = CGAffineTransformMakeTranslation(sg_rowShift + sg_rowLeft, 0);
         if (!CGAffineTransformEqualToTransform(artwork.transform, transform)) artwork.transform = transform;
     }
     NSHashTable<UIView *> *controls = [NSHashTable weakObjectsHashTable];
@@ -457,12 +484,22 @@ static void scaleRowContent(UIView *bar, BOOL inRow) {
         if (artwork && ([v isDescendantOfView:artwork] || [artwork isDescendantOfView:v])) return;
         [controls addObject:v];
     });
-    CGAffineTransform transform = inRow ? CGAffineTransformMakeScale(kRowButtonScale, kRowButtonScale) : CGAffineTransformIdentity;
+    CGFloat scale = inRow ? kRowButtonScale : 1;
+    CGAffineTransform transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(sg_rowRight, 0), scale, scale);
+    CGFloat playLeft = CGFLOAT_MAX;
     for (UIView *control in controls.allObjects) {
         BOOL nested = NO;
         for (UIView *up = control.superview; up && up != bar && !nested; up = up.superview) nested = [controls containsObject:up];
-        if (!nested && !CGAffineTransformEqualToTransform(control.transform, transform)) control.transform = transform;
+        if (nested) continue;
+        if (!CGAffineTransformEqualToTransform(control.transform, transform)) control.transform = transform;
+        // The leftmost one still showing, where it is drawn once moved: the text ends short of it in the row.
+        BOOL shown = YES;
+        for (UIView *up = control; up && up != bar && shown; up = up.superview) shown = !up.hidden && up.alpha >= 0.01;
+        if (!shown) continue;
+        CGFloat middle = [bar convertPoint:control.center fromView:control.superview].x;
+        playLeft = MIN(playLeft, middle - control.bounds.size.width * scale / 2 + sg_rowRight);
     }
+    sg_playLeft = sg_rowLeft != 0 && playLeft < CGFLOAT_MAX ? playLeft : 0;
 }
 
 // In the minimized tab bar's row (TabBar.x): the bar narrowed to the slot by its edges, so Spotify's content
@@ -482,6 +519,33 @@ static __weak UIView *sg_strip;
 static void appendShape(UIView *view, NSUInteger depth, NSMutableString *out) {
     [out appendFormat:@"%*s%@ %@\n", (int)depth * 2, "", NSStringFromClass(view.class), NSStringFromCGRect(view.frame)];
     if (depth < 8) for (UIView *sub in view.subviews) appendShape(sub, depth + 1, out);
+}
+
+// The card's glass where the card is, and the bar masked to it, so nothing of the full width bar shows past the card
+// in the row (a page sliding in, a button moving over). Not in a Jam, whose strip stands outside the card.
+static void placeCardGlass(UIViewController *container) {
+    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *bar = container.childViewControllers.firstObject.viewIfLoaded;
+    CGRect frame = !CGRectIsNull(sg_rowGlass) ? sg_rowGlass : sg_wideGlass;
+    if (!glass || !bar || CGRectIsNull(frame) || glass.superview != container.view) return;
+    CGFloat radius = MIN(kCardRadius, frame.size.height / 2);
+    if (!CGRectEqualToRect(glass.frame, frame)) glass.frame = frame;
+    SGShapeGlass(glass, radius, NO);
+    if (sg_rowByEdges || sg_strip.window) {
+        if (bar.maskView) bar.maskView = nil;
+        return;
+    }
+    UIView *mask = bar.maskView;
+    if (!mask) {
+        mask = [UIView new];
+        mask.backgroundColor = UIColor.blackColor;
+        mask.layer.cornerCurve = kCACornerCurveContinuous;
+        [UIView performWithoutAnimation:^{ mask.frame = CGRectOffset(frame, -bar.frame.origin.x, -bar.frame.origin.y); }];
+        bar.maskView = mask;
+    }
+    CGRect inBar = CGRectOffset(frame, -bar.frame.origin.x, -bar.frame.origin.y);
+    if (!CGRectEqualToRect(mask.frame, inBar)) mask.frame = inBar;
+    if (mask.layer.cornerRadius != radius) mask.layer.cornerRadius = radius;
 }
 
 static void placeInline(UIViewController *container) {
@@ -506,26 +570,54 @@ static void placeInline(UIViewController *container) {
     CGRect slot = !ours || !known ? CGRectNull : SGRTabBarInlineSlot(view.superview, track.size.height);
     // Where the view stands untransformed, in the slot's coordinates.
     CGPoint origin = CGPointMake(view.center.x - view.bounds.size.width / 2, view.center.y - view.bounds.size.height / 2);
+    CGRect wide = ours ? SGRTabBarFullSlot(view.superview) : CGRectNull;
+    // Out of a Jam, the row by what draws: the bar keeps the expanded bar's width (SGRTabBarFullSlot keeps its answer
+    // for the expanded bar while the tab bar is minimized, so it is asked for the edges it had).
+    if (!CGRectIsNull(slot) && !jam && !CGRectIsNull(sg_wideGlass)) {
+        CGFloat wideLeft = CGRectGetMinX(sg_wideGlass) + origin.x, wideRight = CGRectGetMaxX(sg_wideGlass) + origin.x;
+        CGAffineTransform move = CGAffineTransformMakeTranslation(0, CGRectGetMidY(slot) - origin.y - CGRectGetMidY(track));
+        if (!CGAffineTransformEqualToTransform(view.transform, move)) view.transform = move;
+        sg_rowByEdges = NO;
+        sg_rowLeft = CGRectGetMinX(slot) - wideLeft;
+        sg_rowRight = CGRectGetMaxX(slot) - wideRight;
+        sg_rowGlass = CGRectMake(CGRectGetMinX(slot) - origin.x, CGRectGetMidY(track) - kRowCardHeight / 2, slot.size.width, kRowCardHeight);
+        tuckExtras(bar, YES, NO);
+        sg_inline = view;
+        scaleRowContent(bar, YES);
+        placeTexts(bar);
+        placeCardGlass(container);
+        static dispatch_once_t drawnOnce;
+        dispatch_once(&drawnOnce, ^{
+            SGLog(@"now playing bar in the tab bar's row by its drawing: slot %@, glass %@, cover and text by %.1f, buttons by %.1f, text to %.1f",
+                  NSStringFromCGRect(slot), NSStringFromCGRect(sg_rowGlass), sg_rowLeft, sg_rowRight, sg_playLeft);
+        });
+        return;
+    }
+    sg_rowLeft = sg_rowRight = 0;
+    sg_rowGlass = CGRectNull;
     if (CGRectIsNull(slot) || !setEdges(bar, CGRectGetMinX(slot) - origin.x, CGRectGetMaxX(slot) - origin.x)) {
-        if (sg_inline) tuckExtras(bar, NO);
+        if (sg_inline) tuckExtras(bar, NO, NO);
         sg_inline = nil;
+        sg_rowByEdges = NO;
         if (bar) scaleRowContent(bar, !jam);
         // The compact card's glass is shorter than Spotify's card by as much at its foot as at its head; the card
         // comes down by that much, to stand 8 pt over the bar's glass as the Music app's does, not 14.
         CGFloat drop = !jam && sg_card ? MAX(0, (sg_card.bounds.size.height - kRowCardHeight) / 2) : 0;
         CGAffineTransform lower = CGAffineTransformMakeTranslation(0, drop);
         if (!CGAffineTransformEqualToTransform(view.transform, lower)) view.transform = lower;
-        CGRect wide = ours ? SGRTabBarFullSlot(view.superview) : CGRectNull;
         if (bar && (CGRectIsNull(wide) || !setEdges(bar, CGRectGetMinX(wide) - origin.x, CGRectGetMaxX(wide) - origin.x))) restoreEdges(bar);
         if (bar) placeTexts(bar);
+        placeCardGlass(container);
         return;
     }
     CGAffineTransform move = CGAffineTransformMakeTranslation(0, CGRectGetMidY(slot) - origin.y - CGRectGetMidY(track));
     if (!CGAffineTransformEqualToTransform(view.transform, move)) view.transform = move;
-    tuckExtras(bar, YES);
+    tuckExtras(bar, YES, YES);
     sg_inline = view;
+    sg_rowByEdges = YES;
     scaleRowContent(bar, !jam);
     placeTexts(bar);
+    placeCardGlass(container);
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSMutableString *clips = [NSMutableString string];
@@ -543,9 +635,15 @@ static void placeInline(UIViewController *container) {
 void SGRNowPlayingBarFollowTabBar(void) {
     UIViewController *container = sg_container;
     if (!container.isViewLoaded) return;
+    // Spotify lays the bar out only when its edges move: a Jam's row, in or out. Out of a Jam nothing of the bar's
+    // layout changes between the expanded bar and the row.
+    static BOOL wasByEdges;
     placeInline(container);
-    [container.view setNeedsLayout];
-    [container.view layoutIfNeeded];
+    if (sg_rowByEdges || wasByEdges) {
+        [container.view setNeedsLayout];
+        [container.view layoutIfNeeded];
+    }
+    wasByEdges = sg_rowByEdges;
 }
 
 CGRect SGRNowPlayingStripFrameIn(UIView *host) {
@@ -763,8 +861,15 @@ static void styleNowPlayingBar(UIViewController *container) {
     if (glass.overrideUserInterfaceStyle != UIUserInterfaceStyleDark) glass.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     sg_cardGlass = glass;
     watchPresses(container.view);
-    glass.frame = frame;
-    SGShapeGlass(glass, radius, NO);
+    if (strip || sg_rowByEdges) {
+        glass.frame = frame;
+        SGShapeGlass(glass, radius, NO);
+        if (bar.maskView) bar.maskView = nil;
+    } else {
+        // The bar keeps the expanded bar's width in the row too, so its card is always the wide one.
+        sg_wideGlass = frame;
+        placeCardGlass(container);
+    }
     placeStripGlass(container.view, strip, frame, stripAbove);
 
     static dispatch_once_t once;
