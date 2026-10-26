@@ -706,7 +706,11 @@ static CGPoint placedCenter(UIView *view, CGPoint center) {
 // The width to give a tab button or the lens: stretched once, as their centers are, so the lens fills its tab's share of
 // the row as the Music app's does (138 pt of a three tab row, its owner's recording, 2026-10-26), and a tab takes its
 // whole share for touches. A width this file set, read back and set again, is left as it is.
-static char kSlotWidthKey;
+static char kSlotWidthKey, kSlotHeightKey;
+// How much of UIKit's growth of the lens on the move is kept, across and up (see placedBounds).
+// Measured against the Music app's side by side (2026-10-26): at rest 134 pt to our 137, pressed 156 to our 162, sliding
+// 165 to our 177 with 0.63 kept; so 3 pt off at rest and half the growth.
+static const CGFloat kLensGrowth = 0.5, kLensRise = 0.57, kLensTrim = 3;
 
 static CGRect placedBounds(UIView *view, CGRect bounds) {
     UIView *platter = nil;
@@ -717,12 +721,17 @@ static CGRect placedBounds(UIView *view, CGRect bounds) {
     CGFloat width = bounds.size.width;
     if ([view isKindOfClass:%c(_UITabButton)]) {
         objc_setAssociatedObject(platter, &kSlotWidthKey, @(width), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(platter, &kSlotHeightKey, @(bounds.size.height), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         width *= stretch;
     } else {
-        // The lens grows past a tab's width while it slides and under a finger: the slot's stretch is added to it, not
-        // multiplied in, or the growth was stretched too and the lens ran over two tabs (233 pt, a screen recording).
+        // The lens grows past a tab's size while it slides and under a finger, by half its width and a quarter of its
+        // height on UIKit's narrow row, where the Music app's grows by under a quarter: 134 by 54 pt at rest to 165 by 62
+        // on the move (its owner's recordings at 60 fps, 2026-10-26), ours to 186 by 68. The slot's stretch is added to
+        // it, not multiplied in (multiplied, it ran over two tabs), and its growth is kept to the Music app's share.
         CGFloat slot = [objc_getAssociatedObject(platter, &kSlotWidthKey) doubleValue] ?: width;
-        width += slot * (stretch - 1);
+        CGFloat slotHeight = [objc_getAssociatedObject(platter, &kSlotHeightKey) doubleValue];
+        width = slot * stretch - kLensTrim + MAX(0, width - slot) * kLensGrowth;
+        if (slotHeight > 0 && bounds.size.height > slotHeight) bounds.size.height = slotHeight + (bounds.size.height - slotHeight) * kLensRise;
     }
     bounds.size.width = MIN(width, platter.bounds.size.width - 2 * kTabInset);
     [placed addObject:@(bounds.size.width)];
