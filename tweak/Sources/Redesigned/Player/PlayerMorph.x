@@ -50,9 +50,9 @@ static const CGFloat kHandFrom = 0.25, kHandTo = 0.6;
 // A let go close's spring, as SwiftUI's .spring(duration:bounce:) takes one: some 0.35 s with a little give, so the card
 // dips a little past its place and settles back, as the Music app's mini player does. Its owner's recordings at 60 fps
 // put the Music app's dip at 2.5 to 3.5 pt, settled a tenth of a second later: a bounce of 0.15 (some 0.6% of the way, 5
-// pt on a close from the top); 0.25 dipped 22 pt.
+// pt on a close from the top); 0.25 dipped 22 pt. 0.2 for a while, then 0.15 again by its owner's pick (2026-10-26).
 static const CFTimeInterval kReleaseSpring = 0.32, kReleaseSettle = 0.6;
-static const double kReleaseBounce = 0.2;
+static const double kReleaseBounce = 0.15;
 
 // An underdamped spring from 0 to 1 at `elapsed`, from rest: it goes past 1 and settles back.
 static double releaseSpring(double elapsed) {
