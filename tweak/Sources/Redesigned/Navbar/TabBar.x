@@ -502,16 +502,20 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
         for (UIView *source in sources) [items addObject:[[UITabBarItem alloc] initWithTitle:hideLabels ? nil : labelIn(source).text image:nil tag:items.count]];
         bar.sources = sources;
         [bar setItems:items animated:NO];
-        NSMutableString *out = [NSMutableString stringWithString:@"tab bar icons"];
-        for (UIView *source in sources) {
-            UIView *live = iconIn(source);
-            id icon = live ? encoreIconOf(live) : nil;
-            id variant = [icon respondsToSelector:NSSelectorFromString(@"active")] ? ((id (*)(id, SEL))objc_msgSend)(icon, NSSelectorFromString(@"active")) : nil;
-            [out appendFormat:@"\n  %@: %@ icon %@ active-variant %@ live-isActive %d label-white %d", labelIn(source).text, NSStringFromClass(live.class),
-                 [icon respondsToSelector:@selector(name)] ? [icon name] : icon, [variant respondsToSelector:@selector(name)] ? [variant name] : variant,
-                 [live respondsToSelector:@selector(isActive)] ? [(SPTEncoreIconView *)live isActive] : -1, isActive(source)];
+        // Logged the first few times only: built and written on every minimize and expand, it was part of their stall.
+        static NSUInteger logged;
+        if (logged++ < 4) {
+            NSMutableString *out = [NSMutableString stringWithString:@"tab bar icons"];
+            for (UIView *source in sources) {
+                UIView *live = iconIn(source);
+                id icon = live ? encoreIconOf(live) : nil;
+                id variant = [icon respondsToSelector:NSSelectorFromString(@"active")] ? ((id (*)(id, SEL))objc_msgSend)(icon, NSSelectorFromString(@"active")) : nil;
+                [out appendFormat:@"\n  %@: %@ icon %@ active-variant %@ live-isActive %d label-white %d", labelIn(source).text, NSStringFromClass(live.class),
+                     [icon respondsToSelector:@selector(name)] ? [icon name] : icon, [variant respondsToSelector:@selector(name)] ? [variant name] : variant,
+                     [live respondsToSelector:@selector(isActive)] ? [(SPTEncoreIconView *)live isActive] : -1, isActive(source)];
+            }
+            SGLogLong(@"navbar", out);
         }
-        SGLogLong(@"navbar", out);
     }
 
     BOOL missing = NO;
