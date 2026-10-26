@@ -235,11 +235,16 @@ void SGRShrinkTabTitles(UIView *bar) {
     });
 }
 
+static void widenPlatter(UITabBar *bar);
+static BOOL isTabButton(UIView *view);
+
 @implementation SGRSystemTabBar
 
-// UIKit makes the labels as it lays the items out, so they are shrunk after each pass.
+// UIKit makes the labels as it lays the items out, so they are shrunk after each pass, and the row's platter is
+// widened to the bar after it.
 - (void)layoutSubviews {
     [super layoutSubviews];
+    widenPlatter(self);
     SGRShrinkTabTitles(self);
 }
 
@@ -556,29 +561,58 @@ static UIView *platterOf(UIView *bar) {
     return platter;
 }
 
-// UIKit gives a standalone bar's items a width of their own and centers the platter round them, so with three
-// tabs the platter stood well in from the screen's edges, where the Music app's runs from 21 pt in (screen
-// recordings at 60 fps). The items are
-// given the platter's whole width instead, which UIKit only honors for centered items. Minimized, the one item
-// is a circle's and keeps UIKit's own width.
-static void fillPlatter(SGRSystemTabBar *bar, BOOL circle) {
-    if (circle || bar.items.count < 2) {
-        if (bar.itemPositioning != UITabBarItemPositioningAutomatic) bar.itemPositioning = UITabBarItemPositioningAutomatic;
-        if (bar.itemWidth != 0) bar.itemWidth = 0;
-        return;
-    }
-    UIView *platter = platterOf(bar);
+// UIKit gives a standalone bar's items a width of their own, some 100 pt at most, and centers the platter round
+// them: with three tabs the platter was 293 pt of a 440 pt bar (the phone's log), where the Music app's runs the
+// width of the screen, 21 pt in from each side, as the card above it does (SGRTabBarFullSlot). Neither Fill nor
+// Centered with a wider itemWidth widens it (Centered at 130 pt made it 227 pt), so after UIKit's own pass the
+// platter is given the bar's width and its tabs equal shares of it, in each of the platter's copies of the row (the
+// plain one and the selected one under the lens), and the lens is put on the selected tab's new place. Minimized, a
+// circle keeps UIKit's own width.
+static const CGFloat kTabInset = 4;
+
+static void widenPlatter(UITabBar *bar) {
+    NSUInteger count = bar.items.count;
+    UIView *platter = count >= 2 ? platterOf(bar) : nil;
     CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
-    if (!platter || room < 100) return;
-    CGFloat before = [platter convertRect:platter.bounds toView:bar].size.width;
-    if (before >= room - 1 && bar.itemPositioning == UITabBarItemPositioningAutomatic) return;
-    CGFloat itemWidth = floor((room - 8) / bar.items.count);
-    if (bar.itemPositioning == UITabBarItemPositioningCentered && fabs(bar.itemWidth - itemWidth) < 0.5) return;
-    bar.itemPositioning = UITabBarItemPositioningCentered;
-    bar.itemWidth = itemWidth;
-    [bar layoutIfNeeded];
-    SGLog(@"tab bar: platter %.0f pt wide for %.0f of room; items made %.0f pt wide, platter now %.0f",
-          before, room, itemWidth, [platter convertRect:platter.bounds toView:bar].size.width);
+    if (!platter || room < 100 || sg_minimized) return;
+    CGRect frame = platter.frame;
+    if (fabs(frame.size.width - room) > 0.5 || fabs(frame.origin.x - kPlatterInset) > 0.5) {
+        frame.origin.x = kPlatterInset;
+        frame.size.width = room;
+        platter.frame = frame;
+    }
+    CGFloat share = (room - 2 * kTabInset) / count;
+    NSUInteger selected = bar.selectedItem ? [bar.items indexOfObject:bar.selectedItem] : NSNotFound;
+    for (UIView *pane in platter.subviews) {
+        NSString *name = NSStringFromClass(pane.class);
+        if ([name containsString:@"LiquidLens"]) {
+            // The lens and its punch-out ride the selected tab; while UIKit moves them they are left to it.
+            if (selected == NSNotFound || pane.layer.animationKeys.count) continue;
+            CGRect lens = pane.frame;
+            lens.origin.x = kTabInset + selected * share;
+            lens.size.width = share;
+            if (!CGRectEqualToRect(pane.frame, lens)) pane.frame = lens;
+            continue;
+        }
+        NSMutableArray<UIView *> *buttons = [NSMutableArray array];
+        for (UIView *v in pane.subviews) if (isTabButton(v)) [buttons addObject:v];
+        if (buttons.count != count) continue;
+        [buttons sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) { return [@(a.frame.origin.x) compare:@(b.frame.origin.x)]; }];
+        [buttons enumerateObjectsUsingBlock:^(UIView *button, NSUInteger i, BOOL *stop) {
+            CGRect place = button.frame;
+            place.origin.x = kTabInset + i * share;
+            place.size.width = share;
+            if (!CGRectEqualToRect(button.frame, place)) button.frame = place;
+        }];
+    }
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ SGLog(@"tab bar: platter widened to %.0f pt for %lu tabs, %.0f pt each", room, (unsigned long)count, share); });
+}
+
+// UIKit's own item widths throughout: the platter is widened after its pass instead (widenPlatter).
+static void fillPlatter(SGRSystemTabBar *bar, BOOL circle) {
+    if (bar.itemPositioning != UITabBarItemPositioningAutomatic) bar.itemPositioning = UITabBarItemPositioningAutomatic;
+    if (bar.itemWidth != 0) bar.itemWidth = 0;
 }
 
 // The minimized bar's circles are as tall as its card, 48 pt, as the Music app's are, where UIKit draws a bar's
