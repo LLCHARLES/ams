@@ -250,49 +250,12 @@ static void watchHold(UIView *tilt) {
     objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_ASSIGN);
 }
 
-// Inspect the cover off: the taps that open Spotify's full-screen cover are turned off, its flag left alone. With the
-// flag (ios-creativeworkcommons-cover-art-tilt-configuration-kit.cover_art_tilt_enabled) forced off Spotify built the
-// cover without the tilt view, and the pause shrink above, which works on that view, stopped. Taps on the tilt view
-// and inside it go, and any between it and its cell whose target is Spotify's tilt kit; each seen is logged once.
-static BOOL inspectOff(void) {
-    static BOOL off;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ off = !SGEnabled(SGRKeyPlayerInspectCover); });
-    return off;
-}
-
-static void offTaps(UIView *view, BOOL any) {
-    static NSHashTable *seen;
-    if (!seen) seen = [NSHashTable weakObjectsHashTable];
-    for (UIGestureRecognizer *recognizer in view.gestureRecognizers) {
-        if (![recognizer isKindOfClass:UITapGestureRecognizer.class]) continue;
-        NSString *what = recognizer.description;
-        BOOL off = any || [what containsString:@"Tilt"];
-        if (![seen containsObject:recognizer]) {
-            [seen addObject:recognizer];
-            SGLog(@"redesign player: cover tap on %@ %@: %@", NSStringFromClass(view.class), off ? @"off" : @"kept", what);
-        }
-        if (off && recognizer.enabled) recognizer.enabled = NO;
-    }
-}
-
-static void blockInspect(UIView *tilt) {
-    if (!inspectOff()) return;
-    SGForEachView(tilt, ^(UIView *view) { offTaps(view, YES); });
-    static Class cell;
-    if (!cell) cell = NSClassFromString(@"_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl");
-    for (UIView *v = tilt.superview; v; v = v.superview) {
-        offTaps(v, NO);
-        if ([v isKindOfClass:cell]) break;
-    }
-}
-
 %hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
 - (void)layoutSubviews {
     UIView *tilt = (UIView *)self;
-    BOOL player = inCoverCell(tilt);
     %orig;
-    if (tilt.bounds.size.width < kCoverMinWidth || !player) return;
+    // The width first: the bar's and the pages' small tilt views skip the walk up to the cell.
+    if (tilt.bounds.size.width < kCoverMinWidth || !inCoverCell(tilt)) return;
     UIView *cover = coverIn(tilt);
     if (!cover) return;
     [sg_tilts addObject:tilt];
@@ -302,7 +265,6 @@ static void blockInspect(UIView *tilt) {
         [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
     }
     watchHold(tilt);
-    blockInspect(tilt);
     SGRPlayerMotionCoverLaidOut();
     // The cover fills the tilt view (01.txt:37); bounds and center, unlike a frame, hold under the scale.
     CGRect bounds = tilt.bounds;

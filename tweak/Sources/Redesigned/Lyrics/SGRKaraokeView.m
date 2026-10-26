@@ -365,6 +365,7 @@ static double heldStrength(double held) {
 // it off. A backing row has none.
 @property (nonatomic, readonly) UIFont *romanised;
 @property (nonatomic) BOOL japanese;   // the song has kana, so its kanji are read the Japanese way
+@property (nonatomic) BOOL romanisedReplace;   // show the Latin letters in place of the line's words
 - (instancetype)initWithSize:(CGFloat)size order:(NSArray<NSNumber *> *)order pronunciation:(BOOL)pronunciation translation:(BOOL)translation
                    romanised:(BOOL)romanised;
 @end
@@ -406,6 +407,8 @@ static const CGFloat kSecondShare = 0.67, kThirdShare = 0.54;
     NSMutableArray<NSNumber *> *order = [_order mutableCopy];
     [order removeObject:@(SGRLyricsTextTranslation)];
     backing->_order = order;
+    backing.japanese = _japanese;
+    backing.romanisedReplace = _romanisedReplace;
     return backing;
 }
 
@@ -612,22 +615,27 @@ static CGRect blockFrame(NSString *text, UIFont *font, CGFloat width, CGFloat to
 // row keeps to, its line's; -1 for a line of its own, which takes its side from its voice and script.
 static SGRKaraokeLayout *layOut(SGKaraokeLine *line, CGFloat width, SGRKaraokeStyle *style, NSInteger right) {
     SGRKaraokeLayout *layout = [SGRKaraokeLayout new];
-    layout.right = right >= 0 ? right : alignsRight(line);
+    SGKaraokeLine *activeLine = line;
+    if (style.romanisedReplace) {
+        SGKaraokeLine *romanised = SGLyricsRomanisedLine(line, style.japanese);
+        if (romanised) activeLine = romanised;
+    }
+    layout.right = right >= 0 ? right : alignsRight(activeLine);
     layout.translation = layout.romanised = CGRectNull;
-    NSArray<SGKaraokeWord *> *spoken = style.pronunciation ? line.pronunciation.words : nil;
-    NSString *translation = style.translation ? line.translation : nil;
+    NSArray<SGKaraokeWord *> *spoken = (style.pronunciation && !style.romanisedReplace) ? line.pronunciation.words : nil;
+    NSString *translation = style.translation ? activeLine.translation : nil;
     // A translator hands back a line already in the language as it was; the line says it once. It stays
     // translated, so it is not asked again.
-    NSString *lineText = translation.length || style.romanised ? SGKaraokeLineText(line) : nil;
+    NSString *lineText = translation.length || (style.romanised && !style.romanisedReplace) ? SGKaraokeLineText(line) : nil;
     if (translation.length && [SGLyricsBareText(translation) isEqualToString:SGLyricsBareText(lineText)]) translation = nil;
     // A source's own pronunciation, hidden, still reads better than the transform's.
-    if (style.romanised && !spoken.count) {
+    if (style.romanised && !style.romanisedReplace && !spoken.count) {
         layout.romanisedText = line.pronunciation ? SGKaraokeLineText(line.pronunciation)
                                                   : SGLyricsRomanised(lineText, style.japanese);
     }
     NSMutableArray<NSNumber *> *parts = [NSMutableArray array];
     for (NSNumber *text in style.order) {
-        if (text.integerValue == SGRLyricsTextPronunciation && !spoken.count) continue;
+        if (text.integerValue == SGRLyricsTextPronunciation && (!spoken.count || style.romanisedReplace)) continue;
         if (text.integerValue == SGRLyricsTextTranslation && !translation.length) continue;
         [parts addObject:text];
     }
@@ -647,8 +655,8 @@ static SGRKaraokeLayout *layOut(SGKaraokeLine *line, CGFloat width, SGRKaraokeSt
         if (paired) {
             NSArray<NSValue *> *pairedFrames;
             NSArray<NSNumber *> *pairedOffsets;
-            y = layPair(lyrics ? line.words : spoken, lyrics ? style.lyrics : style.pronunciation,
-                        lyrics ? spoken : line.words, lyrics ? style.pronunciation : style.lyrics,
+            y = layPair(lyrics ? activeLine.words : spoken, lyrics ? style.lyrics : style.pronunciation,
+                        lyrics ? spoken : activeLine.words, lyrics ? style.pronunciation : style.lyrics,
                         width, layout.right, y, &frames, &offsets, &pairedFrames, &pairedOffsets);
             layout.lyricFrames = lyrics ? frames : pairedFrames;
             layout.lyricOffsets = lyrics ? offsets : pairedOffsets;
@@ -657,7 +665,7 @@ static SGRKaraokeLayout *layOut(SGKaraokeLine *line, CGFloat width, SGRKaraokeSt
             p++;
             lyrics = YES;
         } else {
-            y = layRun(lyrics ? line.words : spoken, lyrics ? style.lyrics : style.pronunciation, width, layout.right, y, &frames, &offsets);
+            y = layRun(lyrics ? activeLine.words : spoken, lyrics ? style.lyrics : style.pronunciation, width, layout.right, y, &frames, &offsets);
             if (lyrics) {
                 layout.lyricFrames = frames;
                 layout.lyricOffsets = offsets;
@@ -670,9 +678,9 @@ static SGRKaraokeLayout *layOut(SGKaraokeLine *line, CGFloat width, SGRKaraokeSt
             layout.romanised = blockFrame(layout.romanisedText, style.romanised, width, y + kPartGap);
             y = CGRectGetMaxY(layout.romanised);
         }
-        if (lyrics && right < 0 && line.backing.words.count) {
+        if (lyrics && right < 0 && activeLine.backing.words.count) {
             layout.backingTop = y + kBackingGap;
-            y = layout.backingTop + layOut(line.backing, width, style.backing, layout.right).height;
+            y = layout.backingTop + layOut(activeLine.backing, width, style.backing, layout.right).height;
         }
     }
     layout.height = y;
@@ -858,16 +866,21 @@ static double wholeFrom(SGKaraokeLine *run, BOOL sweepsEstimates) {
     self = [super initWithFrame:CGRectZero];
     if (!self) return nil;
     _line = line;
-    self.isAccessibilityElement = under == nil;
-    self.accessibilityLabel = SGKaraokeLineText(line);
-    self.accessibilityTraits = UIAccessibilityTraitButton;
     BOOL backing = under != nil;
+    SGKaraokeLine *activeLine = line;
+    if (style.romanisedReplace) {
+        SGKaraokeLine *romanised = SGLyricsRomanisedLine(line, style.japanese);
+        if (romanised) activeLine = romanised;
+    }
+    self.isAccessibilityElement = under == nil;
+    self.accessibilityLabel = SGKaraokeLineText(activeLine);
+    self.accessibilityTraits = UIAccessibilityTraitButton;
     SGRKaraokeLayout *layout = layOut(line, width, style, backing ? under.right : -1);
     _right = layout.right;
     NSMutableArray<SGRKaraokeSweep *> *sweeps = [NSMutableArray array];
-    SGRKaraokeSweep *sung = [self sweepOf:line.words font:style.lyrics frames:layout.lyricFrames offsets:layout.lyricOffsets
-                                wholeFrom:wholeFrom(line, sweepsEstimates)];
-    SGRKaraokeSweep *spoken = [self sweepOf:line.pronunciation.words font:style.pronunciation frames:layout.spokenFrames
+    SGRKaraokeSweep *sung = [self sweepOf:activeLine.words font:style.lyrics frames:layout.lyricFrames offsets:layout.lyricOffsets
+                                wholeFrom:wholeFrom(activeLine, sweepsEstimates)];
+    SGRKaraokeSweep *spoken = style.romanisedReplace ? nil : [self sweepOf:line.pronunciation.words font:style.pronunciation frames:layout.spokenFrames
                                     offsets:layout.spokenOffsets wholeFrom:wholeFrom(line.pronunciation, sweepsEstimates)];
     if (sung) [sweeps addObject:sung];
     if (spoken) [sweeps addObject:spoken];
@@ -875,10 +888,10 @@ static double wholeFrom(SGKaraokeLine *run, BOOL sweepsEstimates) {
     _words = [sung.words ?: @[] arrayByAddingObjectsFromArray:spoken.words ?: @[]];
     _lyricWords = sung.words;
 
-    if (!CGRectIsNull(layout.translation)) _translation = [self asideAt:layout.translation font:style.translation text:line.translation];
+    if (!CGRectIsNull(layout.translation)) _translation = [self asideAt:layout.translation font:style.translation text:activeLine.translation];
     if (!CGRectIsNull(layout.romanised)) _romanised = [self asideAt:layout.romanised font:style.romanised text:layout.romanisedText];
     if (layout.backingTop > 0) {
-        _backing = [[SGRKaraokeLineView alloc] initWithLine:line.backing width:width style:style.backing under:self blurred:NO
+        _backing = [[SGRKaraokeLineView alloc] initWithLine:activeLine.backing ?: line.backing width:width style:style.backing under:self blurred:NO
                                             sweepsEstimates:sweepsEstimates];
         _backing.alpha = kBackingAlpha;
         _backing.frame = CGRectMake(0, layout.backingTop, width, _backing.bounds.size.height);
@@ -887,8 +900,8 @@ static double wholeFrom(SGKaraokeLine *run, BOOL sweepsEstimates) {
     NSMutableArray<NSString *> *asides = [NSMutableArray array];
     if (_translation.text.length) [asides addObject:_translation.text];
     if (_romanised.text.length) [asides addObject:_romanised.text];
-    if (layout.spokenFrames.count && line.pronunciation) [asides addObject:SGKaraokeLineText(line.pronunciation) ?: @""];
-    if (line.backing) [asides addObject:SGKaraokeLineText(line.backing) ?: @""];
+    if (layout.spokenFrames.count && line.pronunciation && !style.romanisedReplace) [asides addObject:SGKaraokeLineText(line.pronunciation) ?: @""];
+    if (activeLine.backing) [asides addObject:SGKaraokeLineText(activeLine.backing) ?: @""];
     self.accessibilityValue = [asides componentsJoinedByString:@". "];
     for (UIView *child in self.subviews) child.accessibilityElementsHidden = YES;
     self.frame = CGRectMake(0, 0, width, layout.height);
@@ -1098,6 +1111,12 @@ static const NSUInteger kLinesPerFrame = 4;
 - (void)showTime:(double)ms running:(BOOL)running at:(CFTimeInterval)shown;
 @end
 
+// Apple Music's hop: as its turn begins each dot rises about 0.8 of its own width, holds at the top,
+// drops back with a small undershoot and settles. One hop of the same length per dot, whatever the break's.
+static const double kHopLift = 0.8;     // of a dot's width
+static const double kHopUnder = 0.12;   // of a dot's width below rest, where the drop lands before it settles
+static const CFTimeInterval kHopLength = 0.9;   // seconds; a break is 7 s or more, so it fits in a dot's third
+
 // Local time on the dots' clock is this far into the break plus this, so no animation begins at 0,
 // which Core Animation reads as "now".
 static const CFTimeInterval kBreakEpoch = 1;
@@ -1210,17 +1229,40 @@ static double smoothstep(double p) {
         atFullRate(run);
         [_group addAnimation:run forKey:run.keyPath];
     }
-    // Each dot fills over its third of the time before they go, in the order the next line reads.
+
+    double slot = exitAt / 3;
+    CAMediaTimingFunction *rise = [CAMediaTimingFunction functionWithControlPoints:0.3 :0 :0.2 :1];
+    CAMediaTimingFunction *drop = [CAMediaTimingFunction functionWithControlPoints:0.4 :0 :1 :1];
+    CAMediaTimingFunction *settle = [CAMediaTimingFunction functionWithControlPoints:0 :0 :0.3 :1];
     for (NSUInteger i = 0; i < _dots.count; i++) {
+        CALayer *dot = _dots[i];
+        NSUInteger turn = _rightToLeft ? _dots.count - 1 - i : i;
+        CFTimeInterval begin = kBreakEpoch + turn * slot;
+
+        // Each dot fills over its third of the time before they go, in the order the next line reads.
         CABasicAnimation *fill = [CABasicAnimation animationWithKeyPath:@"opacity"];
         fill.fromValue = @(kDimAlpha);
         fill.toValue = @1;
-        fill.beginTime = kBreakEpoch + (_rightToLeft ? _dots.count - 1 - i : i) * exitAt / 3;
-        fill.duration = exitAt / 3;
+        fill.beginTime = begin;
+        fill.duration = slot;
         fill.fillMode = kCAFillModeBoth;
         fill.removedOnCompletion = NO;
         atFullRate(fill);
-        [_dots[i] addAnimation:fill forKey:@"fill"];
+        [dot addAnimation:fill forKey:@"fill"];
+
+        if (still) continue;   // Reduce Motion keeps the fill and drops the hop
+
+        CGFloat lift = -kHopLift * _side;   // y grows downward, so up is negative
+        CAKeyframeAnimation *hop = [CAKeyframeAnimation animationWithKeyPath:@"transform.translation.y"];
+        hop.values = @[@0, @(lift), @(lift), @(kHopUnder * _side), @0];
+        hop.keyTimes = @[@0, @0.42, @0.54, @0.87, @1];
+        hop.timingFunctions = @[rise, [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear], drop, settle];
+        hop.beginTime = begin + (turn == 0 ? kBreakWait + kBreakFadeIn : 0);   // the first hops once the dots are in
+        hop.duration = kHopLength;
+        hop.fillMode = kCAFillModeBoth;
+        hop.removedOnCompletion = NO;
+        atFullRate(hop);
+        [dot addAnimation:hop forKey:@"hop"];
     }
 }
 
@@ -1467,29 +1509,44 @@ typedef struct {
     return _sample ?: SGKaraokeLinesForTrack(track);
 }
 
-- (void)tapped:(UITapGestureRecognizer *)tap {
-    [self stir];
-    if (_extrasBox && !_extrasBox.hidden && CGRectContainsPoint(_extrasBox.frame, [tap locationInView:self])) return;
-    if (_sing.userInteractionEnabled && [_sing pointInside:[tap locationInView:_sing] withEvent:nil]) return;
+// What a tap at point (in the view) lands on: the credit, a line's explain bubble (*explains), a line to seek
+// to, or nothing.
+- (UIView *)tapTargetAt:(CGPoint)point explains:(BOOL *)explains {
+    *explains = NO;
+    if (_extrasBox && !_extrasBox.hidden && CGRectContainsPoint(_extrasBox.frame, point)) return nil;
+    if (_sing.userInteractionEnabled && [_sing pointInside:[self convertPoint:point toView:_sing] withEvent:nil]) return nil;
+    CGPoint inScroll = [self convertPoint:point toView:_scroll];
     if (_creditLinks.count && !_credit.hidden
-        && CGRectContainsPoint(CGRectInset(_credit.frame, -kCreditSlop, -MAX(kCreditSlop, (44 - _credit.frame.size.height) / 2)),
-                               [tap locationInView:_scroll])) {
-        SGLyricsOpenCreditLinks(_creditLinks, _credit);
-        return;
+        && CGRectContainsPoint(CGRectInset(_credit.frame, -kCreditSlop, -MAX(kCreditSlop, (44 - _credit.frame.size.height) / 2)), inScroll)) {
+        return _credit;
     }
-    CGPoint point = [tap locationInView:_scroll];
     for (SGRKaraokeLineView *view in _shown.allValues) {
         CGRect target = view.bubbleTarget;
-        if (CGRectIsNull(target) || !CGRectContainsPoint(target, [_scroll convertPoint:point toView:view])) continue;
-        [self explainLine:view];
-        return;
+        if (CGRectIsNull(target) || !CGRectContainsPoint(target, [_scroll convertPoint:inScroll toView:view])) continue;
+        *explains = YES;
+        return view;
     }
-    if (_plain) return;   // a line with no time has nowhere to seek to
+    if (_plain) return nil;   // a line with no time has nowhere to seek to
+    if (_seeksAbove > 0 && (point.y > _seeksAbove || point.y < _seeksBelow)) return nil;   // the host's, where its controls were
     for (SGRKaraokeLineView *view in _shown.allValues) {
-        if (!CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), point)) continue;
-        [self seekToLine:view.line];
-        return;
+        if (CGRectContainsPoint(CGRectInset(view.frame, -_margin, -_lineGap / 2), inScroll)) return view;
     }
+    return nil;
+}
+
+- (BOOL)tapSeeksAt:(CGPoint)point {
+    BOOL explains;
+    UIView *target = [self tapTargetAt:point explains:&explains];
+    return target && target != _credit && !explains;
+}
+
+- (void)tapped:(UITapGestureRecognizer *)tap {
+    [self stir];
+    BOOL explains;
+    UIView *target = [self tapTargetAt:[tap locationInView:self] explains:&explains];
+    if (target == _credit) SGLyricsOpenCreditLinks(_creditLinks, _credit);
+    else if (explains) [self explainLine:(SGRKaraokeLineView *)target];
+    else if (target) [self seekToLine:((SGRKaraokeLineView *)target).line];
 }
 
 // A tap on a line, or VoiceOver activating it.
@@ -1549,7 +1606,7 @@ typedef struct {
         _browseBreak = _openBreak;
     }
     _browsing = YES;
-    if (self.browsingBegan) self.browsingBegan();
+    if (self.browsingBegan) self.browsingBegan([scrollView.panGestureRecognizer translationInView:scrollView].y < 0);
     for (SGRKaraokeLineView *view in _shown.allValues) view.blur = 0;
 }
 
@@ -1798,72 +1855,6 @@ static NSArray<NSString *> *textsOf(NSArray<SGKaraokeLine *> *lines) {
     return texts;
 }
 
-// Letters outside the target's script, read from the characters: past Latin for a Latin-script language, Latin for
-// any other. A short Korean line or one mixed with English, which the recognizer is not sure of, still counts.
-static NSUInteger otherScriptLetters(NSString *text, BOOL latinTarget) {
-    __block NSUInteger count = 0;
-    [text enumerateSubstringsInRange:NSMakeRange(0, text.length) options:NSStringEnumerationByComposedCharacterSequences
-                          usingBlock:^(NSString *character, NSRange range, NSRange enclosing, BOOL *stop) {
-        UTF32Char c = 0;
-        if (![character getBytes:&c maxLength:sizeof(c) usedLength:NULL encoding:NSUTF32LittleEndianStringEncoding options:0
-                           range:NSMakeRange(0, character.length) remainingRange:NULL]) return;
-        if (![NSCharacterSet.letterCharacterSet longCharacterIsMember:c]) return;
-        BOOL latin = c < 0x250 || (c >= 0x1E00 && c < 0x1F00);
-        if (latin != latinTarget) count++;
-    }];
-    return count;
-}
-
-// Words spelled the way Korean is in Latin letters, with "eo" or "eu" (neol, geureon, eotteoke). Spicy Lyrics'
-// community syncs give some K-pop this way. Of twenty English songs checked, no line had two such words.
-static NSUInteger romanizedKoreanWords(NSString *text) {
-    NSUInteger count = 0;
-    for (NSString *word in [text componentsSeparatedByCharactersInSet:NSCharacterSet.letterCharacterSet.invertedSet]) {
-        if ([word containsString:@"eo"] || [word containsString:@"eu"]) count++;
-    }
-    return count;
-}
-
-// Whether a song is in a language other than `language`, line by line: one distinct line in five that the recognizer
-// is at least 80% sure is another language, or two lines in another script (Hangul, kana, Han among English, for
-// K-pop with only a verse in Korean). A line with two letters of another script counts however unsure the
-// recognizer is: NewJeans' "New Jeans" has six such lines, all short or mixed with English. So does a line of Korean
-// in Latin letters (romanizedKoreanWords). A chorus sung eight
-// times weighs as one line. The whole song's guess is not asked: short lines sway it (it reads Havana, all "ooh
-// na-na", as Dutch), and an unsure line counts neither way. A song with no line it is sure of counts as foreign,
-// too little to tell.
-static BOOL inAnotherLanguage(NSArray<SGKaraokeLine *> *lines, NSString *language) {
-    NSString *(^code)(NSString *) = ^NSString *(NSString *tag) {
-        return [tag componentsSeparatedByCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"-_"]].firstObject.lowercaseString;
-    };
-    NSString *target = code(language);
-    NSString *targetScript = [NSOrthography defaultOrthographyForLanguage:language].dominantScript;
-    NSUInteger distinct = 0, sure = 0, foreign = 0, otherScript = 0;
-    NSMutableSet<NSString *> *seen = [NSMutableSet set];
-    NLLanguageRecognizer *recognizer = [NLLanguageRecognizer new];
-    for (SGKaraokeLine *line in lines) {
-        NSString *text = hasWords(line) ? SGKaraokeLineText(line).lowercaseString : nil;
-        if (!text.length || [seen containsObject:text]) continue;
-        [seen addObject:text];
-        distinct++;
-        BOOL lettersOther = otherScriptLetters(text, [targetScript isEqualToString:@"Latn"]) >= 2;
-        if (lettersOther) otherScript++;
-        [recognizer reset];
-        [recognizer processString:text];
-        NSDictionary<NLLanguage, NSNumber *> *guess = [recognizer languageHypothesesWithMaximum:1];
-        NLLanguage found = guess.allKeys.firstObject;
-        BOOL confident = found && guess[found].doubleValue >= 0.8, inTarget = confident && [code(found) isEqualToString:target];
-        // A line sure to be in the target language does not count as romanized Korean, so French "peu" and "heure" stay.
-        if (!lettersOther && !inTarget && romanizedKoreanWords(text) >= 2) otherScript++;
-        if (!confident) continue;
-        sure++;
-        if (inTarget) continue;
-        foreign++;
-        if (!lettersOther && ![[NSOrthography defaultOrthographyForLanguage:found].dominantScript isEqualToString:targetScript]) otherScript++;
-    }
-    return !sure || foreign * 5 >= MAX(distinct, 5) || otherScript >= 2;
-}
-
 // Whether a line with words is still without a translation.
 static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     for (SGKaraokeLine *line in lines) if (!line.translation.length && hasWords(line)) return YES;
@@ -1882,7 +1873,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     _plain = SGKaraokeLinesTiming(_lines) == SGKaraokeTimingNone;
     _savedLanguage = SGLyricsTranslationTarget();
     _saved = _sample ? nil : SGLyricsSyncSavedTranslation(_track, _savedLanguage, _lines);
-    _foreign = inAnotherLanguage(_lines, _savedLanguage);
+    _foreign = SGKaraokeInAnotherLanguage(_lines, _savedLanguage);
     NSInteger sungTo = 0;   // the top of the song counts as where the singing before the first line ends
     for (NSUInteger i = 0; i < count; i++) {
         SGKaraokeLine *line = _lines[i];
@@ -1926,11 +1917,13 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
 // What a line shows besides its words: what the song has, of what the lyrics menu has switched on.
 - (SGRKaraokeStyle *)styleNow {
     BOOL romanised = SGFlag(SGKeyLyricsRomanised, NO);
+    BOOL replace = romanised && SGFlag(SGKeyLyricsRomanisedReplace, NO);
     SGRKaraokeStyle *style = [[SGRKaraokeStyle alloc] initWithSize:_fontSize order:SGRLyricsTextOrder()
-                                                     pronunciation:_hasSpoken && SGFlag(SGRKeyLyricsPronunciation, NO)
+                                                     pronunciation:!replace && _hasSpoken && SGFlag(SGRKeyLyricsPronunciation, NO)
                                                        translation:_hasTranslation && SGFlag(SGRKeyLyricsTranslation, NO)
-                                                         romanised:romanised];
+                                                         romanised:romanised && !replace];
     style.japanese = romanised && SGLyricsLooksJapanese(_lines);
+    style.romanisedReplace = replace;
     return style;
 }
 
@@ -2370,14 +2363,24 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
         _dotsLine = -1;
     }
     if (_dotsLine != _openBreak) {
-        _dots.rightToLeft = readsRightToLeft(SGKaraokeLineText(_lines[(NSUInteger)_openBreak]));
+        SGKaraokeLine *breakLine = _lines[(NSUInteger)_openBreak];
+        if (_style.romanisedReplace) {
+            SGKaraokeLine *rom = SGLyricsRomanisedLine(breakLine, _style.japanese);
+            if (rom) breakLine = rom;
+        }
+        _dots.rightToLeft = readsRightToLeft(SGKaraokeLineText(breakLine));
         for (NSUInteger i = 0; i < _breakCount; i++) {
             if (_breaks[i].line == _openBreak) [_dots playFrom:_breaks[i].start to:_breaks[i].end];
         }
         _dotsLine = _openBreak;
     }
     if (_dots.superview != _scroll) [_scroll addSubview:_dots];
-    _dots.right = alignsRight(_lines[(NSUInteger)_openBreak]);
+    SGKaraokeLine *dotLine = _lines[(NSUInteger)_openBreak];
+    if (_style.romanisedReplace) {
+        SGKaraokeLine *rom = SGLyricsRomanisedLine(dotLine, _style.japanese);
+        if (rom) dotLine = rom;
+    }
+    _dots.right = alignsRight(dotLine);
     CGFloat top = [self topOfLine:_openBreak] - [self breakRoom];
     _dots.frame = CGRectMake(_margin, top, _builtWidth - 2 * _margin, _dots.bounds.size.height);
 }

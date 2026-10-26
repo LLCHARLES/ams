@@ -33,12 +33,12 @@ static BOOL isSwitch(UIView *view) {
 
 static void hideSwitch(UIView *videoSwitch) {
     if (videoSwitch.alpha != 0) videoSwitch.alpha = 0;
-    videoSwitch.userInteractionEnabled = NO;
-    videoSwitch.accessibilityElementsHidden = YES;
+    if (videoSwitch.userInteractionEnabled) videoSwitch.userInteractionEnabled = NO;
+    if (!videoSwitch.accessibilityElementsHidden) videoSwitch.accessibilityElementsHidden = YES;
     UIView *element = videoSwitch.superview;
     if ([NSStringFromClass(element.class) containsString:@"AudioVideoElementProps"]) {
         if (element.alpha != 0) element.alpha = 0;
-        element.userInteractionEnabled = NO;
+        if (element.userInteractionEnabled) element.userInteractionEnabled = NO;
     }
     static dispatch_once_t once;
     dispatch_once(&once, ^{
