@@ -116,6 +116,10 @@ static CGFloat screenRadius(void) {
     CGRect _rowRest;     // where the pictured view stands, in the container
     CGRect _lastSheet;
     UIImageView *_cover;
+    // The flying cover's shadow: the cover clips, so it is a plate of the Kit's under it, the player's own plate's look,
+    // in and out with the cover. Without it the player's shadow appeared in one frame as the cover took over at the end
+    // of an open (its owner's screen recordings, 2026-10-26).
+    SGRShadowPlate *_coverShadow;
     CALayer *_mask;
     // In a Jam (follow mode only): the mask on the stand-in or its picture, its strip part fading on the way open, and
     // a close's copy of the strip's glass, which fades by alpha.
@@ -262,6 +266,9 @@ static CGFloat screenRadius(void) {
         _cover.contentMode = UIViewContentModeScaleAspectFill;
         _cover.clipsToBounds = YES;
         _cover.layer.cornerCurve = kCACornerCurveContinuous;
+        _coverShadow = [SGRShadowPlate new];
+        _coverShadow.alpha = 0;
+        [container addSubview:_coverShadow];
         [container addSubview:_cover];
     }
 
@@ -427,6 +434,7 @@ static CGFloat screenRadius(void) {
             CGRect from = CGRectOffset(self->_barArtwork, -self->_card.origin.x, -self->_card.origin.y);
             if (CGRectIsNull(coverInPlayer)) {
                 self->_cover.hidden = YES;
+                self->_coverShadow.hidden = YES;
             } else {
                 CGRect to = CGRectMake(middle.x + scale * (coverInPlayer.origin.x - middle.x) + shift.x + origin.x,
                                        middle.y + scale * (coverInPlayer.origin.y - middle.y) + shift.y + origin.y,
@@ -451,6 +459,12 @@ static CGFloat screenRadius(void) {
                 self->_cover.alpha = animated ? 0 : whole ? 1 : closing ? 1 - ramp(0, 0.6, c) : 1;
                 // An open fades it in as a close fades it out, backwards: in over the last 60% of the way.
                 if (!animated && !whole && !closing) self->_cover.alpha = 1 - ramp(0, 0.6, 1 - t);
+                SGRShadowPlate *shadow = self->_coverShadow;
+                shadow.hidden = NO;
+                shadow.bounds = (CGRect){CGPointZero, self->_cover.bounds.size};
+                shadow.center = self->_cover.center;
+                shadow.cornerRadius = self->_cover.layer.cornerRadius;
+                shadow.alpha = self->_cover.alpha;
             }
         }
     }];
@@ -546,6 +560,7 @@ static CGFloat screenRadius(void) {
         bar.alpha = 0;
         self->_row.alpha = 0;
         self->_cover.hidden = YES;
+        self->_coverShadow.hidden = YES;
     }];
     [CATransaction commit];
     if (_coverHidden) {
@@ -598,10 +613,12 @@ static CGFloat screenRadius(void) {
     _overlayColor = NULL;
     [_sheet removeFromSuperview];
     [_cover removeFromSuperview];
+    [_coverShadow removeFromSuperview];
     [CATransaction commit];
     if (_coverHidden) SGRPlayerSetCoverHidden(NO);
     _coverHidden = NO;
     _cover = nil;
+    _coverShadow = nil;
 }
 
 @end

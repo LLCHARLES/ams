@@ -237,6 +237,7 @@ void SGRShrinkTabTitles(UIView *bar) {
 
 static void widenPlatter(UITabBar *bar);
 static BOOL isTabButton(UIView *view);
+static UIImageView *glyphView(UIView *button);
 
 @implementation SGRSystemTabBar
 
@@ -581,6 +582,9 @@ static void widenPlatter(UITabBar *bar) {
         frame.size.width = room;
         platter.frame = frame;
     }
+    // UIKit lays the platter's rows out again for the new width in their own pass, which ran after this one and put
+    // the tabs back to its widths, bunched at the leading end (a screen recording, 2026-10-26): it runs now, first.
+    [platter layoutIfNeeded];
     CGFloat share = (room - 2 * kTabInset) / count;
     NSUInteger selected = bar.selectedItem ? [bar.items indexOfObject:bar.selectedItem] : NSNotFound;
     for (UIView *pane in platter.subviews) {
@@ -603,10 +607,19 @@ static void widenPlatter(UITabBar *bar) {
             place.origin.x = kTabInset + i * share;
             place.size.width = share;
             if (!CGRectEqualToRect(button.frame, place)) button.frame = place;
+            // The glyph and name inside follow the button's new width now, not on a later pass.
+            [button layoutIfNeeded];
         }];
     }
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ SGLog(@"tab bar: platter widened to %.0f pt for %lu tabs, %.0f pt each", room, (unsigned long)count, share); });
+    dispatch_once(&once, ^{
+        NSMutableString *panes = [NSMutableString string];
+        for (UIView *pane in platter.subviews) {
+            [panes appendFormat:@"\n  %@ %@:", NSStringFromClass(pane.class), NSStringFromCGRect(pane.frame)];
+            for (UIView *v in pane.subviews) if (isTabButton(v)) [panes appendFormat:@" %@ glyph %@", NSStringFromCGRect(v.frame), NSStringFromCGRect(glyphView(v).frame)];
+        }
+        SGLogLong(@"navbar", [NSString stringWithFormat:@"tab bar: platter widened to %.0f pt for %lu tabs, %.0f pt each%@", room, (unsigned long)count, share, panes]);
+    });
 }
 
 // UIKit's own item widths throughout: the platter is widened after its pass instead (widenPlatter).
