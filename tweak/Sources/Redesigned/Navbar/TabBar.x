@@ -28,6 +28,9 @@ static BOOL sg_minimized;
 // The trailing circle sliding back into the row as the bar grows, kept on screen until it has.
 static BOOL sg_trailLeaving;
 static BOOL sg_fingerOnBar;
+// A circle tapped, lit at once rather than when Spotify repaints its tab a moment later (its owner, 2026-10-27).
+static __weak UIView *sg_pendingActive;
+static CFTimeInterval sg_pendingUntil;
 
 @interface SGRSystemTabBar : UITabBar <UITabBarDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, weak) UIView *stockBar;
@@ -268,6 +271,7 @@ void SGRShrinkTabTitles(UIView *bar) {
 }
 
 static void widenPlatter(UITabBar *bar);
+static void pressCircle(UIView *bar, BOOL down);
 static BOOL isTabButton(UIView *view);
 static UIImageView *glyphView(UIView *button);
 
@@ -293,6 +297,11 @@ static UIImageView *glyphView(UIView *button);
     if (![NSStringFromClass(source.class) isEqualToString:@"SGRTabItemView"]) SGRNavbarForgetTab();
     // Home tapped while on Home pops Spotify's stack, which would take Mod Settings straight off it.
     if (!self.holding) forwardTap(source);
+    if (sg_minimized && !self.holding && self.stockBar) {
+        sg_pendingActive = source;
+        sg_pendingUntil = CACurrentMediaTime() + 0.6;
+        syncBar(self.stockBar);
+    }
     self.partner.selectedItem = nil;
     self.partner.shown = nil;
     // Spotify repaints its labels a moment later; a tap it did not take snaps the selection back.
@@ -740,6 +749,8 @@ static void widenPlatter(UITabBar *bar) {
         if (![NSStringFromClass(pane.class) containsString:@"LiquidLens"]) continue;
         CGFloat shown = sg_minimized ? 0 : 1;
         if (pane.alpha != shown) pane.alpha = shown;
+        // Held hidden on the circles (the lens's hooks), it is shown again with the full row.
+        if (!sg_minimized && pane.hidden) pane.hidden = NO;
     }
     UIView *platter = count >= 2 ? platterOf(bar) : nil;
     CGFloat room = bar.bounds.size.width - 2 * kPlatterInset;
@@ -783,11 +794,17 @@ static void fillPlatter(SGRSystemTabBar *bar, BOOL circle) {
 // put, by a transform on its sublayers: its own frame, which the moves and the card's slot read, is untouched.
 static const CGFloat kRowCircle = 48;
 
+// A circle under a finger, drawn a little larger: UIKit's own press lifts its lens outside the circle's shrink, a second
+// disc of the bar's full 62 pt off the 48 pt circle (its owner's recordings, 2026-10-27), so the lens stays hidden on the
+// circles and the press is drawn on the circle itself, once and at its size.
+static char kPressedKey;
+static const CGFloat kCirclePress = 1.12;
+
 static CATransform3D circleTransform(UIView *bar, BOOL circle) {
     if (!circle) return CATransform3DIdentity;
     CGPoint center = CGPointMake(kPlatterInset + kCircleWidth / 2, kCircleWidth / 2);
     CGPoint off = CGPointMake(center.x - CGRectGetMidX(bar.bounds), center.y - CGRectGetMidY(bar.bounds));
-    CGFloat scale = kRowCircle / kCircleWidth;
+    CGFloat scale = kRowCircle / kCircleWidth * ([objc_getAssociatedObject(bar, &kPressedKey) boolValue] ? kCirclePress : 1);
     CATransform3D transform = CATransform3DMakeTranslation(off.x, off.y, 0);
     transform = CATransform3DScale(transform, scale, scale, 1);
     return CATransform3DTranslate(transform, -off.x, -off.y, 0);
@@ -801,6 +818,27 @@ static void shrinkCircle(UIView *bar, BOOL circle) {
     [CATransaction setDisableActions:YES];
     bar.layer.sublayerTransform = transform;
     [CATransaction commit];
+}
+
+static void pressCircle(UIView *bar, BOOL down) {
+    if (!bar || [objc_getAssociatedObject(bar, &kPressedKey) boolValue] == down) return;
+    objc_setAssociatedObject(bar, &kPressedKey, down ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // Let go after the bar grew back: the row keeps its own transform.
+    if (!sg_minimized) return;
+    CALayer *layer = bar.layer;
+    CATransform3D from = (layer.presentationLayer ?: layer).sublayerTransform, to = circleTransform(bar, YES);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.sublayerTransform = to;
+    [CATransaction commit];
+    if (SGRReduceMotion()) return;
+    if (@available(iOS 17.0, *)) {
+        CASpringAnimation *spring = [[CASpringAnimation alloc] initWithPerceptualDuration:0.3 bounce:down ? 0.25 : 0.35];
+        spring.keyPath = @"sublayerTransform";
+        spring.fromValue = [NSValue valueWithCATransform3D:from];
+        spring.duration = spring.settlingDuration;
+        [layer addAnimation:spring forKey:@"sgr.press"];
+    }
 }
 
 static void syncBar(UIView *stockBar) {
@@ -832,6 +870,8 @@ static void syncBar(UIView *stockBar) {
     if (![sources containsObject:active]) active = nil;
     for (UIView *source in sources) if (!active && isActive(source)) active = source;
     active = active ?: selectedSource(bar) ?: selectedSource(trailBar);
+    UIView *pending = sg_pendingActive;
+    if (pending && CACurrentMediaTime() < sg_pendingUntil && [sources containsObject:pending]) active = pending;
 
     // Minimized, the bar keeps the tab it is on, glyph only, on a circle at the leading end, and the row's last tab on
     // one at the trailing end, the way the Music app keeps Search, sliding out of the row to it as the card comes down
@@ -1459,7 +1499,38 @@ static void itemDidLayOut(UIView *item) {
 }
 %end
 
+// Whether a lens is one of the glass bar's own.
+static BOOL inGlassBar(UIView *view) {
+    NSUInteger depth = 0;
+    for (UIView *up = view.superview; up && depth < 4; up = up.superview, depth++) if ([up isKindOfClass:SGRSystemTabBar.class]) return YES;
+    return NO;
+}
+
 %hook _UILiquidLensView
+// No lens on a minimized circle (see pressCircle): UIKit shows it by its alpha and hidden, so those stay off.
+- (void)setAlpha:(CGFloat)alpha {
+    %orig(sg_minimized && alpha > 0 && inGlassBar((UIView *)self) ? 0 : alpha);
+}
+- (void)setHidden:(BOOL)hidden {
+    %orig(hidden || (sg_minimized && inGlassBar((UIView *)self)));
+}
+// UIKit's press is the lens being lifted, and the lifted lens is drawn apart from the lens view, so neither its alpha nor
+// its hidden kept it off a circle: two bubbles stacked at every tap (its owner, 2026-10-27; the buttons' highlight never
+// changed, the log showed). On a minimized circle the lift is refused and stands for the press instead (pressCircle).
+- (void)setLifted:(BOOL)lifted animated:(BOOL)animated alongsideAnimations:(id)alongside completion:(id)completion {
+    UIView *lens = (UIView *)self;
+    if (sg_minimized && inGlassBar(lens)) {
+        for (UIView *up = lens.superview; up; up = up.superview) {
+            if ([up isKindOfClass:SGRSystemTabBar.class]) {
+                pressCircle(up, lifted);
+                break;
+            }
+        }
+        %orig(NO, animated, alongside, completion);
+        return;
+    }
+    %orig;
+}
 - (void)setCenter:(CGPoint)center {
     %orig(placedCenter((UIView *)self, center));
 }
