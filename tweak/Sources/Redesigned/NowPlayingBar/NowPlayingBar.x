@@ -290,7 +290,10 @@ static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
     if (!tuck) {
         NSArray<UIView *> *items = sg_tucked.allObjects;
         [sg_tucked removeAllObjects];
-        for (UIView *item in items) item.hidden = NO;
+        for (UIView *item in items) {
+            item.hidden = NO;
+            item.userInteractionEnabled = YES;
+        }
         SGRAnimate(SGRMotionRespond, ^{ for (UIView *item in items) item.alpha = 1; }, nil);
         return;
     }
@@ -306,6 +309,7 @@ static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
         // Hidden, the stack closes the gap, which is a layout of Spotify's; out of a Jam the buttons only fade, the
         // trailing ones sliding over their place.
         if (collapse) item.hidden = YES;
+        item.userInteractionEnabled = NO;
         SGRAnimate(SGRMotionExit, ^{ item.alpha = 0; }, nil);
         [sg_tucked addObject:item];
     });
@@ -995,7 +999,11 @@ static void styleNowPlayingBar(UIViewController *container) {
     // on the tap, a button of its own place with none of the row's move, so the row is drawn again after it.
     if (sg_rowLeft != 0) {
         for (UIView *control in sg_rowControls) {
-            if (!control.window || control.hidden || control.alpha < 0.01 || !control.userInteractionEnabled) continue;
+            // Shown and touchable all the way up: the device button the row tucks away fades by its stack's item, not
+            // itself, and was found here and tapped under the play button (its owner, 2026-10-27).
+            BOOL live = control.window != nil;
+            for (UIView *up = control; up && up != moved && live; up = up.superview) live = !up.hidden && up.alpha >= 0.01 && up.userInteractionEnabled;
+            if (!live) continue;
             CGPoint inControl = [(UIView *)self convertPoint:point toView:control];
             if ([control pointInside:inControl withEvent:event]) {
                 reapplyRow();

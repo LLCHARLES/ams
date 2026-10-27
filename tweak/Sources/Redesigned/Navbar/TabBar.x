@@ -820,9 +820,23 @@ static void shrinkCircle(UIView *bar, BOOL circle) {
     [CATransaction commit];
 }
 
+static char kPressTokenKey;
+
 static void pressCircle(UIView *bar, BOOL down) {
     if (!bar || [objc_getAssociatedObject(bar, &kPressedKey) boolValue] == down) return;
     objc_setAssociatedObject(bar, &kPressedKey, down ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // UIKit lowers a lens it was let lift, and this one never lifted, so it does not always ask again on the finger's way
+    // up: the circle stayed at its pressed size after the tap (its owner's recording, 2026-10-27). It settles back on its
+    // own, once the finger has had time to lift, if nothing has lowered it first.
+    if (down) {
+        id token = [NSObject new];
+        objc_setAssociatedObject(bar, &kPressTokenKey, token, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        __weak UIView *weakBar = bar;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            UIView *strongBar = weakBar;
+            if (strongBar && objc_getAssociatedObject(strongBar, &kPressTokenKey) == token) pressCircle(strongBar, NO);
+        });
+    }
     // Let go after the bar grew back: the row keeps its own transform.
     if (!sg_minimized) return;
     CALayer *layer = bar.layer;
