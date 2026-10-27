@@ -744,9 +744,14 @@ static char kPressKey, kSheenKey;
         sheen.backgroundColor = UIColor.whiteColor;
         sheen.userInteractionEnabled = NO;
         sheen.alpha = 0;
+        sheen.layer.cornerCurve = kCACornerCurveContinuous;
         [glass.contentView addSubview:sheen];
         objc_setAssociatedObject(glass, &kSheenKey, sheen, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
+    // The glass is shaped by its corner configuration, which does not clip its content view: the sheen showed as a
+    // square behind the card's rounded ends on a press (its owner's recording, 2026-10-27). So it is rounded as the card.
+    sheen.frame = glass.contentView.bounds;
+    sheen.layer.cornerRadius = MIN(kCardRadius, glass.bounds.size.height / 2);
     SGRAnimate(SGRMotionRespond, ^{ sheen.alpha = down ? kPressSheen : 0; }, nil);
 }
 
@@ -900,7 +905,16 @@ static void styleNowPlayingBar(UIViewController *container) {
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *hit = %orig;
     UIView *moved = sg_inline;
-    if (![moved isDescendantOfView:(UIView *)self] || (hit && [hit isDescendantOfView:moved])) return hit;
+    if (![moved isDescendantOfView:(UIView *)self]) return hit;
+    // In the row the bar keeps the expanded bar's width, masked to its card (placeInline): a touch beside the card, on
+    // the tab bar's circles, landed on the bar's own views under the mask and never reached the circles (its owner,
+    // 2026-10-27). Only a touch on the card's glass is the bar's.
+    UIVisualEffectView *glass = sg_cardGlass;
+    if (glass.window) {
+        CGPoint onGlass = [(UIView *)self convertPoint:point toView:glass];
+        if (!CGRectContainsPoint(CGRectInset(glass.bounds, -4, -4), onGlass)) return hit && ![hit isDescendantOfView:moved] ? hit : nil;
+    }
+    if (hit && [hit isDescendantOfView:moved]) return hit;
     UIView *inside = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
     return inside && inside != moved ? inside : nil;
 }

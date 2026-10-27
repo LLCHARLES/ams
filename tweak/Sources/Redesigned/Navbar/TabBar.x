@@ -284,16 +284,10 @@ static UIImageView *glyphView(UIView *button);
 - (void)tabBar:(UITabBar *)tabBar didSelectItem:(UITabBarItem *)item {
     NSUInteger index = [self.items indexOfObject:item];
     if (index == NSNotFound || index >= self.sources.count) return;
-    BOOL again = item == self.shown;
     self.shown = item;
-    // On the minimized bar the leading circle brings the whole bar back, as the Music app's does; passed on,
-    // the tap would take Spotify's stack back to its root. Minimizing builds the circle's item anew, so it
-    // is told by the bar it is on, not by being the item shown before.
-    BOOL leading = self.stockBar && objc_getAssociatedObject(self.stockBar, &kBarKey) == self;
-    if (sg_minimized && (again || leading)) {
-        SGRSetTabBarMinimized(NO, YES);
-        return;
-    }
+    // A minimized circle is its tab, as a tab of the full bar is: a tap on the one the page is on takes Spotify's stack
+    // back to its root, and the bar stays minimized (its owner asked for this over the Music app's, whose circle brings
+    // the bar back, 2026-10-27).
     // One of Spotify's own takes the light back from a tab of the mod's own.
     UIView *source = self.sources[index];
     if (![NSStringFromClass(source.class) isEqualToString:@"SGRTabItemView"]) SGRNavbarForgetTab();
@@ -568,7 +562,6 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
         missing |= !item.image || !item.selectedImage;
         item.accessibilityLabel = labelIn(sources[i]).text;
         item.largeContentSizeImage = item.image;
-        item.accessibilityHint = sg_minimized && bar == objc_getAssociatedObject(bar.stockBar, &kBarKey) ? @"Shows all tabs" : nil;
         NSString *title = hideLabels ? nil : labelIn(sources[i]).text;
         if (hideLabels ? item.title != nil : title.length && ![title isEqualToString:item.title]) item.title = title;
     }
