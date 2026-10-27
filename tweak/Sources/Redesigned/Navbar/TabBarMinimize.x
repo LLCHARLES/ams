@@ -60,17 +60,7 @@ static void scrolled(UIScrollView *scrollView) {
     sg_containerClass = NSClassFromString(@"_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl");
     if (!sg_containerClass) return;
     %init;
-    // The player opens over the whole bar, so the bar is expanded first (its pictures move with the player); a player
-    // opened from the minimized bar closes back into it, minimized again before the close takes the bar's pictures, as
-    // the Music app's does (its owner asked). The appearance callbacks that announce a close come before its animator.
-    [NSNotificationCenter.defaultCenter addObserverForName:SGPlayerTransitionNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) {
-        static BOOL openedMinimized;
-        if (SGPlayerTransitionOpens()) {
-            openedMinimized = SGRTabBarMinimized();
-            SGRSetTabBarMinimized(NO, NO);
-        } else if (openedMinimized) {
-            SGRSetTabBarMinimized(YES, NO);
-        }
-    }];
+    // The bar is left as it is while the player opens and closes. It was expanded at once before an open from the
+    // minimized bar and minimized again before the close, which took 13 to 29 ms and 5 to 8 ms of the transition's first
+    // frame (the phone's log, 2026-10-27); the morph flies the card from wherever it stands, the row's included.
 }

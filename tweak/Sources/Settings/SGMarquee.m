@@ -48,6 +48,18 @@ static NSString *const kScroll = @"sg.marquee";
     [self setNeedsLayout];
 }
 
+- (void)setLeadingInset:(CGFloat)inset {
+    if (_leadingInset == inset) return;
+    _leadingInset = inset;
+    _scrolled = -1;
+    [self setNeedsLayout];
+}
+
+- (void)setFadesLeadingEdge:(BOOL)fades {
+    _fadesLeadingEdge = fades;
+    [self setNeedsLayout];
+}
+
 - (void)setTextColor:(UIColor *)textColor {
     _label.textColor = textColor;
 }
@@ -63,19 +75,21 @@ static NSString *const kScroll = @"sg.marquee";
     [super layoutSubviews];
     CGSize size = self.bounds.size;
     CGFloat textWidth = ceil([_label sizeThatFits:CGSizeMake(CGFLOAT_MAX, size.height)].width);
-    CGFloat overflow = textWidth - size.width;
+    CGFloat lead = _fadesLeadingEdge ? MAX(0, _leadingInset) : 0;
+    CGFloat overflow = textWidth - (size.width - lead);
     BOOL scrolls = overflow > 0.5 && !UIAccessibilityIsReduceMotionEnabled() && self.window;
     _label.lineBreakMode = scrolls ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
-    CGRect frame = CGRectMake(0, 0, scrolls ? textWidth : size.width, size.height);
+    CGRect frame = CGRectMake(lead, 0, scrolls ? textWidth : size.width - lead, size.height);
     if (!CGRectEqualToRect(_label.frame, frame)) _label.frame = frame;
 
     self.layer.mask = scrolls ? _fade : nil;
     if (scrolls) {
         _fade.frame = self.bounds;
         CGFloat edge = MIN(kFade / size.width, 0.2);
-        // The trailing edge fades, where the text runs on; its start stays crisp at rest.
-        _fade.colors = @[(id)UIColor.blackColor.CGColor, (id)UIColor.blackColor.CGColor, (id)UIColor.clearColor.CGColor];
-        _fade.locations = @[@0, @(1 - edge), @1];
+        // The trailing edge fades, where the text runs on; its start stays crisp at rest, unless both are asked for.
+        id black = (id)UIColor.blackColor.CGColor, clear = (id)UIColor.clearColor.CGColor;
+        _fade.colors = _fadesLeadingEdge ? @[clear, black, black, clear] : @[black, black, clear];
+        _fade.locations = _fadesLeadingEdge ? @[@0, @(edge), @(1 - edge), @1] : @[@0, @(1 - edge), @1];
     }
 
     CGFloat travel = scrolls ? overflow + kFade : 0;

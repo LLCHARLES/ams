@@ -9,4 +9,9 @@
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, strong) UIFont *font;
 @property (nonatomic, strong) UIColor *textColor;
+// Its leading edge faded too while it scrolls, as the Music app's mini player has both. Off unless set. The text then
+// starts leadingInset in (0 unless set), so that much of the fade lies before it at rest: the caller places the view that
+// much further out.
+@property (nonatomic) BOOL fadesLeadingEdge;
+@property (nonatomic) CGFloat leadingInset;
 @end

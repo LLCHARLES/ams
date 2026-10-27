@@ -29,6 +29,7 @@
 #import "Settings/SGMarquee.h"
 #import "NowPlayingBar.h"
 #import "Redesigned/Navbar/Navbar.h"
+#import "Shared/Player/PlayerState.h"
 
 static const CGFloat kCardRadius = 24;
 // The card's glass, above the expanded bar and in the minimized bar's row alike: 48 pt, as the Music app's is in
@@ -336,6 +337,8 @@ static char kTextKey;
     _artists = [SGMarqueeLabel new];
     _artists.textColor = SGRSecondary();
     _artists.font = SGRFont(UIFontTextStyleFootnote, UIFontWeightRegular, UIContentSizeCategoryLarge);
+    _title.fadesLeadingEdge = YES;
+    _artists.fadesLeadingEdge = YES;
     [self addSubview:_title];
     [self addSubview:_artists];
     return self;
@@ -349,8 +352,21 @@ static char kTextKey;
     // The lines share 2pt of their leading, set as close as the Music app sets its card's.
     CGFloat shared = 2;
     CGFloat top = round((size.height - titleHeight - (two ? artistsHeight - shared : 0)) / 2);
-    _title.frame = CGRectMake(0, top, size.width, titleHeight);
-    _artists.frame = CGRectMake(0, top + titleHeight - shared, size.width, artistsHeight);
+    // Out past the text's start by 10 of the marquee's 16 pt fade, so most lies before the text at rest and the rest over
+    // its first letter while it scrolls (its owner's pick, 2026-10-27); no further than the nearest view that clips allows,
+    // or the fade was cut off and none showed (the expanded card, whose page clips just before the text).
+    CGFloat lead = 10;
+    UIView *up = self.superview;
+    for (NSUInteger depth = 0; up && depth < 6; up = up.superview, depth++) {
+        if (!up.clipsToBounds) continue;
+        CGFloat room = [self convertPoint:CGPointZero toView:up].x;
+        lead = MAX(0, MIN(lead, room));
+        break;
+    }
+    _title.leadingInset = lead;
+    _artists.leadingInset = lead;
+    _title.frame = CGRectMake(-lead, top, size.width + lead, titleHeight);
+    _artists.frame = CGRectMake(-lead, top + titleHeight - shared, size.width + lead, artistsHeight);
     _artists.alpha = two ? 1 : 0;
 }
 @end
@@ -418,7 +434,11 @@ static void placeText(UIView *page) {
     // place), so a page off to the side is sized as the one showing.
     if (sg_playLeft > 0 && root && pages.superview) {
         CGFloat left = [pages.superview convertPoint:pages.frame.origin toView:root].x + SGFrameIn(unit, page).origin.x + lead;
-        width = MAX(40, MIN(width, sg_playLeft - 8 - left));
+        // And short of the pages' list's own edge, which clips: moved right with the cover, the text ran past it and
+        // was cut hard there, its fade never showing (its owner, 2026-10-27).
+        UIView *list = pages.superview;
+        CGFloat listRight = CGRectGetMaxX([list convertRect:list.bounds toView:root]);
+        width = MAX(40, MIN(width, MIN(sg_playLeft - 8, listRight) - left));
     }
     CGRect frame = CGRectMake(0, -SGFrameIn(unit, page).origin.y, width, page.bounds.size.height);
     BOOL inRow = sg_inline != nil;
@@ -459,6 +479,10 @@ static void placeTexts(UIView *bar) {
 // are sized for its own 60 pt card and filled the compact one to its edges. Only the outermost control of a nest is
 // scaled.
 static const CGFloat kRowCover = 30, kRowButtonScale = 0.8;
+// The buttons the row moved by a transform: moved out of their stack's bounds, which hit testing checks first, they took
+// no touches in the row (its owner, 2026-10-27), so the bar's touch handling looks for them itself (the hitTest hook).
+static NSHashTable<UIView *> *sg_rowControls;
+static void reapplyRow(void);
 
 static void scaleRowContent(UIView *bar, BOOL inRow) {
     UIView *artwork = sg_cardArtwork;
@@ -485,19 +509,46 @@ static void scaleRowContent(UIView *bar, BOOL inRow) {
         [controls addObject:v];
     });
     CGFloat scale = inRow ? kRowButtonScale : 1;
-    CGAffineTransform transform = CGAffineTransformScale(CGAffineTransformMakeTranslation(sg_rowRight, 0), scale, scale);
+    CGAffineTransform shrink = CGAffineTransformMakeScale(scale, scale);
+    CGAffineTransform slide = CGAffineTransformMakeTranslation(sg_rowRight, 0);
     CGFloat playLeft = CGFLOAT_MAX;
+    if (!sg_rowControls) sg_rowControls = [NSHashTable weakObjectsHashTable];
+    [sg_rowControls removeAllObjects];
+    // The buttons slide by their holder, the small view round them (Spotify's stack of them), not each by itself: Spotify
+    // swaps play for pause inside it on a tap, and a new button moved alone stood at its own place, past the card, until
+    // the row was drawn again, a flash at every tap (its owner, 2026-10-27). Slid with its holder it is in place at once,
+    // and the holder's bounds go with it, so its touches do too.
+    static NSHashTable<UIView *> *slid;
+    if (!slid) slid = [NSHashTable weakObjectsHashTable];
+    NSHashTable<UIView *> *holders = [NSHashTable weakObjectsHashTable];
     for (UIView *control in controls.allObjects) {
         BOOL nested = NO;
         for (UIView *up = control.superview; up && up != bar && !nested; up = up.superview) nested = [controls containsObject:up];
         if (nested) continue;
+        [sg_rowControls addObject:control];
+        UIView *holder = nil;
+        for (UIView *up = control.superview; up && up != bar && up.bounds.size.width <= 200; up = up.superview) {
+            if (artwork && [artwork isDescendantOfView:up]) break;
+            holder = up;
+        }
+        CGAffineTransform transform = holder ? shrink : CGAffineTransformConcat(shrink, slide);
+        if (holder) [holders addObject:holder];
         if (!CGAffineTransformEqualToTransform(control.transform, transform)) control.transform = transform;
         // The leftmost one still showing, where it is drawn once moved: the text ends short of it in the row.
         BOOL shown = YES;
         for (UIView *up = control; up && up != bar && shown; up = up.superview) shown = !up.hidden && up.alpha >= 0.01;
         if (!shown) continue;
         CGFloat middle = [bar convertPoint:control.center fromView:control.superview].x;
-        playLeft = MIN(playLeft, middle - control.bounds.size.width * scale / 2 + sg_rowRight);
+        // Its holder's slide is in the conversion already; a button slid alone is not yet moved when read here.
+        playLeft = MIN(playLeft, middle - control.bounds.size.width * scale / 2 + (holder && CGAffineTransformEqualToTransform(holder.transform, slide) ? 0 : sg_rowRight));
+    }
+    for (UIView *holder in slid.allObjects) {
+        if (![holders containsObject:holder] && !CGAffineTransformIsIdentity(holder.transform)) holder.transform = CGAffineTransformIdentity;
+    }
+    [slid removeAllObjects];
+    for (UIView *holder in holders.allObjects) {
+        if (!CGAffineTransformEqualToTransform(holder.transform, slide)) holder.transform = slide;
+        [slid addObject:holder];
     }
     sg_playLeft = sg_rowLeft != 0 && playLeft < CGFLOAT_MAX ? playLeft : 0;
 }
@@ -631,6 +682,32 @@ static void placeInline(UIViewController *container) {
               NSStringFromCGRect(SGFrameIn(strip, view)), NSStringFromCGRect(bar.frame), NSStringFromCGRect(track));
     });
 }
+
+// The row's moves put on the bar's views again: Spotify swaps the play and pause button as the state changes, and the new
+// one stood at its untransformed place past the card's mask, gone from the row after the first tap (its owner, 2026-10-27).
+static void reapplyRowNow(void) {
+    UIViewController *container = sg_container;
+    UIView *bar = container.childViewControllers.firstObject.viewIfLoaded;
+    if (!bar || !sg_inline || sg_rowByEdges || sg_rowLeft == 0) return;
+    [UIView performWithoutAnimation:^{
+        scaleRowContent(bar, YES);
+        placeTexts(bar);
+    }];
+}
+
+static void reapplyRow(void) {
+    for (NSNumber *delay in @[@0.05, @0.2, @0.5]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ reapplyRowNow(); });
+    }
+}
+
+@interface SGRRowStateWatch : NSObject <SGPlayerStateObserver>
+@end
+@implementation SGRRowStateWatch
+- (void)playerStateDidChange:(SPTPlayerState *)state {
+    reapplyRow();
+}
+@end
 
 void SGRNowPlayingBarFollowTabBar(void) {
     UIViewController *container = sg_container;
@@ -914,6 +991,18 @@ static void styleNowPlayingBar(UIViewController *container) {
         CGPoint onGlass = [(UIView *)self convertPoint:point toView:glass];
         if (!CGRectContainsPoint(CGRectInset(glass.bounds, -4, -4), onGlass)) return hit && ![hit isDescendantOfView:moved] ? hit : nil;
     }
+    // A button the row moved: asked directly, since its stack no longer holds the point. Spotify swaps play for pause
+    // on the tap, a button of its own place with none of the row's move, so the row is drawn again after it.
+    if (sg_rowLeft != 0) {
+        for (UIView *control in sg_rowControls) {
+            if (!control.window || control.hidden || control.alpha < 0.01 || !control.userInteractionEnabled) continue;
+            CGPoint inControl = [(UIView *)self convertPoint:point toView:control];
+            if ([control pointInside:inControl withEvent:event]) {
+                reapplyRow();
+                return [control hitTest:inControl withEvent:event] ?: control;
+            }
+        }
+    }
     if (hit && [hit isDescendantOfView:moved]) return hit;
     UIView *inside = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
     return inside && inside != moved ? inside : nil;
@@ -1019,6 +1108,9 @@ static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) 
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
+    static SGRRowStateWatch *watch;
+    watch = [SGRRowStateWatch new];
+    SGAddPlayerStateObserver(watch);
     SGRequireClasses(@[
         @"_TtC18NowPlaying_BarImpl36NowPlayingBarContainerViewController",
         @"_TtC18NowPlaying_BarImpl27NowPlayingBarViewController",

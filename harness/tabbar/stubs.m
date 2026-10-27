@@ -12,6 +12,7 @@ __weak UIView *sgr_artistRoot = nil;
 
 void SGRComposeTabBar(UIView *tabBar) {}
 void SGRRefreshTabBar(void) {}
+void SGAddPlayerStateObserver(id observer) {}
 
 void SGRLogTabBarRow(UIView *tabBar) {}
 // The tab of the mod's own whose page is up (Navbar.x), which the `lit` launch word sets by hand.
