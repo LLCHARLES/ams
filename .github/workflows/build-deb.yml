@@ -5,6 +5,10 @@ name: Build deb
 
 on:
   workflow_dispatch:
+  push:
+    branches: [vitrine-main]
+    paths-ignore:
+      - '**.md'
 
 permissions:
   contents: read
