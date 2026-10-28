@@ -73,7 +73,7 @@ static const CGFloat kTopScrim = 180, kTopScrimAlpha = 0.28;
 // falls 0.552 of the player's height down and its ends 0.474 — measured off Apple Music's player, where a
 // halftone cover fits this circle to four pixels. It is only where the blur's profile starts: the profile's
 // own heights and feather are unchanged, read from the circle out.
-static const CGFloat kArcCentreY = 0.375f, kArcRadius = 0.824f;
+static const CGFloat kArcCentreY = 0.3f, kArcRadius = 0.824f;
 
 @interface CAFilter : NSObject
 + (instancetype)filterWithType:(NSString *)type;
