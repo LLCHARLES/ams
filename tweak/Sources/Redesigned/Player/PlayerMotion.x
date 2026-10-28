@@ -1,14 +1,15 @@
 // Player redesign: Animated artwork, the track's Canvas or Apple Music's animated cover behind the player,
-// the way the lock screen draws it (measured off recordings, 2026-10-22). A cover runs the width of the screen,
-// starting a little way down; past each end its own edge rows, playing with it, are stretched on to the top and
-// the bottom of the screen, mirrored so they meet the cover row for row, the way the lock screen carries a
-// picture's folds and edges on as streaks (nothing is made up). They are copies of the cover's own layer that a
-// replicator draws (CAReplicatorLayer), so they show the very frame the cover does: player layers of their own
-// for them, on the same player, now and then drew a frame the cover was not on, and the seam showed as a line. Both ends blur, easing off across the cover's
-// edges, with one variable Gaussian blur on the clip itself (Core Animation's variableBlur filter, its strength
+// the way the lock screen draws it (measured off recordings, 2026-10-22). A cover runs the width of the screen
+// from the top (a Canvas the window's full height); past its foot its own edge rows, playing with it, are
+// stretched on down to the bottom of the screen, mirrored so they meet the cover row for row, the way the lock
+// screen carries a picture's folds and edges on as streaks (nothing is made up). They are a copy of the cover's
+// own layer that a replicator draws (CAReplicatorLayer), so they show the very frame the cover does: player
+// layers of their own, on the same player, now and then drew a frame the cover was not on, and the seam showed
+// as a line. One variable Gaussian blur on the clip itself (Core Animation's variableBlur filter, its strength
 // read from a mask), drawn by the render server with every frame and with no material's gray over it; a
-// material (UIVisualEffectView) is kept only for an OS without the filter. A Canvas is drawn to the full height
-// and only its foot is carried on and blurred, under the controls; behind the lyrics the whole clip is blurred.
+// material (UIVisualEffectView) is kept only for an OS without the filter. The blur's edge is the Music app's
+// circle, where the cover's foot is sharp in the middle and blurred at its corners; how strong it is by height
+// is the lock screen's ramp. Behind the lyrics the whole clip is blurred.
 // Tried and dropped: a still band (the poster's top, stretched or blurred) stood still while the clip moved; the
 // whole cover mirrored over the band put a dark shape of it there; fading the cover over the band drew both at
 // once, a gray stripe; and the foot dissolved into the album page's color drew no picture there at all.
@@ -53,10 +54,9 @@
 
 // Where the blur under the controls may start at the latest, as a share of the clip's height.
 static const CGFloat kFootFrom = 0.9;
-// How far down a cover starts, as a share of the screen (the lock screen's, measured off recordings 2026-10-22),
-// and how far into it the blur over the band above reaches before it is gone. A Canvas still starts at the top.
-static const CGFloat kCoverDrop = 0.087, kTopBlurRamp = 45;
-// How much the clip's reflections past its ends are stretched: the lock screen mirrors the cover at both ends and
+// How far into a cover the blur over the band above reaches before it is gone.
+static const CGFloat kTopBlurRamp = 45;
+// How much the clip's reflection past its foot is stretched: the lock screen mirrors the cover below and
 // stretches the reflection away from the edge, about twice (its owner's unblurred photos, 2026-10-24: a mouth 110px
 // tall came back 220px below the cover's foot, its blur starting just under the mouth, about 60pt above the foot).
 static const CGFloat kMirrorStretch = 2;
@@ -68,6 +68,12 @@ static const CGFloat kVariableBlurRadius = 72;
 // The scrim over a cover's band, the album page's (AlbumHeader.x) strength over a little more height: black
 // this strong at the top, gone this far down, so the status bar and the header keep on a white band.
 static const CGFloat kTopScrim = 180, kTopScrimAlpha = 0.28;
+// The blur's edge, the Music app's player's: one circle, the same on every cover, sized by the width of the
+// screen. Its centre sits on the middle line 0.375 W from the top, its radius is 0.824 W, so its lowest point
+// falls 0.552 of the player's height down and its ends 0.474 — measured off Apple Music's player, where a
+// halftone cover fits this circle to four pixels. It is only where the blur's profile starts: the profile's
+// own heights and feather are unchanged, read from the circle out.
+static const CGFloat kArcCentreY = 0.375f, kArcRadius = 0.824f;
 
 @interface CAFilter : NSObject
 + (instancetype)filterWithType:(NSString *)type;
@@ -175,9 +181,10 @@ static CGFloat brightEnd(NSData *luminances) {
     UIView *_picture;   // the clip over its foot, faded in as one
     CALayer *_still;    // the poster, with the video drawn over it
     AVPlayerLayer *_clip;
-    CAGradientLayer *_seamMask;
-    CAReplicatorLayer *_footCopy;   // the clip and its head again, mirrored and stretched down from its foot
-    CAReplicatorLayer *_headCopy;   // the clip again, mirrored and stretched up from a cover's top edge
+    CALayer *_seamMask;   // the seam material's edge: the same ramp, its start on the circle
+    NSString *_seamKey;   // the size and feather the seam mask was drawn for
+    UIImage *_seamImage;
+    CAReplicatorLayer *_footCopy;   // the clip again, mirrored and stretched down from its foot
     CAGradientLayer *_scrim;   // over a cover's band, for the status bar and the header
     UIVisualEffectView *_topBlur;   // over the head and the top of the cover
     CAGradientLayer *_topMask;
@@ -197,6 +204,49 @@ static UIBlurEffect *blurEffect(void) {
     return [UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemUltraThinMaterialDark];
 }
 
+// A stop profile at `y`, linearly interpolated between its stops, flat at each end — the same reading the
+// gradient used.
+static CGFloat profileAt(const CGFloat (*stops)[2], NSUInteger from, NSUInteger count, CGFloat y) {
+    if (count <= from) return 0;
+    if (y <= stops[from][0]) return stops[from][1];
+    for (NSUInteger i = from; i + 1 < count; i++) {
+        if (y <= stops[i + 1][0]) {
+            CGFloat span = stops[i + 1][0] - stops[i][0];
+            CGFloat t = span > 0 ? (y - stops[i][0]) / span : 0;
+            return stops[i][1] + (stops[i + 1][1] - stops[i][1]) * t;
+        }
+    }
+    return stops[count - 1][1];
+}
+
+// The seam material's mask: the same clear-to-black ramp over `ramp` points, except that its start follows the
+// circle instead of a straight line. The material's opacity and the ramp's length are the original ones.
+static UIImage *arcSeamMaskImage(CGSize size, CGFloat ramp) {
+    size_t w = (size_t)size.width, h = (size_t)size.height;
+    if (!w || !h || ramp <= 0) return nil;
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceGray();
+    CGContextRef context = CGBitmapContextCreate(NULL, w, h, 8, w * 2, space,
+                                                 (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    if (!context) return nil;
+    uint8_t *pixels = CGBitmapContextGetData(context);
+    CGFloat cx = size.width / 2, cy = kArcCentreY * size.width, radius = kArcRadius * size.width;
+    for (size_t y = 0; y < h; y++) {
+        for (size_t x = 0; x < w; x++) {
+            CGFloat dx = x + 0.5 - cx;
+            CGFloat arcY = cy + sqrtf(MAX(0, radius * radius - dx * dx));
+            CGFloat a = MIN(1, MAX(0, (y + 0.5 - arcY) / ramp));
+            pixels[(y * w + x) * 2] = 0;
+            pixels[(y * w + x) * 2 + 1] = (uint8_t)(a * 255.0f + 0.5f);
+        }
+    }
+    CGImageRef image = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    UIImage *result = image ? [UIImage imageWithCGImage:image] : nil;
+    if (image) CGImageRelease(image);
+    return result;
+}
+
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
     self.userInteractionEnabled = NO;
@@ -213,12 +263,9 @@ static UIBlurEffect *blurEffect(void) {
     _clip.videoGravity = AVLayerVideoGravityResizeAspectFill;
     [_still addSublayer:_clip];
     // Anchored at their origin, so a copy's transform is made about a point given in the picture's own terms.
-    _headCopy = [CAReplicatorLayer layer];
-    _headCopy.anchorPoint = CGPointZero;
-    [_headCopy addSublayer:_still];
     _footCopy = [CAReplicatorLayer layer];
     _footCopy.anchorPoint = CGPointZero;
-    [_footCopy addSublayer:_headCopy];
+    [_footCopy addSublayer:_still];
     [_picture.layer addSublayer:_footCopy];
     // The copies reach far past the field, stretched as they are; nothing past it is drawn or blurred.
     _picture.layer.masksToBounds = YES;
@@ -233,8 +280,8 @@ static UIBlurEffect *blurEffect(void) {
     _seamBlur = [[UIVisualEffectView alloc] initWithEffect:nil];
     _seamBlur.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     UIView *mask = [UIView new];
-    _seamMask = [CAGradientLayer layer];
-    _seamMask.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
+    _seamMask = [CALayer layer];
+    _seamMask.contentsGravity = kCAGravityResize;
     [mask.layer addSublayer:_seamMask];
     _seamBlur.maskView = mask;
     [self addSubview:_seamBlur];
@@ -285,10 +332,10 @@ static UIBlurEffect *blurEffect(void) {
     CGFloat screen = _screenHeight > 0 ? _screenHeight : total;
     CGFloat height = round(width * _aspect);
     if (_aspect > kCanvasAspect) height = MAX(height, screen);
-    CGFloat top = _aspect > kCanvasAspect ? 0 : round(screen * kCoverDrop);
+    CGFloat top = 0;
     CGFloat seam = top + round(height * kFootFrom), blurFrom = MIN(seam, round(screen * kBlurByControls));
     CGFloat blurRamp = kBlurRamp;
-    if (top > 0) {
+    if (_aspect <= kCanvasAspect) {
         // The controls' dim is whole where the lock screen's blur is half.
         blurFrom = round(screen * kFootBlurFrom);
         blurRamp = round(screen * kDimWholeAt) - blurFrom;
@@ -304,25 +351,26 @@ static UIBlurEffect *blurEffect(void) {
     [CATransaction setDisableActions:YES];
     _still.frame = CGRectMake(0, top, width, height);
     _clip.frame = _still.bounds;
-    // The cover's copy above it: flipped about its top edge and stretched kMirrorStretch times away from it, a row y
-    // below that edge landing kMirrorStretch * y above it. The rest of the copy is past the field.
     _footCopy.frame = bounds;
-    _headCopy.frame = bounds;
-    _headCopy.instanceCount = top > 0 ? 2 : 1;
-    _headCopy.instanceTransform = flipAbout(top, kMirrorStretch);
-    _scrim.hidden = top == 0;
+    _scrim.hidden = _aspect > kCanvasAspect;
     _scrim.frame = CGRectMake(0, 0, width, kTopScrim);
     _topMask.frame = bounds;
     _topMask.locations = @[@0, @(top / total), @(MIN(1, (top + kTopBlurRamp) / total))];
-    // The same below, about the clip's foot, down to the bottom of the field. The copy of the head this makes lands
-    // far below the field.
+    // The same below, about the clip's foot, down to the bottom of the field.
     CGFloat below = MAX(0, total - top - height);
     _footCopy.instanceCount = below > 0 ? 2 : 1;
     _footCopy.instanceTransform = flipAbout(top + height, kMirrorStretch);
     _dim.frame = bounds;
     _dim.locations = @[@(MIN(1, (top + screen * kDimEaseFrom) / total)), @(MIN(1, (blurFrom + blurRamp) / total))];
     _seamMask.frame = bounds;
-    _seamMask.locations = @[@(MIN(1, blurFrom / total)), @(MIN(1, (blurFrom + blurRamp) / total))];
+    // The seam material's mask keeps its clear-to-black ramp and its length, and only its start moves: it now
+    // follows the circle rather than the straight line at blurFrom.
+    NSString *seamKey = [NSString stringWithFormat:@"%.0fx%.0f:%.0f", bounds.size.width, bounds.size.height, blurRamp];
+    if (![seamKey isEqualToString:_seamKey]) {
+        _seamKey = seamKey;
+        _seamImage = arcSeamMaskImage(bounds.size, blurRamp);
+    }
+    _seamMask.contents = (__bridge id)_seamImage.CGImage;
     if (_variable) {
         // At its strength down to the cover's top edge and easing off inside it, so the cover keeps nearly all its height.
         // The lock screen's, by height on the screen (kFootBlur, kTopBlur...).
@@ -395,30 +443,45 @@ static UIBlurEffect *blurEffect(void) {
 }
 
 // The variable blur on the clip, whole where a stop says 1 and none where it says 0, eased between, each stop at a
-// height in points. Its mask, drawn at a point a pixel, is drawn again only when the stops or the size change.
+// height in points. The stops, their heights and their spacing are the original ones; only where the foot's
+// profile starts moves — the circle takes the place of its first stop, and the profile is read from there, so
+// the arc decides where the blur begins and the stops still decide how strong it is and how soft its edge is.
+// Its mask, drawn at a point a pixel, is drawn again only when the stops or the size change.
 - (void)variableBlur:(CGFloat (*)[2])stops count:(NSUInteger)count size:(CGSize)size {
-    if (size.width < 1 || size.height < 1) return;
+    if (size.width < 1 || size.height < 1 || count < 5) return;
     NSMutableString *key = [NSMutableString stringWithFormat:@"%.0fx%.0f", size.width, size.height];
     for (NSUInteger i = 0; i < count; i++) [key appendFormat:@" %.0f:%.0f", stops[i][0], stops[i][1]];
     if ([key isEqualToString:_blurKey]) return;
     _blurKey = key;
-    NSMutableArray *colors = [NSMutableArray array];
-    CGFloat locations[12];
-    for (NSUInteger i = 0; i < count && i < 12; i++) {
-        [colors addObject:(id)[UIColor colorWithWhite:0 alpha:stops[i][1]].CGColor];
-        locations[i] = MIN(1, MAX(0, stops[i][0] / size.height));
+    // The first four stops are the band above a cover (all zero now that it starts at the top); the fifth is
+    // the foot's profile's first stop, the line the circle takes the place of.
+    NSUInteger foot = 4;
+    CGFloat footStart = stops[foot][0];
+    CGFloat cx = size.width / 2, cy = kArcCentreY * size.width, radius = kArcRadius * size.width;
+    size_t w = (size_t)size.width, h = (size_t)size.height;
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceGray();
+    CGContextRef context = CGBitmapContextCreate(NULL, w, h, 8, w * 2, space,
+                                                 (CGBitmapInfo)kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    if (!context) return;
+    uint8_t *pixels = CGBitmapContextGetData(context);
+    for (size_t y = 0; y < h; y++) {
+        for (size_t x = 0; x < w; x++) {
+            CGFloat dx = x + 0.5 - cx;
+            CGFloat arcY = cy + sqrtf(MAX(0, radius * radius - dx * dx));
+            CGFloat footY = y + 0.5 + footStart - arcY;
+            CGFloat footA = profileAt(stops, foot, count, footY);
+            CGFloat bandA = profileAt(stops, 0, MIN(foot, count), y + 0.5);
+            CGFloat a = MAX(bandA, footA);
+            pixels[(y * w + x) * 2] = 0;
+            pixels[(y * w + x) * 2 + 1] = (uint8_t)(a * 255.0f + 0.5f);
+        }
     }
-    const CGFloat *at = locations;   // run at once, below: a block cannot take the array itself
-    UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat preferredFormat];
-    format.scale = 1;
-    format.opaque = NO;
-    UIImage *mask = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
-        CGColorSpaceRef space = CGColorSpaceCreateDeviceGray();
-        CGGradientRef gradient = CGGradientCreateWithColors(space, (__bridge CFArrayRef)colors, at);
-        CGContextDrawLinearGradient(context.CGContext, gradient, CGPointZero, CGPointMake(0, size.height), 0);
-        CGGradientRelease(gradient);
-        CGColorSpaceRelease(space);
-    }];
+    CGImageRef image = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    UIImage *mask = image ? [UIImage imageWithCGImage:image] : nil;
+    if (image) CGImageRelease(image);
+    if (!mask) return;
     CAFilter *blur = [NSClassFromString(@"CAFilter") filterWithType:@"variableBlur"];
     [blur setValue:@(kVariableBlurRadius) forKey:@"inputRadius"];
     [blur setValue:(__bridge id)mask.CGImage forKey:@"inputMaskImage"];
