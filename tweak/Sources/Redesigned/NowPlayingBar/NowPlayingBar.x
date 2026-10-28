@@ -320,6 +320,10 @@ static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
 // 2026-10-24; the title alone there before). Each swipe page holds its own track's labels,
 // so the text is read from them and drawn over them page by page. The page reads its own VoiceOver label.
 static NSString *const kPageId = @"now-playing-bar-page";
+// The pages' list (Spotify's InformationCollectionView), which clips the text at its leading edge: in the row it slides
+// over with the cover and text, or a page swiped off to the left ran over the cover, cut only by the card's edge (its
+// owner's recording, 2026-10-28). Its touches go with it.
+static __weak UIScrollView *sg_pageList;
 
 static NSString *const kUnitId = @"Components.UI.PageInformationUnitNowPlayingBar";
 static NSString *const kDeviceLineId = @"now-plaging-bar-connect-content";   // Spotify's spelling
@@ -437,7 +441,9 @@ static void placeText(UIView *page) {
     // Inside Spotify's unit, so the text moves and fades with it as Spotify slides a page's in and out: the page's
     // height, which the card shows whole, and a line of text wide.
     UIView *root = sgr_nowPlayingRoot, *pages = page.superview;
-    CGFloat width = unit.bounds.size.width, lead = sg_rowShift + sg_rowLeft;
+    // A list slid into the row (scaleRowContent) carries the text all but the fade's room.
+    BOOL listSlid = sg_pageList && [page isDescendantOfView:sg_pageList] && sg_pageList.transform.tx != 0;
+    CGFloat width = unit.bounds.size.width, lead = sg_rowShift + (listSlid ? sg_rowLeft - sg_pageList.transform.tx : sg_rowLeft);
     // In the row the text ends short of the trailing buttons, measured from where the page stands at rest (its list's
     // place), so a page off to the side is sized as the one showing.
     if (sg_playLeft > 0 && root && pages.superview) {
@@ -509,8 +515,55 @@ static NSHashTable<UIView *> *sg_rowHolders;
 static void reapplyRow(void);
 
 
+// The page's nearest scroll view: the page sits in a cell's content view, in the cell, in the list.
+static UIScrollView *pageListIn(UIView *bar) {
+    UIScrollView *list = sg_pageList;
+    if (list && [list isDescendantOfView:bar]) return list;
+    __block UIView *page = nil;
+    SGForEachView(bar, ^(UIView *v) {
+        if (!page && [v.accessibilityIdentifier isEqualToString:kPageId]) page = v;
+    });
+    UIView *up = page.superview;
+    while (up && up != bar && ![up isKindOfClass:UIScrollView.class]) up = up.superview;
+    sg_pageList = up != bar && [up isKindOfClass:UIScrollView.class] ? (UIScrollView *)up : nil;
+    return sg_pageList;
+}
+
+// The slid list's leading edge fades over the fade's room, as each title's own fade does at rest: a page swiped off to
+// the left was cut there hard (its owner's recording, 2026-10-28). The mask is in the list's bounds, which scroll, so it
+// follows every offset (the UIScrollView hook); at rest it ends before the text starts.
+static CAGradientLayer *sg_listFade;
+static void fadeListEdge(UIScrollView *list) {
+    BOOL slid = list.transform.tx != 0;
+    if (!slid) {
+        if (sg_listFade && list.layer.mask == sg_listFade) list.layer.mask = nil;
+        return;
+    }
+    if (!sg_listFade) {
+        sg_listFade = [CAGradientLayer layer];
+        sg_listFade.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
+        sg_listFade.startPoint = CGPointMake(0, 0.5);
+        sg_listFade.endPoint = CGPointMake(1, 0.5);
+    }
+    CGRect bounds = list.bounds;
+    if (bounds.size.width <= kTextLead) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if (!CGRectEqualToRect(sg_listFade.frame, bounds)) sg_listFade.frame = bounds;
+    sg_listFade.locations = @[@0, @(kTextLead / bounds.size.width)];
+    if (list.layer.mask != sg_listFade) list.layer.mask = sg_listFade;
+    [CATransaction commit];
+}
+
 static void scaleRowContent(UIView *bar, BOOL inRow) {
     UIView *artwork = sg_cardArtwork;
+    UIScrollView *list = pageListIn(bar);
+    // Not when the cover is inside it: the cover's own shift would then move it twice. Short of the text by the leading
+    // fade's room, which its edge cut off at the text's start (its owner, 2026-10-28); the cover still lies past it.
+    BOOL slideList = list && !(artwork && [artwork isDescendantOfView:list]) && sg_rowLeft > kTextLead;
+    CGAffineTransform listSlide = CGAffineTransformMakeTranslation(slideList ? sg_rowLeft - kTextLead : 0, 0);
+    if (list && !CGAffineTransformEqualToTransform(list.transform, listSlide)) list.transform = listSlide;
+    if (list) fadeListEdge(list);
     sg_rowShift = 0;
     sg_compact = inRow;
     if (artwork && [artwork isDescendantOfView:bar]) {
@@ -1111,6 +1164,13 @@ static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) 
 %end
 
 // A page lays out again when Spotify moves its text, which it does after the first pass at launch.
+%hook UIScrollView
+- (void)setContentOffset:(CGPoint)offset {
+    %orig;
+    if (self == sg_pageList) fadeListEdge(self);
+}
+%end
+
 %hook _TtC18NowPlaying_BarImpl17InformationCellV2
 - (void)layoutSubviews {
     %orig;
