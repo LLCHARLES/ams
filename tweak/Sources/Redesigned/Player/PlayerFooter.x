@@ -12,7 +12,7 @@
 // device, as the Music app's is (AirPlay audio on the phone, the AirPods by model, a HomePod, a Mac...), with the
 // device's name on a line under the row; a tap on it opens the system's AirPlay picker and a press held opens
 // Spotify's Connect sheet (SGRRoutePicker). Connect's glyph is an image Spotify draws the color into: each new one is
-// read once for that color, so a device in use still lights it in the accent (or the cover's, PlayerCoverAccent.x),
+// read once for that color, which says only whether a Connect device is in use (the stand-in keeps the row's color),
 // and is swapped for a clear image of its size. The queue's is an SPTEncoreIconView: its foreground colors are kept
 // for the stand-in and Spotify's drawn clear.
 // Spotify has no lyrics control down here, so that one is the Kit's glyph button, and it turns the
@@ -180,6 +180,12 @@ static UIImage *litImage(SGRGlyphView *glyph, UIImage *symbol, UIColor *color) {
 // is drawn as the full-size one until MediaPlayer names its model (fetchPicked). A Spotify Connect device plays with the phone's own route, so it keeps AirPlay, lit.
 typedef NS_ENUM(NSInteger, SGROutputKind) { SGROutputKindHeadphones = 2, SGROutputKindHeadset = 3, SGROutputKindTV = 11, SGROutputKindHomePod = 12, SGROutputKindAppleTV = 13, SGROutputKindCar = 14 };
 
+// A Spotify Connect device in use (Spotify lights its glyph) and its name, from Spotify's label inside Connect: it plays
+// over the network while iOS's own route can stay where it was (a HomePod, its owner's recording, 2026-10-30), so it
+// comes before the route.
+static NSString *sg_spotifyDeviceName;
+static BOOL sg_connectLit;
+
 // The AirPlay route MediaPlayer says is picked, its name and its model (fetchPicked). Stale from a route change until the
 // next answer: two AirPlay routes can both be named "AirPlay", so the last answer may be the other device's.
 static NSString *sg_pickedName, *sg_pickedProduct, *sg_pickedFor;
@@ -193,9 +199,17 @@ static id outputDevice(AVAudioSessionPortDescription *port) {
         if (![contextClass respondsToSelector:@selector(sharedSystemAudioContext)]) return nil;
         NSArray *devices = [[contextClass performSelector:@selector(sharedSystemAudioContext)] valueForKey:@"outputDevices"];
         id named = nil, airPlay = nil;
+        NSMutableString *list = [NSMutableString string];
         for (id device in devices) {
             if ([[device valueForKey:@"name"] isEqual:port.portName]) named = device;
             if (!airPlay && [[device valueForKey:@"deviceType"] integerValue] == 0) airPlay = device;
+            [list appendFormat:@" [%@ %@/%@]", [device valueForKey:@"name"], [device valueForKey:@"deviceType"], [device valueForKey:@"deviceSubType"]];
+        }
+        static NSString *told;
+        NSString *line = [NSString stringWithFormat:@"%@ (%@):%@", port.portName, port.portType, list];
+        if (![told isEqualToString:line]) {
+            told = line;
+            SGLog(@"DIAG output devices for %@, picked %@ (%@)", line, sg_pickedName, sg_pickedStale ? @"stale" : @"current");
         }
         if (named) return named;
         return [port.portType isEqualToString:AVAudioSessionPortAirPlay] ? airPlay : (devices.count == 1 ? devices.firstObject : nil);
@@ -334,10 +348,14 @@ static void endDiscovery(NSUInteger token) {
     @try { ((void (*)(id, SEL, NSInteger))objc_msgSend)(sg_routing, @selector(setDiscoveryMode:), 0); } @catch (NSException *e) {}
 }
 
+static NSUInteger sg_fetchAttempt;
+
 static void fetchPicked(AVAudioSessionPortDescription *port) {
     if (!port.UID || [sg_pickedFor isEqualToString:port.UID]) return;
     sg_pickedFor = port.UID;
-    NSUInteger token = ++sg_fetchToken;
+    NSUInteger token = ++sg_fetchToken, attempt = sg_fetchAttempt;
+    sg_fetchAttempt = 0;
+    NSString *portType = port.portType;
     // The last answer stays until the new one comes, used only while its name fits the route (outputSymbol): cleared at
     // once, every switch drew a speaker for a moment (the phone's log, 2026-10-30).
     Class controllerClass = NSClassFromString(@"MPAVRoutingController");
@@ -356,6 +374,28 @@ static void fetchPicked(AVAudioSessionPortDescription *port) {
                 @try {
                     id picked = [controller valueForKey:@"pickedRoute"];
                     NSString *name = [picked valueForKey:@"routeName"];
+                    // MediaPlayer can still answer with the route before (a pair of AirPods while AirPlay already plays,
+                    // the phone's log, 2026-10-30): an AirPlay route takes only an AirPlay answer, asked again a moment later.
+                    BOOL wantAirPlay = [portType isEqualToString:AVAudioSessionPortAirPlay];
+                    BOOL airPlay = [picked respondsToSelector:@selector(isAirPlayRoute)] && [[picked valueForKey:@"isAirPlayRoute"] boolValue];
+                    if (!airPlay) for (id route in routes) {
+                        if ([[route valueForKey:@"routeName"] isEqual:name] && [route respondsToSelector:@selector(isAirPlayRoute)])
+                            airPlay = [[route valueForKey:@"isAirPlayRoute"] boolValue];
+                    }
+                    // A placeholder of iOS's while a route is handed over (its owner's screenshot, 2026-10-30), no device's.
+                    if ([name isEqual:@"AirPlayHandoffDevice"]) airPlay = NO;
+                    if (wantAirPlay && !airPlay) {
+                        if (attempt < 3) {
+                            sg_pickedFor = nil;
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.7 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                                if (token == sg_fetchToken) {
+                                    sg_fetchAttempt = attempt + 1;
+                                    paintConnectAgain();
+                                }
+                            });
+                        }
+                        return;
+                    }
                     // The picked route can be another class with no model (the phone's log, 2026-10-30): its model is
                     // on the route of that name in the list.
                     NSString *product = nil;
@@ -410,12 +450,29 @@ static BOOL hasDeviceSymbol(NSString *name) {
     return has.boolValue;
 }
 
+// The Spotify Connect device in use, if Spotify's lit glyph names one while the phone's own sound stays on its speaker:
+// Spotify lights its glyph for every output that is not the speaker, naming it "AirPlay", "Wired Connection" or a handoff
+// placeholder (the phone, 2026-10-30), and those are the route's, which the route draws itself.
+static NSString *spotifyConnectName(AVAudioSessionPortDescription *port) {
+    NSString *name = sg_spotifyDeviceName;
+    BOOL speaker = !port || [port.portType isEqualToString:AVAudioSessionPortBuiltInSpeaker] || [port.portType isEqualToString:AVAudioSessionPortBuiltInReceiver];
+    return speaker && sg_connectLit && name.length ? name : nil;
+}
+
 static NSString *outputSymbol(void) {
     AVAudioSessionPortDescription *port = AVAudioSession.sharedInstance.currentRoute.outputs.firstObject;
     NSString *type = port.portType, *name = port.portName.lowercaseString ?: @"";
     NSString *symbol = kConnectSymbol;
-    if ([type isEqualToString:AVAudioSessionPortHeadphones]) {
-        // Wired, through the headphone jack or a Lightning or USB-C adapter: drawn as EarPods (its owner's pick, 2026-10-30).
+    NSString *connectName = spotifyConnectName(port);
+    if (connectName) {
+        // A Spotify Connect device: drawn by the model remembered for its name (a Mac played to over AirPlay before),
+        // else as AirPlay.
+        markOutputUsed(connectName);
+        NSString *model = outputModels()[connectName];
+        symbol = symbolForProduct(model) ?: symbolForHeadphones(model, connectName) ?: kConnectSymbol;
+    } else if ([type isEqualToString:AVAudioSessionPortHeadphones] || [type isEqualToString:AVAudioSessionPortUSBAudio]
+               || [type isEqualToString:AVAudioSessionPortLineOut]) {
+        // Wired, through the headphone jack, an adapter, or USB-C earphones: drawn as EarPods (its owner's pick, 2026-10-30).
         symbol = @"earpods";
     } else if ([type isEqualToString:AVAudioSessionPortCarAudio]) {
         symbol = @"car.fill";
@@ -449,6 +506,8 @@ static NSString *outputSymbol(void) {
         NSString *modelSymbol = symbolForProduct(outputModels()[deviceName]) ?: (fits ? symbolForProduct(sg_pickedProduct) : nil);
         NSInteger kind = modelSymbol ? -1 : kindOf(device);
         if (modelSymbol) symbol = modelSymbol;
+        // Not yet known (iOS's list and MediaPlayer's answer can trail a switch): AirPlay's own glyph until they come.
+        else if (kind < 0 && sg_pickedStale) symbol = kConnectSymbol;
         else if (kind == SGROutputKindHomePod) symbol = @"homepod.fill";
         else if (kind == SGROutputKindAppleTV) symbol = @"appletv.fill";
         else if (kind == SGROutputKindTV) symbol = @"tv.fill";
@@ -463,9 +522,10 @@ static NSString *outputSymbol(void) {
     while (!hasDeviceSymbol(symbol) && older[symbol]) symbol = older[symbol];
     if (!hasDeviceSymbol(symbol)) symbol = kConnectSymbol;
     static NSString *told;
-    if (![told isEqualToString:symbol]) {
-        told = symbol;
-        SGLog(@"redesign player: output %@ (%@), drawn as %@", port.portType, port.portName, symbol);
+    NSString *line = [NSString stringWithFormat:@"%@ (%@), drawn as %@", port.portType, port.portName, symbol];
+    if (![told isEqualToString:line]) {
+        told = line;
+        SGLog(@"redesign player: output %@", line);
     }
     return symbol;
 }
@@ -475,15 +535,13 @@ static NSString *outputSymbol(void) {
 // Connect device plays from the phone's speaker route with Spotify's glyph lit, and is named by Spotify's own label
 // inside Connect, hidden in the row.
 static NSHashTable<UILabel *> *sg_routeLines;
-static NSString *sg_spotifyDeviceName;
-static BOOL sg_connectLit;
 
 static NSString *routeText(void) {
     AVAudioSessionPortDescription *port = AVAudioSession.sharedInstance.currentRoute.outputs.firstObject;
+    NSString *connectName = spotifyConnectName(port);
+    if (connectName) return connectName;
     NSString *type = port.portType;
-    if (!port || [type isEqualToString:AVAudioSessionPortBuiltInSpeaker] || [type isEqualToString:AVAudioSessionPortBuiltInReceiver]) {
-        return sg_connectLit && sg_spotifyDeviceName.length ? sg_spotifyDeviceName : nil;
-    }
+    if (!port || [type isEqualToString:AVAudioSessionPortBuiltInSpeaker] || [type isEqualToString:AVAudioSessionPortBuiltInReceiver]) return nil;
     return outputName(port, outputDevice(port));
 }
 
@@ -508,16 +566,15 @@ static void paintConnectAgain(void) {
 static void paintConnect(UIImageView *drawn) {
     SGRGlyphView *glyph = objc_getAssociatedObject(drawn, &kStandInKey);
     if (!glyph) return;
+    // Spotify lights its glyph for a Connect device in use; the stand-in keeps the row's color, as the Music app's device
+    // glyph does (its owner, 2026-10-30), and the light says the device is Spotify's (outputSymbol, routeText).
+    UIColor *ink = objc_getAssociatedObject(drawn, &kConnectInkKey);
+    sg_connectLit = ink && SGRPlayerAccentLike(ink);
     NSString *want = outputSymbol();
     if (![glyph.symbol isEqualToString:want]) [glyph setSymbol:want animated:NO];
     UIImage *symbol = deviceSymbol(want, glyph.preferredSymbolConfiguration);
-    UIColor *ink = objc_getAssociatedObject(drawn, &kConnectInkKey);
-    BOOL lit = ink && SGRPlayerAccentLike(ink);
-    sg_connectLit = lit;
     updateRouteLine();
-    glyph.image = lit ? litImage(glyph, symbol, ink) : symbol;
-    // Spotify hands the new image over with no layout pass, so Follow the cover is told here, or a lit glyph keeps the accent.
-    if (lit) SGRPlayerPaintCover(glyph);
+    glyph.image = symbol;
 }
 
 // Spotify's new Connect glyph: its color onto the stand-in, drawn into the stand-in's image so Follow the cover
@@ -654,8 +711,11 @@ UIView *SGRPlayerConnectGlyphIn(UIView *host, UIView *connect) {
         if ([view isKindOfClass:UILabel.class] || SGClassNamed(view.class, @"MarqueeLabel")) SGRPlayerVanish(view);
         if (!name.length && [view isKindOfClass:UILabel.class]) name = ((UILabel *)view).text;
     });
+    BOOL renamed = !(name == sg_spotifyDeviceName || [name isEqualToString:sg_spotifyDeviceName]);
     sg_spotifyDeviceName = name;
     if (glyph) standInForConnect((UIImageView *)glyph);
+    // Spotify names another device after its glyph is drawn (another Connect device with the same glyph draws none).
+    if (renamed) paintConnectAgain();
     return glyph;
 }
 
@@ -724,6 +784,46 @@ UIView *SGRPlayerConnectGlyphIn(UIView *host, UIView *connect) {
 }
 @end
 
+// The lyrics glyph is a button of the Kit's and presses like one; Connect's and the queue's are drawn inside Spotify's
+// controls, which never press them (its owner's recording, 2026-10-30). A recognizer of a finger's whole stay on the
+// control presses the glyph and lets go of it as the finger lifts, taking nothing from the tap or the hold.
+@interface SGRGlyphPressWatch : NSObject <UIGestureRecognizerDelegate>
+@end
+
+@implementation SGRGlyphPressWatch
+- (void)touched:(UILongPressGestureRecognizer *)press {
+    UIView *source = [press.view isKindOfClass:SGRRoutePicker.class] ? ((SGRRoutePicker *)press.view).holder : press.view;
+    __block SGRGlyphView *glyph = nil;
+    SGForEachView(source, ^(UIView *view) {
+        if (!glyph && [view isKindOfClass:SGRGlyphView.class]) glyph = (SGRGlyphView *)view;
+    });
+    UIGestureRecognizerState state = press.state;
+    if (state == UIGestureRecognizerStateBegan) SGRGlyphPress(glyph, YES);
+    else if (state == UIGestureRecognizerStateEnded || state == UIGestureRecognizerStateCancelled || state == UIGestureRecognizerStateFailed) SGRGlyphPress(glyph, NO);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
+    return YES;
+}
+@end
+
+static char kGlyphPressKey;
+
+static void pressGlyphOnTouch(UIView *control) {
+    if (!control || objc_getAssociatedObject(control, &kGlyphPressKey)) return;
+    static SGRGlyphPressWatch *watch;
+    if (!watch) watch = [SGRGlyphPressWatch new];
+    UILongPressGestureRecognizer *press = [[UILongPressGestureRecognizer alloc] initWithTarget:watch action:@selector(touched:)];
+    press.minimumPressDuration = 0;
+    press.allowableMovement = 30;
+    press.cancelsTouchesInView = NO;
+    press.delaysTouchesBegan = NO;
+    press.delaysTouchesEnded = NO;
+    press.delegate = watch;
+    [control addGestureRecognizer:press];
+    objc_setAssociatedObject(control, &kGlyphPressKey, press, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
 static char kRoutePickerKey;
 
 static char kRouteLineKey;
@@ -734,6 +834,7 @@ void SGRPlayerPlaceRoute(UIView *host, UIView *connect, CGPoint middle) {
     if (!picker) {
         picker = [[SGRRoutePicker alloc] initWithFrame:CGRectMake(0, 0, 44, 44)];
         objc_setAssociatedObject(host, &kRoutePickerKey, picker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        pressGlyphOnTouch(picker);
         SGLog(@"redesign player: the middle glyph opens AirPlay, held it opens Connect");
     }
     picker.holder = connect;
@@ -896,6 +997,7 @@ void SGRPlayerLowerRow(UIView *row) {
 
     UIView *queue = SGRFindByIdentifier(host, @"QueueButtonNowPlaying", &kQueueKey);
     standInForQueue((SPTEncoreIconView *)SGRFindByIdentifier(queue, @"Encore.IconView", &kQueueIconKey));
+    pressGlyphOnTouch(queue);
     CGFloat queueFrom = moveTo(arrangedAround(queue, host), queue, CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds)), host, round(width * (rtl ? kLeading : kTrailing)));
 
     SGRPlayerLowerRow(host);

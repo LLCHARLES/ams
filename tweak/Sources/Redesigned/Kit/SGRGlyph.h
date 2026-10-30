@@ -16,6 +16,10 @@
 - (void)setSymbol:(NSString *)symbol animated:(BOOL)animated;
 @end
 
+// A glyph drawn pressed (dimmed and a little smaller) or let go of, with the press motion: the glyph button's own, for
+// a glyph drawn inside a control of Spotify's.
+void SGRGlyphPress(UIView *glyph, BOOL pressed);
+
 // A glyph that is a button: at least 44pt to touch whatever the glyph's size, dims and springs back
 // when pressed, 0.35 alpha and "dimmed" to VoiceOver when disabled, and shows the large content
 // viewer with its title when held at accessibility text sizes.

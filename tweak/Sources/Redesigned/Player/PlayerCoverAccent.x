@@ -12,6 +12,9 @@
 // those two alone so the cover on the card is never judged: when the cover's color changes, which reaches here with the
 // player never opened (PlayerField.x), when the bar or one of the two buttons lays out, and when the device glyph is
 // handed a new image, which lays nothing out. Only the tab bar's bar (sgr_nowPlayingRoot), not the one on Spotify's sheets.
+//
+// With Follow the cover off they are painted the same way in white, the color of the player's other icons, rather than left
+// in the accent (its owner, 2026-10-30: a lit shuffle and the like's check stood out green beside the white row).
 #import <objc/runtime.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
@@ -252,7 +255,7 @@ static void paintTree(UIView *root) {
 }
 
 void SGRPlayerPaintCover(UIView *stack) {
-    if (!SGRPlayerFollowsCover() || !stack) return;
+    if (!stack) return;
     if (stack.superview && [stack isKindOfClass:UIStackView.class]) sg_stack = stack;
     paintTree(stack);
 }
@@ -297,6 +300,7 @@ static void paintBar(UIView *bar) {
 }
 
 void SGRPlayerSetCoverAccent(UIColor *cover) {
+    if (!SGRPlayerFollowsCover()) return;
     NSInteger rgb = -1;
     CGFloat h, s, v, a;
     if ([cover getHue:&h saturation:&s brightness:&v alpha:&a] && s >= 0.15) {
@@ -338,6 +342,7 @@ void SGRPlayerSetCoverAccent(UIColor *cover) {
 %end
 
 %ctor {
-    if (!SGRedesignedUI() || !SGRPlayerFollowsCover()) return;
+    if (!SGRedesignedUI()) return;
+    if (!SGRPlayerFollowsCover()) sg_cover = 0xFFFFFF;
     %init;
 }

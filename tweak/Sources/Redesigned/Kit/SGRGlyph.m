@@ -42,6 +42,14 @@ static const CGFloat kMinTouch = 44, kPressAlpha = 0.5, kPressScale = 0.9, kDisa
 
 @end
 
+void SGRGlyphPress(UIView *glyph, BOOL pressed) {
+    if (!glyph) return;
+    SGRAnimate(SGRMotionPress, ^{
+        glyph.alpha = pressed ? kPressAlpha : 1;
+        glyph.transform = pressed ? CGAffineTransformMakeScale(kPressScale, kPressScale) : CGAffineTransformIdentity;
+    }, nil);
+}
+
 @implementation SGRGlyphButton {
     SGRGlyphView *_glyph;
 }
@@ -103,11 +111,7 @@ static const CGFloat kMinTouch = 44, kPressAlpha = 0.5, kPressScale = 0.9, kDisa
 
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
-    SGRGlyphView *glyph = _glyph;
-    SGRAnimate(SGRMotionPress, ^{
-        glyph.alpha = highlighted ? kPressAlpha : 1;
-        glyph.transform = highlighted ? CGAffineTransformMakeScale(kPressScale, kPressScale) : CGAffineTransformIdentity;
-    }, nil);
+    SGRGlyphPress(_glyph, highlighted);
 }
 
 - (void)setEnabled:(BOOL)enabled {
