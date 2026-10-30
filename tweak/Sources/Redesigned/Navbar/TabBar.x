@@ -821,21 +821,31 @@ static void shrinkCircle(UIView *bar, BOOL circle) {
 }
 
 static char kPressTokenKey;
+// Fingers on the screen, from the touches the window sends (the UIWindow hook): a press held is not let go of under them.
+static NSUInteger sg_fingersDown;
+static void pressCircle(UIView *bar, BOOL down);
+
+// The press let go of once no finger is down, unless something lowered it first (its token replaced).
+static void settleWhenLifted(UIView *bar, id token, NSTimeInterval after) {
+    __weak UIView *weakBar = bar;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(after * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        UIView *strongBar = weakBar;
+        if (!strongBar || objc_getAssociatedObject(strongBar, &kPressTokenKey) != token) return;
+        if (sg_fingersDown) settleWhenLifted(strongBar, token, 0.1);
+        else pressCircle(strongBar, NO);
+    });
+}
 
 static void pressCircle(UIView *bar, BOOL down) {
     if (!bar || [objc_getAssociatedObject(bar, &kPressedKey) boolValue] == down) return;
     objc_setAssociatedObject(bar, &kPressedKey, down ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     // UIKit lowers a lens it was let lift, and this one never lifted, so it does not always ask again on the finger's way
     // up: the circle stayed at its pressed size after the tap (its owner's recording, 2026-10-27). It settles back on its
-    // own, once the finger has had time to lift, if nothing has lowered it first.
+    // own once the finger lifts, if nothing has lowered it first; a press held keeps its size (the review, 2026-10-30).
     if (down) {
         id token = [NSObject new];
         objc_setAssociatedObject(bar, &kPressTokenKey, token, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        __weak UIView *weakBar = bar;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIView *strongBar = weakBar;
-            if (strongBar && objc_getAssociatedObject(strongBar, &kPressTokenKey) == token) pressCircle(strongBar, NO);
-        });
+        settleWhenLifted(bar, token, 0.45);
     }
     // Let go after the bar grew back: the row keeps its own transform.
     if (!sg_minimized) return;
@@ -1519,6 +1529,18 @@ static BOOL inGlassBar(UIView *view) {
     for (UIView *up = view.superview; up && depth < 4; up = up.superview, depth++) if ([up isKindOfClass:SGRSystemTabBar.class]) return YES;
     return NO;
 }
+
+%hook UIWindow
+- (void)sendEvent:(UIEvent *)event {
+    %orig;
+    if (event.type != UIEventTypeTouches) return;
+    NSUInteger down = 0;
+    for (UITouch *touch in event.allTouches) {
+        if (touch.phase != UITouchPhaseEnded && touch.phase != UITouchPhaseCancelled) down++;
+    }
+    sg_fingersDown = down;
+}
+%end
 
 %hook _UILiquidLensView
 // No lens on a minimized circle (see pressCircle): UIKit shows it by its alpha and hidden, so those stay off.
