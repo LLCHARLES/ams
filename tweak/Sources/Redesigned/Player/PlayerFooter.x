@@ -415,7 +415,8 @@ static NSString *outputSymbol(void) {
     NSString *type = port.portType, *name = port.portName.lowercaseString ?: @"";
     NSString *symbol = kConnectSymbol;
     if ([type isEqualToString:AVAudioSessionPortHeadphones]) {
-        symbol = @"headphones";
+        // Wired, through the headphone jack or a Lightning or USB-C adapter: drawn as EarPods (its owner's pick, 2026-10-30).
+        symbol = @"earpods";
     } else if ([type isEqualToString:AVAudioSessionPortCarAudio]) {
         symbol = @"car.fill";
     } else if ([type isEqualToString:AVAudioSessionPortHDMI]) {
