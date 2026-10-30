@@ -569,34 +569,38 @@ static UIScrollView *pageListIn(UIView *bar) {
 }
 
 // The slid list's leading edge fades over the fade's room, as each title's own fade does at rest: a page swiped off to
-// the left was cut there hard (its owner's recording, 2026-10-28). The mask is on the list's own view, which does not
-// scroll, so it is set once per pass of the row rather than at every offset of a swipe, and the list is not drawn offscreen
-// as it scrolls: whole up to the list's edge (the cover lies there), clear at the edge, whole again kTextLead in, where at
-// rest the text starts.
+// the left was cut there hard (its owner's recording, 2026-10-28). The mask is in the list's bounds, which scroll, so a
+// scroll only moves it (the UIScrollView hook); at rest it ends before the text starts. On the list's own view instead,
+// which does not scroll, no fade showed (the phone, 2026-10-30).
 static CAGradientLayer *sg_listFade;
+static void followListFade(UIScrollView *list) {
+    if (list.layer.mask != sg_listFade || CGPointEqualToPoint(sg_listFade.frame.origin, list.bounds.origin)) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    sg_listFade.frame = list.bounds;
+    [CATransaction commit];
+}
+
 static void fadeListEdge(UIScrollView *list) {
-    UIView *host = list.superview;
-    BOOL slid = list.transform.tx != 0 && host && ![host isKindOfClass:UIScrollView.class];
+    BOOL slid = list.transform.tx != 0;
     if (!slid) {
-        if (sg_listFade && host.layer.mask == sg_listFade) host.layer.mask = nil;
+        if (sg_listFade && list.layer.mask == sg_listFade) list.layer.mask = nil;
         return;
     }
-    CGRect bounds = host.bounds;
-    CGFloat edge = CGRectGetMinX(list.frame) - bounds.origin.x;
-    if (bounds.size.width <= 0 || edge < 0 || edge + kTextLead > bounds.size.width) return;
+    CGRect bounds = list.bounds;
+    if (bounds.size.width <= kTextLead) return;
     if (!sg_listFade) {
         sg_listFade = [CAGradientLayer layer];
-        UIColor *whole = UIColor.blackColor;
-        sg_listFade.colors = @[(id)whole.CGColor, (id)whole.CGColor, (id)UIColor.clearColor.CGColor, (id)whole.CGColor];
+        sg_listFade.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
         sg_listFade.startPoint = CGPointMake(0, 0.5);
         sg_listFade.endPoint = CGPointMake(1, 0.5);
     }
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     if (!CGRectEqualToRect(sg_listFade.frame, bounds)) sg_listFade.frame = bounds;
-    CGFloat from = edge / bounds.size.width, to = (edge + kTextLead) / bounds.size.width;
-    sg_listFade.locations = @[@0, @(from), @(from), @(to)];
-    if (host.layer.mask != sg_listFade) host.layer.mask = sg_listFade;
+    NSArray *locations = @[@0, @(kTextLead / bounds.size.width)];
+    if (![sg_listFade.locations isEqualToArray:locations]) sg_listFade.locations = locations;
+    if (list.layer.mask != sg_listFade) list.layer.mask = sg_listFade;
     [CATransaction commit];
 }
 
@@ -1199,6 +1203,13 @@ static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) 
         return;
     }
     %orig;
+}
+%end
+
+%hook UIScrollView
+- (void)setContentOffset:(CGPoint)offset {
+    %orig;
+    if (self == sg_pageList) followListFade(self);
 }
 %end
 
