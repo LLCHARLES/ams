@@ -7,11 +7,13 @@
 // transform survives the stack view laying them out again, and moving the holder keeps its touches
 // inside its own bounds. The device name goes transparent, since the glyph alone sits in the middle, and
 // Connect's holder takes touches only in a square over the glyph (SGRPlayerCoverConnect).
-// Both draw the Music app's glyphs, AirPlay audio and a bulleted list (issue #109): a stand-in inside each of
-// Spotify's glyph views, so it is hidden, faded and pulsed with Spotify's own, while Spotify's drawing goes
-// clear at its source. Connect's glyph is an image Spotify draws the color into: each new one is read once for
-// that color, so a device in use still lights it in the accent (or the cover's, PlayerCoverAccent.x), and is
-// swapped for a clear image of its size. The queue's is an SPTEncoreIconView: its foreground colors are kept
+// Both draw the Music app's glyphs (issue #109): a stand-in inside each of Spotify's glyph views, so it is hidden,
+// faded and pulsed with Spotify's own, while Spotify's drawing goes clear at its source. Connect's is the output's
+// device, as the Music app's is (AirPlay audio on the phone, the AirPods by model, a HomePod, a Mac...), with the
+// device's name on a line under the row; a tap on it opens the system's AirPlay picker and a press held opens
+// Spotify's Connect sheet (SGRRoutePicker). Connect's glyph is an image Spotify draws the color into: each new one is
+// read once for that color, so a device in use still lights it in the accent (or the cover's, PlayerCoverAccent.x),
+// and is swapped for a clear image of its size. The queue's is an SPTEncoreIconView: its foreground colors are kept
 // for the stand-in and Spotify's drawn clear.
 // Spotify has no lyrics control down here, so that one is the Kit's glyph button, and it turns the
 // lyrics in the player on and off (PlayerLyrics.x): filled while they are up, dimmed and dead for a
@@ -192,13 +194,6 @@ static id outputDevice(AVAudioSessionPortDescription *port) {
         for (id device in devices) {
             if ([[device valueForKey:@"name"] isEqual:port.portName]) named = device;
             if (!airPlay && [[device valueForKey:@"deviceType"] integerValue] == 0) airPlay = device;
-        }
-        static NSString *told;
-        NSMutableString *list = [NSMutableString string];
-        for (id device in devices) [list appendFormat:@" [%@ %@/%@]", [device valueForKey:@"name"], [device valueForKey:@"deviceType"], [device valueForKey:@"deviceSubType"]];
-        if (![told isEqualToString:list]) {
-            told = [list copy];
-            SGLog(@"redesign player: output devices for %@:%@", port.portName, list);
         }
         if (named) return named;
         return [port.portType isEqualToString:AVAudioSessionPortAirPlay] ? airPlay : (devices.count == 1 ? devices.firstObject : nil);
