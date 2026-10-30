@@ -282,6 +282,7 @@ static BOOL setEdges(UIView *bar, CGFloat left, CGFloat right) {
 // buttons stand aside while it is there and come back with the full card, the device button staying when the
 // Player page's Device button asks for it (SGRKeyBarInlineConnect). Only what this hid is shown again.
 static NSHashTable<UIView *> *sg_tucked;
+static char kTuckedTouchesKey;
 
 static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
     if (!sg_tucked) sg_tucked = [NSHashTable weakObjectsHashTable];
@@ -290,9 +291,11 @@ static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
     if (!tuck) {
         NSArray<UIView *> *items = sg_tucked.allObjects;
         [sg_tucked removeAllObjects];
+        // Each item's touches as Spotify had them before the row: one it had turned off (an ad's, say) stays off.
         for (UIView *item in items) {
             item.hidden = NO;
-            item.userInteractionEnabled = YES;
+            item.userInteractionEnabled = [objc_getAssociatedObject(item, &kTuckedTouchesKey) boolValue];
+            objc_setAssociatedObject(item, &kTuckedTouchesKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         SGRAnimate(SGRMotionRespond, ^{ for (UIView *item in items) item.alpha = 1; }, nil);
         return;
@@ -309,6 +312,7 @@ static void tuckExtras(UIView *bar, BOOL tuck, BOOL collapse) {
         // Hidden, the stack closes the gap, which is a layout of Spotify's; out of a Jam the buttons only fade, the
         // trailing ones sliding over their place.
         if (collapse) item.hidden = YES;
+        objc_setAssociatedObject(item, &kTuckedTouchesKey, @(item.userInteractionEnabled), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         item.userInteractionEnabled = NO;
         SGRAnimate(SGRMotionExit, ^{ item.alpha = 0; }, nil);
         [sg_tucked addObject:item];
@@ -324,6 +328,9 @@ static NSString *const kPageId = @"now-playing-bar-page";
 // over with the cover and text, or a page swiped off to the left ran over the cover, cut only by the card's edge (its
 // owner's recording, 2026-10-28). Its touches go with it.
 static __weak UIScrollView *sg_pageList;
+// A bar looked through with no pages yet (in a Jam, or before Spotify lays them out) is not looked through again on every
+// pass of the row: placeText forgets it once a page is placed.
+static __weak UIView *sg_pageListMissed;
 
 static NSString *const kUnitId = @"Components.UI.PageInformationUnitNowPlayingBar";
 static NSString *const kDeviceLineId = @"now-plaging-bar-connect-content";   // Spotify's spelling
@@ -397,6 +404,7 @@ static BOOL inSight(UIView *view, UIView *unit) {
 }
 
 static void placeText(UIView *page) {
+    sg_pageListMissed = nil;
     // The cell lays itself out before its content view places Spotify's text, so the text is placed first.
     [page layoutIfNeeded];
     __block UIView *unit = nil;
@@ -510,8 +518,37 @@ static const CGFloat kRowGlyph = 15;
 // The buttons the row moved by a transform: moved out of their stack's bounds, which hit testing checks first, they took
 // no touches in the row (its owner, 2026-10-27), so the bar's touch handling looks for them itself (the hitTest hook).
 static NSHashTable<UIView *> *sg_rowControls;
-// The views round those buttons that the row slides (scaleRowContent).
+// The views round those buttons that the row slides (scaleRowContent). Off its live buttons, which the hitTest hook asks
+// first, a slid holder takes no touches: moved over the pages' list, its tucked device button's room swallowed the swipes
+// for the next track on the card's right half (its owner, 2026-10-28). Each holder's class answers from the mark, as
+// every other view of the class does without it.
 static NSHashTable<UIView *> *sg_rowHolders;
+static char kRowHolderKey;
+static NSMutableDictionary<NSString *, NSValue *> *sg_holderPointInside;   // class name -> original IMP
+
+static BOOL holderPointInside(UIView *self, SEL _cmd, CGPoint point, UIEvent *event) {
+    if (sg_rowLeft != 0 && objc_getAssociatedObject(self, &kRowHolderKey)) return NO;
+    for (Class c = object_getClass(self); c; c = class_getSuperclass(c)) {
+        IMP orig = [sg_holderPointInside[NSStringFromClass(c)] pointerValue];
+        if (orig) return ((BOOL (*)(UIView *, SEL, CGPoint, UIEvent *))orig)(self, _cmd, point, event);
+    }
+    return CGRectContainsPoint(self.bounds, point);
+}
+
+static void markRowHolder(UIView *holder, BOOL mark) {
+    if (mark) {
+        if (!sg_holderPointInside) sg_holderPointInside = [NSMutableDictionary dictionary];
+        NSString *name = NSStringFromClass(holder.class);
+        if (!sg_holderPointInside[name]) {
+            // The class's own method replaced, or one added over the one it inherits, which stays the original.
+            Method inherited = class_getInstanceMethod(holder.class, @selector(pointInside:withEvent:));
+            IMP orig = class_replaceMethod(holder.class, @selector(pointInside:withEvent:), (IMP)holderPointInside, method_getTypeEncoding(inherited));
+            if (!orig) orig = method_getImplementation(inherited);
+            sg_holderPointInside[name] = [NSValue valueWithPointer:(void *)orig];
+        }
+    }
+    objc_setAssociatedObject(holder, &kRowHolderKey, mark ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 static void reapplyRow(void);
 
 
@@ -519,6 +556,7 @@ static void reapplyRow(void);
 static UIScrollView *pageListIn(UIView *bar) {
     UIScrollView *list = sg_pageList;
     if (list && [list isDescendantOfView:bar]) return list;
+    if (bar && sg_pageListMissed == bar) return nil;
     __block UIView *page = nil;
     SGForEachView(bar, ^(UIView *v) {
         if (!page && [v.accessibilityIdentifier isEqualToString:kPageId]) page = v;
@@ -526,32 +564,39 @@ static UIScrollView *pageListIn(UIView *bar) {
     UIView *up = page.superview;
     while (up && up != bar && ![up isKindOfClass:UIScrollView.class]) up = up.superview;
     sg_pageList = up != bar && [up isKindOfClass:UIScrollView.class] ? (UIScrollView *)up : nil;
+    sg_pageListMissed = sg_pageList ? nil : bar;
     return sg_pageList;
 }
 
 // The slid list's leading edge fades over the fade's room, as each title's own fade does at rest: a page swiped off to
-// the left was cut there hard (its owner's recording, 2026-10-28). The mask is in the list's bounds, which scroll, so it
-// follows every offset (the UIScrollView hook); at rest it ends before the text starts.
+// the left was cut there hard (its owner's recording, 2026-10-28). The mask is on the list's own view, which does not
+// scroll, so it is set once per pass of the row rather than at every offset of a swipe, and the list is not drawn offscreen
+// as it scrolls: whole up to the list's edge (the cover lies there), clear at the edge, whole again kTextLead in, where at
+// rest the text starts.
 static CAGradientLayer *sg_listFade;
 static void fadeListEdge(UIScrollView *list) {
-    BOOL slid = list.transform.tx != 0;
+    UIView *host = list.superview;
+    BOOL slid = list.transform.tx != 0 && host && ![host isKindOfClass:UIScrollView.class];
     if (!slid) {
-        if (sg_listFade && list.layer.mask == sg_listFade) list.layer.mask = nil;
+        if (sg_listFade && host.layer.mask == sg_listFade) host.layer.mask = nil;
         return;
     }
+    CGRect bounds = host.bounds;
+    CGFloat edge = CGRectGetMinX(list.frame) - bounds.origin.x;
+    if (bounds.size.width <= 0 || edge < 0 || edge + kTextLead > bounds.size.width) return;
     if (!sg_listFade) {
         sg_listFade = [CAGradientLayer layer];
-        sg_listFade.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
+        UIColor *whole = UIColor.blackColor;
+        sg_listFade.colors = @[(id)whole.CGColor, (id)whole.CGColor, (id)UIColor.clearColor.CGColor, (id)whole.CGColor];
         sg_listFade.startPoint = CGPointMake(0, 0.5);
         sg_listFade.endPoint = CGPointMake(1, 0.5);
     }
-    CGRect bounds = list.bounds;
-    if (bounds.size.width <= kTextLead) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     if (!CGRectEqualToRect(sg_listFade.frame, bounds)) sg_listFade.frame = bounds;
-    sg_listFade.locations = @[@0, @(kTextLead / bounds.size.width)];
-    if (list.layer.mask != sg_listFade) list.layer.mask = sg_listFade;
+    CGFloat from = edge / bounds.size.width, to = (edge + kTextLead) / bounds.size.width;
+    sg_listFade.locations = @[@0, @(from), @(from), @(to)];
+    if (host.layer.mask != sg_listFade) host.layer.mask = sg_listFade;
     [CATransaction commit];
 }
 
@@ -617,15 +662,23 @@ static void scaleRowContent(UIView *bar, BOOL inRow) {
         for (UIView *up = control; up && up != bar && shown; up = up.superview) shown = !up.hidden && up.alpha >= 0.01;
         if (!shown) continue;
         CGFloat middle = [bar convertPoint:control.center fromView:control.superview].x;
-        // Its holder's slide is in the conversion already; a button slid alone is not yet moved when read here.
-        playLeft = MIN(playLeft, middle - (inRow ? kRowGlyph : control.bounds.size.width * scale) / 2 + (holder && CGAffineTransformEqualToTransform(holder.transform, slide) ? 0 : sg_rowRight));
+        // Its holder's slide is in the conversion already; a button slid alone is not yet moved when read here. Play's
+        // drawing is its 15pt glyph, far inside its tap area; another control kept in the row (Connect, with its switch
+        // on) is measured by its own width.
+        BOOL play = SGClassNamed(control.superview.class, @"PlayButtonView") || [control.accessibilityLabel isEqualToString:@"Play"]
+                 || [control.accessibilityLabel isEqualToString:@"Pause"];
+        CGFloat drawn = inRow && play ? kRowGlyph : control.bounds.size.width * scale;
+        playLeft = MIN(playLeft, middle - drawn / 2 + (holder && CGAffineTransformEqualToTransform(holder.transform, slide) ? 0 : sg_rowRight));
     }
     for (UIView *holder in slid.allObjects) {
-        if (![holders containsObject:holder] && !CGAffineTransformIsIdentity(holder.transform)) holder.transform = CGAffineTransformIdentity;
+        if ([holders containsObject:holder]) continue;
+        if (!CGAffineTransformIsIdentity(holder.transform)) holder.transform = CGAffineTransformIdentity;
+        markRowHolder(holder, NO);
     }
     [slid removeAllObjects];
     for (UIView *holder in holders.allObjects) {
         if (!CGAffineTransformEqualToTransform(holder.transform, slide)) holder.transform = slide;
+        if (![slid containsObject:holder]) markRowHolder(holder, YES);
         [slid addObject:holder];
     }
     sg_playLeft = sg_rowLeft != 0 && playLeft < CGFLOAT_MAX ? playLeft : 0;
@@ -1085,20 +1138,6 @@ static void styleNowPlayingBar(UIViewController *container) {
             }
         }
     }
-    // Off a live button, a slid holder takes nothing: moved over the pages' list, its tucked device button's room
-    // swallowed the swipes for the next track on the card's right half (its owner, 2026-10-28). It is let go of for the
-    // look, so the list under it answers.
-    if (sg_rowLeft != 0 && sg_rowHolders.count) {
-        NSArray<UIView *> *holders = sg_rowHolders.allObjects;
-        NSMutableArray<UIView *> *off = [NSMutableArray array];
-        for (UIView *holder in holders) if (holder.userInteractionEnabled) {
-            holder.userInteractionEnabled = NO;
-            [off addObject:holder];
-        }
-        UIView *under = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
-        for (UIView *holder in off) holder.userInteractionEnabled = YES;
-        return under && under != moved ? under : nil;
-    }
     if (hit && [hit isDescendantOfView:moved]) return hit;
     UIView *inside = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
     return inside && inside != moved ? inside : nil;
@@ -1164,13 +1203,6 @@ static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) 
 %end
 
 // A page lays out again when Spotify moves its text, which it does after the first pass at launch.
-%hook UIScrollView
-- (void)setContentOffset:(CGPoint)offset {
-    %orig;
-    if (self == sg_pageList) fadeListEdge(self);
-}
-%end
-
 %hook _TtC18NowPlaying_BarImpl17InformationCellV2
 - (void)layoutSubviews {
     %orig;
