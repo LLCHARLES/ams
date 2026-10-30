@@ -149,6 +149,8 @@ static void styleFooter(UIViewController *unit) {
         placeHolder(connectHolder, from, slot(1), 1);
         // Its view reaches far to the right of the glyph, over Queue and the DJ button: touches only over the glyph.
         SGRPlayerCoverConnect(connectHolder, glyph);
+        // A tap for AirPlay, held for Connect, and the output's name under it, as in the ordinary player's footer.
+        SGRPlayerPlaceRoute(host, connect, CGPointMake(slot(1), middleY));
     }
 
     SGRGlyphButton *queue = glyphButtonIn(host, &kQueueKey, @"list.bullet", @"Queue", SGRPrimary(), ^{
