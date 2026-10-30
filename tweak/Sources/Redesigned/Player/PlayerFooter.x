@@ -381,7 +381,7 @@ static NSString *symbolForProduct(NSString *product) {
     if ([product hasPrefix:@"AudioAccessory6"]) return @"homepod.2.fill";
     if ([product hasPrefix:@"AudioAccessory"]) return @"homepod.fill";
     if ([product hasPrefix:@"AppleTV"]) return @"appletv.fill";
-    if ([product hasPrefix:@"MacBook"]) return @"laptopcomputer";
+    if ([product hasPrefix:@"MacBook"]) return @"macbook";
     if ([product hasPrefix:@"iMac"]) return @"desktopcomputer";
     if ([product hasPrefix:@"Macmini"]) return @"macmini.fill";
     if ([product hasPrefix:@"Mac"]) return @"desktopcomputer";
@@ -458,7 +458,7 @@ static NSString *outputSymbol(void) {
     if (!older) older = @{@"airpods.pro.gen1": @"airpodspro", @"airpods.pro.gen3": @"airpods.pro", @"airpods.pro": @"airpodspro",
                           @"airpods.max": @"airpodsmax", @"airpods.gen4": @"airpods.gen3", @"airpods.gen3": @"airpods",
                           @"homepod.2.fill": @"homepod.fill", @"homepod.mini.fill": @"homepodmini.fill", @"beats.fit.pro": @"beats.fitpro",
-                          @"beats.studiobuds.plus": @"beats.studiobuds", @"beats.powerbeats.pro": @"beats.powerbeats", @"beats.powerbeats3": @"beats.powerbeats"};
+                          @"beats.studiobuds.plus": @"beats.studiobuds", @"macbook": @"laptopcomputer", @"beats.powerbeats.pro": @"beats.powerbeats", @"beats.powerbeats3": @"beats.powerbeats"};
     while (!hasDeviceSymbol(symbol) && older[symbol]) symbol = older[symbol];
     if (!hasDeviceSymbol(symbol)) symbol = kConnectSymbol;
     static NSString *told;
