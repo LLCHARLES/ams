@@ -16,8 +16,6 @@ UIStackView *SGRowIn(UIView *host);
 BOOL SGClassNamed(Class cls, NSString *marker);
 // Whether any view under `root` has `marker` in its class name.
 BOOL SGHasClass(UIView *root, NSString *marker);
-// Whether any view from `view` up the superview chain has `marker` in its class name.
-BOOL SGUnderClass(UIView *view, NSString *marker);
 // The first view under `root` (itself included) that `match` accepts, remembered weakly on `root` under
 // `key` and looked for again once it no longer matches or has left `root`. Nothing found is not remembered.
 UIView *SGFindRemembered(UIView *root, const void *key, BOOL (^match)(UIView *view));

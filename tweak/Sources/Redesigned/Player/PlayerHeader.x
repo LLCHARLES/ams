@@ -125,11 +125,14 @@ static void glassHeader(UIViewController *unit, BOOL watchMenu) {
     glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
 }
 
-// The title row's add button wears the Music app's star over the same glass circle the ⋯ wears: hollow
-// until the song is saved, filled and accented once it is. The image only changes with the selected state;
-// the Lottie stays transparent under it.
+// The title row's add button (the one sg_like names) wears the Music app's star over the same glass
+// circle the ⋯ wears: hollow until the song is saved, filled and accented once it is. The image only
+// changes with the selected state; the Lottie stays transparent under it. The marker keeps the plain
+// checkmark off this button and says which button the star's later passes are looking at.
 static void showStar(UIButton *button) {
-    if (!SGUnderClass(button, @"InformationElementsUnit")) return;
+    if (!button) return;
+    if (button != sg_like && !objc_getAssociatedObject(button, &SGRTitleAddButtonKey)) return;
+    objc_setAssociatedObject(button, &SGRTitleAddButtonKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
     pressFrom(button, NO);
     UIImageView *star = objc_getAssociatedObject(button, &kStarKey);
@@ -175,15 +178,16 @@ static void showEllipsis(UIButton *button) {
     dots.frame = button.bounds;
 }
 
-// Both sides found (the header's ⋯, the row and its add button), the move is made once and kept asserted:
+// Both sides found (the header's ⋯, the stack holding the star), the move is made once and kept asserted:
 // a rebuilt row takes the ⋯ back out and this puts it again.
 static void placeRowButtons(void) {
     UIStackView *row = sg_row;
     UIButton *like = sg_like, *more = sg_more;
     if (!row || !like || !more) return;
     NSUInteger afterLike = [row.arrangedSubviews indexOfObject:like];
-    if (afterLike == NSNotFound) return;
-    afterLike++;
+    // Spotify keeps the add button among the stack's arranged views; if a build gives it as a plain
+    // subview instead, the ⋯ still goes last, where the pair belongs.
+    afterLike = afterLike == NSNotFound ? row.arrangedSubviews.count : afterLike + 1;
     if (more.superview != row || [row.arrangedSubviews indexOfObject:more] != afterLike) {
         [more removeFromSuperview];
         more.translatesAutoresizingMaskIntoConstraints = NO;
@@ -199,15 +203,18 @@ static void placeRowButtons(void) {
     showEllipsis(more);
 }
 
-// The ordinary player's information unit holds the title row the buttons move into. The DJ's unit is
-// another class, so its row keeps Spotify's buttons.
+// The ordinary player's information unit holds the title row the buttons move into. The row is the stack
+// the add button itself sits in (Spotify keeps the title and the button in an inner stack, not the outer
+// one SGRowIn finds): that is the stack the ⋯ joins. The DJ's unit is another class, so its row keeps
+// Spotify's buttons.
 static void rowUnitLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
-    UIStackView *row = SGRowIn(host);
     UIButton *like = (UIButton *)SGRFindByIdentifier(host, @"Components.UI.AddToButton", &kLikeKey);
-    if (row) sg_row = row;
-    if ([like isKindOfClass:UIButton.class]) sg_like = like;
+    if (![like isKindOfClass:UIButton.class]) return;
+    sg_like = like;
+    if ([like.superview isKindOfClass:UIStackView.class]) sg_row = (UIStackView *)like.superview;
+    showStar(like);
     placeRowButtons();
 }
 
@@ -215,10 +222,16 @@ static void rowUnitLaidOut(UIViewController *unit) {
 - (void)viewDidLayoutSubviews {
     %orig;
     glassHeader((UIViewController *)self, YES);
-    // Once the ⋯ is in the title row it has left this view and the lookup is skipped.
-    if (!sg_more || sg_more.superview != sg_row) {
-        UIButton *more = (UIButton *)SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
-        if ([more isKindOfClass:UIButton.class]) sg_more = more;
+    // Once the ⋯ is in the title row it has left this view and the walk is skipped. A header that was
+    // rebuilt keeps a fresh ⋯ of its own: that one is taken and the moved one, if it is still in the row,
+    // goes, so the row never shows two.
+    UIStackView *row = sg_row;
+    if (!sg_more || !(row && sg_more.superview == row)) {
+        UIButton *found = (UIButton *)SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
+        if ([found isKindOfClass:UIButton.class] && found != sg_more) {
+            if (row && [row.arrangedSubviews containsObject:sg_more]) [sg_more removeFromSuperview];
+            sg_more = found;
+        }
     }
     placeRowButtons();
 }

@@ -23,6 +23,9 @@ BOOL SGRPlainCheckOn(void);
 // The Lottie animation an add button (id=Components.UI.AddToButton) draws its plus and tick with, so the
 // looks that stand in for it (SGRPlainCheck.x, Player/PlayerHeader.x's star) can put it away.
 UIView *SGRAddButtonAnimation(UIButton *button);
+// Set on the ordinary player's title-row add button, which the star draws (Player/PlayerHeader.x): the
+// plain checkmark leaves it alone, and the star's own passes know the button again.
+extern char SGRTitleAddButtonKey;
 
 @class SGModRow;
 NSArray<SGModRow *> *SGRAppearanceRows(void);   // the accent color, for the Appearance page
