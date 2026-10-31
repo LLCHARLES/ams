@@ -19,7 +19,7 @@ on:
         type: choice
         options: [artifacts, filebin, both]
   push:
-    branches: [michaelmelita1]
+    branches: [michaelmelita1, ams]
 
 env:
   THEOS: ${{ github.workspace }}/theos
