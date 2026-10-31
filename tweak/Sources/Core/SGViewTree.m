@@ -65,6 +65,13 @@ BOOL SGHasClass(UIView *root, NSString *marker) {
     return found;
 }
 
+BOOL SGUnderClass(UIView *view, NSString *marker) {
+    for (UIView *v = view; v; v = v.superview) {
+        if (SGClassNamed(v.class, marker)) return YES;
+    }
+    return NO;
+}
+
 @interface SGWeakBox : NSObject
 @property (nonatomic, weak) UIView *value;
 @end

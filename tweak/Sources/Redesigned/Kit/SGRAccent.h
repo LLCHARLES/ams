@@ -20,6 +20,9 @@ BOOL SGRAccentSwap(CGFloat *r, CGFloat *g, CGFloat *b);
 BOOL SGRPlainCheckOn(void);
 // The plain checkmark's view, a template image: Follow the cover (Player/PlayerCoverAccent.x) sets its tint.
 #define SGRPlainCheckIdentifier @"spotifyglass.plainCheck"
+// The Lottie animation an add button (id=Components.UI.AddToButton) draws its plus and tick with, so the
+// looks that stand in for it (SGRPlainCheck.x, Player/PlayerHeader.x's star) can put it away.
+UIView *SGRAddButtonAnimation(UIButton *button);
 
 @class SGModRow;
 NSArray<SGModRow *> *SGRAppearanceRows(void);   // the accent color, for the Appearance page

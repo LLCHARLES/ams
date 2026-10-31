@@ -10,12 +10,18 @@
 // (trees/continuous/1.txt, 2026-09-17: shapes at {-10, -22} and {320, -22}; the close button is at {12, 0}
 // in the unit's view, so its circle belonged at {14, 2}).
 //
-// The add button keeps no circle: its glyph is a circle of its own, green and filled once the track is
-// saved, and on glass it read as a disc on a disc (device test, 2026-09-17).
+// The ⋯ leaves the header for the title row's trailing end, right of the add button, where the Music app
+// keeps the pair (reparented as an arranged view: the glass, the menu front, the press and the popover
+// anchor are the button's own and ride the move; PlayerLyrics.x's title fade reads the row's new trailing
+// edge by itself). The add button stays where Spotify put it and wears the Music app's star over the same
+// glass circle: hollow until the song is saved, filled and accented once it is. Its Lottie plus/tick stays
+// under the star, transparent, so the button's own action and selected state are untouched, and the saved
+// star carries the plain checkmark's identifier for Follow the cover. The other add buttons (the list rows',
+// the mini bar's) keep Spotify's look, and so does the AI DJ's player: its units are other classes.
 //
 // Tree (trees/clean/player/01.txt): HeaderElementsUnit's view is a 402x48 row holding
 // id=now-playing-minimize-button 48x48 (:103) and id=Context menu 48x48 (:122), the playlist name
-// between them. The down arrow and the ⋯ are a pair, as the Music app's are: the same circle, size and glass.
+// between them. The down arrow keeps its circle in the header; the ⋯'s circle moves to the row with it.
 // 9.1.78 also carries mobile-nowplaying-close-button (strings in the binary), so the down arrow is looked for
 // under either name; which view each circle went into is logged once, so a phone where the arrow has none
 // says why.
@@ -30,7 +36,15 @@
 #import "Player.h"
 
 static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
+static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey;
 static const CGFloat kPressScale = 0.92;
+static const CGFloat kRowButtonGap = 10;   // between the star and the ⋯ in the title row
+static const CGFloat kStarSize = 17;
+static const CGFloat kEllipsisSize = 20;
+
+static __weak UIStackView *sg_row;   // the ordinary player's title row
+static __weak UIButton *sg_like;     // its add button, star-drawn
+static __weak UIButton *sg_more;     // the header's ⋯, moved to the row's end
 
 @interface SGRHeaderPress : NSObject
 @end
@@ -111,10 +125,123 @@ static void glassHeader(UIViewController *unit, BOOL watchMenu) {
     glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
 }
 
+// The title row's add button wears the Music app's star over the same glass circle the ⋯ wears: hollow
+// until the song is saved, filled and accented once it is. The image only changes with the selected state;
+// the Lottie stays transparent under it.
+static void showStar(UIButton *button) {
+    if (!SGUnderClass(button, @"InformationElementsUnit")) return;
+    SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
+    pressFrom(button, NO);
+    UIImageView *star = objc_getAssociatedObject(button, &kStarKey);
+    if (!star) {
+        star = [[UIImageView alloc] initWithImage:nil];
+        star.contentMode = UIViewContentModeCenter;
+        star.userInteractionEnabled = NO;
+        star.isAccessibilityElement = NO;
+        objc_setAssociatedObject(button, &kStarKey, star, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (star.superview != button) [button addSubview:star];
+    star.frame = button.bounds;
+    BOOL saved = button.isSelected;
+    NSNumber *was = objc_getAssociatedObject(button, &kStarStateKey);
+    if (!was || was.boolValue != saved) {
+        objc_setAssociatedObject(button, &kStarStateKey, @(saved), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:kStarSize weight:UIImageSymbolWeightSemibold];
+        star.image = [UIImage systemImageNamed:saved ? @"star.fill" : @"star" withConfiguration:configuration];
+        star.tintColor = saved ? SGRAccent() : UIColor.whiteColor;
+        star.accessibilityIdentifier = saved ? SGRPlainCheckIdentifier : nil;
+    }
+    SGRAddButtonAnimation(button).alpha = 0;
+}
+
+// The ⋯'s glyph, Spotify's dots swapped for the SF Symbol. The glass, the menu front and the press are
+// the button's own subviews and targets and stay untouched.
+static void showEllipsis(UIButton *button) {
+    UIImageView *dots = objc_getAssociatedObject(button, &kEllipsisKey);
+    if (!dots) {
+        UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:kEllipsisSize weight:UIImageSymbolWeightBold];
+        dots = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis" withConfiguration:configuration]];
+        dots.tintColor = UIColor.whiteColor;
+        dots.contentMode = UIViewContentModeCenter;
+        dots.userInteractionEnabled = NO;
+        dots.isAccessibilityElement = NO;
+        objc_setAssociatedObject(button, &kEllipsisKey, dots, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    for (UIView *sub in button.subviews) {
+        if (sub != dots && [sub isKindOfClass:UIImageView.class]) sub.hidden = YES;
+    }
+    button.imageView.hidden = YES;
+    if (dots.superview != button) [button addSubview:dots];
+    dots.frame = button.bounds;
+}
+
+// Both sides found (the header's ⋯, the row and its add button), the move is made once and kept asserted:
+// a rebuilt row takes the ⋯ back out and this puts it again.
+static void placeRowButtons(void) {
+    UIStackView *row = sg_row;
+    UIButton *like = sg_like, *more = sg_more;
+    if (!row || !like || !more) return;
+    NSUInteger afterLike = [row.arrangedSubviews indexOfObject:like];
+    if (afterLike == NSNotFound) return;
+    afterLike++;
+    if (more.superview != row || [row.arrangedSubviews indexOfObject:more] != afterLike) {
+        [more removeFromSuperview];
+        more.translatesAutoresizingMaskIntoConstraints = NO;
+        [row insertArrangedSubview:more atIndex:afterLike];
+        if (!objc_getAssociatedObject(more, &kSizedKey)) {
+            objc_setAssociatedObject(more, &kSizedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            [more.widthAnchor constraintEqualToConstant:SGRGlassCircleSize].active = YES;
+            [more.heightAnchor constraintEqualToConstant:SGRGlassCircleSize].active = YES;
+        }
+        SGLog(@"redesign player: the ⋯ moved to the title row, after the star");
+    }
+    [row setCustomSpacing:kRowButtonGap afterView:like];
+    showEllipsis(more);
+}
+
+// The ordinary player's information unit holds the title row the buttons move into. The DJ's unit is
+// another class, so its row keeps Spotify's buttons.
+static void rowUnitLaidOut(UIViewController *unit) {
+    UIView *host = unit.viewIfLoaded;
+    if (!host) return;
+    UIStackView *row = SGRowIn(host);
+    UIButton *like = (UIButton *)SGRFindByIdentifier(host, @"Components.UI.AddToButton", &kLikeKey);
+    if (row) sg_row = row;
+    if ([like isKindOfClass:UIButton.class]) sg_like = like;
+    placeRowButtons();
+}
+
 %hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
     glassHeader((UIViewController *)self, YES);
+    // Once the ⋯ is in the title row it has left this view and the lookup is skipped.
+    if (!sg_more || sg_more.superview != sg_row) {
+        UIButton *more = (UIButton *)SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
+        if ([more isKindOfClass:UIButton.class]) sg_more = more;
+    }
+    placeRowButtons();
+}
+%end
+
+%hook _TtC20NowPlaying_ModesImpl23InformationElementsUnit
+- (void)viewDidLayoutSubviews {
+    %orig;
+    rowUnitLaidOut((UIViewController *)self);
+}
+%end
+
+// The star follows the add button's state: Spotify marks a saved song's button selected, and the same
+// button in the list rows and the mini bar is left to Spotify (or to the plain checkmark, when that is on).
+%hook UIButton
+- (void)layoutSubviews {
+    %orig;
+    if ([self.accessibilityIdentifier isEqualToString:@"Components.UI.AddToButton"]) showStar(self);
+}
+
+- (void)setSelected:(BOOL)selected {
+    %orig;
+    if ([self.accessibilityIdentifier isEqualToString:@"Components.UI.AddToButton"]) showStar(self);
 }
 %end
 
@@ -134,5 +261,5 @@ static void glassHeader(UIViewController *unit, BOOL watchMenu) {
     %init;
     Class djHeader = SGRDJClass(@"DJMHeaderElementsUnitViewController");
     if (djHeader) { %init(SGRDJHeaderHooks, SGRDJHeaderUnit = djHeader); }
-    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl18HeaderElementsUnit"]);
+    SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl18HeaderElementsUnit", @"_TtC20NowPlaying_ModesImpl23InformationElementsUnit"]);
 }

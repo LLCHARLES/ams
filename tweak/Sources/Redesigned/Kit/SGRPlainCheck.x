@@ -19,7 +19,7 @@ BOOL SGRPlainCheckOn(void) {
     return on;
 }
 
-static UIView *animationIn(UIButton *button) {
+UIView *SGRAddButtonAnimation(UIButton *button) {
     UIView *found = objc_getAssociatedObject(button, &kAnimationKey);
     if (found.superview) return found;
     static Class lottie;
@@ -35,7 +35,9 @@ static UIView *animationIn(UIButton *button) {
 }
 
 static void showState(UIButton *button) {
-    UIView *animation = animationIn(button);
+    // The player's title row is the star's (Player/PlayerHeader.x): the checkmark keeps the other rows'.
+    if (SGUnderClass(button, @"InformationElementsUnit")) return;
+    UIView *animation = SGRAddButtonAnimation(button);
     if (!animation) return;
     UIImageView *check = objc_getAssociatedObject(button, &kCheckKey);
     BOOL saved = button.isSelected;
