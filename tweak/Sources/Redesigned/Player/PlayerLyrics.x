@@ -285,9 +285,15 @@ static void placeTitleRow(SGRLyricsLayout l) {
         CGFloat wanted = kInfoLift;
         CGRect cover = sg_host ? SGRPlayerCoverFrameIn(sg_host) : CGRectNull;
         if (!CGRectIsNull(cover)) {
-            // The title's own top, not the unit's: the unit keeps a little padding above the text.
+            // The title's own top, not the unit's: the unit keeps a little padding above the text. The
+            // element's frame read in the player carries the unit's lift with it, so coming back from
+            // the lines it measured the open place beside the thumbnail, found no room under the cover
+            // and dropped the row onto the bar until the next pass lifted it again. It is measured now
+            // from the unit's untransformed frame plus the element's place inside it -- the same on
+            // every pass, flying or standing.
             UIView *element = sg_titleElement ?: info;
-            CGFloat rowTop = CGRectGetMinY(untransformed(element, sg_host));
+            CGFloat rowTop = CGRectGetMinY(untransformed(info, sg_host));
+            if (element != info) rowTop += CGRectGetMinY([info convertRect:element.bounds fromView:element]);
             wanted = MIN(wanted, MAX(0, rowTop - CGRectGetMaxY(cover) - kCoverGap));
         }
         lift = -wanted;
