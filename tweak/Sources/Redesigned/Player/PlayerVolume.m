@@ -353,7 +353,7 @@ static void settle(UIView *stack, UIView *row, BOOL moved, CGRect frame) {
     });
 }
 
-BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin) {
+BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin, CGFloat drop) {
     SGRVolumeRow *volume = objc_getAssociatedObject(stack, &kVolumeKey);
     if (!SGRPlayerVolumeOn() || !controls) {
         if (volume) volume.alpha = 0;
@@ -386,7 +386,7 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
     CGFloat above = CGRectGetMaxY([play convertRect:play.bounds toView:stack]);
     CGFloat below = [row convertPoint:CGPointMake(CGRectGetMidX(row.bounds), CGRectGetMidY(row.bounds)) toView:stack].y - kGlyphsHalf;
     CGFloat height = kRowHeight, room = below - above;
-    CGRect frame = CGRectMake(margin, round((above + below - height) / 2), MAX(0, stack.bounds.size.width - 2 * margin), height);
+    CGRect frame = CGRectMake(margin, round((above + below - height) / 2) + drop, MAX(0, stack.bounds.size.width - 2 * margin), height);
     BOOL moved = !CGRectEqualToRect(volume.frame, frame);
     if (moved) volume.frame = frame;
     settle(stack, row, moved, frame);

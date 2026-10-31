@@ -114,11 +114,12 @@ SGModRow *SGRLyricsHideRow(void);
 
 // A volume slider under the controls (PlayerVolume.m), the system's: this iPhone's, or the Connect device's.
 // On until switched off. Placed by the footer's layout, between the controls (`controls`) and the footer row
-// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side.
+// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side and `drop` below the middle of
+// the room between them.
 #define SGRKeyPlayerVolume @"spotifyglass.redesign.player.volume"
 BOOL SGRPlayerVolumeOn(void);
 // YES when the row shows; NO when it is off, has no controls to sit under or no room between them and the footer.
-BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin);
+BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin, CGFloat drop);
 // Called after any slider's setValue:animated: (PlayerFooter.x), so the row follows its hidden system slider.
 void SGRPlayerVolumeSliderSet(UISlider *slider);
 

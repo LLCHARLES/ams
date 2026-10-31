@@ -24,7 +24,10 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Player.h"
 
-static const CGFloat kSkipGlyphSize = 32, kPlayGlyphSize = 44;
+static const CGFloat kSkipGlyphSize = 32, kPlayGlyphSize = 51;
+// The Music app draws previous and next this much further out from play than Spotify's row puts them,
+// measured on the iPhone 16 Pro the layouts were compared on.
+static const CGFloat kSkipOutset = 21;
 // A spinner that is still up this long after a state change is buffering, not a track starting.
 static const NSTimeInterval kSpinnerCheck = 0.6;
 
@@ -80,7 +83,7 @@ static void keepOnTop(UIView *view, UIView *host) {
 
 #pragma mark - previous and next
 
-static void skipGlyph(UIView *host, NSString *identifier, const void *findKey, NSString *symbol) {
+static void skipGlyph(UIView *host, NSString *identifier, const void *findKey, NSString *symbol, CGFloat outset) {
     UIView *button = SGRFindByIdentifier(host, identifier, findKey);
     UIView *content = button.subviews.firstObject;
     if (!content) {
@@ -94,6 +97,9 @@ static void skipGlyph(UIView *host, NSString *identifier, const void *findKey, N
         if (view != glyph && [view isKindOfClass:icon]) SGRPlayerVanish(view);
     });
     keepOnTop(glyph, content);
+    // The button itself moves, so the glyph and the square that takes its taps move together.
+    CGAffineTransform out = CGAffineTransformMakeTranslation(outset, 0);
+    if (!CGAffineTransformEqualToTransform(button.transform, out)) button.transform = out;
 }
 
 #pragma mark - shuffle and repeat
@@ -235,8 +241,9 @@ void SGRPlayerPlayGlyphIn(UIView *host) {
     // The unit lays out before its row does, and the glyphs are centered on the buttons in it.
     UIStackView *row = (UIStackView *)SGFindRemembered(host, &kRowKey, ^BOOL(UIView *v) { return SGIsRow(v); });
     [row layoutIfNeeded];
-    skipGlyph(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey, @"backward.fill");
-    skipGlyph(host, @"SPTNowPlayingNextTrackButton", &kNextKey, @"forward.fill");
+    BOOL rtl = host.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    skipGlyph(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey, @"backward.fill", rtl ? kSkipOutset : -kSkipOutset);
+    skipGlyph(host, @"SPTNowPlayingNextTrackButton", &kNextKey, @"forward.fill", rtl ? -kSkipOutset : kSkipOutset);
     SGRPlayerPlayGlyphIn(host);
     hideShuffleAndRepeat(host, row);
 }

@@ -57,10 +57,15 @@ static const CGFloat kRowAboveSafeArea = 32, kRowMinBottom = 34;
 // The controls follow a share of the row's move when nothing stands between them, so the gaps above
 // and below them even out instead of all the room opening under them.
 static const CGFloat kControlsShare = 0.3;
-// The volume row's sides, the player's own margin.
-static const CGFloat kVolumeMargin = 24;
+// The volume row's sides, measured from the Music app's (its speaker glyphs 36pt in from the screen's edge).
+static const CGFloat kVolumeMargin = 28;
 // And the controls go up this much over it, so the gaps above and below the volume row match.
 static const CGFloat kVolumeLift = 10;
+// The Music app draws the controls this much nearer its footer than Spotify's bottom stack does: the stack's
+// room between the two stretches with a taller screen. Measured on the iPhone 16 Pro the layouts were compared on.
+static const CGFloat kControlsLift = 49;
+// The Music app's volume row sits below the middle of the room the lifted controls leave it, by this much.
+static const CGFloat kVolumeDrop = 10;
 
 // "airplayaudio" is the name iOS 16 knows; iOS 18 calls it airplay.audio and keeps this one as its alias.
 static NSString *const kConnectSymbol = @"airplayaudio", *const kQueueSymbol = @"list.bullet";
@@ -925,20 +930,23 @@ void SGRPlayerLowerRow(UIView *row) {
     // The ordinary player's controls unit, or the AI DJ's head unit (DJPlayer.x), which holds the same buttons.
     Class unit = unitOf(above).class;
     BOOL controls = SGClassNamed(unit, @"PlaybackControlsElementsUnit") || SGClassNamed(unit, @"DJMHeadUnitViewController");
+    // The Music app's places are the ordinary player's; the AI DJ's keep the places it gave them.
+    BOOL ordinary = controls && SGClassNamed(unit, @"PlaybackControlsElementsUnit");
     // With the volume row, the controls stay where Spotify put them and the row takes the room the footer leaves.
     // The volume row is placed against the controls where they would stand for it; one that does not show leaves them
     // following the footer as they do without it.
     BOOL volume = SGRPlayerVolumeOn() && controls;
-    CGFloat share = volume ? 0 : kControlsShare, lift = volume ? kVolumeLift : 0;
+    CGFloat share = volume ? 0 : kControlsShare;
+    CGFloat lift = (volume ? kVolumeLift : 0) + (ordinary ? kControlsLift : 0);
     CGAffineTransform follow = CGAffineTransformMakeTranslation(0, controls ? round(move * share) - lift : 0);
     if (above && controls && !CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     SGRPlayerPaintCover(stack);
-    if (volume && !SGRPlayerPlaceVolume(stack, above, row, kVolumeMargin)) {
+    if (volume && !SGRPlayerPlaceVolume(stack, above, row, kVolumeMargin, ordinary ? kVolumeDrop : 0)) {
         share = kControlsShare;
-        follow = CGAffineTransformMakeTranslation(0, round(move * share));
+        follow = CGAffineTransformMakeTranslation(0, round(move * share) - (ordinary ? kControlsLift : 0));
         if (!CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     } else if (!volume) {
-        SGRPlayerPlaceVolume(stack, nil, row, kVolumeMargin);
+        SGRPlayerPlaceVolume(stack, nil, row, kVolumeMargin, 0);
     }
 
     SGRFooterReach *reach = objc_getAssociatedObject(row, &kReachKey);

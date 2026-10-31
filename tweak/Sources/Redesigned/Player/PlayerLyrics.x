@@ -37,11 +37,20 @@
 
 static const CGFloat kThumbSide = 72;          // the cover once the lyrics are up
 static const CGFloat kThumbGap = 16;           // between the thumbnail and the title beside it
+static const CGFloat kTitleInset = 9;          // the title's leading in from Spotify's, where the Music app's is
 static const CGFloat kTitleGap = 12;           // between the title and the controls at the trailing edge
 static const CGFloat kTitleFade = 20;          // over how much of its end a title too long to fit fades out
-static const CGFloat kThumbTop = 8;            // below the top of the artwork band
+static const CGFloat kThumbTop = -15;          // above the top of the artwork band, where the Music app's thumb sits
 static const CGFloat kLyricsTop = 20;          // between the title row and the first line
 static const CGFloat kLyricsBottom = 8;        // above the progress bar
+// Spotify's bottom stack spreads the title, the times and the bar further apart than the Music app, which
+// draws them nearer the cover and the controls: what the stack leaves standing too low, and the bar's width,
+// measured on the iPhone 16 Pro the layouts were compared on (402 x 874pt, 3x).
+static const CGFloat kInfoLift = 92;           // the title row rises this much
+static const CGFloat kCoverGap = 16;           // but never nearer the cover than this
+static const CGFloat kBarLift = 85;            // the bar and its times rise this much
+static const CGFloat kBarScale = 0.956;        // and the unit narrows to the Music app's bar (336 of 351pt)
+static const CGFloat kTimeDrop = 8;            // the times sit this much further under the bar than Spotify's
 // The lines are a surface arriving, not something moving: they come up from just under full size as the
 // room for them opens, and go at once when it closes. An exit the eye waits through reads as a stall.
 static const CGFloat kLyricsEnterScale = 0.96;
@@ -55,7 +64,7 @@ static const CGFloat kLivingHeight = 200;
 // The lines on their own: the controls under them fade after this long without a touch.
 static const NSTimeInterval kRest = 4;
 
-static char kOverlayKey, kPlateKey, kTitleKey, kStackKey;
+static char kOverlayKey, kPlateKey, kTitleKey, kStackKey, kTimeTakeKey, kTimeRemainingKey;
 static BOOL sg_open;
 static BOOL sg_moving;                      // the transition is in flight, so no layout pass may re-place it
 static __weak UIView *sg_host;              // SPTNowPlayingView
@@ -63,6 +72,7 @@ static __weak UIViewController *sg_info, *sg_duration, *sg_floating, *sg_header;
 static __weak UIView *sg_titleElement;      // the arranged element view holding the title and the artist
 static __weak UIViewController *sg_player;  // NowPlayingViewController, whose units the controls are
 static BOOL sg_alone;                       // the lines have the player to themselves
+static BOOL sg_ordinaryInfo, sg_ordinaryDuration; // the ordinary player's units, whose places the Music app's are
 static BOOL sg_touching;                    // a finger is on the player, which holds the clock (SGRPlayerTouchWatcher)
 static NSTimer *sg_rest;
 static __weak UIGestureRecognizer *sg_wake; // on the player, on while alone: the tap that brings the controls back
@@ -196,15 +206,19 @@ static SGRLyricsLayout layoutIn(UIView *host) {
     if (!host || host.bounds.size.height < kLivingHeight || !info || !duration) return l;
     CGRect area = SGRPlayerArtworkAreaIn(host), cover = SGRPlayerCoverFrameIn(host);
     if (CGRectIsNull(area) || CGRectIsNull(cover)) return l;
-    CGRect row = untransformed(info, host), bar = untransformed(duration, host);
-    // The thumbnail takes the title's own leading edge, so the two line up down the page.
-    CGFloat leading = title ? CGRectGetMinX(untransformed(title, host)) : CGRectGetMinX(area) + SGRSideMargin;
+    CGRect row = untransformed(info, host);
+    // The bar as it is drawn, the lift and scale on the unit taken in: the lines stop above where it stands.
+    CGRect bar = SGFrameIn(duration, host);
+    // The thumbnail takes the title's own leading edge, the Music app's inset and all, so the two line up
+    // down the page.
+    CGFloat inset = sg_ordinaryInfo ? kTitleInset : 0;
+    CGFloat leading = title ? CGRectGetMinX(untransformed(title, host)) + inset : CGRectGetMinX(area) + SGRSideMargin;
     l.cover = cover;
     l.thumb = CGRectMake(leading, CGRectGetMinY(area) + kThumbTop, kThumbSide, kThumbSide);
     // Beside the thumbnail when the title can be moved clear of it, under it when it cannot be found.
     CGFloat top = title ? CGRectGetMidY(l.thumb) - row.size.height / 2 : CGRectGetMaxY(l.thumb) + SGRGrid;
     l.lift = top - CGRectGetMinY(row);
-    l.shift = title ? kThumbSide + kThumbGap : 0;
+    l.shift = title ? inset + kThumbSide + kThumbGap : 0;
     CGFloat lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + kLyricsTop;
     l.stage = CGRectMake(CGRectGetMinX(area), lines, area.size.width, CGRectGetMinY(bar) - kLyricsBottom - lines);
     l.ok = l.stage.size.height > kLivingHeight / 2 && l.lift < 0;
@@ -262,17 +276,53 @@ static void placeTitleRow(SGRLyricsLayout l) {
     UIView *info = sg_info.viewIfLoaded;
     if (!info) return;
     [SGRowIn(info) layoutIfNeeded];
-    CGFloat lift = sg_open ? l.lift : 0, shift = sg_open ? l.shift : 0;
+    // Closed, the Music app's row still stands where its cover leaves it: kInfoLift nearer the cover and this
+    // much in from the edge, or as near as the cover leaves room for on a shorter screen. The AI DJ's row
+    // keeps Spotify's places.
+    BOOL ordinary = sg_ordinaryInfo;
+    CGFloat lift = sg_open ? l.lift : 0;
+    if (!sg_open && ordinary) {
+        CGFloat wanted = kInfoLift;
+        CGRect cover = sg_host ? SGRPlayerCoverFrameIn(sg_host) : CGRectNull;
+        if (!CGRectIsNull(cover)) {
+            // The title's own top, not the unit's: the unit keeps a little padding above the text.
+            UIView *element = sg_titleElement ?: info;
+            CGFloat rowTop = CGRectGetMinY(untransformed(element, sg_host));
+            wanted = MIN(wanted, MAX(0, rowTop - CGRectGetMaxY(cover) - kCoverGap));
+        }
+        lift = -wanted;
+    }
+    CGFloat shift = sg_open ? l.shift : (ordinary ? kTitleInset : 0);
     CGAffineTransform rise = CGAffineTransformMakeTranslation(0, round(lift));
     if (!CGAffineTransformEqualToTransform(info.transform, rise)) info.transform = rise;
     UIView *title = sg_titleElement;
     if (!title) return;
     CGAffineTransform slide = CGAffineTransformMakeTranslation(round(shift), 0);
     if (!CGAffineTransformEqualToTransform(title.transform, slide)) title.transform = slide;
-    // Closed it reaches as far as Spotify meant it to; moved, only as far as the controls it moved toward.
+    // Never further than the controls at the trailing edge: the title's own shift, and the Music app's inset
+    // when it sits in the ordinary player's row, are taken in.
     CGFloat room = CGFLOAT_MAX;
-    if (sg_open) room = trailingEdgeIn(info) - kTitleGap - (CGRectGetMinX(untransformed(title, info)) + shift);
+    if (sg_open || shift > 0) room = trailingEdgeIn(info) - kTitleGap - (CGRectGetMinX(untransformed(title, info)) + shift);
     clipTitle(title, room);
+}
+
+// Spotify's bottom stack leaves the bar lower and wider than the Music app's, which draws it this much
+// higher and this much narrower. Onto the duration unit's view, which holds the bar and its times: the
+// scale leaves the height as it is, so the two only change place across the page.
+static void placeDuration(void) {
+    UIView *view = sg_duration.viewIfLoaded;
+    if (!view || !sg_ordinaryDuration) return;
+    CGAffineTransform place = CGAffineTransformMakeScale(kBarScale, 1);
+    place = CGAffineTransformTranslate(place, 0, -kBarLift);
+    if (!CGAffineTransformEqualToTransform(view.transform, place)) view.transform = place;
+    // The times under the bar, which the unit set nearer it than the Music app does.
+    static NSString *const identifiers[] = { @"now-playing-time-take-label-internal", @"now-playing-time-remaning-label-internal" };
+    static const void *const keys[] = { &kTimeTakeKey, &kTimeRemainingKey };
+    for (NSUInteger i = 0; i < 2; i++) {
+        UIView *label = SGRFindByIdentifier(view, identifiers[i], keys[i]);
+        CGAffineTransform under = CGAffineTransformMakeTranslation(0, kTimeDrop);
+        if (label && !CGAffineTransformEqualToTransform(label.transform, under)) label.transform = under;
+    }
 }
 
 #pragma mark - opening and closing
@@ -590,6 +640,8 @@ static void setOpen(BOOL open, BOOL animated) {
         SGLog(@"redesign player: the lyrics were asked for before the player laid out");
         return;
     }
+    // The bar's place first, so the room the lines are given is measured from where it is drawn.
+    placeDuration();
     SGRLyricsLayout l = layoutIn(host);
     if (open && !l.ok) {
         SGLog(@"redesign player: the lyrics have nowhere to go (stage %.0fx%.0f, lift %.0f)", l.stage.size.width, l.stage.size.height, l.lift);
@@ -695,6 +747,8 @@ void SGRPlayerToggleLyrics(void) {
 static void replace(void) {
     UIView *host = sg_host;
     if (!host || sg_moving) return;   // a pass in the middle of the transition would cut it short
+    // The bar's place first, since the room the lines are given stops above it.
+    placeDuration();
     // Closed, placeTitleRow reads nothing of the layout, so the cover is not measured for it.
     SGRLyricsLayout l = sg_open ? layoutIn(host) : (SGRLyricsLayout){0};
     if (sg_open && !l.ok) return;
@@ -750,6 +804,7 @@ static void replace(void) {
 // hold the same title row and progress bar) are measured the same way, so the DJ's player has these lyrics too.
 static void informationUnitLaidOut(UIViewController *unit) {
     sg_info = unit;
+    sg_ordinaryInfo = [NSStringFromClass(unit.class) containsString:@"InformationElementsUnit"];
     UIView *host = unit.viewIfLoaded;
     // The title and the artist are two labels of one arranged element view, which is what moves.
     UIView *label = SGRFindByIdentifier(host, @"now-playing-title-label", &kTitleKey);
@@ -767,6 +822,7 @@ static void informationUnitLaidOut(UIViewController *unit) {
 
 static void durationUnitLaidOut(UIViewController *unit) {
     sg_duration = unit;
+    sg_ordinaryDuration = [NSStringFromClass(unit.class) containsString:@"DurationElementUnit"];
     replace();
 }
 
