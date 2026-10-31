@@ -2,6 +2,12 @@
 // back while playback is paused, the way the Music app's does. Spotify's lyric preview under it, and the cover's size
 // beside it, are Spotify's, as its own lyrics setting has them.
 //
+// The player's cover is drawn where the Music app draws it, as measured off its player (402 x 874pt): square,
+// the screen's width less 23pt either side, its top 94.8pt down the screen, just under the header row.
+// Spotify centers its tilt view in a taller artwork band, which stands the cover 72pt lower; the tilt view is
+// moved on up by a transform (a transform survives the cell laying its views out again), so the cover, its
+// corners, plate, image and touches go together, and the field behind it -- not the cover at all -- does not move.
+//
 // Tree (trees/clean/player/01.txt:36-43): CoverArtCellImpl > ... > CoverArtTiltView 354x354 > an
 // ElementView the same size > ImageViewProxy > Encore.ImageView (clips) > UIImageView, with
 // Lyrics_NPVContainerKit.LyricsContainerView under the tilt view. The ElementView is what gets the
@@ -21,6 +27,15 @@
 static const CGFloat kPausedScale = 0.84;
 // The bar's 40pt cover lives in a tilt view of its own; the player's is 354.
 static const CGFloat kCoverMinWidth = 200;
+// The Music app's cover, measured off its player on the iPhone 16 Pro the layouts were compared on
+// (402 x 874pt, 3x): 356pt square, 23pt in from either side of the screen and its top 94.8pt down it, just
+// under the header row. Spotify centers its 354pt tilt view in a taller artwork band, which draws the cover
+// 72pt lower there (167pt down). The cover may be this much wider than Spotify's tilt view, whose margins are
+// its own, and no more.
+static const CGFloat kArtworkInset = 23, kArtworkWider = 2.2;
+// The cover's top as a share of the screen's height (94.8 of 874), and the least room the header row's buttons
+// are left under the safe area's top on a shorter screen.
+static const CGFloat kArtworkTopShare = 0.1085, kArtworkTopGap = 33;
 
 static char kPlateKey;
 static NSHashTable<UIView *> *sg_tilts;
@@ -63,6 +78,28 @@ static void scaleCover(UIView *tilt, CGFloat scale) {
     CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
     cover.transform = transform;
     plate.transform = transform;
+}
+
+#pragma mark - the Music app's cover geometry
+
+// The side the player's cover is drawn at: the screen's width less the Music app's margins, and never much wider
+// than the tilt view Spotify sized for it (its own 24pt margins, 354 at this player's width). The bar's small
+// cover is not this one (kCoverMinWidth).
+static CGFloat coverSide(UIView *tilt, CGSize tiltSize) {
+    CGFloat screen = tilt.window ? CGRectGetWidth(tilt.window.bounds) : 0;
+    if (screen <= 0) return tiltSize.width;
+    return MAX(kCoverMinWidth, MIN(screen - 2 * kArtworkInset, tiltSize.width + kArtworkWider));
+}
+
+// How far the tilt view rises for the cover, centered in it, to stand where the Music app draws it: its top
+// kArtworkTopShare of the screen down. Nothing for the 3D cover, drawn full screen (twice the bar's cover's least).
+static CGFloat coverLift(UIView *tilt, CGSize tiltSize, CGFloat side) {
+    UIWindow *window = tilt.window;
+    if (!window || !tilt.superview || tiltSize.height > kCoverMinWidth * 2) return 0;
+    CGPoint middle = [tilt.superview convertPoint:tilt.center toView:window];
+    CGFloat top = middle.y - tiltSize.height / 2 + (tiltSize.height - side) / 2;
+    CGFloat target = MAX(CGRectGetHeight(window.bounds) * kArtworkTopShare, window.safeAreaInsets.top + kArtworkTopGap);
+    return MAX(0, top - target);
 }
 
 #pragma mark - where the cover is
@@ -266,10 +303,19 @@ static void watchHold(UIView *tilt) {
     }
     watchHold(tilt);
     SGRPlayerMotionCoverLaidOut();
-    // The cover fills the tilt view (01.txt:37); bounds and center, unlike a frame, hold under the scale.
+    // The cover fills the tilt view (01.txt:37) and is drawn where the Music app draws it: square, the screen's
+    // width less its margins, its top just under the header row rather than centered in Spotify's taller band.
+    // The move is the tilt view's, as a transform: the cell writes its frame again on every pass and a transform
+    // survives that, and the cover's image, corners, shadow plate and its touches all move with it. The frames the
+    // lyrics' thumbnail and the open's flown cover read (SGRPlayerCoverFrameIn) take the transform in.
+    // Bounds and center, unlike a frame, hold under the scale.
     CGRect bounds = tilt.bounds;
     CGPoint middle = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-    if (!CGSizeEqualToSize(cover.bounds.size, bounds.size)) cover.bounds = (CGRect){cover.bounds.origin, bounds.size};
+    CGFloat side = coverSide(tilt, bounds.size);
+    CGSize size = CGSizeMake(side, side);
+    CGAffineTransform lift = CGAffineTransformMakeTranslation(0, -coverLift(tilt, bounds.size, side));
+    if (!CGAffineTransformEqualToTransform(tilt.transform, lift)) tilt.transform = lift;
+    if (!CGSizeEqualToSize(cover.bounds.size, size)) cover.bounds = (CGRect){cover.bounds.origin, size};
     if (!CGPointEqualToPoint(cover.center, middle)) cover.center = middle;
     // Its image is placed again for the new size (the ImageViewProxy hook below makes it fill the cover).
     for (UIView *image in cover.subviews) {
