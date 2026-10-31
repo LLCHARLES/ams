@@ -203,6 +203,9 @@ UIView *SGRPlayerConnectGlyphIn(UIView *host, UIView *connect);
 // Connect's touches only in a 44pt square over its glyph: `holder` is the view of the footer that holds Connect, whose
 // own view reaches far past the glyph (over Queue and the DJ button once the glyph is moved).
 void SGRPlayerCoverConnect(UIView *holder, UIView *glyph);
+// Over Connect's glyph, at `middle` in `host`: a tap opens the system's AirPlay picker and a press held Connect's own sheet,
+// and the output's name on a line under it, as the Music app's. `connect` is the view Connect's identifier is on.
+void SGRPlayerPlaceRoute(UIView *host, UIView *connect, CGPoint middle);
 // Whether a control is drawn lit: in the accent, judged as Follow the cover judges what it repaints.
 BOOL SGRPlayerAccentLike(UIColor *color);
 // The color an image is drawn in: the average of its opaque pixels, read once at 16 by 16 and kept on the image; nil
