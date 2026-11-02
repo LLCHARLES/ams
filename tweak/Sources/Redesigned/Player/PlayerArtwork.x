@@ -108,8 +108,10 @@ static CGFloat coverSide(UIView *tilt, CGSize tiltSize) {
     CGFloat screen = tilt.window ? CGRectGetWidth(tilt.window.bounds) : 0;
     if (screen <= 0) return tiltSize.width;
     CGFloat side = MAX(kCoverMinWidth, MIN(screen - 2 * kArtworkInset, tiltSize.width + kArtworkWider));
+    // Only room worth taking is taken: a room under kCoverMinWidth says the screen is too short for either
+    // layout's numbers, and a cover shrunk to it would be no better than Spotify's place kept.
     CGFloat target = coverTargetInWindow(tilt), lowest = SGRPlayerCoverMaxBottomInWindow();
-    if (!isnan(target) && !isnan(lowest)) side = MIN(side, MAX(kCoverMinWidth, lowest - target));
+    if (!isnan(target) && !isnan(lowest) && lowest - target > kCoverMinWidth) side = MIN(side, lowest - target);
     return side;
 }
 
