@@ -100,7 +100,7 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
         // Asked of the tilt view's own tree, not answered with the tilt whole: the tap that opens the inspection
         // is a recognizer on the tilt view, which takes a touch its subtree answers, and one on a view inside it
         // would miss a touch answered above it. The point can be inside the tilt but over the cover's edge only.
-        CGPoint inTilt = [tilt convertPoint:point fromView:self];
+        CGPoint inTilt = [tilt convertPoint:point fromView:(UIView *)self];
         UIView *inside = CGRectContainsPoint(tilt.bounds, inTilt) ? [tilt hitTest:inTilt withEvent:event] : nil;
         answer = inside ?: tilt;
     } else if (hitTilt) {
