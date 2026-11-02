@@ -309,10 +309,10 @@ static void placeRowButtons(void) {
     UIStackView *row = sg_row;
     UIView *like = sg_like, *more = sg_more;
     if (!more) return;
-    if (!row || !like) {
-        // The title row is not laid out (or is being rebuilt for a new track): the ⋯ stays where it is, but its
-        // circle and its glyph are re-asserted. Returning before them left the ⋯ the header's pass had given a
-        // 44pt circle, or a circle a rebuild had lost, until the row's next pass (the phone's report).
+    if (!row || !row.window) {
+        // The title row is not laid out, or is being rebuilt for a new track and not in a window yet: the ⋯ stays
+        // where it is -- the header, until the row is back -- but its circle and its glyph are re-asserted. Moving
+        // it into a row that is about to be dropped took it off screen with that row.
         UIView *circle = SGRGlassInside(more, &kGlassKey, kTitleDiscSize);
         SGRShowGlass(circle, YES);
         showEllipsis(more);
@@ -376,8 +376,6 @@ static void rowUnitLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
     UIButton *like = (UIButton *)SGRFindByIdentifier(host, @"Components.UI.AddToButton", &kLikeKey);
-    if (![like isKindOfClass:UIButton.class]) return;
-    sg_like = like;
     UIView *title = SGRFindByIdentifier(host, @"now-playing-title-label", &kTitleKey);
     UIStackView *row = nil;
     for (UIView *v = title; v && v != host; v = v.superview) {
@@ -385,8 +383,15 @@ static void rowUnitLaidOut(UIViewController *unit) {
     }
     if (!row && [like.superview isKindOfClass:UIStackView.class]) row = (UIStackView *)like.superview;
     if (!row) row = SGRowIn(host);
+    // The row is taken even on a track whose add button Spotify has not built or does not draw: the ⋯ rides at
+    // its end then. Returning here left the ⋯ in the row of the track before -- a row the track change drops --
+    // so the ⋯ and its disc went with it, which is what a swipe between tracks showed.
+    if (!row) return;
     sg_row = row;
-    showStar(like);
+    if ([like isKindOfClass:UIButton.class]) {
+        sg_like = like;
+        showStar(like);
+    }
     placeRowButtons();
     // The trees this ran against: the row, the add button and the ⋯ as found, so a phone says which stack
     // the row is and where the pair stands. Logged when it changes, not on every pass.
@@ -415,7 +420,7 @@ static void rowUnitLaidOut(UIViewController *unit) {
     // broken was one where it is not a UIButton; that view is also what the menu front, the press and the
     // popover anchor were put on (PlayerHeader's own pass), so the move takes all of them along.
     UIStackView *row = sg_row;
-    BOOL moved = sg_more && row && sg_more.superview == row;
+    BOOL moved = sg_more && row && sg_more.superview == row && sg_more.window != nil;
     UIView *found = SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
     if (!moved) {
         if (found && found != sg_more) {
