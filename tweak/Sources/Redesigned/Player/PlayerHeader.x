@@ -148,11 +148,25 @@ static BOOL holds(UIView *root, UIView *target) {
     return target && (target == root || [target isDescendantOfView:root]);
 }
 
+// Whether `item` is a piece of the row the Music app does not draw: the arrow's, or the source line's, which
+// Spotify wraps each of its elements in on some builds. A piece that also holds the ⋯ is not one of them.
+static BOOL drawsHeaderExtra(UIView *item, UIView *arrow, UIView *more) {
+    if (holds(item, arrow)) return YES;
+    __block BOOL label = NO;
+    SGForEachView(item, ^(UIView *view) {
+        if (label || ![view isKindOfClass:UILabel.class]) return;
+        if (holds(more, view)) return;
+        label = YES;
+    });
+    return label;
+}
+
 // The Music app draws no row over its cover: no down arrow, no "Playing from ..." line. The Redesigned player
 // keeps Spotify's header unit (its touches close the player and its ⋯ is the menu) but draws none of the row's
 // content: the arrow, the labels and the items the row wraps them in go, while the ⋯ and the item it sits in
 // stay, so a header rebuilt before the title row takes it back does not lose the menu. Hiding the unit's own
-// view would take the menu with it, so it is left alone.
+// view would take the menu with it, so it is left alone, and so is anything of the row that draws neither the
+// arrow nor a label.
 // Run every pass, since Spotify can rebuild the row under the same unit view; every write is idempotent.
 static void hideHeaderExtras(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
@@ -161,11 +175,13 @@ static void hideHeaderExtras(UIViewController *unit) {
     if (!arrow) arrow = SGRFindByIdentifier(host, @"mobile-nowplaying-close-button", &kArrowKey);
     if (arrow) arrow.hidden = YES;
     UIView *more = SGRFindByIdentifier(host, @"Context menu", &kMoreRowKey);
-    // The arrow's slot and the source line's item, which Spotify wraps each element in on some builds.
+    // The arrow's slot and the source line's item: hidden so they are gone and take no touches.
     for (UIView *item in [host.subviews copy]) {
-        if (!holds(item, more)) item.hidden = YES;
+        if (holds(item, more)) continue;
+        if (drawsHeaderExtra(item, arrow, more)) item.hidden = YES;
     }
-    // A label inside the ⋯ itself is not the source line: it is left to the menu.
+    // A label inside the ⋯ itself is not the source line: it is left to the menu. One inside a piece already
+    // hidden is hidden with it, and saying so again costs nothing.
     SGForEachView(host, ^(UIView *view) {
         if (![view isKindOfClass:UILabel.class]) return;
         if (holds(more, view)) return;

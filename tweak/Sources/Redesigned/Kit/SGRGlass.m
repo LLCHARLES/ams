@@ -113,6 +113,11 @@ UIView *SGRGlassCapsuleInside(UIView *control, const void *key, CGSize size, BOO
 }
 
 void SGRShowGlass(UIView *shape, BOOL shown) {
+    if (!shape) return;
+    // A shape is hidden, not emptied, when a caller asks for a zero side (glassInside); showing it again never
+    // cleared that, and neither did a later pass with a size, so the disc stayed gone for good on whichever
+    // control asked for its circle before it was laid out (the phone's report). Shown is drawn.
+    if (shown) shape.hidden = NO;
     if ([shape isKindOfClass:UIVisualEffectView.class]) {
         UIVisualEffectView *glass = (UIVisualEffectView *)shape;
         if ((glass.effect != nil) != shown) glass.effect = shown ? SGGlassEffect() : nil;
