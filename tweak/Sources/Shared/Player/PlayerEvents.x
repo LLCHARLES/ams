@@ -23,13 +23,18 @@ BOOL SGPlayerTransitionOpens(void) {
 static void announceTransition(UIViewController *unit, BOOL animated, NSString *what) {
     id<UIViewControllerTransitionCoordinator> coordinator = unit.transitionCoordinator;
     if (!animated || !coordinator) return;
-    sg_opens = [what isEqualToString:@"opens"];
+    BOOL opening = [what isEqualToString:@"opens"];
+    sg_opens = opening;
     NSTimeInterval duration = MAX(0.1, coordinator.transitionDuration);
     NSUInteger generation = ++sg_transitionGeneration;
     sg_transitionEnds = CACurrentMediaTime() + duration;
     [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionNotification object:nil];
     [coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
         if (generation != sg_transitionGeneration) return;
+        // A cancelled swipe leaves the player where it was, and UIKit does not send the appearance callback
+        // back when it is: the "closes" a drag began with was left standing after a drag that was let go back
+        // open, so what reads SGPlayerTransitionOpens after a cancelled close took the player for gone.
+        if (context.isCancelled) sg_opens = !opening;
         sg_transitionEnds = 0;
         [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionEndedNotification object:nil];
     }];

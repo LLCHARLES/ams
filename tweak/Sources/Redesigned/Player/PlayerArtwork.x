@@ -37,7 +37,7 @@ static const CGFloat kArtworkInset = 23, kArtworkWider = 2.2;
 // are left under the safe area's top on a shorter screen.
 static const CGFloat kArtworkTopShare = 0.1085, kArtworkTopGap = 33;
 
-static char kPlateKey, kGeoKey;
+static char kPlateKey, kGeoKey, kPlaceSoonKey;
 static NSHashTable<UIView *> *sg_tilts;
 // The cover of each tilt view once found. A frame Spotify sets on a scaled view becomes its scaled
 // size, leaving bounds that no longer match the tilt view's, so the cover is not looked for by size again.
@@ -365,27 +365,15 @@ static void logGeometry(UIView *tilt, UIView *cover, NSString *when) {
           tilt.window ? NSStringFromCGSize(tilt.window.bounds.size) : @"none");
 }
 
-%hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
-- (void)layoutSubviews {
-    UIView *tilt = (UIView *)self;
-    %orig;
-    // The width first: the bar's and the pages' small tilt views skip the walk up to the cell.
-    if (tilt.bounds.size.width < kCoverMinWidth || !inCoverCell(tilt)) return;
-    [sg_tilts addObject:tilt];
-    // Kept hidden, it is whichever cover is showing: the first open can lay out a second cell in its place. Not animated,
-    // though this pass may run inside Spotify's transition.
-    if (sg_coverKeptHidden && showingTilt() == tilt) {
-        UIView *kept = coverIn(tilt);
-        if (kept && kept != sg_hiddenCover) [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
-    }
-    watchHold(tilt);
-    SGRPlayerMotionCoverLaidOut();
-    // The cover fills the tilt view (01.txt:37) and is drawn where the Music app draws it: square, the screen's
-    // width less its margins, its top just under the header row rather than centered in Spotify's taller band.
-    // The move is the tilt view's, as a transform: the cell writes its frame again on every pass and a transform
-    // survives that, and the cover's image, corners, shadow plate and its touches all move with it. The frames the
-    // lyrics' thumbnail and the open's flown cover read (SGRPlayerCoverFrameIn) take the transform in.
-    // Bounds and center, unlike a frame, hold under the scale.
+// The cover fills the tilt view (01.txt:37) and is drawn where the Music app draws it: square, the screen's
+// width less its margins, its top just under the header row rather than centered in Spotify's taller band.
+// The move is the tilt view's, as a transform: the cell writes its frame again on every pass and a transform
+// survives that, and the cover's image, corners, shadow plate and its touches all move with it. The frames the
+// lyrics' thumbnail and the open's flown cover read (SGRPlayerCoverFrameIn) take the transform in.
+// Bounds and center, unlike a frame, hold under the scale.
+// NO when there is nothing to place by yet: no window to measure the screen and the safe area's top in, or a
+// cell that has not built its cover. The caller asks for one more pass then.
+static BOOL placeCover(UIView *tilt) {
     CGRect bounds = tilt.bounds;
     CGPoint middle = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
     CGFloat side = coverSide(tilt, bounds.size);
@@ -402,7 +390,7 @@ static void logGeometry(UIView *tilt, UIView *cover, NSString *when) {
     if (!cover) {
         [CATransaction commit];
         logGeometry(tilt, nil, @"laid out, no cover");
-        return;
+        return NO;
     }
     if (!CGSizeEqualToSize(cover.bounds.size, size)) cover.bounds = (CGRect){cover.bounds.origin, size};
     if (!CGPointEqualToPoint(cover.center, middle)) cover.center = middle;
@@ -424,6 +412,56 @@ static void logGeometry(UIView *tilt, UIView *cover, NSString *when) {
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"redesign player: cover %@ rounded %.0f with a shadow plate, scale %.2f", NSStringFromClass(cover.class), SGRRadiusArtwork, currentScale()); });
+    return tilt.window != nil;
+}
+
+// One layout pass, once, asked for on the main queue: a tilt view laid out before it joined a window, or
+// before its cell built the cover, is placed again once it has, rather than waiting for Spotify to lay it
+// out next -- which is what pausing and playing happened to do on the phone, and the only thing that put a
+// first open's cover back. Never layoutIfNeeded: this is asked for from inside a pass.
+static void placeSoon(UIView *tilt) {
+    if (objc_getAssociatedObject(tilt, &kPlaceSoonKey)) return;
+    objc_setAssociatedObject(tilt, &kPlaceSoonKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak UIView *weak = tilt;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *view = weak;
+        if (!view) return;
+        // The pass this asks for spends the request (layoutSubviews); one that cannot run is dropped here,
+        // and didMoveToWindow asks again when the tilt next joins a window.
+        if (view.window && view.superview) [view setNeedsLayout];
+        else objc_setAssociatedObject(view, &kPlaceSoonKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    });
+}
+
+%hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
+- (void)layoutSubviews {
+    UIView *tilt = (UIView *)self;
+    // A request placeSoon made is spent by this pass, however it ends, so one request is one pass.
+    objc_setAssociatedObject(tilt, &kPlaceSoonKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    %orig;
+    // The width first: the bar's and the pages' small tilt views skip the walk up to the cell.
+    if (tilt.bounds.size.width < kCoverMinWidth || !inCoverCell(tilt)) return;
+    [sg_tilts addObject:tilt];
+    // Kept hidden, it is whichever cover is showing: the first open can lay out a second cell in its place. Not animated,
+    // though this pass may run inside Spotify's transition.
+    if (sg_coverKeptHidden && showingTilt() == tilt) {
+        UIView *kept = coverIn(tilt);
+        if (kept && kept != sg_hiddenCover) [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
+    }
+    watchHold(tilt);
+    SGRPlayerMotionCoverLaidOut();
+    // Only the pass with no window to measure by is asked for again: didMoveToWindow makes it once the tilt
+    // joins one, and a cover its cell has not built yet comes with the cell's own next pass (a reused cell's).
+    if (!placeCover(tilt) && !tilt.window) placeSoon(tilt);
+}
+// A cell built or reused for the next track can lay its tilt view out before it joins the window, where
+// neither the screen's height nor the safe area's top can be read: the cover then stays at Spotify's own
+// place, or at the size Spotify gave it, until something lays the tilt out again. One pass after it joins
+// places it, so a first open from an album or a playlist is right without a pause and a play.
+- (void)didMoveToWindow {
+    %orig;
+    UIView *tilt = (UIView *)self;
+    if (tilt.window && tilt.bounds.size.width >= kCoverMinWidth && inCoverCell(tilt)) placeSoon(tilt);
 }
 %end
 

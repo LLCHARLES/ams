@@ -97,12 +97,12 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
     BOOL onCover = CGRectContainsPoint(CGRectInset(cover, -1, -1), point);
     UIView *answer = hit;
     if (onCover) {
-        // Asked of the tilt view's own tree, not answered with the tilt whole: the tap that opens the inspection
-        // is a recognizer on the tilt view, which takes a touch its subtree answers, and one on a view inside it
-        // would miss a touch answered above it. The point can be inside the tilt but over the cover's edge only.
-        CGPoint inTilt = [tilt convertPoint:point fromView:(UIView *)self];
-        UIView *inside = CGRectContainsPoint(tilt.bounds, inTilt) ? [tilt hitTest:inTilt withEvent:event] : nil;
-        answer = inside ?: tilt;
+        // Answered with the tilt view whole, whatever lies inside it: the tap that opens the inspection is the
+        // tilt's own (PlayerGestures.x's handleTap hook, and Spotify's -[CoverArtTiltView handleTap] the only
+        // caller), and a touch handed deeper -- to the cover's image view -- did not open it on the phone,
+        // while the same tap on the cover's edge, which the tilt alone answers, did. The cover is 356pt over a
+        // tilt of 354, so its edge is the only place that used to be answered here; the rest is like that now.
+        answer = tilt;
     } else if (hitTilt) {
         // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
         answer = hitTilt.superview ?: hit;
