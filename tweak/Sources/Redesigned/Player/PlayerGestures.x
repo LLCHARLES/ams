@@ -102,7 +102,9 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
         // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
         answer = hitTilt.superview ?: hit;
     }
-    if (answer != hit) logTap((UIView *)self, point, tilt, cover, hit, answer);
+    // Every touch that falls on the cover or on what the tilt's frame wrongly reaches is written down, so the
+    // phone's log has the workable tap and the broken one side by side; a touch well away from both is left.
+    if (onCover || hitTilt) logTap((UIView *)self, point, tilt, cover, hit, answer);
     return answer;
 }
 %end
