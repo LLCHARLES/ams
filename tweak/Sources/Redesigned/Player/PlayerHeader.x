@@ -220,7 +220,7 @@ static void placeRowButtons(void) {
         NSUInteger next = item ? [row.arrangedSubviews indexOfObject:item] : NSNotFound;
         next = next == NSNotFound ? row.arrangedSubviews.count : next + 1;
         next = MIN(next, row.arrangedSubviews.count);
-        [more insertArrangedSubview:more atIndex:next];
+        [row insertArrangedSubview:more atIndex:next];
         if (!objc_getAssociatedObject(more, &kSizedKey)) {
             objc_setAssociatedObject(more, &kSizedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             [more.widthAnchor constraintEqualToConstant:kMoreSide].active = YES;
