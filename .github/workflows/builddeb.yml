@@ -63,15 +63,7 @@ jobs:
 
       - name: Build the dylib
         run: |
-          env -u MAKELEVEL gmake -C tweak SG_DRIVER=0 >/tmp/build.log 2>&1 && OK=1 || OK=0
-          cat /tmp/build.log
-          if [ "$OK" = 0 ]; then
-            # TEMPORARY: the compiler's own lines as annotations, readable without admin rights. Revert.
-            grep -E "error:" /tmp/build.log | head -n 10 | while IFS= read -r line; do
-              echo "::error::${line}"
-            done
-            exit 1
-          fi
+          env -u MAKELEVEL gmake -C tweak SG_DRIVER=0
           mkdir -p out
           cp tweak/.theos/obj/spotifyglass.dylib out/spotifyglass.dylib
           # The copy in .theos/obj is unsigned: Theos signs the one it puts in the .deb, not this one, and
@@ -138,7 +130,8 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to filebin.net
-        if: ${{ github.event_name != 'push' && inputs.upload_method != 'artifacts' }}
+        # TEMPORARY (one run): the push runs upload too, so the built .deb has a link that needs no sign-in.
+        if: ${{ inputs.upload_method != 'artifacts' }}
         run: |
           BIN="vitrine-deb-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
