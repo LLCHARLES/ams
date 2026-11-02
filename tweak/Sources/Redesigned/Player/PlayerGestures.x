@@ -88,28 +88,34 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
     UIView *row = SGRPlayerInfoRowHitIn((UIView *)self, point, event);
     if (row) return row;
     UIView *hit = %orig;
-    UIView *hitTilt = tiltOf(hit);
-    UIView *tilt = hitTilt ?: SGRPlayerCoverTilt();
-    if (!tilt) return hit;
-    CGRect cover = SGRPlayerCoverRectIn(tilt, (UIView *)self);
-    if (CGRectIsNull(cover)) return hit;
+    // The cover on screen decides where the cover is, not the tilt the touch happened to land in: the list keeps
+    // one tilt view per cell, and on a first open, a sideways scroll or a cell reused for the next track the tilt
+    // under the finger is not the one drawing the visible cover. Judging the touch by that one measured its own
+    // cover -- drawn a page away -- so a tap in the middle of the visible cover was "beside it", and the answer
+    // became that other cell's parent, which no recognizer watches: the centre did nothing while the edge, where
+    // the list's own hit test came back with the showing tilt, still opened the inspection.
+    UIView *shown = SGRPlayerCoverTilt();
+    // Only the list's own cover may answer: a hit test returns a view of the subtree it was asked for, and a
+    // second list's tilt (the player opening or closing beside this one) is not.
+    if (shown && ![shown isDescendantOfView:(UIView *)self]) shown = nil;
+    CGRect cover = shown ? SGRPlayerCoverRectIn(shown, (UIView *)self) : CGRectNull;
     // A point on the corner's drawn edge is on the cover: the rect is whole points and a touch is not.
-    BOOL onCover = CGRectContainsPoint(CGRectInset(cover, -1, -1), point);
-    UIView *answer = hit;
+    BOOL onCover = shown && !CGRectIsNull(cover) && CGRectContainsPoint(CGRectInset(cover, -1, -1), point);
     if (onCover) {
         // Answered with the tilt view whole, whatever lies inside it: the tap that opens the inspection is the
         // tilt's own (PlayerGestures.x's handleTap hook, and Spotify's -[CoverArtTiltView handleTap] the only
         // caller), and a touch handed deeper -- to the cover's image view -- did not open it on the phone,
-        // while the same tap on the cover's edge, which the tilt alone answers, did. The cover is 356pt over a
-        // tilt of 354, so its edge is the only place that used to be answered here; the rest is like that now.
-        answer = tilt;
-    } else if (hitTilt) {
-        // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
-        answer = hitTilt.superview ?: hit;
+        // while the same tap on the cover's edge, which the tilt alone answers, did.
+        if (hit != shown) logTap((UIView *)self, point, shown, cover, hit, shown);
+        return shown;
     }
+    UIView *hitTilt = tiltOf(hit);
+    if (!hitTilt) return hit;
+    // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
+    UIView *answer = hitTilt.superview ?: hit;
     // Every touch that falls on the cover or on what the tilt's frame wrongly reaches is written down, so the
     // phone's log has the workable tap and the broken one side by side; a touch well away from both is left.
-    if (onCover || hitTilt) logTap((UIView *)self, point, tilt, cover, hit, answer);
+    logTap((UIView *)self, point, shown ?: hitTilt, cover, hit, answer);
     return answer;
 }
 %end

@@ -206,26 +206,38 @@ CGRect SGRPlayerArtworkAreaIn(UIView *host) {
     return CGRectNull;
 }
 
-// The cover hidden for a stand-in, so the same one comes back if the list moved on meanwhile.
-static __weak UIView *sg_hiddenCover, *sg_hiddenPlate;
+// The covers hidden for a stand-in, every one of them: the list lays out a second cell while the first has not
+// gone yet, and the one hidden last used to be the only one remembered, so the cover actually showing stayed at
+// alpha 0 after the transition and came back only when playback paused or played (scaleEveryCover resets it) --
+// which is the cover that "does not show until you pause and play". Weak, so a cell reused for another track
+// does not keep its old cover alive.
+static NSHashTable<UIView *> *sg_hiddenCovers, *sg_hiddenPlates;
 // Asked for while no cover was laid out yet (the first open): the cover is hidden in the layout pass that makes it,
 // so its first frame on screen is already hidden.
 static BOOL sg_coverKeptHidden;
 
+static BOOL coverHidden(UIView *cover) {
+    return cover && [sg_hiddenCovers containsObject:cover];
+}
+
 void SGRPlayerSetCoverHidden(BOOL hidden) {
-    sg_hiddenCover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
-    sg_hiddenPlate.alpha = 1;
-    sg_hiddenCover = sg_hiddenPlate = nil;
+    CGFloat alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
     sg_coverKeptHidden = hidden;
-    if (!hidden) return;
+    if (!hidden) {
+        for (UIView *cover in sg_hiddenCovers.allObjects) cover.alpha = alpha;
+        for (UIView *plate in sg_hiddenPlates.allObjects) plate.alpha = 1;
+        [sg_hiddenCovers removeAllObjects];
+        [sg_hiddenPlates removeAllObjects];
+        return;
+    }
     UIView *tilt = showingTilt();
     UIView *cover = coverIn(tilt);
     if (!cover) return;
     UIView *plate = SGRShadowPlateIn(tilt, &kPlateKey);
     cover.alpha = 0;
     plate.alpha = 0;
-    sg_hiddenCover = cover;
-    sg_hiddenPlate = plate;
+    [sg_hiddenCovers addObject:cover];
+    if (plate) [sg_hiddenPlates addObject:plate];
 }
 
 #pragma mark - the paused shrink
@@ -237,7 +249,7 @@ static void scaleEveryCover(BOOL animated) {
         for (UIView *tilt in tilts) {
             scaleCover(tilt, scale);
             UIView *cover = coverIn(tilt);
-            if (cover != sg_hiddenCover) cover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
+            if (!coverHidden(cover)) cover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
         }
     };
     if (animated) SGRAnimate(SGRReduceMotion() ? SGRMotionRespond : SGRMotionLayout, apply, nil);
@@ -446,7 +458,7 @@ static void placeSoon(UIView *tilt) {
     // though this pass may run inside Spotify's transition.
     if (sg_coverKeptHidden && showingTilt() == tilt) {
         UIView *kept = coverIn(tilt);
-        if (kept && kept != sg_hiddenCover) [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
+        if (kept && !coverHidden(kept)) [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
     }
     watchHold(tilt);
     SGRPlayerMotionCoverLaidOut();
@@ -462,6 +474,22 @@ static void placeSoon(UIView *tilt) {
     %orig;
     UIView *tilt = (UIView *)self;
     if (tilt.window && tilt.bounds.size.width >= kCoverMinWidth && inCoverCell(tilt)) placeSoon(tilt);
+}
+%end
+
+// A pass of the cell itself, after Spotify has placed the band in it. A cell moved without its bounds changing --
+// the queue taking its place on the first open, a page scrolling -- does not lay its tilt view out again, so the
+// cover keeps the translation the last pass put on it while the band it is drawn in has moved, and stands a little
+// high or low. Placing it here measures where the cover is drawn now; the move is read off that place, so passes
+// that repeat change nothing.
+%hook _TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl
+- (void)layoutSubviews {
+    %orig;
+    UIView *cell = (UIView *)self;
+    for (UIView *tilt in sg_tilts.allObjects) {
+        if (tilt.bounds.size.width < kCoverMinWidth || ![tilt isDescendantOfView:cell]) continue;
+        if (tilt.window) placeCover(tilt);
+    }
 }
 %end
 
@@ -557,6 +585,8 @@ static SGRPlayerArtworkWatcher *sg_artworkWatcher;
     %init;
     sg_tilts = [NSHashTable weakObjectsHashTable];
     sg_covers = [NSMapTable weakToWeakObjectsMapTable];
+    sg_hiddenCovers = [NSHashTable weakObjectsHashTable];
+    sg_hiddenPlates = [NSHashTable weakObjectsHashTable];
     sg_artworkWatcher = [SGRPlayerArtworkWatcher new];
     SGAddPlayerStateObserver(sg_artworkWatcher);
     SGRequireClasses(@[
