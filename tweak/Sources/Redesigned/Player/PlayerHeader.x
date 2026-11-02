@@ -41,7 +41,7 @@
 
 static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
 static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey, kTitleKey, kFrameKey;
-static char kTreeKey, kTreeAfterKey;
+static char kTreeKey, kTreeAfterKey, kDupKey;
 static const CGFloat kPressScale = 0.92;
 // The Music app's two round buttons on the title row, measured off its player screenshot (706 x 1536px for the
 // 402 x 874pt screen, 1.756px to a point): the discs are 50px across, 28.5pt, 11.5pt apart with their middles
@@ -333,8 +333,9 @@ static void rowUnitLaidOut(UIViewController *unit) {
     // broken was one where it is not a UIButton; that view is also what the menu front, the press and the
     // popover anchor were put on (PlayerHeader's own pass), so the move takes all of them along.
     UIStackView *row = sg_row;
-    if (!sg_more || !(row && sg_more.superview == row)) {
-        UIView *found = SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
+    BOOL moved = sg_more && row && sg_more.superview == row;
+    UIView *found = SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
+    if (!moved) {
         if (found && found != sg_more) {
             UIView *old = sg_more;
             if (old && old.superview) {
@@ -344,7 +345,22 @@ static void rowUnitLaidOut(UIViewController *unit) {
                 }
                 [old removeFromSuperview];
             }
+            // A rebuilt header's ⋯ may have been hidden by the branch below before the row took it back.
+            found.hidden = NO;
+            found.alpha = 1;
+            found.accessibilityElementsHidden = NO;
             sg_more = found;
+        }
+    } else if (found && found != sg_more) {
+        // A header rebuilt behind a row that already holds the ⋯ keeps a fresh ⋯ of its own, in this unit's
+        // own view. Nothing moves that one: the ⋯ that moved is the one drawn at the row's end, so the
+        // header's copy is only hidden (Spotify holds it and lays its row out with it), once per copy.
+        found.hidden = YES;
+        found.alpha = 0;
+        found.accessibilityElementsHidden = YES;
+        if (!objc_getAssociatedObject(found, &kDupKey)) {
+            objc_setAssociatedObject(found, &kDupKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            SGLog(@"redesign player: a rebuilt header's ⋯ (%@) was hidden; the ⋯ in the title row stays", NSStringFromClass(found.class));
         }
     }
     placeRowButtons();
