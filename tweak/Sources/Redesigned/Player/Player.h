@@ -72,6 +72,13 @@ CGFloat SGRPlayerCoverScale(void);
 // The band that cover sits in -- the room the player gives its artwork, between the header row and the
 // title -- in `host`'s coordinates; CGRectNull when no cover has laid out.
 CGRect SGRPlayerArtworkAreaIn(UIView *host);
+// The tilt view drawing the cover on screen; nil until one has laid out. A tap on the cover belongs to it,
+// and Spotify opens the cover's tilt mode from its own tap.
+UIView *SGRPlayerCoverTilt(void);
+// The cover that tilt draws, in `host`'s coordinates as it is drawn (the paused shrink taken in); CGRectNull
+// when it has none. The cover's own rect is what a tap may open the tilt mode from, not the tilt's frame:
+// they are the same square but the view's frame can be a pass behind what it draws (PlayerGestures.x).
+CGRect SGRPlayerCoverRectIn(UIView *tilt, UIView *host);
 // Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
 // (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
 void SGRPlayerSetCoverHidden(BOOL hidden);

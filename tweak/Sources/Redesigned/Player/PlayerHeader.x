@@ -41,6 +41,7 @@
 
 static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
 static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey, kTitleKey, kFrameKey;
+static char kTreeKey, kTreeAfterKey;
 static const CGFloat kPressScale = 0.92;
 // The Music app's two round buttons on the title row, measured off its player screenshot (706 x 1536px for the
 // 402 x 874pt screen, 1.756px to a point): the discs are 50px across, 28.5pt, 11.5pt apart with their middles
@@ -168,9 +169,39 @@ static void showStar(UIButton *button) {
     SGRAddButtonAnimation(button).alpha = 0;
 }
 
+// The ⋯'s own glyph in the button, hidden under ours, is the small one. Spotify's ⋯ is a view whose class the
+// phones disagree on (PlayerHeader.x's move found a non-UIButton), and what it draws is not always its own
+// image view nor a child of the button: a reused header came back with a small ellipsis drawn a level or two
+// inside (the phone's report, two glyphs over each other). Everything that is not ours is hidden, however deep
+// it sits; the button itself is never hidden, and neither are the ⋯'s own control, the menu's front, nor the
+// glass circle, so the menu, its action and its press stay untouched.
+static void hideGlyphs(UIView *root, UIView *keepDots, UIView *keepGlass, UIView *keepFront) {
+    for (UIView *sub in root.subviews) {
+        if (sub == keepDots || sub == keepGlass || sub == keepFront) continue;
+        // A control is the menu's front or Spotify's own button: it is not hidden (that would take its touches
+        // away), but what it draws inside it may be the glyph and is looked at.
+        if ([sub isKindOfClass:UIControl.class]) {
+            hideGlyphs(sub, keepDots, keepGlass, keepFront);
+            continue;
+        }
+        sub.hidden = YES;
+        hideGlyphs(sub, keepDots, keepGlass, keepFront);
+    }
+}
+
+static void appendTree(UIView *view, NSUInteger depth, NSMutableString *text) {
+    NSString *indent = [@"" stringByPaddingToLength:depth * 2 withString:@" " startingAtIndex:0];
+    [text appendFormat:@"\n%@%@ %@%@ hidden=%d alpha=%.2f", indent, NSStringFromClass(view.class), NSStringFromCGRect(view.frame),
+     [view isKindOfClass:UIControl.class] ? @" (control)" : @"", view.hidden, view.alpha];
+    if ([view isKindOfClass:UIImageView.class]) [text appendFormat:@" image=%@", ((UIImageView *)view).image ? @"yes" : @"no"];
+    if ([view isKindOfClass:UILabel.class]) [text appendFormat:@" text=%@", ((UILabel *)view).text];
+    for (UIView *sub in view.subviews) appendTree(sub, depth + 1, text);
+}
+
 // The ⋯'s glyph, Spotify's dots swapped for the SF Symbol. The glass, the menu front and the press are
 // the button's own subviews and targets and stay untouched. The ⋯ is Spotify's control whatever its class:
-// its image view is hidden only when it has one (a UIButton).
+// its glyph is hidden only when it has one (a UIButton's image view), and anything else the button draws
+// that is not ours (hideGlyphs).
 static void showEllipsis(UIView *button) {
     UIImageView *dots = objc_getAssociatedObject(button, &kEllipsisKey);
     if (!dots) {
@@ -182,12 +213,24 @@ static void showEllipsis(UIView *button) {
         dots.isAccessibilityElement = NO;
         objc_setAssociatedObject(button, &kEllipsisKey, dots, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    for (UIView *sub in button.subviews) {
-        if (sub != dots && [sub isKindOfClass:UIImageView.class]) sub.hidden = YES;
+    // The tree as Spotify's ⋯ came, once, and after the pass that hid what it drew: the phone's log then says
+    // which view drew the second ellipsis (kTreeKey is the before, kTreeAfterKey the after).
+    if (!objc_getAssociatedObject(button, &kTreeKey)) {
+        NSMutableString *text = [NSMutableString string];
+        appendTree(button, 0, text);
+        objc_setAssociatedObject(button, &kTreeKey, [text copy], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        SGLog(@"redesign player: the ⋯ %@ came as:%@", NSStringFromClass(button.class), text);
     }
     if ([button isKindOfClass:UIButton.class]) ((UIButton *)button).imageView.hidden = YES;
+    hideGlyphs(button, dots, objc_getAssociatedObject(button, &kGlassKey), SGRSystemMenuFront(button));
     if (dots.superview != button) [button addSubview:dots];
     dots.frame = button.bounds;
+    NSMutableString *after = [NSMutableString string];
+    appendTree(button, 0, after);
+    if (![after isEqualToString:objc_getAssociatedObject(button, &kTreeAfterKey)]) {
+        objc_setAssociatedObject(button, &kTreeAfterKey, [after copy], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        SGLog(@"redesign player: the ⋯ %@ is now:%@", NSStringFromClass(button.class), after);
+    }
 }
 
 // Both sides found (the header's ⋯, the stack holding the star), the move is made once and kept asserted:

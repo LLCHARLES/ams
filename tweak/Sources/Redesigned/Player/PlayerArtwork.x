@@ -37,7 +37,7 @@ static const CGFloat kArtworkInset = 23, kArtworkWider = 2.2;
 // are left under the safe area's top on a shorter screen.
 static const CGFloat kArtworkTopShare = 0.1085, kArtworkTopGap = 33;
 
-static char kPlateKey;
+static char kPlateKey, kGeoKey;
 static NSHashTable<UIView *> *sg_tilts;
 // The cover of each tilt view once found. A frame Spotify sets on a scaled view becomes its scaled
 // size, leaving bounds that no longer match the tilt view's, so the cover is not looked for by size again.
@@ -53,13 +53,21 @@ static CGFloat currentScale(void) {
 static UIView *coverIn(UIView *tilt) {
     UIView *cover = [sg_covers objectForKey:tilt];
     if (cover.superview == tilt) return cover;
+    UIView *best = nil;
     for (UIView *sub in tilt.subviews) {
-        if (![sub isKindOfClass:SGRShadowPlate.class] && CGSizeEqualToSize(sub.bounds.size, tilt.bounds.size)) {
+        if ([sub isKindOfClass:SGRShadowPlate.class]) continue;
+        if (CGSizeEqualToSize(sub.bounds.size, tilt.bounds.size)) {
             [sg_covers setObject:sub forKey:tilt];
             return sub;
         }
+        // A cover the tilt was sized for a pass ago, or one a frame set off its center: still the square view
+        // the tilt draws, the largest of them. A cell reused for the next track can come with one of these,
+        // and the pass that could not find it left the cover where Spotify had it until the next one.
+        CGSize size = sub.bounds.size;
+        if (size.width >= kCoverMinWidth && fabs(size.width - size.height) < 1 && (!best || size.width > best.bounds.size.width)) best = sub;
     }
-    return nil;
+    if (best) [sg_covers setObject:best forKey:tilt];
+    return best;
 }
 
 static BOOL inCoverCell(UIView *tilt) {
@@ -134,6 +142,17 @@ CGRect SGRPlayerCoverFrameIn(UIView *host) {
 
 CGFloat SGRPlayerCoverScale(void) {
     return currentScale();
+}
+
+// The tilt view drawing the cover on screen, and the cover it draws in `host`'s coordinates, paused shrink
+// included (PlayerGestures.x asks before it lets a tap through). CGRectNull when there is none.
+UIView *SGRPlayerCoverTilt(void) {
+    return showingTilt();
+}
+
+CGRect SGRPlayerCoverRectIn(UIView *tilt, UIView *host) {
+    UIView *cover = coverIn(tilt);
+    return cover && host ? [host convertRect:cover.bounds fromView:cover] : CGRectNull;
 }
 
 CGRect SGRPlayerArtworkAreaIn(UIView *host) {
@@ -287,19 +306,38 @@ static void watchHold(UIView *tilt) {
     objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_ASSIGN);
 }
 
+// The tilt and the cover as the phone has them, logged when the state changes (and on a track change, beside
+// the cover's own passes): the frame, bounds, center and transform through a track change are what a cover
+// that jumps up is read from.
+static void logGeometry(UIView *tilt, UIView *cover, NSString *when) {
+    if (!tilt) return;
+    NSString *state = [NSString stringWithFormat:@"%@|%.1f,%.1f|%@|%@|%@|%@", when,
+                       tilt.center.x, tilt.center.y, NSStringFromCGAffineTransform(tilt.transform),
+                       cover ? NSStringFromCGRect(cover.frame) : @"-",
+                       cover ? NSStringFromCGAffineTransform(cover.transform) : @"-",
+                       cover ? NSStringFromCGSize(cover.bounds.size) : @"-"];
+    if ([state isEqualToString:objc_getAssociatedObject(tilt, &kGeoKey)]) return;
+    objc_setAssociatedObject(tilt, &kGeoKey, state, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    SGLog(@"redesign player: artwork %@: tilt frame %@ bounds %@ center %@ transform %@; cover %@ frame %@ bounds %@ transform %@; window %@",
+          when, NSStringFromCGRect(tilt.frame), NSStringFromCGRect(tilt.bounds), NSStringFromCGPoint(tilt.center),
+          NSStringFromCGAffineTransform(tilt.transform), cover ? NSStringFromClass(cover.class) : @"none",
+          cover ? NSStringFromCGRect(cover.frame) : @"-", cover ? NSStringFromCGRect(cover.bounds) : @"-",
+          cover ? NSStringFromCGAffineTransform(cover.transform) : @"-",
+          tilt.window ? NSStringFromCGSize(tilt.window.bounds.size) : @"none");
+}
+
 %hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
 - (void)layoutSubviews {
     UIView *tilt = (UIView *)self;
     %orig;
     // The width first: the bar's and the pages' small tilt views skip the walk up to the cell.
     if (tilt.bounds.size.width < kCoverMinWidth || !inCoverCell(tilt)) return;
-    UIView *cover = coverIn(tilt);
-    if (!cover) return;
     [sg_tilts addObject:tilt];
     // Kept hidden, it is whichever cover is showing: the first open can lay out a second cell in its place. Not animated,
     // though this pass may run inside Spotify's transition.
-    if (sg_coverKeptHidden && cover != sg_hiddenCover && showingTilt() == tilt) {
-        [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
+    if (sg_coverKeptHidden && showingTilt() == tilt) {
+        UIView *kept = coverIn(tilt);
+        if (kept && kept != sg_hiddenCover) [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
     }
     watchHold(tilt);
     SGRPlayerMotionCoverLaidOut();
@@ -313,8 +351,27 @@ static void watchHold(UIView *tilt) {
     CGPoint middle = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
     CGFloat side = coverSide(tilt, bounds.size);
     CGSize size = CGSizeMake(side, side);
-    CGAffineTransform lift = CGAffineTransformMakeTranslation(0, -coverLift(tilt, bounds.size, side));
-    if (!CGAffineTransformEqualToTransform(tilt.transform, lift)) tilt.transform = lift;
+    // What the lift is measured from stands only once the tilt's own view is laid out: a cell laid out before
+    // its band is would read a place Spotify never drew it at, and moving it then would only be undone.
+    BOOL measurable = tilt.window && tilt.superview && tilt.superview.bounds.size.height >= bounds.size.height - 0.5;
+    // Every write below is written without animation: a pass that runs inside Spotify's track change would
+    // otherwise animate the tilt from the old place (or from Spotify's own) to the new one, which is the cover
+    // seen jumping. Spotify's crossfade of the artwork itself is its own and is not touched by this.
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    // The lift is the tilt's own place and is worked out before the cover is looked for: a cell reused for the
+    // next track lays its cover out a pass later, and waiting for it left the tilt at Spotify's place, to jump up
+    // when the next pass moved it.
+    if (measurable) {
+        CGAffineTransform lift = CGAffineTransformMakeTranslation(0, -coverLift(tilt, bounds.size, side));
+        if (!CGAffineTransformEqualToTransform(tilt.transform, lift)) tilt.transform = lift;
+    }
+    UIView *cover = coverIn(tilt);
+    if (!cover) {
+        [CATransaction commit];
+        logGeometry(tilt, nil, measurable ? @"laid out, no cover" : @"laid out, not measurable");
+        return;
+    }
     if (!CGSizeEqualToSize(cover.bounds.size, size)) cover.bounds = (CGRect){cover.bounds.origin, size};
     if (!CGPointEqualToPoint(cover.center, middle)) cover.center = middle;
     // Its image is placed again for the new size (the ImageViewProxy hook below makes it fill the cover).
@@ -330,6 +387,8 @@ static void watchHold(UIView *tilt) {
     plate.center = cover.center;
     // The same value an animation in flight is heading to, so a layout pass never cuts one short.
     scaleCover(tilt, currentScale());
+    [CATransaction commit];
+    logGeometry(tilt, cover, @"laid out");
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"redesign player: cover %@ rounded %.0f with a shadow plate, scale %.2f", NSStringFromClass(cover.class), SGRRadiusArtwork, currentScale()); });
@@ -389,6 +448,7 @@ static UIView *coverOfImage(UIView *image) {
 
 @implementation SGRPlayerArtworkWatcher {
     NSInteger _paused;
+    NSString *_track;
 }
 
 - (instancetype)init {
@@ -398,6 +458,18 @@ static UIView *coverOfImage(UIView *image) {
 }
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
+    // The artwork through a track change, read before the covers have laid out and again while the next
+    // one's picture comes in: the frame and transform at each point say where a cover that jumped was.
+    NSString *track = SGURIString(state.track.URI);
+    if (![track isEqualToString:_track]) {
+        _track = track;
+        for (NSNumber *delay in @[@0.05, @0.4, @1.5]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                UIView *tilt = showingTilt();
+                logGeometry(tilt, coverIn(tilt), [NSString stringWithFormat:@"track %.2fs after the change", delay.doubleValue]);
+            });
+        }
+    }
     NSInteger paused = state.isPaused ? 1 : 0;
     if (paused == _paused) return;
     _paused = paused;
