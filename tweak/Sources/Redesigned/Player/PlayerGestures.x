@@ -93,11 +93,16 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
     if (!tilt) return hit;
     CGRect cover = SGRPlayerCoverRectIn(tilt, (UIView *)self);
     if (CGRectIsNull(cover)) return hit;
-    BOOL onCover = CGRectContainsPoint(cover, point);
+    // A point on the corner's drawn edge is on the cover: the rect is whole points and a touch is not.
+    BOOL onCover = CGRectContainsPoint(CGRectInset(cover, -1, -1), point);
     UIView *answer = hit;
     if (onCover) {
-        // The cover's taps are the tilt's even when the list answered with the band around it.
-        if (!hitTilt) answer = tilt;
+        // Asked of the tilt view's own tree, not answered with the tilt whole: the tap that opens the inspection
+        // is a recognizer on the tilt view, which takes a touch its subtree answers, and one on a view inside it
+        // would miss a touch answered above it. The point can be inside the tilt but over the cover's edge only.
+        CGPoint inTilt = [tilt convertPoint:point fromView:self];
+        UIView *inside = CGRectContainsPoint(tilt.bounds, inTilt) ? [tilt hitTest:inTilt withEvent:event] : nil;
+        answer = inside ?: tilt;
     } else if (hitTilt) {
         // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
         answer = hitTilt.superview ?: hit;

@@ -75,11 +75,24 @@ static char kButtonGlassKey, kPanelGlassKey;
     [_hide invalidate];
 }
 
+// The circle behind the mic, sized to the button. Before the first layout pass the bounds are empty, and the
+// Kit hides a shape given no size; showing it again does not unhide it, so the size asked for here is the one
+// the shape already had -- or a circle's -- rather than nothing, and the button is never left without a disc.
+- (UIView *)circle {
+    CGFloat side = MIN(self.bounds.size.width, self.bounds.size.height);
+    if (side < 1) {
+        UIView *shape = objc_getAssociatedObject(self, &kButtonGlassKey);
+        side = shape ? MIN(shape.bounds.size.width, shape.bounds.size.height) : 0;
+    }
+    if (side < 1) side = SGRGlassCircleSize;
+    return SGRGlassInside(self, &kButtonGlassKey, side);
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
     _button.frame = bounds;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked);
+    SGRShowGlass([self circle], !_tucked);
     _ring.frame = bounds;
     // Starting at the top and running clockwise, as a download ring does.
     CGFloat radius = MIN(bounds.size.width, bounds.size.height) / 2 - kRingInset - kRingWidth / 2;
@@ -92,7 +105,7 @@ static char kButtonGlassKey, kPanelGlassKey;
 // fade, and an open slider goes with them.
 - (void)setTucked:(BOOL)tucked {
     _tucked = tucked;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height)), !tucked);
+    SGRShowGlass([self circle], !tucked);
     _button.alpha = tucked ? 0 : 1;
     [self showRing];
     self.userInteractionEnabled = !tucked;

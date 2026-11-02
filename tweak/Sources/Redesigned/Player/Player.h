@@ -79,6 +79,14 @@ UIView *SGRPlayerCoverTilt(void);
 // when it has none. The cover's own rect is what a tap may open the tilt mode from, not the tilt's frame:
 // they are the same square but the view's frame can be a pass behind what it draws (PlayerGestures.x).
 CGRect SGRPlayerCoverRectIn(UIView *tilt, UIView *host);
+// The cover where the player settles it, in `host`'s coordinates: square, its top where the Music app draws
+// it, and the paused shrink left out. It is what the title row measures its gap from (PlayerLyrics.x), so the
+// row no longer follows a cover that is a pass behind its lift. CGRectNull until a cover has laid out.
+CGRect SGRPlayerCoverRestFrameIn(UIView *host);
+// The lowest the cover may reach and still leave the ordinary player's title row at its Music-app place, in
+// window coordinates (the row's settled top less its gap from the cover); NAN until that row has laid out.
+// The cover is sized to it (PlayerArtwork.x), so the two never overlap on a short screen.
+CGFloat SGRPlayerCoverMaxBottomInWindow(void);
 // Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
 // (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
 void SGRPlayerSetCoverHidden(BOOL hidden);

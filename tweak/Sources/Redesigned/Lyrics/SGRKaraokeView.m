@@ -2078,6 +2078,10 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     }
     _extras.menu = [UIMenu menuWithChildren:items];
     _extrasBox.hidden = NO;
+    // Shown again here, not only in the layout pass: a song that comes back with something to offer unhides the
+    // box inside whatever animation is running, and until the next pass its circle would have been left as the
+    // hide before it put it (the phone's report of the translation button's disc vanishing).
+    SGRShowGlass(SGRGlassInside(_extrasBox, &kExtrasGlassKey, kExtrasSide), !_extrasHidden);
     [self setNeedsLayout];
 }
 

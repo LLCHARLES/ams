@@ -71,6 +71,7 @@ static __weak UIView *sg_host;              // SPTNowPlayingView
 static __weak UIViewController *sg_info, *sg_duration, *sg_floating, *sg_header;
 static __weak UIView *sg_titleElement;      // the arranged element view holding the title and the artist
 static __weak UIViewController *sg_player;  // NowPlayingViewController, whose units the controls are
+static CGFloat sg_titleTopInWindow = NAN;   // the title row's top before this file lifts it, NAN until it lays out
 static BOOL sg_alone;                       // the lines have the player to themselves
 static BOOL sg_ordinaryInfo, sg_ordinaryDuration; // the ordinary player's units, whose places the Music app's are
 static BOOL sg_touching;                    // a finger is on the player, which holds the clock (SGRPlayerTouchWatcher)
@@ -312,11 +313,11 @@ static void placeTitleRow(SGRLyricsLayout l) {
     // much in from the edge, or as near as the cover leaves room for on a shorter screen. The AI DJ's row
     // keeps Spotify's places.
     BOOL ordinary = sg_ordinaryInfo;
+    if (!ordinary) sg_titleTopInWindow = NAN;
     CGFloat lift = sg_open ? l.lift : 0;
     if (!sg_open && ordinary) {
         CGFloat wanted = kInfoLift;
-        CGRect cover = sg_host ? SGRPlayerCoverFrameIn(sg_host) : CGRectNull;
-        if (!CGRectIsNull(cover)) {
+        if (sg_host) {
             // The title's own top, not the unit's: the unit keeps a little padding above the text. The
             // element's frame read in the player carries the unit's lift with it, so coming back from
             // the lines it measured the open place beside the thumbnail, found no room under the cover
@@ -326,7 +327,16 @@ static void placeTitleRow(SGRLyricsLayout l) {
             UIView *element = sg_titleElement ?: info;
             CGFloat rowTop = CGRectGetMinY(untransformed(info, sg_host));
             if (element != info) rowTop += CGRectGetMinY([info convertRect:element.bounds fromView:element]);
-            wanted = MIN(wanted, MAX(0, rowTop - CGRectGetMaxY(cover) - kCoverGap));
+            // The row's place before this file lifts it, in the window, for the cover's size to stop above
+            // (SGRPlayerCoverMaxBottomInWindow, PlayerArtwork.x).
+            CGPoint top = [sg_host convertPoint:CGPointMake(0, rowTop) toView:nil];
+            if (sg_host.window && !isnan(top.y)) sg_titleTopInWindow = top.y;
+            // The cover at the place it settles at, not the frame a pass happens to draw: a cell reused for
+            // the next track can still be at Spotify's own place when this reads it, and following that put
+            // the row under a cover that was about to be lifted.
+            CGRect cover = SGRPlayerCoverRestFrameIn(sg_host);
+            if (CGRectIsNull(cover)) cover = SGRPlayerCoverFrameIn(sg_host);
+            if (!CGRectIsNull(cover)) wanted = MIN(wanted, MAX(0, rowTop - CGRectGetMaxY(cover) - kCoverGap));
         }
         lift = -wanted;
     }
@@ -342,6 +352,14 @@ static void placeTitleRow(SGRLyricsLayout l) {
     CGFloat room = CGFLOAT_MAX;
     if (sg_open || shift > 0) room = trailingEdgeIn(info) - kTitleGap - (CGRectGetMinX(untransformed(title, info)) + shift);
     clipTitle(title, room);
+}
+
+// The lowest the cover may reach and still leave the ordinary player's title row where the Music app has it, in
+// window coordinates: the row's settled top less the gap it keeps from the cover. PlayerArtwork.x sizes the cover
+// under this. NAN until that row has laid out, or in the AI DJ's player, whose uncovered row keeps Spotify's place.
+CGFloat SGRPlayerCoverMaxBottomInWindow(void) {
+    if (!sg_ordinaryInfo || !sg_host.window || isnan(sg_titleTopInWindow)) return NAN;
+    return sg_titleTopInWindow - kInfoLift - kCoverGap;
 }
 
 // Spotify's bottom stack leaves the bar lower and wider than the Music app's, which draws it this much

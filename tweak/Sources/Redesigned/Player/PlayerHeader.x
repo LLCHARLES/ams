@@ -41,7 +41,7 @@
 
 static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
 static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey, kTitleKey, kFrameKey;
-static char kTreeKey, kTreeAfterKey, kDupKey;
+static char kTreeKey, kTreeAfterKey, kDupKey, kArrowKey;
 static const CGFloat kPressScale = 0.92;
 // The Music app's two round buttons on the title row, measured off its player screenshot (706 x 1536px for the
 // 402 x 874pt screen, 1.756px to a point): the discs are 50px across, 28.5pt, 11.5pt apart with their middles
@@ -109,6 +109,10 @@ static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *
             continue;
         }
         UIView *circle = SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
+        // The material is asserted with the circle, not only made with it: a pass that finds the circle already
+        // there leaves whatever state a menu, a hide or a trait change gave it, and glass that has lost its
+        // effect draws nothing. The call is idempotent and never makes a second view.
+        SGRShowGlass(circle, YES);
         if (![said containsObject:name] && button.bounds.size.width > 0) {
             [said addObject:name];
             SGLog(@"redesign player: a %.0fpt glass circle in %@ (id %@, %.0fx%.0f, %@)", circle.bounds.size.width, NSStringFromClass(button.class),
@@ -132,9 +136,55 @@ static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *
     }
 }
 
-static void glassHeader(UIViewController *unit, BOOL watchMenu) {
+// `arrow`: the header's down arrow is still there to be given a circle. The ordinary player takes it away
+// (hideHeaderExtras), so only its ⋯ is looked for; the AI DJ keeps its arrow.
+static void glassHeader(UIViewController *unit, BOOL watchMenu, BOOL arrow) {
     static const void *keys[] = {&kCloseKey, &kMoreKey};
-    glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
+    if (arrow) glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
+    else glassInside(unit, @[@[@"Context menu"]], keys + 1, watchMenu);
+}
+
+static BOOL holds(UIView *root, UIView *target) {
+    return target && (target == root || [target isDescendantOfView:root]);
+}
+
+// The Music app draws no row over its cover: no down arrow, no "Playing from ..." line. The Redesigned player
+// keeps Spotify's header unit (its touches close the player and its ⋯ is the menu) but draws none of the row's
+// content: the arrow, the labels and the items the row wraps them in go, while the ⋯ and the item it sits in
+// stay, so a header rebuilt before the title row takes it back does not lose the menu. Hiding the unit's own
+// view would take the menu with it, so it is left alone.
+// Run every pass, since Spotify can rebuild the row under the same unit view; every write is idempotent.
+static void hideHeaderExtras(UIViewController *unit) {
+    UIView *host = unit.viewIfLoaded;
+    if (!host) return;
+    UIView *arrow = SGRFindByIdentifier(host, @"now-playing-minimize-button", &kArrowKey);
+    if (!arrow) arrow = SGRFindByIdentifier(host, @"mobile-nowplaying-close-button", &kArrowKey);
+    if (arrow) arrow.hidden = YES;
+    UIView *more = SGRFindByIdentifier(host, @"Context menu", &kMoreRowKey);
+    // The arrow's slot and the source line's item, which Spotify wraps each element in on some builds.
+    for (UIView *item in [host.subviews copy]) {
+        if (!holds(item, more)) item.hidden = YES;
+    }
+    // A label inside the ⋯ itself is not the source line: it is left to the menu.
+    SGForEachView(host, ^(UIView *view) {
+        if (![view isKindOfClass:UILabel.class]) return;
+        if (holds(more, view)) return;
+        view.hidden = YES;
+    });
+}
+
+// Whether the add button is the ordinary player's title row's, read off the unit it sits in. The marker alone is
+// not enough: a row rebuilt for a new track comes back with a fresh button the marker was never put on, and
+// `button != sg_like` then refused it -- the star and its circle were gone from the new button (the phone's
+// report). The list rows', the mini bar's and the queue's buttons sit in no information unit and keep Spotify's.
+static BOOL titleAddButton(UIButton *button) {
+    if (objc_getAssociatedObject(button, &SGRTitleAddButtonKey)) return YES;
+    for (UIResponder *responder = button.nextResponder; responder; responder = responder.nextResponder) {
+        if (![responder isKindOfClass:UIViewController.class]) continue;
+        NSString *name = NSStringFromClass(responder.class);
+        if ([name containsString:@"InformationElementsUnit"] && ![name containsString:@"DJM"]) return YES;
+    }
+    return NO;
 }
 
 // The title row's add button (the one sg_like names) wears the Music app's star over the same glass
@@ -142,10 +192,11 @@ static void glassHeader(UIViewController *unit, BOOL watchMenu) {
 // changes with the selected state; the Lottie stays transparent under it. The marker keeps the plain
 // checkmark off this button and says which button the star's later passes are looking at.
 static void showStar(UIButton *button) {
-    if (!button) return;
-    if (button != sg_like && !objc_getAssociatedObject(button, &SGRTitleAddButtonKey)) return;
+    if (!button || !titleAddButton(button)) return;
     objc_setAssociatedObject(button, &SGRTitleAddButtonKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    SGRGlassInside(button, &kGlassKey, kTitleDiscSize);
+    sg_like = button;
+    UIView *circle = SGRGlassInside(button, &kGlassKey, kTitleDiscSize);
+    SGRShowGlass(circle, YES);
     pressFrom(button, NO);
     UIImageView *star = objc_getAssociatedObject(button, &kStarKey);
     if (!star) {
@@ -241,7 +292,16 @@ static void showEllipsis(UIView *button) {
 static void placeRowButtons(void) {
     UIStackView *row = sg_row;
     UIView *like = sg_like, *more = sg_more;
-    if (!row || !like || !more) return;
+    if (!more) return;
+    if (!row || !like) {
+        // The title row is not laid out (or is being rebuilt for a new track): the ⋯ stays where it is, but its
+        // circle and its glyph are re-asserted. Returning before them left the ⋯ the header's pass had given a
+        // 44pt circle, or a circle a rebuild had lost, until the row's next pass (the phone's report).
+        UIView *circle = SGRGlassInside(more, &kGlassKey, kTitleDiscSize);
+        SGRShowGlass(circle, YES);
+        showEllipsis(more);
+        return;
+    }
     // The view of the row the add button belongs to, which the ⋯ goes after.
     UIView *item = like;
     while (item && item.superview != row) item = item.superview;
@@ -257,6 +317,11 @@ static void placeRowButtons(void) {
             [(UIStackView *)old removeArrangedSubview:more];
         }
         [more removeFromSuperview];
+        // The header's pass may have hidden the ⋯ with the rest of its row, or a rebuilt header's copy was hidden
+        // while the row kept the moved one: the one this puts in the row is the one drawn, and it is shown here.
+        more.hidden = NO;
+        more.alpha = 1;
+        more.accessibilityElementsHidden = NO;
         more.translatesAutoresizingMaskIntoConstraints = NO;
         // The index is read again once the ⋯ is out: its old place, before the add button, would have
         // shifted the one wanted under it, and an index past the stack's count is an exception.
@@ -281,7 +346,8 @@ static void placeRowButtons(void) {
               NSStringFromClass(row.class), (unsigned long)next, item ? NSStringFromClass(item.class) : @"nothing");
     }
     if (item) [row setCustomSpacing:kRowButtonGap afterView:item];
-    SGRGlassInside(more, &kGlassKey, kTitleDiscSize);
+    UIView *circle = SGRGlassInside(more, &kGlassKey, kTitleDiscSize);
+    SGRShowGlass(circle, YES);
     showEllipsis(more);
 }
 
@@ -326,7 +392,7 @@ static void rowUnitLaidOut(UIViewController *unit) {
 %hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    glassHeader((UIViewController *)self, YES);
+    glassHeader((UIViewController *)self, YES, NO);
     // Once the ⋯ is in the title row it has left this view and the walk is skipped. A header that was
     // rebuilt keeps a fresh ⋯ of its own: that one is taken and the moved one, wherever it stands, goes, so
     // the row never shows two. The identifier's view is taken whatever its class, since the phone that stayed
@@ -364,6 +430,9 @@ static void rowUnitLaidOut(UIViewController *unit) {
         }
     }
     placeRowButtons();
+    // Last, once the ⋯ has been taken back into the row if the row is there: what is left in the header is the
+    // arrow, the source line and their items, which the Music app does not draw.
+    hideHeaderExtras((UIViewController *)self);
 }
 %end
 
@@ -394,7 +463,7 @@ static void rowUnitLaidOut(UIViewController *unit) {
 %hook SGRDJHeaderUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    glassHeader((UIViewController *)self, NO);
+    glassHeader((UIViewController *)self, NO, YES);
 }
 %end
 %end

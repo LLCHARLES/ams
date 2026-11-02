@@ -90,24 +90,46 @@ static void scaleCover(UIView *tilt, CGFloat scale) {
 
 #pragma mark - the Music app's cover geometry
 
+// Where the cover's top belongs, in the window: kArtworkTopShare of the screen down, and no higher than the
+// header row's buttons are left on a shorter screen. NAN for the 3D cover, drawn full screen (twice the bar's
+// cover's least), whose tilt view is left where Spotify has it.
+static CGFloat coverTargetInWindow(UIView *tilt) {
+    UIWindow *window = tilt.window;
+    if (!window || tilt.bounds.size.height > kCoverMinWidth * 2) return NAN;
+    return MAX(CGRectGetHeight(window.bounds) * kArtworkTopShare, window.safeAreaInsets.top + kArtworkTopGap);
+}
+
 // The side the player's cover is drawn at: the screen's width less the Music app's margins, and never much wider
 // than the tilt view Spotify sized for it (its own 24pt margins, 354 at this player's width). The bar's small
-// cover is not this one (kCoverMinWidth).
+// cover is not this one (kCoverMinWidth). It is also no taller than the room the ordinary player's title row
+// leaves under it: the row settles kInfoLift above where Spotify draws it (PlayerLyrics.x), and sizing the cover
+// to that keeps the two apart on a short screen instead of drawing the row under the cover.
 static CGFloat coverSide(UIView *tilt, CGSize tiltSize) {
     CGFloat screen = tilt.window ? CGRectGetWidth(tilt.window.bounds) : 0;
     if (screen <= 0) return tiltSize.width;
-    return MAX(kCoverMinWidth, MIN(screen - 2 * kArtworkInset, tiltSize.width + kArtworkWider));
+    CGFloat side = MAX(kCoverMinWidth, MIN(screen - 2 * kArtworkInset, tiltSize.width + kArtworkWider));
+    CGFloat target = coverTargetInWindow(tilt), lowest = SGRPlayerCoverMaxBottomInWindow();
+    if (!isnan(target) && !isnan(lowest)) side = MIN(side, MAX(kCoverMinWidth, lowest - target));
+    return side;
 }
 
-// How far the tilt view rises for the cover, centered in it, to stand where the Music app draws it: its top
-// kArtworkTopShare of the screen down. Nothing for the 3D cover, drawn full screen (twice the bar's cover's least).
-static CGFloat coverLift(UIView *tilt, CGSize tiltSize, CGFloat side) {
-    UIWindow *window = tilt.window;
-    if (!window || !tilt.superview || tiltSize.height > kCoverMinWidth * 2) return 0;
-    CGPoint middle = [tilt.superview convertPoint:tilt.center toView:window];
-    CGFloat top = middle.y - tiltSize.height / 2 + (tiltSize.height - side) / 2;
-    CGFloat target = MAX(CGRectGetHeight(window.bounds) * kArtworkTopShare, window.safeAreaInsets.top + kArtworkTopGap);
-    return MAX(0, top - target);
+// Moves the tilt view so that the cover, centered in it, is drawn with its top at that place. The move is read
+// off where the cover is drawn now -- the tilt's transform included -- and put on as a translation, so a pass
+// that runs before the cell's band has laid out lands the cover anyway; the next pass reads the new place and
+// keeps it. Waiting until the band was measurable was what left a fresh or reused cell's cover at Spotify's own
+// place for a pass, 70pt under the lifted title row, and then jumped it up (PlayerLyrics.x measures the row from
+// a settled cover now, so neither follows the other's pass).
+static void pinCover(UIView *tilt, CGFloat side) {
+    UIView *band = tilt.superview;
+    CGFloat target = coverTargetInWindow(tilt);
+    if (!band || isnan(target)) return;
+    // Both places in the band's own coordinates, so the distance is the translation the move is made in even
+    // while a pass runs inside an animation that scales the player.
+    CGPoint coverTop = [band convertPoint:CGPointMake(0, (tilt.bounds.size.height - side) / 2) fromView:tilt];
+    CGFloat targetInBand = [band convertPoint:CGPointMake(0, target) fromView:nil].y;
+    CGAffineTransform lift = tilt.transform;
+    lift.ty -= coverTop.y - targetInBand;
+    if (!CGAffineTransformEqualToTransform(tilt.transform, lift)) tilt.transform = lift;
 }
 
 #pragma mark - where the cover is
@@ -153,6 +175,21 @@ UIView *SGRPlayerCoverTilt(void) {
 CGRect SGRPlayerCoverRectIn(UIView *tilt, UIView *host) {
     UIView *cover = coverIn(tilt);
     return cover && host ? [host convertRect:cover.bounds fromView:cover] : CGRectNull;
+}
+
+// The cover at the place it settles at, in `host`: square, its top where the Music app draws it, its middle the
+// tilt view's, and the paused shrink left out. The title row measures its gap from this, not from the frame a
+// pass happens to draw (SGRPlayerCoverFrameIn follows the tilt's transform and a cell reused for the next track
+// can still be at Spotify's place for a pass), so the row stays put through a track change. The tilt view's own
+// transform is not in it: its center is where Spotify centered it, and the cover is placed from there.
+CGRect SGRPlayerCoverRestFrameIn(UIView *host) {
+    UIView *tilt = showingTilt();
+    CGFloat target = tilt ? coverTargetInWindow(tilt) : NAN;
+    if (!tilt || !host || isnan(target)) return SGRPlayerCoverFrameIn(host);
+    UIView *band = tilt.superview ?: tilt;
+    CGPoint middle = [band convertPoint:tilt.center toView:nil];
+    CGFloat side = coverSide(tilt, tilt.bounds.size);
+    return [host convertRect:CGRectMake(middle.x - side / 2, target, side, side) fromView:nil];
 }
 
 CGRect SGRPlayerArtworkAreaIn(UIView *host) {
@@ -351,25 +388,18 @@ static void logGeometry(UIView *tilt, UIView *cover, NSString *when) {
     CGPoint middle = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
     CGFloat side = coverSide(tilt, bounds.size);
     CGSize size = CGSizeMake(side, side);
-    // What the lift is measured from stands only once the tilt's own view is laid out: a cell laid out before
-    // its band is would read a place Spotify never drew it at, and moving it then would only be undone.
-    BOOL measurable = tilt.window && tilt.superview && tilt.superview.bounds.size.height >= bounds.size.height - 0.5;
     // Every write below is written without animation: a pass that runs inside Spotify's track change would
     // otherwise animate the tilt from the old place (or from Spotify's own) to the new one, which is the cover
     // seen jumping. Spotify's crossfade of the artwork itself is its own and is not touched by this.
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    // The lift is the tilt's own place and is worked out before the cover is looked for: a cell reused for the
-    // next track lays its cover out a pass later, and waiting for it left the tilt at Spotify's place, to jump up
-    // when the next pass moved it.
-    if (measurable) {
-        CGAffineTransform lift = CGAffineTransformMakeTranslation(0, -coverLift(tilt, bounds.size, side));
-        if (!CGAffineTransformEqualToTransform(tilt.transform, lift)) tilt.transform = lift;
-    }
+    // The cover is placed before it is looked for: a cell reused for the next track lays its cover out a pass
+    // later, and waiting for it left the tilt at Spotify's place, to jump up when the next pass moved it.
+    pinCover(tilt, side);
     UIView *cover = coverIn(tilt);
     if (!cover) {
         [CATransaction commit];
-        logGeometry(tilt, nil, measurable ? @"laid out, no cover" : @"laid out, not measurable");
+        logGeometry(tilt, nil, @"laid out, no cover");
         return;
     }
     if (!CGSizeEqualToSize(cover.bounds.size, size)) cover.bounds = (CGRect){cover.bounds.origin, size};
