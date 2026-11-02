@@ -88,35 +88,43 @@ static void logTap(UIView *list, CGPoint point, UIView *tilt, CGRect cover, UIVi
     UIView *row = SGRPlayerInfoRowHitIn((UIView *)self, point, event);
     if (row) return row;
     UIView *hit = %orig;
-    // The cover on screen decides where the cover is, not the tilt the touch happened to land in: the list keeps
-    // one tilt view per cell, and on a first open, a sideways scroll or a cell reused for the next track the tilt
-    // under the finger is not the one drawing the visible cover. Judging the touch by that one measured its own
-    // cover -- drawn a page away -- so a tap in the middle of the visible cover was "beside it", and the answer
-    // became that other cell's parent, which no recognizer watches: the centre did nothing while the edge, where
-    // the list's own hit test came back with the showing tilt, still opened the inspection.
+    // The cover drawn under the point answers, whichever tilt draws it. The list keeps one tilt view per cell,
+    // and on a first open, a sideways scroll or a cell reused for the next track the tilt the touch lands in is
+    // not always the one drawing the visible cover: measured by the other one, a tap in the middle of the cover
+    // was "beside it" and was answered with that cell's parent, which no recognizer watches, while the edge --
+    // where the list's own hit test came back with no tilt and the showing one was asked -- still opened.
+    UIView *hitTilt = tiltOf(hit);
     UIView *shown = SGRPlayerCoverTilt();
-    // Only the list's own cover may answer: a hit test returns a view of the subtree it was asked for, and a
-    // second list's tilt (the player opening or closing beside this one) is not.
+    // A hit test answers with a view of the subtree it was asked for, and a second list's tilt (the player
+    // opening or closing beside this one) is not one.
     if (shown && ![shown isDescendantOfView:(UIView *)self]) shown = nil;
-    CGRect cover = shown ? SGRPlayerCoverRectIn(shown, (UIView *)self) : CGRectNull;
-    // A point on the corner's drawn edge is on the cover: the rect is whole points and a touch is not.
-    BOOL onCover = shown && !CGRectIsNull(cover) && CGRectContainsPoint(CGRectInset(cover, -1, -1), point);
-    if (onCover) {
+    CGRect cover = CGRectNull;
+    UIView *answer = nil;
+    UIView *tilts[2] = {hitTilt, shown};
+    for (NSUInteger i = 0; i < 2 && !answer; i++) {
+        UIView *tilt = tilts[i];
+        if (!tilt) continue;
+        CGRect drawn = SGRPlayerCoverRectIn(tilt, (UIView *)self);
+        // A point on the corner's drawn edge is on the cover: the rect is whole points and a touch is not.
+        if (CGRectIsNull(drawn) || !CGRectContainsPoint(CGRectInset(drawn, -1, -1), point)) continue;
         // Answered with the tilt view whole, whatever lies inside it: the tap that opens the inspection is the
         // tilt's own (PlayerGestures.x's handleTap hook, and Spotify's -[CoverArtTiltView handleTap] the only
         // caller), and a touch handed deeper -- to the cover's image view -- did not open it on the phone,
         // while the same tap on the cover's edge, which the tilt alone answers, did.
-        if (hit != shown) logTap((UIView *)self, point, shown, cover, hit, shown);
-        return shown;
+        cover = drawn;
+        answer = tilt;
     }
-    UIView *hitTilt = tiltOf(hit);
+    if (answer) {
+        if (hit != answer) logTap((UIView *)self, point, answer, cover, hit, answer);
+        return answer;
+    }
     if (!hitTilt) return hit;
     // The tilt's frame reaches past its cover: the view it sits in answers, and no recognizer of the tilt's runs.
-    UIView *answer = hitTilt.superview ?: hit;
+    UIView *elsewhere = hitTilt.superview ?: hit;
     // Every touch that falls on the cover or on what the tilt's frame wrongly reaches is written down, so the
     // phone's log has the workable tap and the broken one side by side; a touch well away from both is left.
-    logTap((UIView *)self, point, shown ?: hitTilt, cover, hit, answer);
-    return answer;
+    logTap((UIView *)self, point, shown ?: hitTilt, cover, hit, elsewhere);
+    return elsewhere;
 }
 %end
 
