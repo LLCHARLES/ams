@@ -6,6 +6,7 @@
 #import "Core/SGCore.h"
 #import "Shared/Gestures/Gestures.h"
 #import "Shared/Player/PlayerSettings.h"
+#import "Player.h"
 
 // A single tap on the cover is Spotify's way into the tilt mode, the artwork alone in 3D. That is
 // the half of a double tap that misses, so while the zones are on it would open on the way to every
@@ -15,12 +16,28 @@
     if (SGFlag(SGKeyGestures, NO) || SGHidden(SGKeyHideFullScreenCover)) return;
     %orig;
 }
+
+// The title row is lifted to the Music app's place, above the bottom stack it is arranged in, and the cover's
+// full screen cell is behind the stack: a tap on the title, the star or the ⋯ was past the stack's bounds and
+// the cover took it, opening the tilt mode. The row answers first for where it is drawn (PlayerLyrics.x); the
+// cover keeps every other touch, so tapping it still opens its inspection.
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *row = SGRPlayerInfoRowHitIn((UIView *)self, point, event);
+    if (row) return row;
+    return %orig;
+}
 %end
 
 %hook _TtC35NowPlaying_ContentLayerPlatformImpl24AccessibleCollectionView
 - (void)layoutSubviews {
     %orig;
     SGGestureAttach((UIView *)self);
+}
+
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *row = SGRPlayerInfoRowHitIn((UIView *)self, point, event);
+    if (row) return row;
+    return %orig;
 }
 %end
 

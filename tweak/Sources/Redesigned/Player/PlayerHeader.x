@@ -13,11 +13,15 @@
 // The ⋯ leaves the header for the title row's trailing end, right of the add button, where the Music app
 // keeps the pair (reparented as an arranged view: the glass, the menu front, the press and the popover
 // anchor are the button's own and ride the move; PlayerLyrics.x's title fade reads the row's new trailing
-// edge by itself). The add button stays where Spotify put it and wears the Music app's star over the same
-// glass circle: hollow until the song is saved, filled and accented once it is. Its Lottie plus/tick stays
-// under the star, transparent, so the button's own action and selected state are untouched, and the saved
-// star carries the plain checkmark's identifier for Follow the cover. The other add buttons (the list rows',
-// the mini bar's) keep Spotify's look, and so does the AI DJ's player: its units are other classes.
+// edge by itself). The row is the stack the title rides in, not the add button's superview: Spotify can give
+// each element of the row a view of its own. The add button stays where Spotify put it and wears the Music
+// app's star over the same glass circle: hollow until the song is saved, filled and accented once it is. Its
+// Lottie plus/tick stays under the star, transparent, so the button's own action and selected state are
+// untouched, and the saved star carries the plain checkmark's identifier for Follow the cover. The other add
+// buttons (the list rows', the mini bar's) keep Spotify's look, and so does the AI DJ's player: its units are
+// other classes. Both discs are 30pt (the Music app's 28.5pt, measured below): the header's own pass puts a
+// 44pt circle behind the ⋯ for the one pass it is still there, and placeRowButtons re-asserts the pair's
+// size every time, so no other glass circle changes.
 //
 // Tree (trees/clean/player/01.txt): HeaderElementsUnit's view is a 402x48 row holding
 // id=now-playing-minimize-button 48x48 (:103) and id=Context menu 48x48 (:122), the playlist name
@@ -36,15 +40,22 @@
 #import "Player.h"
 
 static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
-static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey;
+static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey, kTitleKey, kFrameKey;
 static const CGFloat kPressScale = 0.92;
-static const CGFloat kRowButtonGap = 10;   // between the star and the ⋯ in the title row
+// The Music app's two round buttons on the title row, measured off its player screenshot (706 x 1536px for the
+// 402 x 874pt screen, 1.756px to a point): the discs are 50px across, 28.5pt, 11.5pt apart with their middles
+// 40pt apart. Spotify's add button keeps its own 48pt slot; the ⋯'s slot is 36pt and both discs 30pt (28.5
+// rounded up so the 17pt glyph keeps its rim), so the add button's 9pt inset and the ⋯'s 3pt leave 12pt
+// between the discs and 42pt between their middles.
+static const CGFloat kTitleDiscSize = 30;
+static const CGFloat kMoreSide = 36;
+static const CGFloat kRowButtonGap = 0;
 static const CGFloat kStarSize = 17;
 static const CGFloat kEllipsisSize = 20;
 
 static __weak UIStackView *sg_row;   // the ordinary player's title row
 static __weak UIButton *sg_like;     // its add button, star-drawn
-static __weak UIButton *sg_more;     // the header's ⋯, moved to the row's end
+static __weak UIView *sg_more;       // the header's ⋯, moved to the row's end
 
 @interface SGRHeaderPress : NSObject
 @end
@@ -133,7 +144,7 @@ static void showStar(UIButton *button) {
     if (!button) return;
     if (button != sg_like && !objc_getAssociatedObject(button, &SGRTitleAddButtonKey)) return;
     objc_setAssociatedObject(button, &SGRTitleAddButtonKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    SGRGlassInside(button, &kGlassKey, SGRGlassCircleSize);
+    SGRGlassInside(button, &kGlassKey, kTitleDiscSize);
     pressFrom(button, NO);
     UIImageView *star = objc_getAssociatedObject(button, &kStarKey);
     if (!star) {
@@ -158,8 +169,9 @@ static void showStar(UIButton *button) {
 }
 
 // The ⋯'s glyph, Spotify's dots swapped for the SF Symbol. The glass, the menu front and the press are
-// the button's own subviews and targets and stay untouched.
-static void showEllipsis(UIButton *button) {
+// the button's own subviews and targets and stay untouched. The ⋯ is Spotify's control whatever its class:
+// its image view is hidden only when it has one (a UIButton).
+static void showEllipsis(UIView *button) {
     UIImageView *dots = objc_getAssociatedObject(button, &kEllipsisKey);
     if (!dots) {
         UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:kEllipsisSize weight:UIImageSymbolWeightBold];
@@ -173,49 +185,99 @@ static void showEllipsis(UIButton *button) {
     for (UIView *sub in button.subviews) {
         if (sub != dots && [sub isKindOfClass:UIImageView.class]) sub.hidden = YES;
     }
-    button.imageView.hidden = YES;
+    if ([button isKindOfClass:UIButton.class]) ((UIButton *)button).imageView.hidden = YES;
     if (dots.superview != button) [button addSubview:dots];
     dots.frame = button.bounds;
 }
 
 // Both sides found (the header's ⋯, the stack holding the star), the move is made once and kept asserted:
-// a rebuilt row takes the ⋯ back out and this puts it again.
+// a rebuilt row takes the ⋯ back out and this puts it again. The ⋯ goes right after the add button, or after
+// the view the add button is arranged in (Spotify may wrap each element of the row), and last when it is not
+// arranged at all. Its slot is kMoreSide square (the add button keeps Spotify's own), and its glass is
+// re-asserted here so the header's own pass, which puts a 44pt circle behind it, does not keep the size.
 static void placeRowButtons(void) {
     UIStackView *row = sg_row;
-    UIButton *like = sg_like, *more = sg_more;
+    UIView *like = sg_like, *more = sg_more;
     if (!row || !like || !more) return;
-    NSUInteger afterLike = [row.arrangedSubviews indexOfObject:like];
-    // Spotify keeps the add button among the stack's arranged views; if a build gives it as a plain
-    // subview instead, the ⋯ still goes last, where the pair belongs.
-    afterLike = afterLike == NSNotFound ? row.arrangedSubviews.count : afterLike + 1;
-    if (more.superview != row || [row.arrangedSubviews indexOfObject:more] != afterLike) {
+    // The view of the row the add button belongs to, which the ⋯ goes after.
+    UIView *item = like;
+    while (item && item.superview != row) item = item.superview;
+    BOOL placed = NO;
+    if (more.superview == row) {
+        NSUInteger at = [row.arrangedSubviews indexOfObject:more];
+        NSUInteger before = item ? [row.arrangedSubviews indexOfObject:item] : NSNotFound;
+        placed = at != NSNotFound && (before == NSNotFound ? at == row.arrangedSubviews.count - 1 : at == before + 1);
+    }
+    if (!placed) {
+        UIView *old = more.superview;
+        if ([old isKindOfClass:UIStackView.class] && [((UIStackView *)old).arrangedSubviews containsObject:more]) {
+            [(UIStackView *)old removeArrangedSubview:more];
+        }
         [more removeFromSuperview];
         more.translatesAutoresizingMaskIntoConstraints = NO;
-        [row insertArrangedSubview:more atIndex:afterLike];
+        // The index is read again once the ⋯ is out: its old place, before the add button, would have
+        // shifted the one wanted under it, and an index past the stack's count is an exception.
+        NSUInteger next = item ? [row.arrangedSubviews indexOfObject:item] : NSNotFound;
+        next = next == NSNotFound ? row.arrangedSubviews.count : next + 1;
+        next = MIN(next, row.arrangedSubviews.count);
+        [more insertArrangedSubview:more atIndex:next];
         if (!objc_getAssociatedObject(more, &kSizedKey)) {
             objc_setAssociatedObject(more, &kSizedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            [more.widthAnchor constraintEqualToConstant:SGRGlassCircleSize].active = YES;
-            [more.heightAnchor constraintEqualToConstant:SGRGlassCircleSize].active = YES;
+            [more.widthAnchor constraintEqualToConstant:kMoreSide].active = YES;
+            // The height yields to the row: a fill alignment gives the ⋯ the row's height, and the circle is
+            // centered in whatever bounds the button ends with, so a required height would only be broken.
+            NSLayoutConstraint *height = [more.heightAnchor constraintEqualToConstant:kMoreSide];
+            height.priority = 999;
+            height.active = YES;
         }
-        SGLog(@"redesign player: the ⋯ moved to the title row, after the star");
+        // The circle is centered from the button's bounds, which are still the header's or nothing until the
+        // stack lays this pass' new view out: its place is given here, so the first frame is right too.
+        more.bounds = (CGRect){CGPointZero, CGSizeMake(kMoreSide, kMoreSide)};
+        SGLog(@"redesign player: the ⋯ (%@) moved from %@ to the title row %@ at index %lu, after %@",
+              NSStringFromClass(more.class), old ? NSStringFromClass(old.class) : @"nothing",
+              NSStringFromClass(row.class), (unsigned long)next, item ? NSStringFromClass(item.class) : @"nothing");
     }
-    [row setCustomSpacing:kRowButtonGap afterView:like];
+    if (item) [row setCustomSpacing:kRowButtonGap afterView:item];
+    SGRGlassInside(more, &kGlassKey, kTitleDiscSize);
     showEllipsis(more);
 }
 
 // The ordinary player's information unit holds the title row the buttons move into. The row is the stack
-// the add button itself sits in (Spotify keeps the title and the button in an inner stack, not the outer
-// one SGRowIn finds): that is the stack the ⋯ joins. The DJ's unit is another class, so its row keeps
-// Spotify's buttons.
+// the title is arranged in (the unit's own view is a plain view above it): the add button can be given as a
+// plain view of that stack, or inside a view of it, so its own superview is not the row to trust. The stack
+// the title rides in is the row; the add button's stack and SGRowIn are the fallbacks. The DJ's unit is
+// another class, so its row keeps Spotify's buttons.
 static void rowUnitLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
     UIButton *like = (UIButton *)SGRFindByIdentifier(host, @"Components.UI.AddToButton", &kLikeKey);
     if (![like isKindOfClass:UIButton.class]) return;
     sg_like = like;
-    if ([like.superview isKindOfClass:UIStackView.class]) sg_row = (UIStackView *)like.superview;
+    UIView *title = SGRFindByIdentifier(host, @"now-playing-title-label", &kTitleKey);
+    UIStackView *row = nil;
+    for (UIView *v = title; v && v != host; v = v.superview) {
+        if ([v.superview isKindOfClass:UIStackView.class]) { row = (UIStackView *)v.superview; break; }
+    }
+    if (!row && [like.superview isKindOfClass:UIStackView.class]) row = (UIStackView *)like.superview;
+    if (!row) row = SGRowIn(host);
+    sg_row = row;
     showStar(like);
     placeRowButtons();
+    // The trees this ran against: the row, the add button and the ⋯ as found, so a phone says which stack
+    // the row is and where the pair stands. Logged when it changes, not on every pass.
+    NSString *seen = [NSString stringWithFormat:@"%@ %@ %@ %@", row ? NSStringFromClass(row.class) : @"nothing",
+                      like.superview ? NSStringFromClass(like.superview.class) : @"nothing",
+                      sg_more ? NSStringFromClass(sg_more.class) : @"nothing",
+                      title ? NSStringFromClass(title.class) : @"nothing"];
+    if (![seen isEqualToString:objc_getAssociatedObject(host, &kFrameKey)]) {
+        objc_setAssociatedObject(host, &kFrameKey, seen, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        SGLog(@"redesign player: the title row is %@ %@; the add button rides in %@, the title on %@; the ⋯ %@",
+              row ? NSStringFromClass(row.class) : @"nothing",
+              row ? NSStringFromCGRect(SGFrameIn(row, host)) : @"(none)",
+              like.superview ? NSStringFromClass(like.superview.class) : @"nothing",
+              title ? NSStringFromClass(title.class) : @"nothing",
+              sg_more ? NSStringFromClass(sg_more.class) : @"nothing");
+    }
 }
 
 %hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
@@ -223,13 +285,22 @@ static void rowUnitLaidOut(UIViewController *unit) {
     %orig;
     glassHeader((UIViewController *)self, YES);
     // Once the ⋯ is in the title row it has left this view and the walk is skipped. A header that was
-    // rebuilt keeps a fresh ⋯ of its own: that one is taken and the moved one, if it is still in the row,
-    // goes, so the row never shows two.
+    // rebuilt keeps a fresh ⋯ of its own: that one is taken and the moved one, wherever it stands, goes, so
+    // the row never shows two. The identifier's view is taken whatever its class, since the phone that stayed
+    // broken was one where it is not a UIButton; that view is also what the menu front, the press and the
+    // popover anchor were put on (PlayerHeader's own pass), so the move takes all of them along.
     UIStackView *row = sg_row;
     if (!sg_more || !(row && sg_more.superview == row)) {
-        UIButton *found = (UIButton *)SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
-        if ([found isKindOfClass:UIButton.class] && found != sg_more) {
-            if (row && [row.arrangedSubviews containsObject:sg_more]) [sg_more removeFromSuperview];
+        UIView *found = SGRFindByIdentifier(((UIViewController *)self).viewIfLoaded, @"Context menu", &kMoreRowKey);
+        if (found && found != sg_more) {
+            UIView *old = sg_more;
+            if (old && old.superview) {
+                if ([old.superview isKindOfClass:UIStackView.class]
+                    && [((UIStackView *)old.superview).arrangedSubviews containsObject:old]) {
+                    [(UIStackView *)old.superview removeArrangedSubview:old];
+                }
+                [old removeFromSuperview];
+            }
             sg_more = found;
         }
     }

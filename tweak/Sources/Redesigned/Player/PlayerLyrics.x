@@ -227,6 +227,38 @@ static SGRLyricsLayout layoutIn(UIView *host) {
 
 #pragma mark - the title row
 
+// The row's touches belong to it, not to the cover underneath. The row is lifted to the Music app's place
+// (kInfoLift below), which draws it above the bottom stack it is arranged in; UIKit stops looking at a view
+// whose bounds the touch is not in, so the full screen cover's cell behind the stack took the tap, and
+// tapping the title, the star or the ⋯ opened the cover's tilt mode. Asked by the cover's list before it
+// takes a touch (PlayerGestures.x), the row answers for where it is drawn: the buttons it holds take the
+// touch themselves, and the title's own place is the row's, so the cover never opens from there.
+UIView *SGRPlayerInfoRowHitIn(UIView *view, CGPoint point, UIEvent *event) {
+    if (!sg_ordinaryInfo || !sg_host || !view.window) return nil;
+    UIView *info = sg_info.viewIfLoaded, *row = sg_titleElement.superview ?: info;
+    if (!row || !row.window || row.window != view.window || ![row isDescendantOfView:sg_host]) return nil;
+    // The row and its buttons: the add button's 48pt slot, and the ⋯'s beside it, stand taller than the
+    // row's own bounds, so their frames are taken in.
+    CGRect area = row.bounds;
+    if ([row isKindOfClass:UIStackView.class]) {
+        for (UIView *item in ((UIStackView *)row).arrangedSubviews) {
+            if (item.hidden || item.alpha < 0.01 || item.bounds.size.width < 1) continue;
+            area = CGRectUnion(area, [item convertRect:item.bounds toView:row]);
+        }
+    }
+    CGPoint local = [row convertPoint:point fromView:view];
+    if (!CGRectContainsPoint(CGRectInset(area, -2, -2), local)) return nil;
+    // What the row answers at the point: its own subviews walked as UIKit walks them, since the point can be
+    // outside the row's bounds (over a button's taller slot) where the row's own hit test would refuse it.
+    for (UIView *item in row.subviews.reverseObjectEnumerator) {
+        if (item.hidden || item.alpha < 0.01 || !item.userInteractionEnabled) continue;
+        CGPoint at = [item convertPoint:point fromView:view];
+        UIView *hit = CGRectContainsPoint(item.bounds, at) ? [item hitTest:at withEvent:event] : nil;
+        if (hit) return hit;
+    }
+    return row;
+}
+
 // Where the row's trailing controls start, in the unit's coordinates: the nearest arranged view on the
 // trailing side of the title that is still there to be seen. The title may not reach it.
 static CGFloat trailingEdgeIn(UIView *info) {
