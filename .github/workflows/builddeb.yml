@@ -130,8 +130,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload to filebin.net
-        # TEMPORARY (one run): the push runs upload too, so the built .deb has a link that needs no sign-in.
-        if: ${{ inputs.upload_method != 'artifacts' }}
+        if: ${{ github.event_name != 'push' && inputs.upload_method != 'artifacts' }}
         run: |
           BIN="vitrine-deb-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
