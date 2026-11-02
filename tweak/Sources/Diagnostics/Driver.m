@@ -906,9 +906,16 @@ static NSDictionary<NSString *, SGCommand> *commands(void) {
                         if (button) return @{@"point" : [NSValue valueWithCGPoint:screenCenter(button)], @"target" : describe(button)};
                     }
                     if (!playerShown()) return @{};
-                    fail(@"the player is open but its down arrow is not found");
+                    // The Redesigned player draws no down arrow (PlayerHeader.x), so there is nothing to tap: the
+                    // player's own dismissal is its presenting controller's, which is what the arrow's action
+                    // asked for. Native UI still has its arrow and is tapped above.
+                    UIViewController *player = (UIViewController *)controllerView(kPlayerClass).nextResponder;
+                    if (![player isKindOfClass:UIViewController.class]) fail(@"the player is open but its down arrow is not found");
+                    [player.presentingViewController dismissViewControllerAnimated:YES completion:nil];
+                    return @{@"dismissed" : NSStringFromClass(player.class)};
                 });
                 if (!where.count) return @{@"note" : @"the player was not open"};
+                if (where[@"dismissed"]) return where;
                 return touchAt(where, 0.08);
             },
             @"player.more" : ^NSDictionary *(NSDictionary *p) {
