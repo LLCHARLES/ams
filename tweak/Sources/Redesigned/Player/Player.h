@@ -90,6 +90,10 @@ CGFloat SGRPlayerCoverMaxBottomInWindow(void);
 // Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
 // (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
 void SGRPlayerSetCoverHidden(BOOL hidden);
+// Places every cover in a window again, from where its band now stands (PlayerArtwork.x). The pin on a tilt
+// view is worked out from the band's place in the window, so it must be re-read after the player has moved
+// without a layout pass: the morph calls it once the player has landed on an open or a close.
+void SGRPlayerCoversReplace(void);
 
 #pragma mark - the lyrics in the player (PlayerLyrics.x)
 

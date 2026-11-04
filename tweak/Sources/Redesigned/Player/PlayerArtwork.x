@@ -224,6 +224,19 @@ void SGRPlayerSetCoverHidden(BOOL hidden) {
     CGFloat alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
     sg_coverKeptHidden = hidden;
     if (!hidden) {
+        // Show every cover back, not just the ones remembered: on the first open the list lays out a second
+        // cell while the first has not gone yet, and a cover hidden by the layout pass below was only added
+        // to the set when showingTilt() picked its tilt out of the two -- which mid-transition it does not
+        // always do. Left out of the set, that cover stayed at alpha 0 until a pause and a play reset it.
+        // Walking every tilt is the catch-all that brings such a cover back too.
+        for (UIView *tilt in sg_tilts) {
+            UIView *cover = coverIn(tilt);
+            if (cover) cover.alpha = alpha;
+            // Read the plate back rather than asking SGRShadowPlateIn for it, which would make and insert
+            // one on a tilt that never had it.
+            SGRShadowPlate *plate = objc_getAssociatedObject(tilt, &kPlateKey);
+            if (plate) plate.alpha = 1;
+        }
         for (UIView *cover in sg_hiddenCovers.allObjects) cover.alpha = alpha;
         for (UIView *plate in sg_hiddenPlates.allObjects) plate.alpha = 1;
         [sg_hiddenCovers removeAllObjects];
@@ -427,6 +440,19 @@ static BOOL placeCover(UIView *tilt) {
     return tilt.window != nil;
 }
 
+// Places every cover that is in a window, from where it is drawn now. The pin on a tilt view is a transform
+// worked out from where its band stands in the window at that moment, so it goes stale whenever the band
+// moves without the tilt laying out again. A layout pass catches a resize, but a cell that only moves --
+// the queue taking its place, a page scrolling, the player flying in on the first open -- keeps its bounds
+// and so never gets one. Called from the cell's setFrame:/setCenter: (a move always goes through those) and
+// from the morph once the player has landed, this re-reads the band's place and settles the cover again.
+void SGRPlayerCoversReplace(void) {
+    for (UIView *tilt in sg_tilts.allObjects) {
+        if (tilt.bounds.size.width < kCoverMinWidth || !tilt.window || !inCoverCell(tilt)) continue;
+        placeCover(tilt);
+    }
+}
+
 // One layout pass, once, asked for on the main queue: a tilt view laid out before it joined a window, or
 // before its cell built the cover, is placed again once it has, rather than waiting for Spotify to lay it
 // out next -- which is what pausing and playing happened to do on the phone, and the only thing that put a
@@ -477,19 +503,36 @@ static void placeSoon(UIView *tilt) {
 }
 %end
 
-// A pass of the cell itself, after Spotify has placed the band in it. A cell moved without its bounds changing --
-// the queue taking its place on the first open, a page scrolling -- does not lay its tilt view out again, so the
-// cover keeps the translation the last pass put on it while the band it is drawn in has moved, and stands a little
-// high or low. Placing it here measures where the cover is drawn now; the move is read off that place, so passes
-// that repeat change nothing.
-%hook _TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl
-- (void)layoutSubviews {
-    %orig;
-    UIView *cell = (UIView *)self;
+// Re-places the cover of every tilt view this cell holds, measured from where the cell now stands. A pass of
+// the cell runs after Spotify has placed the band in it; the move is read off where the cover is drawn now,
+// so passes that repeat change nothing.
+static void replaceCoversInCell(UIView *cell) {
     for (UIView *tilt in sg_tilts.allObjects) {
         if (tilt.bounds.size.width < kCoverMinWidth || ![tilt isDescendantOfView:cell]) continue;
         if (tilt.window) placeCover(tilt);
     }
+}
+
+%hook _TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl
+- (void)layoutSubviews {
+    %orig;
+    replaceCoversInCell((UIView *)self);
+}
+// A cell that only moves never lays out: setFrame:/setCenter: change where the band stands in the window
+// without touching its bounds, so no layoutSubviews follows and the cover keeps the translation worked out
+// for the band's old place -- the cover that stands a little high or low after the queue slides across or a
+// page scrolls. Both setters always run on a move, so the cover is placed again from the cell's new place.
+- (void)setFrame:(CGRect)frame {
+    %orig;
+    replaceCoversInCell((UIView *)self);
+}
+- (void)setCenter:(CGPoint)center {
+    %orig;
+    replaceCoversInCell((UIView *)self);
+}
+- (void)setBounds:(CGRect)bounds {
+    %orig;
+    replaceCoversInCell((UIView *)self);
 }
 %end
 
