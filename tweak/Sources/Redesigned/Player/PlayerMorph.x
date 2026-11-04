@@ -627,11 +627,8 @@ static CGFloat screenRadius(void) {
     _coverHidden = NO;
     _cover = nil;
     _coverShadow = nil;
-    // The player has landed, but the pin on each cover was worked out from the band's place mid-flight (or
-    // before the first open's band had settled), which is the cover that stands a little high or low once the
-    // sheet is gone. Read the band again now that it stands where it settles -- on the next turn of the run
-    // loop, once Spotify has laid the landed player out.
-    dispatch_async(dispatch_get_main_queue(), ^{ SGRPlayerCoversReplace(); });
+    // No re-placement on landing: the player draws its own cover at a frame worked out from its own
+    // bounds, so it is already where the stand-in hands over and nothing has to be corrected afterwards.
 }
 
 @end

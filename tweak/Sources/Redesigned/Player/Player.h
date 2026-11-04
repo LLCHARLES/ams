@@ -61,39 +61,32 @@ void SGRPlayerHoldField(void);
 
 #pragma mark - the cover (PlayerArtwork.x)
 
-// The sideways list of covers behind the player, nil until one has laid out.
+// The player's cover is a view of the redesign's own (PlayerArtwork.x), drawn in the player's view at a
+// frame worked out only from that view's bounds, and Spotify's own list of covers is hidden under a mask.
+// What follows is that drawn view and its geometry; nothing here reads a cell, a tilt view or a band.
+// The lyrics fade it by alpha and an animated artwork masks its layer, so this stands for "the cover on
+// screen". Nil until the player has laid out once.
 UIView *SGRPlayerCoverList(void);
-// The cover on screen as it is drawn, its paused shrink included, in `host`'s coordinates; CGRectNull
-// when no cover has laid out.
+// The cover as it is drawn, its paused shrink included, in `host`'s coordinates. Answered from pure
+// geometry even before the view has been made, so the morph's stand-in has a place to fly to on its first
+// frame; CGRectNull only when `host` is nil.
 CGRect SGRPlayerCoverFrameIn(UIView *host);
 // The scale the cover is drawn at: 1 while playing, its shrink while paused, so a stand-in can draw its
 // corners the size the cover's are.
 CGFloat SGRPlayerCoverScale(void);
-// The band that cover sits in -- the room the player gives its artwork, between the header row and the
-// title -- in `host`'s coordinates; CGRectNull when no cover has laid out.
+// The room the player gives its artwork, between the header row and the title, in `host`'s coordinates;
+// CGRectNull when there is no host.
 CGRect SGRPlayerArtworkAreaIn(UIView *host);
-// The tilt view drawing the cover on screen; nil until one has laid out. A tap on the cover belongs to it,
-// and Spotify opens the cover's tilt mode from its own tap.
-UIView *SGRPlayerCoverTilt(void);
-// The cover that tilt draws, in `host`'s coordinates as it is drawn (the paused shrink taken in); CGRectNull
-// when it has none. The cover's own rect is what a tap may open the tilt mode from, not the tilt's frame:
-// they are the same square but the view's frame can be a pass behind what it draws (PlayerGestures.x).
-CGRect SGRPlayerCoverRectIn(UIView *tilt, UIView *host);
-// The cover where the player settles it, in `host`'s coordinates: square, its top where the Music app draws
-// it, and the paused shrink left out. It is what the title row measures its gap from (PlayerLyrics.x), so the
-// row no longer follows a cover that is a pass behind its lift. CGRectNull until a cover has laid out.
+// The cover without the paused shrink, in `host`'s coordinates. It is what the title row measures its gap
+// from (PlayerLyrics.x); answered from the same pure geometry on a first open.
 CGRect SGRPlayerCoverRestFrameIn(UIView *host);
 // The lowest the cover may reach and still leave the ordinary player's title row at its Music-app place, in
-// window coordinates (the row's settled top less its gap from the cover); NAN until that row has laid out.
-// The cover is sized to it (PlayerArtwork.x), so the two never overlap on a short screen.
+// window coordinates; NAN until that row has laid out. The title row reads it for its own lift; the drawn
+// cover caps its side by a share of the player's height instead, so neither waits for the other.
 CGFloat SGRPlayerCoverMaxBottomInWindow(void);
-// Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
-// (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
+// Hides the drawn cover (and its shadow) or shows it again, for a stand-in to fly in its place
+// (PlayerMorph.x). Until NO, a cover made on a first open is hidden too.
 void SGRPlayerSetCoverHidden(BOOL hidden);
-// Places every cover in a window again, from where its band now stands (PlayerArtwork.x). The pin on a tilt
-// view is worked out from the band's place in the window, so it must be re-read after the player has moved
-// without a layout pass: the morph calls it once the player has landed on an open or a close.
-void SGRPlayerCoversReplace(void);
 
 #pragma mark - the lyrics in the player (PlayerLyrics.x)
 
