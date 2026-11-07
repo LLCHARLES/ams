@@ -81,6 +81,15 @@ jobs:
             echo "ISYSROOT=$SDK"
           } >> "$GITHUB_ENV"
 
+          # Declare UITab.selectedImage for the compiler (iOS 26.1+ public API that
+          # the iOS 26.5 SDK headers omit). The shim lives in RUNNER_TEMP and is
+          # force-included into every translation unit; no repo source is modified.
+          SHIM="$RUNNER_TEMP/VitrineSDKSelectedImage.h"
+          printf '%s' "Ly8gQnVpbGQtdGltZSBTREsgc2hpbS4gR2VuZXJhdGVkIGJ5IC5naXRodWIvd29ya2Zsb3dzL2J1aWxkZGViLnltbC4KLy8gVUlUYWIuc2VsZWN0ZWRJbWFnZSBpcyBwdWJsaWMgc2luY2UgaU9TIDI2LjEgYnV0IHRoZSBVSUtpdCBoZWFkZXJzIHNoaXBwZWQKLy8gaW4gdGhlIHJ1bm5lcidzIGlPUyAyNi41IFNESyBkbyBub3QgZGVjbGFyZSBpdCB5ZXQuIFRoaXMgZGVjbGFyZXMgdGhlCi8vIGFjY2Vzc29yIGZvciB0aGUgY29tcGlsZXIgb25seTsgVUlLaXQgaW1wbGVtZW50cyBpdCBvbiAyNi4xKyBhbmQgZXZlcnkgY2FsbAovLyBzaXRlIGluIFN5c3RlbVRhYnMueCBpcyBndWFyZGVkIGJ5IEBhdmFpbGFibGUoaU9TIDI2LjEsICopLgojaWYgZGVmaW5lZChfX09CSkNfXykKI2ltcG9ydCA8VUlLaXQvVUlLaXQuaD4KQGludGVyZmFjZSBVSVRhYiAoVml0cmluZVNES1NlbGVjdGVkSW1hZ2UpCkBwcm9wZXJ0eSAobm9uYXRvbWljLCBzdHJvbmcsIG51bGxhYmxlKSBVSUltYWdlICpzZWxlY3RlZEltYWdlOwpAZW5kCiNlbmRpZgo=" | base64 -D > "$SHIM"
+          echo "--- SDK shim at $SHIM ---"
+          cat "$SHIM"
+          echo "ADDITIONAL_CFLAGS=-include $SHIM" >> "$GITHUB_ENV"
+
       - name: Generate the flags table
         # SGFlagList.m is gitignored and generated from an IPA (scripts/extract-flags.py); the link fails
         # without it. With an IPA the real table is read out of it; without one it is built empty, which
