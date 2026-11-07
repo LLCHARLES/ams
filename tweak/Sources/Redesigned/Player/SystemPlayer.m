@@ -143,16 +143,21 @@ static const CGFloat kAddGlyph = 22, kAddSide = 44;
 // and next out from the middle as a share of the width between the margins; the bottom row's glyphs at a fifth, half
 // and four fifths of the width, as the redesigned player's footer placed them (kLeading, kMiddle, kTrailing).
 //
-// The two gaps over the times are calibrated to AMS-beta's places, not m1's own 440x956 screenshots: beta's bottom
-// stack (trees/clean/player/01.txt, quoted at PlayerLyrics.x:17) puts the information unit at 576.67 of 874 (66% of
-// the height, exactly where PlayerArtwork.x caps the cover's foot) and the duration unit at 640.67..680.67 (73%..78%,
-// the bar over the times). Scaled to this screen and measured back up from our footer's rowMid -- its middle 32pt over
-// the safe area's bottom, beta's own rule in PlayerFooter.x's SGRPlayerLowerRow -- 37 and 33 (times the spacing) land
-// the bar on the duration unit's top, the times on its foot and the title just under the cover. m1's 58 and 46 put that
-// whole group about 40pt too high and left the cover, already moved to beta's place, stranded above it. The volume's
-// 38 and the footer's own place do not change: beta moves only the footer, the controls and the volume under the two
-// units the stack leaves standing. On 393x852 this is title ~569, bar 625, times ~649, play 696, volume 740, row 786.
-static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 37, kTimesAboveControls = 33, kScrubberAboveTimes = 17;
+// The two gaps over the controls are AMS-beta's own places, not m1's 440x956 screenshots and not the raw dump of
+// Spotify's stack. Beta's tree (trees/clean/player/01.txt, quoted at PlayerLyrics.x:17) is measured on a 402x874
+// iPhone 16 Pro: npv.bottomStackView {0, 576.67, 402, 236}, information unit {0, 0, 402, 64} (title, artist, add),
+// duration unit {0, 64, 402, 40} (bar and times), an 88pt controls unit and a 44pt footer whose middle is 790.67.
+// Beta then lifts them every layout pass: PlayerLyrics.x's placeTitleRow raises the information unit kInfoLift=92
+// (closed and ordinary too), placeDuration raises the bar kBarLift=85 with the times kTimeDrop=8 under it;
+// PlayerFooter.x's SGRPlayerLowerRow drops the footer to height-MAX(safe.bottom+32, 34) -- our rowMid -- and lifts
+// the controls kControlsLift=49 plus kVolumeLift=10 for the volume row. So on 402x874 the controls end up at
+// title 484.67, bar 555.67, times ~584, play ~666, volume ~756, footer 808: spread from just under the cover's
+// foot (66% of the height) down to the row, not crowded into the bottom third. Scaled to 393x852 (x0.975) that is
+// 472 / 542 / 569 / 649 / 737 / 787. m1's 58 and 46 gave 55pt from the times to the controls and 70pt from the
+// controls to the volume; 76 and 67 give beta's ~80 and ~91, with the title lifted to just under the cover. The
+// volume's 38 and the footer's own place are unchanged. Beta's AI DJ keeps Spotify's places (sg_ordinaryInfo off);
+// these two gaps follow the ordinary player's.
+static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 76, kTimesAboveControls = 67, kScrubberAboveTimes = 17;
 static const CGFloat kHeaderSide = 16, kHeaderDrop = 2, kSkipShare = 0.25, kSkipGlyph = 32, kPlayGlyph = 44;
 // An episode's skips go back and forward this far, as Spotify's episode player's 15 s buttons do.
 static const double kEpisodeSkip = 15;
