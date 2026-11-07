@@ -15,6 +15,8 @@
 #import "Redesigned/ContextMenu/ContextMenu.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SpeedPitch.h"
+#import "Shared/Player/SleepTimer.h"
+#import "Shared/Navigation/Links.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Settings/SGPageStyle.h"
@@ -202,6 +204,63 @@ static UIAction *lyricsSourceItem(void) {
     return open;
 }
 
+
+// The ⋯'s Go to rows, as the system player's ⋯ opens them: the album from the track's metadata and
+// the artist (and its concerts) from the track itself. Spotify's own sheet keeps its own rows; these
+// are the mod's, from the ⋯ the redesign's menu is built from (its owner, 2026-11-06).
+static NSArray<UIMenuElement *> *goToItems(void) {
+    SPTPlayerTrack *track = SGPlayerState().track;   // a compile-time interface; the object is one of Spotify's own
+    if (!track) return @[];
+    NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
+    id album = [track.metadata isKindOfClass:NSDictionary.class] ? track.metadata[@"album_uri"] : nil;
+    NSString *albumURI = [album isKindOfClass:NSString.class] && [album hasPrefix:@"spotify:album:"] ? album : nil;
+    if (albumURI) {
+        [items addObject:[UIAction actionWithTitle:@"Go to Album" image:symbol(@"square.stack") identifier:nil
+                                           handler:^(UIAction *action) { SGOpenSpotifyURI([NSURL URLWithString:albumURI]); }]];
+    }
+    NSString *artistURI = SGURIString(track.artistURI);
+    if ([artistURI hasPrefix:@"spotify:artist:"]) {
+        [items addObject:[UIAction actionWithTitle:@"Go to Artist" image:symbol(@"music.microphone") identifier:nil
+                                           handler:^(UIAction *action) { SGOpenSpotifyURI([NSURL URLWithString:artistURI]); }]];
+        NSString *concerts = [artistURI stringByAppendingString:@":concerts"];
+        [items addObject:[UIAction actionWithTitle:@"Go to Artist Concerts" image:symbol(@"ticket") identifier:nil
+                                           handler:^(UIAction *action) { SGOpenSpotifyURI([NSURL URLWithString:concerts]); }]];
+    }
+    return items;
+}
+
+// The ⋯'s Sleep Timer, as the system player's ⋯ offers it: the mod's own timer
+// (Shared/Player/SleepTimer.h), with what it is set to read back under its name.
+static UIMenu *sleepTimerMenu(void) {
+    SGSleepTimerMode mode = SGSleepTimerCurrentMode();
+    NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
+    for (NSNumber *minutes in @[@5, @10, @15, @30, @45, @60]) {
+        NSString *title = minutes.integerValue == 60 ? @"1 Hour" : [NSString stringWithFormat:@"%@ Minutes", minutes];
+        [items addObject:[UIAction actionWithTitle:title image:nil identifier:nil handler:^(UIAction *action) {
+            SGSetSleepTimer(SGSleepTimerAtTime, minutes.doubleValue * 60);
+        }]];
+    }
+    UIAction *track = [UIAction actionWithTitle:@"End of Song" image:nil identifier:nil
+                                         handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfTrack, 0); }];
+    if (mode == SGSleepTimerEndOfTrack) track.state = UIMenuElementStateOn;
+    UIAction *album = [UIAction actionWithTitle:@"End of Album or Playlist" image:nil identifier:nil
+                                         handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfAlbum, 0); }];
+    if (mode == SGSleepTimerEndOfAlbum) album.state = UIMenuElementStateOn;
+    [items addObjectsFromArray:@[track, album]];
+    if (mode != SGSleepTimerOff) {
+        [items addObject:[UIAction actionWithTitle:@"Turn Off Timer" image:symbol(@"xmark") identifier:nil
+                                           handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerOff, 0); }]];
+    }
+    UIMenu *menu = [UIMenu menuWithTitle:@"Sleep Timer" image:symbol(@"moon.zzz") identifier:nil options:0 children:items];
+    NSDate *end = SGSleepTimerEnd();
+    if (mode == SGSleepTimerAtTime && end) {
+        NSInteger left = MAX(0, (NSInteger)ceil(end.timeIntervalSinceNow / 60));
+        menu.subtitle = [NSString stringWithFormat:@"%ld min left", (long)left];
+    } else if (mode == SGSleepTimerEndOfTrack) menu.subtitle = @"End of song";
+    else if (mode == SGSleepTimerEndOfAlbum) menu.subtitle = @"End of album or playlist";
+    return menu;
+}
+
 static NSArray<UIMenuElement *> *playerItems(void) {
     NSMutableArray<UIMenuElement *> *items = [NSMutableArray arrayWithObject:soundMenu()];
     if (SGPlayerMenuOffersAnimatedArtwork()) {
@@ -221,6 +280,8 @@ static NSArray<UIMenuElement *> *playerItems(void) {
     }
     UIAction *lyrics = lyricsSourceItem();
     if (lyrics) [items addObject:lyrics];
+    [items addObjectsFromArray:goToItems()];
+    [items addObject:sleepTimerMenu()];
     return items;
 }
 
