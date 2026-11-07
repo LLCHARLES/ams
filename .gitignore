@@ -13,7 +13,6 @@ tweak/.theos/
 tweak/obj/
 tweak/packages/
 tweak/Sources/Shared/Flags/SGFlagList.m
-tweak/Sources/App/Onboarding/SGWhatsNewNotes.h
 /trees/continuous
 /trees/clean
 harness/**/build/
@@ -27,3 +26,4 @@ notes/
 .zsign_cache/
 .phone.env
 .claude/worktrees/
+tweak/Sources/App/About/SGBuildStamp.m

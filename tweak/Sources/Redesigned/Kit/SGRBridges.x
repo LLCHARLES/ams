@@ -1,9 +1,6 @@
-// The Kit's bridge into Spotify: the now playing artwork. The player's state, its open and close and
-// links are Shared's (Shared/Player/PlayerState.h, Shared/Player/PlayerEvents.h,
-// Shared/Navigation/Links.h). SGRBridges.h names the hook and why it is the one.
+// The Kit's bridge into Spotify: the now playing artwork. The player's state and links are Shared's
+// (Shared/Player/PlayerState.h, Shared/Navigation/Links.h). SGRBridges.h names the hook and why it is the one.
 #import "Core/SGCore.h"
-#import "Shared/LocalFiles/LocalFiles.h"
-#import "Shared/Player/PlayerEvents.h"
 #import "SGRBridges.h"
 #import "SGRedesign.h"
 #import "SGRRestyle.h"
@@ -47,18 +44,11 @@ static NSString *imageIDIn(id value) {
     return nil;
 }
 
-// The picture a track names, largest first, and where it can be fetched from. A local file's cover the
-// user picked (Shared/LocalFiles) is a file of its own, named afresh for every new one, so its name is
-// the picture.
+// The picture a track names, largest first, and where it can be fetched from.
 static NSString *pictureOf(SPTPlayerTrack *track, NSURL **url) {
     NSDictionary *metadata = [track respondsToSelector:@selector(metadata)] ? track.metadata : nil;
     if (![metadata isKindOfClass:NSDictionary.class]) return nil;
     for (NSString *field in @[@"image_xlarge_url", @"image_large_url", @"image_url", @"image_small_url"]) {
-        NSString *stored = SGLocalFileCoverInURL(metadata[field]);
-        if (stored) {
-            if (url) *url = [NSURL fileURLWithPath:stored];
-            return [@"local:" stringByAppendingString:stored.lastPathComponent];
-        }
         NSString *value = metadata[field], *identifier = imageIDIn(value);
         if (!identifier) continue;
         if (url) *url = [value hasPrefix:@"https://"] ? [NSURL URLWithString:value]
@@ -112,12 +102,6 @@ void SGRTrackPicture(SPTPlayerTrack *track, void (^done)(UIImage *image)) {
     NSString *key = nil;
     if ([metadata isKindOfClass:NSDictionary.class]) {
         for (NSString *field in @[@"image_small_url", @"image_url", @"image_large_url"]) {
-            NSString *stored = SGLocalFileCoverInURL(metadata[field]);
-            if (stored) {
-                url = [NSURL fileURLWithPath:stored];
-                key = stored;
-                break;
-            }
             NSString *value = metadata[field], *identifier = imageIDIn(value);
             if (!identifier) continue;
             url = [value hasPrefix:@"https://"] ? [NSURL URLWithString:value] : [NSURL URLWithString:[@"https://i.scdn.co/image/" stringByAppendingString:identifier]];
@@ -199,26 +183,14 @@ static void fetchPicture(NSString *key, NSURL *url, NSUInteger attempt) {
     [sg_fetch resume];
 }
 
-// A local file whose metadata names no picture: its own cover, found where Spotify shows it elsewhere
-// (Shared/LocalFiles/LocalCover.m), as the picture the track names, so a screen's placeholder never
-// replaces it. A cover picked in Edit info is named by the metadata and never gets here. NO when there
-// is none to publish.
-static BOOL publishLocalCover(void) {
-    if (![sg_wantedKey hasPrefix:@"track:"]) return NO;
-    UIImage *cover = SGLocalFileFallbackCover(SGPlayerState().track);
-    if (!cover) return NO;
-    if (cover != sg_artwork) publish(cover, sg_wantedKey, SGRArtworkQualityExact);
-    return YES;
-}
-
 // The next track's full picture fetched into the session's store once while this one plays, so a skip finds it there
 // in a few milliseconds rather than tenths of a second, and no screen's small picture stands in meanwhile (its owner,
-// 2026-11-02: a skip felt slow while the page waited for the cover). Native redesign's alone, and not in Low Power Mode.
+// 2026-11-02: a skip felt slow while the page waited for the cover). Not in Low Power Mode.
 // After the playing track's own fetch has started, and looked at once per next track.
 static NSString *sg_aheadKey, *sg_aheadURI;
 
 static void fetchAhead(void) {
-    if (!SGNativeRedesign() || NSProcessInfo.processInfo.lowPowerModeEnabled) return;
+    if (NSProcessInfo.processInfo.lowPowerModeEnabled) return;
     SPTPlayerState *state = SGPlayerState();
     id future = [state respondsToSelector:@selector(future)] ? state.future : nil;
     id next = [future isKindOfClass:NSArray.class] ? [(NSArray *)future firstObject] : nil;
@@ -251,7 +223,6 @@ static void followPlaying(void) {
     sg_fetch = nil;
     if ([key isEqualToString:sg_artworkKey] && sg_artworkQuality == SGRArtworkQualityExact) return;
     if (url) fetchPicture(key, url, 0);
-    else publishLocalCover();
 }
 
 static void followPlayer(void) {
@@ -259,7 +230,10 @@ static void followPlayer(void) {
     fetchAhead();
 }
 
-void SGRSetNowPlayingArtwork(UIImage *image, NSString *trackURI, SGRArtworkQuality quality) {
+// A picture read off a screen for `trackURI`: ignored unless that track is still the one playing, when
+// it is a picture already published for another track, when a better one is in for this picture, and
+// when it is the same image again.
+static void setNowPlayingArtwork(UIImage *image, NSString *trackURI, SGRArtworkQuality quality) {
     if (!image || !trackURI) return;
     followPlayer();
     // Read for a track that is no longer playing.
@@ -309,7 +283,6 @@ static __weak UIView *sg_barView;
 
 static void publishBarArtwork(void) {
     followPlayer();
-    if (publishLocalCover()) return;
     UIView *card = SGRFindByIdentifier(sg_barView, @"SPTNowPlayingBar", &kBarCardKey);
     UIView *holder = SGRFindByIdentifier(card, @"Encore.ImageView", &kBarImageKey);
     UIImageView *cover = nil;
@@ -319,7 +292,7 @@ static void publishBarArtwork(void) {
     UIImage *image = cover.image;
     NSString *uri = SGURIString(SGPlayerState().track.URI);
     if (!image || !uri) return;
-    SGRSetNowPlayingArtwork(image, uri, SGRArtworkQualityLow);
+    setNowPlayingArtwork(image, uri, SGRArtworkQualityLow);
 }
 
 // The bar sets its picture when the image has loaded, which lays nothing out, so a track change looks
@@ -354,51 +327,6 @@ static SGRBarArtworkWatcher *sg_barWatcher;
 %end
 %end
 
-#pragma mark - the player's open and close
-
-BOOL SGRPlayerIsTransitioning(void) {
-    return SGPlayerTransitionEnds() > 0;
-}
-
-@interface SGRTransitionObservation : NSObject
-@property (nonatomic, strong) NSArray *tokens;
-@end
-
-@implementation SGRTransitionObservation
-- (void)dealloc {
-    for (id token in self.tokens) [NSNotificationCenter.defaultCenter removeObserver:token];
-}
-@end
-
-static char kTransitionKey;
-
-void SGRObservePlayerTransition(id owner, void (^began)(id owner), void (^ended)(id owner)) {
-    if (!owner) return;
-    __weak id weakOwner = owner;
-    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    NSMutableArray *tokens = [NSMutableArray array];
-    if (began) {
-        [tokens addObject:[center addObserverForName:SGPlayerTransitionNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            id strongOwner = weakOwner;
-            if (strongOwner) began(strongOwner);
-        }]];
-    }
-    if (ended) {
-        [tokens addObject:[center addObserverForName:SGPlayerTransitionEndedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            id strongOwner = weakOwner;
-            if (strongOwner) ended(strongOwner);
-        }]];
-    }
-    SGRTransitionObservation *observation = [SGRTransitionObservation new];
-    observation.tokens = tokens;
-    NSMutableArray *kept = objc_getAssociatedObject(owner, &kTransitionKey);
-    if (!kept) {
-        kept = [NSMutableArray array];
-        objc_setAssociatedObject(owner, &kTransitionKey, kept, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    [kept addObject:observation];
-}
-
 %ctor {
     if (!SGRedesignedUI()) return;
     // By pointer: two images of one picture are still two reads.
@@ -409,14 +337,6 @@ void SGRObservePlayerTransition(id owner, void (^began)(id owner), void (^ended)
     SGAddPlayerStateObserver(sg_follower);
     sg_barWatcher = [SGRBarArtworkWatcher new];
     SGAddPlayerStateObserver(sg_barWatcher);
-    // A cover picked or removed for the local file playing changes the picture with no new track, so the
-    // track is looked at again. Posted on the main thread.
-    [NSNotificationCenter.defaultCenter addObserverForName:SGLocalFileEditsDidChangeNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) {
-        if (![note.object isEqual:sg_wantedURI]) return;
-        sg_wantedURI = nil;
-        followPlayer();
-    }];
     %init(SGRBarArtworkHooks);
     SGRequireClasses(@[@"_TtC18NowPlaying_BarImpl27NowPlayingBarViewController"]);
 }

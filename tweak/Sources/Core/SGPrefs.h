@@ -17,9 +17,6 @@ void SGSetEnabled(NSString *key, BOOL on);
 // Settings/SGModPage.h write these.
 NSInteger SGInt(NSString *key, NSInteger fallback);
 void SGSetInt(NSString *key, NSInteger value);
-// A number on a slider, kept like the switches.
-double SGDouble(NSString *key, double fallback);
-void SGSetDouble(NSString *key, double value);
 
 // What -stringForKey: answers (a string as it is, a number as its stringValue, else nil), kept like the switches.
 // A writer of such a key calls SGPrefsChanged() after its write, as SGSetInt does.
@@ -49,7 +46,7 @@ void SGMigrateKey(NSString *from, NSString *to);
 // Quits Spotify so the hooks read the switches afresh on the next launch; the writes reach cfprefsd first.
 void SGRestartSpotify(void);
 
-// Apple Music's red, 0xRRGGBB, offered under either look's accent color.
+// Apple Music's red, 0xRRGGBB, offered as the redesign's accent color.
 #define SGAppleMusicRed 0xFA2D48
-// Spotify's own green, the token either look's accent replaces.
+// Spotify's own green, the token the redesign's accent replaces.
 #define SGSpotifyGreen 0x1ED760

@@ -5,6 +5,7 @@
 #import <os/lock.h>
 #import "Core/SGCore.h"
 #import "Artist.h"
+#import "Shared/Player/LikedSongs.h"
 
 @protocol SGRCollectionState <NSObject>
 + (id)saved;
@@ -42,12 +43,23 @@ static void keepProvider(id provider) {
 
 static __weak id sg_platform;
 
+// The platform that saves to Liked Songs, from whichever of Spotify's four the app last reached for, as
+// Shared/Player/LikedSongs.x keeps it: 9.1.90 may never make SPTCollectionPlatformImplementation, whose init was
+// the only place it was kept, and the player page's star did nothing (its owner, 2026-11-06). Asked for from any thread.
+static void keepPlatform(id platform) {
+    if (![platform respondsToSelector:NSSelectorFromString(@"addURL:showUIConfirmation:completion:")]) return;
+    os_unfair_lock_lock(&sg_providerLock);
+    sg_platform = platform;
+    os_unfair_lock_unlock(&sg_providerLock);
+}
+
 static id currentProvider(void) {
     os_unfair_lock_lock(&sg_providerLock);
     id provider = sg_provider;
     os_unfair_lock_unlock(&sg_providerLock);
-    if (!provider && [sg_platform respondsToSelector:@selector(stateProvider)]) {
-        provider = [sg_platform performSelector:@selector(stateProvider)];
+    id platform = sg_platform ?: SGCollectionPlatformKept();
+    if (!provider && [platform respondsToSelector:@selector(stateProvider)]) {
+        provider = [platform performSelector:@selector(stateProvider)];
         keepProvider(provider);
     }
     return provider;
@@ -62,6 +74,7 @@ static id currentProvider(void) {
 - (id)stateProvider {
     id provider = %orig;
     keepProvider(provider);
+    keepPlatform(self);
     return provider;
 }
 %end
@@ -70,6 +83,7 @@ static id currentProvider(void) {
 - (id)stateProvider {
     id provider = %orig;
     keepProvider(provider);
+    keepPlatform(self);
     return provider;
 }
 %end
@@ -78,6 +92,7 @@ static id currentProvider(void) {
 - (id)stateProvider {
     id provider = %orig;
     keepProvider(provider);
+    keepPlatform(self);
     return provider;
 }
 %end
@@ -86,6 +101,7 @@ static id currentProvider(void) {
 - (id)stateProvider {
     id provider = %orig;
     keepProvider(provider);
+    keepPlatform(self);
     return provider;
 }
 %end
@@ -249,15 +265,16 @@ BOOL SGRCollectionWatchSaved(id watch, BOOL *saved) {
 }
 
 BOOL SGRCollectionSetSaved(NSURL *uri, BOOL saved) {
+    os_unfair_lock_lock(&sg_providerLock);
     id platform = sg_platform;
+    os_unfair_lock_unlock(&sg_providerLock);
+    // Head Gestures keeps one from the same classes from launch, whatever look: the one it has, should none have come here.
+    if (!platform) platform = SGCollectionPlatformKept();
     SEL selector = saved ? NSSelectorFromString(@"addURL:showUIConfirmation:completion:") : NSSelectorFromString(@"removeURL:showUIConfirmation:completion:");
-    if (!uri || ![platform respondsToSelector:selector]) {
-        SGLog(@"redesign artist: cannot %@ %@ (platform %@)", saved ? @"save" : @"unsave", uri.absoluteString, platform ? NSStringFromClass([platform class]) : @"not known yet");
-        return NO;
-    }
+    if (!uri || ![platform respondsToSelector:selector]) return NO;
     // Spotify's own confirmation ("Added to Liked Songs"), as a tap on its add button gives; a completion that reads no
-    // arguments, as HeadGestures.x passes, is safe whatever it is called with.
-    void (^done)(void) = ^{ SGLog(@"redesign artist: %@ %@", saved ? @"saved" : @"unsaved", uri.absoluteString); };
+    // arguments, as LikedSongs.x passes, is safe whatever it is called with.
+    void (^done)(void) = ^{};
     ((void (*)(id, SEL, NSURL *, BOOL, id))objc_msgSend)(platform, selector, uri, YES, done);
     return YES;
 }

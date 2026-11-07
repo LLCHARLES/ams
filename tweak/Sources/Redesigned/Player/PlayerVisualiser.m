@@ -1,6 +1,6 @@
-// Player redesign: the Visualizer background, a calm spectrum of what is playing behind the player, in the
-// cover's colors, over the Fluid field held still (PlayerField.x keeps the field Fluid for this choice, as for
-// Animated, so the ⋯ menu moves between the three without a restart).
+// The Visualizer background, a calm spectrum of what is playing behind the player page (Redesigned/Navbar/
+// SystemPlayer.m, which puts SGRPlayerVisualiserPreview's view over its Fluid field), in the cover's colors. The ⋯
+// menu moves between Fluid, Animated and the Visualizer without a restart (SGRPlayerMenuSetBackground).
 //
 // The sound is Spotify's output as it plays, read on the render thread through the audio effects' notify
 // (SGAudioSetOutputReader, Shared/AudioEffects/AudioEffects.h) into SGRSpectrum.m's bands. Here, on the main
@@ -29,9 +29,7 @@
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/AudioEffects/AudioEffects.h"
-#import "Shared/Player/PlayerEvents.h"
 #import "Shared/Player/PlayerState.h"
-#import "Shared/Player/SpeedPitch.h"
 #import "Player.h"
 #import "SGRSpectrum.h"
 
@@ -70,7 +68,6 @@ static const CGFloat kFadeFoot = 0.04, kFadeTop = 0.2;
 static const float kSettled = 0.02f;
 // Each band shares this much with either neighbor, three times over, so one loud band is a hill and not a spike.
 static const float kSpread = 0.25f;
-static const NSTimeInterval kTransitionSlack = 0.05;
 
 static NSUInteger sg_readers;
 
@@ -186,7 +183,6 @@ static UIColor *lit(UIColor *color, CGFloat luminance) {
         [center addObserver:self selector:@selector(updateMotionSoon) name:name object:nil];
     }
     [center addObserver:self selector:@selector(artworkChanged) name:SGRNowPlayingArtworkDidChangeNotification object:nil];
-    SGRObservePlayerTransition(self, ^(id owner) { [owner updateMotion]; }, ^(id owner) { [owner updateMotion]; });
     SGAddPlayerStateObserver(self);
     [self artworkChanged];
     [self draw];
@@ -194,6 +190,7 @@ static UIColor *lit(UIColor *color, CGFloat luminance) {
 }
 
 - (void)dealloc {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateMotion) object:nil];
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [_link invalidate];
     if (_reading) needReader(NO);
@@ -292,6 +289,13 @@ static UIColor *lit(UIColor *color, CGFloat luminance) {
     [self updateMotion];
 }
 
+// Hidden counts as out of the window: the player page hides it under its landscape player.
+- (void)setHidden:(BOOL)hidden {
+    BOOL changed = hidden != self.hidden;
+    [super setHidden:hidden];
+    if (changed) [self updateMotion];
+}
+
 // The power state is reported off the main thread.
 - (void)updateMotionSoon {
     dispatch_async(dispatch_get_main_queue(), ^{ [self updateMotion]; });
@@ -303,17 +307,11 @@ static UIColor *lit(UIColor *color, CGFloat luminance) {
 }
 
 // Moving while it may and there is something to show: the song playing, or the hills still settling after it
-// stopped. While the player animates, it comes back once the animation is expected to be over.
+// stopped.
 - (void)updateMotion {
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(updateMotion) object:nil];
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    BOOL may = self.window && front && !NSProcessInfo.processInfo.lowPowerModeEnabled;
-    NSTimeInterval wait = SGPlayerTransitionEnds() - CACurrentMediaTime();
-    if (may && (wait > 0 || SGRPlayerIsTransitioning())) {
-        may = NO;
-        // Without an expected end, the transition's ended notification brings it back.
-        if (wait > 0) [self performSelector:@selector(updateMotion) withObject:nil afterDelay:wait + kTransitionSlack inModes:@[NSRunLoopCommonModes]];
-    }
+    BOOL may = self.window && !self.hidden && front && !NSProcessInfo.processInfo.lowPowerModeEnabled;
     BOOL playing = !SGPlayerState().isPaused;
     [self setMoving:may && (playing || !self.settled)];
     [self setReading:may && playing];
@@ -462,51 +460,8 @@ static void shape(CAShapeLayer *layer, const float *bands, CGFloat width, CGFloa
 
 #pragma mark - in the player
 
-static SGRVisualiserView *sg_view;
-
-BOOL SGRPlayerVisualiserShowing(void) {
-    return SGRPlayerBackground() == SGRPlayerBackgroundVisualiser;
-}
-
 UIView *SGRPlayerVisualiserPreview(void) {
     return [[SGRVisualiserView alloc] initWithFrame:CGRectZero];
-}
-
-// The hills from the top of the field to the foot of its bleed, standing on the screen's foot.
-static void layOut(SGRArtworkField *field) {
-    if (sg_view.superview != field) [field addSubview:sg_view];
-    else if (field.subviews.lastObject != sg_view) [field bringSubviewToFront:sg_view];
-    CGSize size = field.bounds.size;
-    CGFloat screen = field.window.bounds.size.height ?: size.height;
-    CGRect frame = CGRectMake(0, 0, size.width, MAX(size.height, screen) + field.bleed.bottom);
-    if (!CGRectEqualToRect(sg_view.frame, frame)) sg_view.frame = frame;
-    sg_view.baseline = screen;
-    sg_view.screenHeight = screen;
-}
-
-void SGRPlayerVisualiserUpdate(void) {
-    SGRArtworkField *field = SGRPlayerField();
-    // Not over an Animated artwork clip still playing: the Player page can change the choice under it, which the
-    // player takes up when it next starts.
-    BOOL wanted = SGRPlayerVisualiserShowing() && field && !SGRPlayerMotionShowing();
-    if (!wanted) {
-        SGRVisualiserView *old = sg_view;
-        sg_view = nil;
-        if (old.window) [old disappear:^{ [old removeFromSuperview]; }];
-        else [old removeFromSuperview];
-        return;
-    }
-    BOOL made = !sg_view;
-    if (made) sg_view = [[SGRVisualiserView alloc] initWithFrame:CGRectZero];
-    layOut(field);
-    if (made) {
-        [sg_view setBlurred:SGRPlayerLyricsOpen() animated:NO];
-        [sg_view appear:field.window != nil];
-        SGLog(@"redesign player: visualizer on the field");
-    } else {
-        BOOL open = SGRPlayerLyricsOpen();
-        if (open != sg_view.blurred) [sg_view setBlurred:open animated:sg_view.window != nil];
-    }
 }
 
 #pragma mark - the ⋯ menu's switch
@@ -518,6 +473,4 @@ void SGRPlayerMenuSetBackground(SGRPlayerBackgroundKind kind) {
     if (kind == SGRPlayerBackgroundAnimated || current == SGRPlayerBackgroundAnimated) SGPlayerMenuSetAnimatedArtwork(kind == SGRPlayerBackgroundAnimated);
     if (kind != SGRPlayerBackgroundAnimated) SGSetInt(SGRKeyPlayerBackground, kind);
     SGLog(@"redesign player: background switched to %@ from the menu", SGRPlayerBackgroundNames()[(NSUInteger)kind]);
-    SGRPlayerHoldField();
-    SGRPlayerVisualiserUpdate();
 }

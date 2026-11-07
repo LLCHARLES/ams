@@ -5,7 +5,6 @@
 // over the same Spotify before, left behind, offered once for deleting.
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/Haptics/Haptics.h"
-#import "Shared/LiveActivity/LiveActivity.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
@@ -56,14 +55,13 @@ static SGProblem version(void) {
 
 // What this install lacks of the app changes Vitrine's IPA build makes (scripts/pipeline.sh: plist/liquid-glass.plist),
 // as when its .deb is injected by hand, each said as what it costs. Spotify's own plist opting out of the system's glass
-// (9.1.88's) costs the redesign its glass bars. 9.1.90 has no such key, and none is the same as glass on. The Live
-// Activity and Music Haptics keys matter in either look, and their own settings say so too.
+// (9.1.88's) costs the redesign its tab bar's glass. 9.1.90 has no such key, and none is the same as glass on. The Live
+// Activity and Music Haptics keys matter on any iOS, and their own settings say so too.
 static NSArray<NSString *> *missingAppChanges(void) {
     NSMutableArray<NSString *> *missing = [NSMutableArray array];
     id compatibility = [NSBundle.mainBundle objectForInfoDictionaryKey:@"UIDesignRequiresCompatibility"];
-    if (SGRedesignAvailable() && SGRedesignedUIStored() && [compatibility isKindOfClass:NSNumber.class] && [compatibility boolValue])
-        [missing addObject:@"the tab bar stays Spotify's own, without its glass"];
-    if (!SGLiveActivityAllowedByInstall()) [missing addObject:@"the Live Activity is missing"];
+    if (SGRedesignedUI() && [compatibility isKindOfClass:NSNumber.class] && [compatibility boolValue])
+        [missing addObject:@"the tab bar is drawn without its glass"];
     if (!SGMusicHapticsListedByInstall())
         [missing addObject:@"iOS does not list Spotify for Music Haptics, which stops vibrations in the background"];
     return missing;
@@ -79,10 +77,12 @@ static SGProblem appChanges(void) {
                  joined(missingAppChanges(), @"and")]];
 }
 
-static SGProblem fellBack(void) {
-    return @[@"The redesign did not start",
-             [NSString stringWithFormat:@"Spotify did not get going with the redesign on iOS %@, so it is back in Legacy and Redesigned UI is off. Mod Settings can turn it on again.",
-                 UIDevice.currentDevice.systemVersion]];
+// Below iOS 26 nothing of the look installs (Core/SGUIMode.h): said in Mod Settings for as long as it is so.
+static SGProblem lookNeedsIOS26(void) {
+    return @[@"Vitrine's look needs iOS 26",
+             [NSString stringWithFormat:@"The redesign is built on iOS 26's Liquid Glass, so on iOS %@ Spotify keeps its own look. "
+                 @"What does not draw on Spotify's screens still works: ads and privacy, lyrics sources, Karaoke and "
+                 @"the rest of Mod Settings.", UIDevice.currentDevice.systemVersion]];
 }
 
 // One problem is the alert's title and message; several are a paragraph each under a count.
@@ -152,9 +152,11 @@ static NSArray<SGProblem> *installProblems(void) {
     return list;
 }
 
-// The rows stay while the install is so; the fall back is said once and is over.
+// The rows stay while the install is so.
 NSArray<SGModRow *> *SGEnvironmentWarningRows(void) {
     NSMutableArray<SGModRow *> *rows = [NSMutableArray array];
+    if (!SGRedesignAvailable())
+        [rows addObject:SGWarningRow(@"The look needs iOS 26", @"Tap for what still works", ^{ tell(@[lookNeedsIOS26()]); })];
     if (SGEeveeSpotifyInjected())
         [rows addObject:SGWarningRow(@"EeveeSpotify is injected too", @"Tap for what that does", ^{ tell(@[eevee()]); })];
     if (otherVersion())
@@ -176,11 +178,10 @@ static NSString *state(void) {
 
 static void whenClear(NSInteger tries, void (^then)(void)) {
     UIViewController *top = SGTopController();
-    // The tour, What's new and the signing sheet own the screen first; an alert presented from one of
-    // them lands nowhere, so this one waits its turn. It also waits for the app to be in front, so it is
+    // The signing sheet owns the screen first; an alert presented from it lands nowhere, so this one waits its turn. It also waits for the app to be in front, so it is
     // not shown, and counted as told, to someone who sent Spotify away in its first seconds.
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    if (!front || !top || SGOnboardingShowing() || [top isKindOfClass:UIAlertController.class]) {
+    if (!front || !top || [top isKindOfClass:UIAlertController.class]) {
         if (tries <= 0) return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kRetry * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             whenClear(tries - 1, then);
@@ -191,10 +192,9 @@ static void whenClear(NSInteger tries, void (^then)(void)) {
 }
 
 static void tellProblems(void) {
-    // The fall back is news every time; the install's state only when it changed.
+    // The install's state is said only when it changed.
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSMutableArray<SGProblem> *list = [NSMutableArray array];
-    if (SGRedesignFellBack()) [list addObject:fellBack()];
     if (![[store stringForKey:kTold] isEqualToString:state()]) {
         [store setObject:state() forKey:kTold];
         [list addObjectsFromArray:installProblems()];

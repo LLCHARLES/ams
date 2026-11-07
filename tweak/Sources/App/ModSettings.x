@@ -1,9 +1,8 @@
 // Settings: a Mod Settings row at the end of Spotify's settings list opens the mod's own page, its rows
 // grouped by what they are as the system Settings app groups its own, in cards with no headings: what the
-// app looks like (Redesigned UI's switch, Appearance, Tab bar), the screens a page of its own changes
-// (Home & Library in the native look, Player, Lyrics, and Albums and Artists in the redesign), the features
-// that work under either look (Sing, Spatial voice, Audio effects, AutoMix, Live Activity, AirPods gestures, Listening
-// stats), the system's side (Lock screen, Vibrations; Premium, ads & privacy), the advanced pages (Labs, All flags, a
+// app looks like (Appearance, Tab bar), the screens a page of its own changes (Home, Player, Lyrics, Albums and
+// Artists), the features that work on any iOS (Sing, Spatial voice, Audio effects, AutoMix, Listening
+// stats), the system's side (Lock screen, Vibrations; Premium, ads & privacy), the advanced pages (All flags, a
 // searchable list of every flag with an override per flag) and Mod, the build, its updates and links. The
 // same row leads the side drawer's list (trees/test6.txt), above Your plan, so the page is a tap from
 // Home, and holding Home on the tab bar opens it too. The tweaks read the switches when they run, so a
@@ -18,15 +17,12 @@
 #import "Settings/SGPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Settings/SGModPage.h"
-#import "Native/Home/Home.h"
 #import "Redesigned/Home/Home.h"
 #import "Shared/AdBlock/AdBlock.h"
 #import "Shared/Flags/Flags.h"
 #import "Shared/AudioEffects/AudioEffectsPage.h"
 #import "Shared/AutoMix/AutoMix.h"
-#import "Shared/LiveActivity/LiveActivity.h"
 #import "Shared/ListeningStats/ListeningStats.h"
-#import "Shared/HeadGestures/HeadGestures.h"
 #import "Shared/Player/PlayerSettings.h"
 #import "Shared/Sing/Sing.h"
 #import "Shared/Haptics/Haptics.h"
@@ -45,8 +41,6 @@ static SGModRow *pageRow(NSString *title, NSString *symbol, UIColor *color, UIVi
 }
 
 static UIViewController *modSettingsPage(void) {
-    // Opening the page is the only thing that asks; the cache keeps it to once every six hours.
-    SGCheckForUpdate(NO);
     NSMutableArray<SGModSection *> *sections = [NSMutableArray array];
     // A build the lock screen cannot open leads the page, above the tweaks: it is the one thing here
     // that no switch can put right, and it is worth reading before anything else.
@@ -57,69 +51,46 @@ static UIViewController *modSettingsPage(void) {
     if (SGSigningWeekLong()) [warnings addObject:SGWithSymbol(SGSigningExpiryRow(), @"clock.badge.exclamationmark")];
     if (warnings.count) [sections addObject:SGSection(nil, warnings)];
 
-    // The rows of one look are asked again as Redesigned UI is flipped, so the page shows what the restart brings.
-    BOOL (^redesigned)(void) = ^BOOL { return SGRedesignedUIStored(); };
-    BOOL (^native)(void) = ^BOOL { return !SGRedesignedUIStored(); };
-
     // The tile colors are the system palette's, in dark mode except where SGColorRGB gives a lighter or deeper shade.
     [sections addObject:SGNotedSection(nil, @[
-        SGRedesignedUIRow(),
-        SGNativeRedesignRow(),
         pageRow(@"Appearance", @"paintpalette.fill", UIColor.systemPurpleColor, ^UIViewController *{ return SGAppearancePage(); }),
         pageRow(@"Tab bar", @"rectangle.bottomthird.inset.filled", UIColor.systemGrayColor, ^UIViewController *{ return SGNavbarPage(); }),
     ], SGRestartNote)];
 
-    // Home & Library holds only the native look's switches; the redesign has its album and artist pages instead.
-    SGModRow *albums = pageRow(@"Albums", @"square.stack.fill", SGColorRGB(0x34C759), ^UIViewController *{ return SGRAlbumSettingsPage(); });
-    albums.visible = redesigned;
-    SGModRow *artists = pageRow(@"Artists", @"music.mic", SGColorRGB(0x30B0C7), ^UIViewController *{ return SGRArtistSettingsPage(); });
-    artists.visible = redesigned;
-    SGModRow *home = pageRow(@"Home & Library", @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGHomeSettingsPage(); });
-    home.visible = native;
-    SGModRow *redesignedHome = pageRow(@"Home", @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRHomeSettingsPage(); });
-    redesignedHome.visible = redesigned;
     [sections addObject:SGSection(nil, @[
-        redesignedHome,
-        home,
+        pageRow(@"Home", @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRHomeSettingsPage(); }),
         pageRow(@"Player", @"play.fill", UIColor.systemPinkColor, ^UIViewController *{ return SGPlayerSettingsPage(); }),
         pageRow(@"Lyrics", @"quote.bubble.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGLyricsSettingsPage(); }),
-        albums,
-        artists,
+        pageRow(@"Albums", @"square.stack.fill", SGColorRGB(0x34C759), ^UIViewController *{ return SGRAlbumSettingsPage(); }),
+        pageRow(@"Artists", @"music.mic", SGColorRGB(0x30B0C7), ^UIViewController *{ return SGRArtistSettingsPage(); }),
     ])];
 
-    // Sing and the audio effects work on the sound, so both looks have them; Audio effects says how many are on.
+    // Sing and the audio effects work on the sound, so they run on any iOS; Audio effects says how many are on.
     SGModRow *sing = pageRow(@"Karaoke", @"mic.fill", SGColorRGB(0x8C42B3), ^UIViewController *{ return SGSingSettingsPage(); });
     SGModRow *audioEffects = pageRow(@"Audio effects", @"slider.vertical.3", UIColor.systemRedColor, ^UIViewController *{ return SGDSPSettingsPage(); });
     audioEffects.value = ^NSString *{ return SGDSPSummary(); };
     // Spatial voice is Sing's too, and shows where the iPhone reads headphone motion, as on Sing's page.
     SGModRow *spatial = pageRow(@"Spatial voice", @"person.wave.2.fill", SGColorRGB(0x5856D6), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); });
     spatial.visible = ^BOOL { return SGSingSpatialAvailable(); };
-    // AutoMix sets Spotify's own Automix and Crossfade, which its player does under either look.
+    // AutoMix sets Spotify's own Automix and Crossfade, which its player does on any iOS.
     SGModRow *autoMix = pageRow(@"AutoMix", @"arrow.triangle.merge", SGColorRGB(0xF05D6C), ^UIViewController *{ return SGAutoMixSettingsPage(); });
     autoMix.value = ^NSString *{ return SGAutoMixSummary(); };
     NSMutableArray<SGModRow *> *features = [NSMutableArray arrayWithObjects:sing, spatial, audioEffects, autoMix, nil];
-    // The Live Activity works under both looks, where ActivityKit's card does.
-    if (@available(iOS 17.0, *)) {
-        SGModRow *liveActivity = pageRow(@"Live Activity", @"iphone", UIColor.systemOrangeColor, ^UIViewController *{ return SGLiveActivitySettingsPage(); });
-        [features addObject:liveActivity];
-    }
     [features addObjectsFromArray:@[
-        pageRow(@"AirPods gestures", @"airpods", UIColor.systemCyanColor, ^UIViewController *{ return SGHeadGesturesSettingsPage(); }),
         pageRow(@"Listening stats", @"chart.bar.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGListeningStatsPage(); }),
     ]];
     [sections addObject:SGSection(nil, features)];
 
     SGModRow *mod = pageRow(@"Mod", @"info.circle", SGColorRGB(0x7D7D81), ^UIViewController *{ return SGAboutPage(); });
-    mod.value = ^NSString *{ return @(SG_VERSION); };
+    mod.value = ^NSString *{ return SGVersionWithBuild(); };
     [sections addObjectsFromArray:@[
         SGSection(nil, @[
             pageRow(@"Lock screen", @"lock.iphone", SGColorRGB(0x32ADE6), ^UIViewController *{ return SGLockScreenWidgetPage(); }),
-            // Vibrations hook Spotify's own controls and its audio, so they answer under either look.
+            // Vibrations hook Spotify's own controls and its audio, so they answer on any iOS.
             pageRow(@"Vibrations", @"waveform", UIColor.systemGreenColor, ^UIViewController *{ return SGVibrationsSettingsPage(); }),
             pageRow(@"Premium, ads & privacy", @"hand.raised.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGAdsSettingsPage(); }),
         ]),
         SGSection(nil, @[
-            pageRow(@"Labs", @"testtube.2", UIColor.systemGreenColor, ^UIViewController *{ return SGLabsPage(); }),
             pageRow(@"All flags", @"flag.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGAllFlagsPage(); }),
         ]),
         SGSection(nil, @[mod]),
@@ -324,5 +295,4 @@ static void attachDrawerRow(UICollectionView *list) {
     SGRequireClasses(@[@"_TtC21Settings_PlatformImpl26SettingsListViewController", @"_TtC23SideDrawer_ListPageImpl18ListViewController"]);
     SGRegisterPages();
     SGCheckSigningOnce();
-    SGWatchForUpdates();
 }

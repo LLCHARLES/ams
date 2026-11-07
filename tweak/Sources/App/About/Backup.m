@@ -14,8 +14,7 @@ static BOOL isSetting(NSString *key) {
     if (![key hasPrefix:@"spotifyglass."]) return NO;
     for (NSString *local in @[@"spotifyglass.adblock.counts", @"spotifyglass.privacy.counts", @"spotifyglass.update.",
                               @"spotifyglass.signing.", @"spotifyglass.onboarding.", @"spotifyglass.navbar.stock",
-                              @"spotifyglass.redesign.navbar.stock", @"spotifyglass.automix.saved",
-                              @"spotifyglass.lossless.savedQuality", @"spotifyglass.liveActivity.startedAt"]) {
+                              @"spotifyglass.redesign.navbar.stock", @"spotifyglass.automix.saved"]) {
         if ([key hasPrefix:local]) return NO;
     }
     return YES;
@@ -60,7 +59,7 @@ void SGShareDiagnostics(void) {
         [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
         UIDevice.currentDevice.systemVersion, machine.machine];
     [text appendFormat:@"look %@, hide ads %d, hide upsells %d, spoof premium %d, EeveeSpotify %d\n\n",
-        SGRedesignedUIStored() ? @"redesign" : @"native", SGHidden(SGKeyHideAds), SGHidden(SGKeyHideUpsells),
+        SGRedesignedUI() ? @"redesign" : @"Spotify's own (below iOS 26)", SGHidden(SGKeyHideAds), SGHidden(SGKeyHideUpsells),
         SGHidden(SGKeyFakePremium), SGEeveeSpotifyInjected()];
     [text appendString:@"== ads blocked (stopped of checked)\n"];
     for (NSString *label in SGAdBlockLabels()) {
@@ -114,7 +113,6 @@ static NSDictionary *fromChroma(NSDictionary *settings) {
         @"spotifyglass.redesign.sing.ignoreHeat": @"spotifyglass.sing.ignoreHeat",
         @"spotifyglass.redesign.spatialVoice": @"spotifyglass.sing.spatial",
         @"spotifyglass.redesign.player.hideVideoSwitch": @"spotifyglass.hide.videoSwitch",
-        @"spotifyglass.gestures.head": @"spotifyglass.headgestures",
         @"spotifyglass.redesign.inlinePlayer": @"spotifyglass.redesign.navbar.minimize",
     };
     NSSet<NSString *> *dropped = [NSSet setWithArray:@[@"spotifyglass.redesign.menuNumbers", @"spotifyglass.eevee.warned",

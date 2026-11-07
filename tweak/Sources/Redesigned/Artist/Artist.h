@@ -15,7 +15,7 @@
 //     ArtistFollow.x    whether the artist is followed, from Spotify's collection, for Follow's glyph
 //     ArtistSettings.m  the Artists page of Mod Settings: the switches below
 //
-// Every hook installs only while Redesigned UI is on (SGRedesignedUI); the native look's do not then.
+// Every hook installs only where the redesign runs, iOS 26 and later (SGRedesignedUI).
 // Threading: main thread only.
 #import <UIKit/UIKit.h>
 
@@ -48,13 +48,13 @@ void SGRArtistSetArtwork(UIView *view, UIImage *image);
 BOOL SGRArtistFollowing(UIView *page, NSString *moreIdentifier, BOOL *following, void (^changed)(void));
 
 // The same collection state for any URI, for a page of the mod's that is no artist page: the system tab bar's player
-// page (Redesigned/Navbar/SystemPlayer.m), whose add button shows whether the track playing is in Liked Songs, the way
+// page (Redesigned/Player/SystemPlayer.m), whose add button shows whether the track playing is in Liked Songs, the way
 // Spotify's add button in the player does (its owner, 2026-11-01). The watch returned subscribes as soon as Spotify's
 // provider is known and ends with the watch; `changed` runs on the main thread whenever the answer changes.
 id SGRCollectionWatchURI(NSURL *uri, void (^changed)(void));
 // YES once the collection has answered for the watch's URI, with the answer; subscribes if it could not before.
 BOOL SGRCollectionWatchSaved(id watch, BOOL *saved);
 // Saves `uri` to the collection (a track: Liked Songs) or takes it out, through Spotify's collection platform's
-// addURL:showUIConfirmation:completion: (as Shared/HeadGestures/HeadGestures.x likes) and its
+// addURL:showUIConfirmation:completion: (as Shared/Player/LikedSongs.x does) and its
 // removeURL:showUIConfirmation:completion: (in the 9.1.90 binary beside it). NO when the platform is not known yet.
 BOOL SGRCollectionSetSaved(NSURL *uri, BOOL saved);

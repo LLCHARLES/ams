@@ -1,4 +1,4 @@
-// Prototype: the system tab bar. A UITabBarController of the mod's over Spotify's tab area, so UIKit itself minimizes
+// The redesign's tab bar: the system tab bar. A UITabBarController of the mod's over Spotify's tab area, so UIKit itself minimizes
 // the bar on scroll and moves the mini player between its place over the bar and the bar's row, the Music app's way
 // (UITabBarController's tabBarMinimizeBehavior and bottomAccessory, iOS 26). Spotify's tab bar container is no
 // UITabBarController (TabBar.x), so this one stands over it:
@@ -10,28 +10,19 @@
 // - its minimize follows the page Spotify shows: each page's content scroll view is set to the scroll view the page is
 //   scrolling (TabBarMinimize.x hands it over);
 // - its accessory is a mini player of the mod's (SGRSystemMiniPlayer), from the player's state and the cover on
-//   Spotify's own bar, which stays unseen; a tap on it brings up the mod's own player (SystemPlayer.m) with UIKit's zoom.
+//   Spotify's own bar, which stays unseen; a tap on it brings up the mod's own player (Player/SystemPlayer.m) with UIKit's zoom.
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
-#import "Redesigned/NowPlayingBar/NowPlayingBar.h"
-#import "Shared/Player/PlayerState.h"
 #import "Navbar.h"
-#import "SystemPlayer.h"
-#import "SystemPlayerTransition.h"
-#import "Redesigned/Kit/SGRRepaint.h"
+#import "Shared/Player/PlayerState.h"
+#import "Shared/Haptics/Haptics.h"
+#import "Redesigned/Player/SystemPlayer.h"
+#import "Redesigned/Player/SystemPlayerTransition.h"
 #import "Settings/SGPage.h"
+#import "Redesigned/Artist/Artist.h"
 
-
-BOOL SGRSystemTabsOn(void) {
-    static BOOL on;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        on = SGNativeRedesign();
-    });
-    return on;
-}
 
 #pragma mark - the mini player
 
@@ -39,8 +30,6 @@ static UIViewController *systemTabsController(void);
 static void buildReadyPage(void);
 
 API_AVAILABLE(ios(26.0))
-// TODO (its owner, 2026-11-01, "aim to add at some point"): no like on it yet, so the Mini player page's Hide the like
-// button reaches only the glass bar.
 @interface SGRSystemMiniPlayer : UIView <SGPlayerStateObserver, UIGestureRecognizerDelegate>
 @property (nonatomic, readonly) UIImageView *cover;
 @end
@@ -111,8 +100,13 @@ static const CGFloat kDeviceRoom = 80;
     CAGradientLayer *_fade;
     SGRGlyphButton *_play, *_next;
     UIView *_device;    // the output's device: a tap the AirPlay picker, a hold Spotify's Connect sheet
+    SGRGlyphButton *_like;   // the star (SGRKeyMiniPlayerLike): the song in Liked Songs or not
+    id _savedWatch;          // Spotify's collection state for the song shown (Artist.h's SGRCollectionWatchURI)
+    NSString *_savedURI;
+    BOOL _saved;
     NSString *_shownURI;
     BOOL _skipping;     // a swipe settled on a neighbour; the track it asked for has not come yet
+    BOOL _swipePast;    // the swipe is past where letting go skips
     BOOL _hadTrack, _emptyPending;  // a track shown, and a look again pending before Not Playing
 }
 
@@ -141,11 +135,16 @@ static const CGFloat kDeviceRoom = 80;
     _play = [SGRGlyphButton buttonWithSymbol:@"play.fill" pointSize:20 title:@"Play"];
     _play.onTap = ^{ [weakSelf togglePlay]; };
     _next = [SGRGlyphButton buttonWithSymbol:@"forward.fill" pointSize:20 title:@"Next"];
-    _next.onTap = ^{ [(id)SGPlayer() skipToNextTrackWithOptions:nil]; };
+    _next.onTap = ^{
+        SGPlayFeedback(SGFeedbackSkip);
+        [(id)SGPlayer() skipToNextTrackWithOptions:nil];
+    };
     // The Mini player page's Device button (its owner, 2026-11-01): the player page's AirPlay button, its glyph the
     // output's device, beside play.
     _device = SGRSystemMakeRouteButton(18, @"the mini player");
-    for (UIView *view in @[_cover, _text, _device, _play, _next]) [self addSubview:view];
+    _like = [SGRGlyphButton buttonWithSymbol:@"star" pointSize:18 title:@"Add to Liked Songs"];
+    _like.onTap = ^{ [weakSelf toggleSaved]; };
+    for (UIView *view in @[_cover, _text, _device, _like, _play, _next]) [self addSubview:view];
     UITapGestureRecognizer *open = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(opened)];
     open.delegate = self;
     [self addGestureRecognizer:open];
@@ -167,6 +166,39 @@ static const CGFloat kDeviceRoom = 80;
     [self registerForTraitChanges:@[UITraitTabAccessoryEnvironment.class] withAction:@selector(environmentChanged)];
     [self show:SGPlayerState()];
     return self;
+}
+
+// The song's place in Liked Songs, from Spotify's collection state, watched from a track change on (the player page's way).
+- (void)syncSaved {
+    NSString *uri = _shownURI;
+    BOOL saveable = [uri hasPrefix:@"spotify:track:"];
+    if (!saveable) {
+        if (_savedURI) [self setNeedsLayout];
+        _savedWatch = nil;
+        _savedURI = nil;
+        return;
+    }
+    if (![uri isEqualToString:_savedURI]) {
+        if (!_savedURI) [self setNeedsLayout];
+        _savedURI = uri;
+        __weak typeof(self) weakSelf = self;
+        _savedWatch = SGRCollectionWatchURI([NSURL URLWithString:uri], ^{ [weakSelf syncSaved]; });
+        [self showSaved:NO];
+    }
+    BOOL saved = NO;
+    if (SGRCollectionWatchSaved(_savedWatch, &saved)) [self showSaved:saved];
+}
+
+- (void)showSaved:(BOOL)saved {
+    _saved = saved;
+    [_like.glyph setSymbol:saved ? @"star.fill" : @"star" animated:self.window != nil];
+    _like.accessibilityLabel = saved ? @"Remove from Liked Songs" : @"Add to Liked Songs";
+}
+
+- (void)toggleSaved {
+    if (!_savedURI || !SGRCollectionSetSaved([NSURL URLWithString:_savedURI], !_saved)) return;
+    SGPlayFeedback(SGFeedbackAdd);
+    [self showSaved:!_saved];
 }
 
 - (void)environmentChanged {
@@ -197,25 +229,33 @@ static const CGFloat kDeviceRoom = 80;
     // Round over the bar too, as in the row (its owner, 2026-10-31).
     _cover.layer.cornerRadius = side / 2;
     CGFloat button = 36, right = size.width - 6;
-    // In the bar's row, play alone as the Music app has it; over the bar, next beside it unless the Mini player page's Skip
-    // button is off (its owner, 2026-11-01), the title taking its room.
-    BOOL next = !inlined && SGEnabled(SGRKeyMiniPlayerNext);
-    _next.hidden = !next;
-    if (next) {
-        _next.frame = CGRectMake(right - button, round((size.height - button) / 2), button, button);
-        right -= button;
-    }
-    _play.frame = CGRectMake(right - button, round((size.height - button) / 2), button, button);
-    right -= button;
-    // The AirPlay button before play while the Mini player page has it on, over the bar and in its row alike, while the
-    // title keeps room.
     CGFloat textX = CGRectGetMaxX(_cover.frame) + 10;
-    BOOL device = SGEnabled(SGRKeyMiniPlayerAirPlay) && right - button - 4 - textX >= kDeviceRoom;
-    _device.hidden = !device;
-    if (device) {
-        _device.frame = CGRectMake(right - button, round((size.height - button) / 2), button, button);
+    // The buttons in the Mini player page's order, laid from the right edge in (its owner, 2026-11-06). In the bar's row,
+    // play alone as the Music app has it; the AirPlay button and the star go first while the title would be left short.
+    NSArray<NSString *> *order = inlined ? @[SGRMiniButtonPlay] : SGRMiniPlayerButtons();
+    NSDictionary<NSString *, UIView *> *views = @{SGRMiniButtonAirPlay: _device, SGRMiniButtonStar: _like,
+                                                  SGRMiniButtonPlay: _play, SGRMiniButtonNext: _next};
+    NSMutableSet<NSString *> *shown = [NSMutableSet set];
+    // Room for the must-haves first (play, next), then the rest while the title keeps kDeviceRoom.
+    NSInteger fixed = 0;
+    for (NSString *key in order) if ([key isEqualToString:SGRMiniButtonPlay] || [key isEqualToString:SGRMiniButtonNext]) fixed++;
+    CGFloat room = right - fixed * button - 4 - textX;
+    for (NSString *key in order) {
+        if ([key isEqualToString:SGRMiniButtonPlay] || [key isEqualToString:SGRMiniButtonNext]) {
+            [shown addObject:key];
+            continue;
+        }
+        if ([key isEqualToString:SGRMiniButtonStar] && ![_savedURI hasPrefix:@"spotify:track:"]) continue;
+        if (room - button < kDeviceRoom) continue;
+        room -= button;
+        [shown addObject:key];
+    }
+    for (NSString *key in order.reverseObjectEnumerator) {
+        if (![shown containsObject:key]) continue;
+        views[key].frame = CGRectMake(right - button, round((size.height - button) / 2), button, button);
         right -= button;
     }
+    for (NSString *key in views) views[key].hidden = ![shown containsObject:key];
     right -= 4;
     CGFloat width = MAX(0, right - textX);
     // The text area starts the fade's width before the text, so the fade lies over nothing at rest: laid over the text,
@@ -240,7 +280,7 @@ static const CGFloat kDeviceRoom = 80;
 
 - (void)show:(SPTPlayerState *)state {
     // A moment with no track between two (a new playlist loading) is not Not Playing: looked at again after a moment
-    // before the card says so, as the page does (SystemPlayer.m).
+    // before the card says so, as the page does (Player/SystemPlayer.m).
     BOOL hasTrack = [state.track isKindOfClass:NSClassFromString(@"SPTPlayerTrack")];
     if (hasTrack) {
         _hadTrack = YES;
@@ -269,6 +309,7 @@ static const CGFloat kDeviceRoom = 80;
     }
     _shownURI = uri;
     _current.track = state.track;
+    [self syncSaved];
     // Nothing playing, the Music app's way (its owner's screenshot, 2026-11-02): "Not Playing" by the note, next dimmed.
     BOOL empty = !hasTrack;
     if (empty) _current.title.text = @"Not Playing";
@@ -327,10 +368,17 @@ static const CGFloat kDeviceRoom = 80;
         case UIGestureRecognizerStateChanged: {
             CGFloat moved = ((x < 0 && !hasNext) || (x > 0 && !hasPrevious)) ? x / 4 : x;
             _strip.transform = CGAffineTransformMakeTranslation(moved, 0);
+            // A tick as the drag passes where letting go skips (Vibrations > Controls).
+            BOOL past = ((x < 0 && hasNext) || (x > 0 && hasPrevious)) && fabs(x) > step * kSwipeDistance;
+            if (past != _swipePast) {
+                _swipePast = past;
+                if (past) SGPlayFeedback(SGFeedbackDetent);
+            }
             break;
         }
         case UIGestureRecognizerStateEnded:
         case UIGestureRecognizerStateCancelled: {
+            _swipePast = NO;
             CGFloat speed = [swipe velocityInView:self].x;
             // The way the finger went, or for a short flick the way it was moving; flicked back against the drag, none.
             NSInteger way = fabs(x) > 12 ? (x < 0 ? -1 : 1) : (speed < 0 ? -1 : 1);
@@ -383,12 +431,13 @@ static const CGFloat kDeviceRoom = 80;
     id player = SGPlayer();
     SPTPlayerState *state = SGPlayerState();
     if (!player) return;
+    SGPlayFeedback(state.isPaused ? SGFeedbackPlay : SGFeedbackPause);
     if (state.isPaused) [player resume:nil];
     else [player pause:nil];
 }
 
-// The player, a page of the mod's (SystemPlayer.m), presented by UIKit's zoom, the Music app's way: its open, its swipe
-// down and its close are the mod's own (SystemPlayerTransition.m), out of the capsule and back into it. Spotify's own
+// The player, a page of the mod's (Player/SystemPlayer.m), presented by UIKit's zoom, the Music app's way: its open, its swipe
+// down and its close are the mod's own (Player/SystemPlayerTransition.m), out of the capsule and back into it. Spotify's own
 // player is not asked for: held in
 // the page, it brought its own pulls and closes, and UIKit's swipe close lost to them, where a page of the mod's alone
 // closed every time (its owner, 2026-11-01).
@@ -456,7 +505,7 @@ static SGRSystemPlayerPage *takePage(void) {
     lastOpen = now;
     SGRSystemPlayerPage *page = takePage();
     __weak UIView *capsule = self.superview ?: self;
-    // Opened and closed by the mod's own move (SystemPlayerTransition.m), out of the capsule and back into it.
+    // Opened and closed by the mod's own move (Player/SystemPlayerTransition.m), out of the capsule and back into it.
     SGRSystemPlayerTransition *transition = [SGRSystemPlayerTransition attachTo:page];
     transition.source = ^UIView *{ return capsule; };
     __weak typeof(self) weakMini = self;
@@ -549,7 +598,7 @@ API_AVAILABLE(ios(26.0))
     clearBackdrops(controller);
 }
 
-// Holding the first tab opens Mod Settings, as on the glass bar (TabBar.x): a little longer than iOS's own press for a
+// Holding the first tab opens Mod Settings, as on the glass bar it replaced: a little longer than iOS's own press for a
 // menu, with a firm tap when it opens.
 // The tab buttons have recognizers of their own: the hold runs beside them, or it never began (the phone's log).
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
@@ -732,19 +781,19 @@ void SGRSystemTabsSync(UIViewController *container, UIView *stockBar, NSArray<UI
         // as each scroll goes (TabBarMinimize.x), and UIKit's, where it stands in, is told never (its owner, 2026-11-01).
         UITabBarMinimizeBehavior minimize = SGEnabled(SGRKeyNavbarMinimize) ? UITabBarMinimizeBehaviorOnScrollDown : UITabBarMinimizeBehaviorNever;
         if (controller.tabBarMinimizeBehavior != minimize) controller.tabBarMinimizeBehavior = minimize;
-        // The redesign's accent on the selected tab, as on the glass bar (its owner, 2026-10-31).
+        // The redesign's accent on the selected tab (its owner, 2026-10-31).
         UIColor *accent = SGRAccent();
         if (![controller.tabBar.tintColor isEqual:accent]) controller.tabBar.tintColor = accent;
         if (![controller.view.tintColor isEqual:accent]) controller.view.tintColor = accent;
 
         // The tabs again only when Spotify's items or their names changed; their glyphs follow in place at every pass.
-        // Icons only on the Tab bar page (SGRKeyNavbarHideLabels, as the glass bar reads it in TabBar.x): each tab without
+        // Icons only on the Tab bar page (SGRKeyNavbarHideLabels): each tab without
         // a name, which UIKit draws as its glyph alone (its owner, 2026-11-01: the system tab bar kept its names). Part of
         // what is compared, so switching it builds the tabs again at the next pass, which the page's SGRRefreshTabBar asks for.
         BOOL namesHidden = SGHidden(SGRKeyNavbarHideLabels);
         NSMutableString *titles = [NSMutableString stringWithString:namesHidden ? @"icons only\n" : @"names\n"];
         for (UIView *source in sources) [titles appendFormat:@"%@\n", SGRTabSourceTitle(source)];
-        // Each tab's outline and filled glyph, as the glass bar draws Spotify's item (TabBar.x): Spotify swaps the item's icon
+        // Each tab's outline and filled glyph, drawn from Spotify's item (TabBar.x): Spotify swaps the item's icon
         // itself between the two as the item becomes active, so the glyph read at a pass is filed as the filled one when the
         // item is active then, else as the outline, and kept by the tab's name. UIKit draws the outline unselected and the
         // filled one selected and under its selection bubble as it slides (its owner, 2026-11-01: the same icon for both left
@@ -774,7 +823,7 @@ void SGRSystemTabsSync(UIViewController *container, UIView *stockBar, NSArray<UI
         }
         if (![sources isEqualToArray:tabs.sources] || ![titles isEqualToString:tabs.titles]) {
             // The last tab, whichever the editor put there, stands on its own at the trailing end as the Music app's Search
-            // does (its owner, 2026-10-31, as the glass bar's trailing circle was): UIKit gives that place to a search tab,
+            // does (its owner, 2026-10-31): UIKit gives that place to a search tab,
             // so the last tab is one, with its own name and glyph in place of the magnifier.
             NSUInteger searchIndex = sources.count > 1 ? sources.count - 1 : NSNotFound;
             NSMutableArray<UITab *> *items = [NSMutableArray array];
@@ -858,7 +907,7 @@ void SGRSystemTabsFollowScroll(UIScrollView *scrollView) {
 #pragma mark - minimizing by the mod's rule
 
 // UIKit's minimize on scroll took several tab switches to start following a page, and brought the bar back only at the
-// top of the list (its owner, 2026-10-31). The page's scroll is judged by the glass bar's rule instead (MinimizeStep.h,
+// top of the list (its owner, 2026-10-31). The page's scroll is judged by the mod's own rule instead (MinimizeStep.h,
 // TabBarMinimize.x: down 24 pt minimizes, back up as much expands, anywhere), and the bar is told. UIKit keeps
 // -[UITabBar _setMinimized:] and -_isMinimized to apps it approves ("This can only be called by an approved app", which
 // crashed Spotify: its owner, 2026-10-31), so the bar's visual provider, which draws it, is told instead
@@ -977,10 +1026,37 @@ static char kRedirectedKey;
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRSystemTabsOn()) return;
     %init;
 }
 
 void SGRRefreshMiniPlayer(void) {
     if (@available(iOS 26.0, *)) [sg_tabs.mini setNeedsLayout];
+}
+
+
+NSArray<NSString *> *SGRMiniPlayerButtons(void) {
+    NSArray *stored = SGArray(SGRKeyMiniPlayerOrder);
+    NSArray<NSString *> *all = @[SGRMiniButtonAirPlay, SGRMiniButtonStar, SGRMiniButtonPlay, SGRMiniButtonNext];
+    if (![stored isKindOfClass:NSArray.class]) {
+        // Before any order was set: the switches that were (AirPlay and Skip on unless switched off, the star off).
+        NSMutableArray<NSString *> *on = [NSMutableArray array];
+        if (SGEnabled(SGRKeyMiniPlayerAirPlay)) [on addObject:SGRMiniButtonAirPlay];
+        if (SGFlag(SGRKeyMiniPlayerLike, NO)) [on addObject:SGRMiniButtonStar];
+        [on addObject:SGRMiniButtonPlay];
+        if (SGEnabled(SGRKeyMiniPlayerNext)) [on addObject:SGRMiniButtonNext];
+        return on;
+    }
+    NSMutableArray<NSString *> *on = [NSMutableArray array];
+    for (id key in stored) if ([key isKindOfClass:NSString.class] && [all containsObject:key] && ![on containsObject:key]) [on addObject:key];
+    if (![on containsObject:SGRMiniButtonPlay]) [on addObject:SGRMiniButtonPlay];
+    return on;
+}
+
+void SGRSetMiniPlayerButtons(NSArray<NSString *> *keys) {
+    NSMutableArray<NSString *> *on = [keys mutableCopy] ?: [NSMutableArray array];
+    // Play cannot be put away.
+    if (![on containsObject:SGRMiniButtonPlay]) [on addObject:SGRMiniButtonPlay];
+    [NSUserDefaults.standardUserDefaults setObject:on forKey:SGRKeyMiniPlayerOrder];
+    SGPrefsChanged();
+    SGRRefreshMiniPlayer();
 }

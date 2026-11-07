@@ -14,10 +14,18 @@ PACKAGE_VERSION := $(subst -,~,$(SG_VERSION))
 
 include $(THEOS)/makefiles/common.mk
 
-# The What's new sheet's text, this version's section of CHANGELOG.md, as a gitignored header that
-# App/Onboarding/WhatsNew.m reads. A copy of tweak/ without the scripts beside it builds without it.
-ifneq ($(wildcard ../scripts/whats-new.sh),)
-$(shell ../scripts/whats-new.sh $(SG_VERSION) ../CHANGELOG.md Sources/App/Onboarding/SGWhatsNewNotes.h)
+
+# Which build this is (the commit, plus the build time when there are uncommitted changes), as a gitignored
+# source that Mod Settings shows beside the version. A copy of tweak/ without the scripts falls back to none.
+# The time is taken once and passed down, so Theos's own makes, which read this file again, write the same stamp.
+ifndef SG_BUILD_TIME
+SG_BUILD_TIME := $(shell date +%m%d.%H%M)
+endif
+export SG_BUILD_TIME
+ifneq ($(wildcard ../scripts/build-stamp.sh),)
+$(shell SG_BUILD_TIME=$(SG_BUILD_TIME) sh ../scripts/build-stamp.sh Sources/App/About/SGBuildStamp.m)
+else
+$(shell [ -f Sources/App/About/SGBuildStamp.m ] || echo 'const char *SGBuildStamp(void) { return ""; }' > Sources/App/About/SGBuildStamp.m)
 endif
 
 TWEAK_NAME := spotifyglass
