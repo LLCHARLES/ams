@@ -137,13 +137,22 @@ UIImageView *SGRSystemCutDisc(NSString *symbol) {
 static const CGFloat kRowAboveSafeArea = 32, kRowMinBottom = 34, kRouteLineDrop = 32;
 // The add button's glyph beside the title and artist, and its touch square.
 static const CGFloat kAddGlyph = 22, kAddSide = 44;
-// The layout from the bottom row up, the redesigned player's as its owner's screenshots of the two show it, on a 440x956
-// screen (2026-11-01): the volume's middle above the row's, the controls' above the volume's, the times' above the
-// controls', the progress bar's above the times'; the header's circles in from the sides and down from the safe area;
-// previous and next out from the middle as a share of the width between the margins; the bottom row's glyphs at a
-// fifth, half and four fifths of the width, as the redesigned player's footer placed them (kLeading, kMiddle, kTrailing). The first three
-// gaps are times controlsSpacing() (below).
-static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 58, kTimesAboveControls = 46, kScrubberAboveTimes = 17;
+// The layout from the bottom row up, still the redesigned player's chain (the volume's middle above the row's, the
+// controls' above the volume's, the times' above the controls', the progress bar's above the times'), the first three
+// gaps times controlsSpacing() (below); the header's circles in from the sides and down from the safe area; previous
+// and next out from the middle as a share of the width between the margins; the bottom row's glyphs at a fifth, half
+// and four fifths of the width, as the redesigned player's footer placed them (kLeading, kMiddle, kTrailing).
+//
+// The two gaps over the times are calibrated to AMS-beta's places, not m1's own 440x956 screenshots: beta's bottom
+// stack (trees/clean/player/01.txt, quoted at PlayerLyrics.x:17) puts the information unit at 576.67 of 874 (66% of
+// the height, exactly where PlayerArtwork.x caps the cover's foot) and the duration unit at 640.67..680.67 (73%..78%,
+// the bar over the times). Scaled to this screen and measured back up from our footer's rowMid -- its middle 32pt over
+// the safe area's bottom, beta's own rule in PlayerFooter.x's SGRPlayerLowerRow -- 37 and 33 (times the spacing) land
+// the bar on the duration unit's top, the times on its foot and the title just under the cover. m1's 58 and 46 put that
+// whole group about 40pt too high and left the cover, already moved to beta's place, stranded above it. The volume's
+// 38 and the footer's own place do not change: beta moves only the footer, the controls and the volume under the two
+// units the stack leaves standing. On 393x852 this is title ~569, bar 625, times ~649, play 696, volume 740, row 786.
+static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 37, kTimesAboveControls = 33, kScrubberAboveTimes = 17;
 static const CGFloat kHeaderSide = 16, kHeaderDrop = 2, kSkipShare = 0.25, kSkipGlyph = 32, kPlayGlyph = 44;
 // An episode's skips go back and forward this far, as Spotify's episode player's 15 s buttons do.
 static const double kEpisodeSkip = 15;
