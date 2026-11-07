@@ -1764,11 +1764,13 @@ UIView *SGRSystemMakeRouteButton(CGFloat pointSize, NSString *place) {
     CGFloat titleHeight = ceil(_title.font.lineHeight), artistHeight = ceil(_artist.font.lineHeight);
     CGFloat artistY = scrubberY - 14 - artistHeight, titleY = artistY - titleHeight;
 
-    // The cover takes the room left between the header and the title, as wide as the margins allow.
-    CGFloat roomTop = headerBottom + 20, room = MAX(0, titleY - 28 - roomTop);
-    CGFloat side = floor(MIN(inner, room));
+    // The cover keeps AMS-beta's place (PlayerArtwork.x coverFrameIn): a share of the screen down,
+    // as wide as the screen less 23pt at each side, and never past 66% of the screen's height.
+    CGFloat coverTop = MAX(height * 0.1085, safe.top + 33);
+    CGFloat side = MAX(200, width - 2 * 23);
+    side = MIN(side, MAX(200, height * 0.66 - coverTop));
     _coverHolder.bounds = CGRectMake(0, 0, side, side);
-    _coverHolder.center = CGPointMake(width / 2, round(roomTop + room / 2));
+    _coverHolder.center = CGPointMake(width / 2, round(coverTop + side / 2));
     if (!CGRectEqualToRect(_shadowBounds, _coverHolder.bounds)) {
         _shadowBounds = _coverHolder.bounds;
         _coverHolder.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_shadowBounds cornerRadius:SGRRadiusArtwork].CGPath;

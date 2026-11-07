@@ -15,7 +15,7 @@ SGModSection *SGLyricsSourcesSection(void) {
         return order.count == 1 ? first : [NSString stringWithFormat:@"%@ +%lu", first, (unsigned long)order.count - 1];
     };
     SGModRow *words = SGOptionRow(@"Prefer word-by-word timing", @"Asks down the order past lines timed by the line", SGKeyLyricsPreferWordTiming);
-    NSMutableArray<SGModRow *> *rows = [NSMutableArray arrayWithObjects:sources, words,
+    NSMutableArray<SGModRow *> *rows = [NSMutableArray arrayWithObjects:sources, words, SGSpicyLyricsKeyRow(),
         SGSwitchRow(@"Lyrics for every track", @"Even where Spotify has none", SGKeyLyricsAllTracks),
         SGOptionRow(@"Show source", @"Who the lyrics came from, after the last line", SGKeyLyricsCredit), nil];
     if (SGEeveeLyricsOn()) {

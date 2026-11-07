@@ -24,6 +24,9 @@ static NSString *const kLegacyMusixmatch = @"spotifyglass.musixmatchLyrics";
 static NSString *const kLegacyAllTracks = @"spotifyglass.musixmatchAllTracks";
 static NSString *const kLegacyNetEase = @"spotifyglass.neteaseWordTiming";
 
+@implementation SGLyricsLink
+@end
+
 @implementation SGLyricsResult
 @end
 
@@ -111,6 +114,37 @@ void SGLyricsGetJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, 
     SGLyricsGetJSONThen(url, headers, ^id(id root) { return root; }, done);
 }
 
+// The same request for a host that answers slowly, given its own wait rather than the shared timeout.
+static NSMutableURLRequest *requestForWithin(NSURL *url, NSDictionary<NSString *, NSString *> *headers,
+                                             NSTimeInterval seconds) {
+    if (!url) return nil;
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:seconds];
+    [headers enumerateKeysAndObjectsUsingBlock:^(NSString *name, NSString *value, BOOL *stop) {
+        [request setValue:value forHTTPHeaderField:name];
+    }];
+    return request;
+}
+
+// For a host that answers slowly: the same call, willing to wait longer than the shared six seconds,
+// and told the status code as well so a 404 (nothing there) can be told from a failed request.
+void SGLyricsGetJSONWithin(NSURL *url, NSDictionary<NSString *, NSString *> *headers, NSTimeInterval seconds,
+                           void (^done)(id root, NSInteger status)) {
+    NSURLRequest *request = requestForWithin(url, headers, seconds);
+    if (!request) {
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil, 0); });
+        return;
+    }
+    NSString *host = url.host;
+    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+        SGLyricsNoteReply(response, error);
+        if (error || status >= 400) SGLog(@"lyrics: %@ answered %ld, error %@", host, (long)status, error);
+        id root = status >= 400 ? nil : jsonIn(data);
+        dispatch_async(dispatch_get_main_queue(), ^{ done(root, status); });
+    }] resume];
+}
+
+
 void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root, NSHTTPURLResponse *response)) {
     sendForReply(requestFor(url, headers), ^(NSData *body, NSHTTPURLResponse *reply) {
         id root = jsonIn(body);
@@ -181,18 +215,21 @@ NSArray<SGLyricsProvider *> *SGLyricsAllProviders(void) {
             provider.detail = detail;
             // A source that matches by Spotify's own track id has everything it needs from the
             // start; the rest wait for the player to name the track before they can search.
-            provider.needsName = ![key isEqualToString:@"musixmatch"];
+            provider.needsName = ![key isEqualToString:@"musixmatch"] && ![key isEqualToString:SGSpicyLyricsKey] && ![key isEqualToString:@"amll"];
             provider.untimed = [key isEqualToString:@"genius"];
             provider.ask = ask;
             return provider;
         };
         all = @[
             make(@"binilyrics", @"BiniLyrics", @"Apple Music word timing", SGBiniLyricsAsk),
+            make(@"amll", @"AMLL", @"Word timing, by Spotify id or name", SGAMLLAsk),
             make(@"musixmatch", @"Musixmatch", @"Spotify's licensed catalog", SGMusixmatchAsk),
             make(@"unison", @"Unison", @"Hand-timed, few tracks", SGUnisonAsk),
             make(@"netease", @"NetEase", @"Word timing, censored", SGNetEaseAsk),
             make(@"lrclib", @"LRCLIB", @"Line timing, open fallback", SGLrcLibAsk),
+            make(SGSpicyLyricsKey, @"Spicy Lyrics", @"Community word syncs, your own key", SGSpicyLyricsAsk),
             make(@"qqmusic", @"QQ Music", @"Line timing, Chinese catalog", SGQQMusicAsk),
+            make(@"luoyue", @"落月", @"Word timing, Chinese translation (落月)", SGLuoyueAsk),
             make(@"kugou", @"KuGou", @"Word timing, Chinese catalog", SGKuGouAsk),
             make(@"genius", @"Genius", @"Untimed, when no other has lyrics", SGGeniusAsk),
         ];

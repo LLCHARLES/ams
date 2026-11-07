@@ -21,8 +21,18 @@
 // unset or 0 takes whatever translation the source has.
 #define SGKeyLyricsTranslationLanguage @"spotifyglass.lyricsTranslationLanguage"
 
+// A page a credit names someone on: "Uploader: name" and the address it opens.
+@interface SGLyricsLink : NSObject
+@property (nonatomic, copy) NSString *title;
+@property (nonatomic, copy) NSURL *url;
+@end
+
 // What a source answers with, and what the chain merges several of into one.
 @interface SGLyricsResult : NSObject
+// Who made the lines, linked from the credit; and whether the source's terms ask for the credit to
+// show wherever its lines do.
+@property (nonatomic, copy) NSArray<SGLyricsLink *> *creditLinks;
+@property (nonatomic) BOOL creditRequired;
 // What the credit names: the source's name, unless it gave a fuller credit of its own.
 @property (nonatomic, copy) NSString *provider;
 // The source of the text Spotify's own page shows, when it is not the one the lines came from.
@@ -108,6 +118,10 @@ void SGLyricsMigrateLegacyKeys(void);
 // The requests the sources share; each calls back on the main queue, with nil when it failed.
 NSURL *SGLyricsURL(NSString *base, NSDictionary<NSString *, NSString *> *query);
 void SGLyricsGetJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root));
+// For a host that answers slowly: the same call, willing to wait longer than the shared six seconds,
+// and told the status code as well so a 404 (nothing there) can be told from a failed request.
+void SGLyricsGetJSONWithin(NSURL *url, NSDictionary<NSString *, NSString *> *headers, NSTimeInterval seconds,
+                           void (^done)(id root, NSInteger status));
 // The same with the reply's status and headers, and the body read whatever the status: an error's
 // body says why. response is nil when the request never got an answer.
 void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root, NSHTTPURLResponse *response));
@@ -161,8 +175,11 @@ SGLyricsResult *SGMusixmatchRichsyncResult(id body);
 extern SGLyricsAsk SGUnisonAsk;
 extern SGLyricsAsk SGNetEaseAsk;
 extern SGLyricsAsk SGLrcLibAsk;
+extern SGLyricsAsk SGSpicyLyricsAsk;
 extern SGLyricsAsk SGQQMusicAsk;
+extern SGLyricsAsk SGLuoyueAsk;
 extern SGLyricsAsk SGKuGouAsk;
+extern SGLyricsAsk SGAMLLAsk;
 extern SGLyricsAsk SGGeniusAsk;
 // Genius.m. The rows of the lyrics in Genius's embed script, "" between stanzas and the [Chorus]
 // headings left out; nil when the script is not the shape it reads or holds no line.
@@ -208,6 +225,19 @@ NSInteger SGLyricsSongRank(NSString *title, NSString *artist, NSString *songTitl
 NSDictionary<NSString *, NSString *> *SGGeniusSearchQuery(NSString *title, NSString *artist);
 NSNumber *SGGeniusSongIn(NSDictionary *response, NSString *title, NSString *artist);
 
+
+// SpicyLyrics.m. Its key in the order; whether the user's own API key is in the Keychain; what keeps
+// it from answering, for its row on the sources page ("Needs a key", why the key was refused), nil
+// while nothing does; the Lyrics page's row that sets or removes the key; and an API response as
+// lines, nil when it has none.
+extern NSString *const SGSpicyLyricsKey;
+BOOL SGSpicyLyricsKeySet(void);
+// Removes the key from the Keychain (Mod > Clear Keychain).
+void SGSpicyLyricsForgetKey(void);
+NSString *SGSpicyLyricsStatus(void);
+@class SGModRow;
+SGModRow *SGSpicyLyricsKeyRow(void);
+SGLyricsResult *SGSpicyLyricsResult(id root);
 
 UIViewController *SGLyricsSourcesPage(void);   // the ordered list on the Lyrics page
 
