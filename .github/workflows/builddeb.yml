@@ -45,6 +45,42 @@ jobs:
           brew install make dpkg ldid
           echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
+      - name: Pin the iOS SDK to the selected Xcode
+        # SystemTabs.x uses UITab.selectedImage (iOS 26.1+). Theos resolves its own
+        # -isysroot from `xcode-select -print-path`, which on the runner can point at
+        # a different, older Xcode than the one setup-xcode selected — that older SDK
+        # declares UITab but not its 26.1 selectedImage property. Pin every path to the
+        # full iPhoneOS SDK shipped by the Xcode chosen above so the compiler sees the
+        # 26.1 headers. No source file is changed.
+        run: |
+          XCODE_APP="${MD_APPLE_SDK_ROOT:-}"
+          if [ -z "$XCODE_APP" ]; then
+            XCODE_APP="$(dirname "$(dirname "$(xcode-select -p)")")"
+          fi
+          case "$XCODE_APP" in
+            */Contents/Developer) DEV_DIR="$XCODE_APP" ;;
+            *)                   DEV_DIR="$XCODE_APP/Contents/Developer" ;;
+          esac
+          export DEVELOPER_DIR="$DEV_DIR"
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          echo "Xcode app       = $XCODE_APP"
+          echo "DEVELOPER_DIR   = $DEV_DIR"
+          echo "iOS SDK path    = $SDK"
+          echo "iOS SDK version = $(xcrun --sdk iphoneos --show-sdk-version)"
+          UITAB="$SDK/System/Library/Frameworks/UIKit.framework/Headers/UITab.h"
+          if [ -f "$UITAB" ]; then
+            echo "--- UITab.h: selectedImage declarations ---"
+            grep -n "selectedImage" "$UITAB" || echo "WARNING: none found in UITab.h"
+          else
+            echo "WARNING: UITab.h not found at $UITAB"
+          fi
+          {
+            echo "DEVELOPER_DIR=$DEV_DIR"
+            echo "THEOS_PLATFORM_SDK_ROOT=$DEV_DIR"
+            echo "SYSROOT=$SDK"
+            echo "ISYSROOT=$SDK"
+          } >> "$GITHUB_ENV"
+
       - name: Generate the flags table
         # SGFlagList.m is gitignored and generated from an IPA (scripts/extract-flags.py); the link fails
         # without it. With an IPA the real table is read out of it; without one it is built empty, which
