@@ -1419,7 +1419,7 @@ typedef struct {
     for (NSNotificationName name in @[UIContentSizeCategoryDidChangeNotification, UIAccessibilityDarkerSystemColorsStatusDidChangeNotification])
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(creditStyleChanged) name:name object:nil];
     _sing = [SGRSingButton new];
-    _sing.hidden = !SGEnabled(SGKeySingButton);
+    _sing.hidden = !SGSingButtonShown();
     [self addSubview:_sing];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(singButtonChanged) name:SGSingButtonDidChangeNotification object:nil];
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped:)]];
@@ -1440,7 +1440,7 @@ typedef struct {
 
 // Karaoke's settings switched the mic off or on: hidden at once, Karaoke itself as it was.
 - (void)singButtonChanged {
-    _sing.hidden = !SGEnabled(SGKeySingButton);
+    _sing.hidden = !SGSingButtonShown();
 }
 
 - (void)refreshCreditStyle {
@@ -1825,13 +1825,6 @@ typedef struct {
     _arrangement++;
     [_dots removeFromSuperview];
     _dots = nil;
-}
-
-static BOOL hasTranslations(NSArray<SGKaraokeLine *> *lines) {
-    for (SGKaraokeLine *line in lines) {
-        if (line.translation.length) return YES;
-    }
-    return NO;
 }
 
 // A line with words to translate: not an empty one, nor a ♪ holding a break.
@@ -2470,7 +2463,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
     NSArray<SGKaraokeLine *> *kept = _lines && track ? [self linesFor:track] : nil;
     if (kept && kept != _lines && kept != _passedOver) {
         if (!_hasTranslation && kept.count == _lines.count && SGKaraokeLinesTiming(kept) == SGKaraokeLinesTiming(_lines)
-            && hasTranslations(kept)) {
+            && SGKaraokeHasTranslations(kept)) {
             // Musixmatch's translations come in a moment after the lines, as copies of them: the song is
             // restyled with them where it stands.
             SGLog(@"karaoke: translations of %@ came in", track);

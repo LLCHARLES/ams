@@ -38,6 +38,14 @@ void SGRComposeTabBar(UIView *tabBar);
 void SGRLogTabBarRow(UIView *tabBar);
 // Lays the bar out again after the Navbar page changes something, so it does not wait for a touch.
 void SGRRefreshTabBar(void);
+
+// TabBarRoom.m. The hold on Spotify's Home that opens Mod Settings, added once.
+void SGRHoldHomeForModSettings(UIView *stockBar);
+// The room made under Spotify's bar for the taller bar of the mod's (see "room for the glass bar" there): the bottom
+// safe area `container` (TabBarContainerImpl) is given, and what UIKit's `bar` asks for with no room made.
+CGFloat SGRTabBarRoom(void);
+CGFloat SGRTabBarGlassHeight(UITabBar *bar, UIView *stockBar);
+void SGRMakeTabBarRoom(UIViewController *container, UIView *stockBar, UITabBar *bar);
 // Whether a tab of the composed row is one of the split tabs at its trailing end, for TabBar.x's second bar.
 BOOL SGRTabIsApart(UIView *item);
 // The tab of the mod's own whose page is on screen, which the glass bar shows selected; nil when none is.
@@ -56,6 +64,11 @@ void SGRSetTabBarMinimized(BOOL minimized, BOOL animated);
 // The room between the minimized bar's two tabs, `height` high and centered on them, in `host`'s
 // coordinates: where the now playing card goes. CGRectNull while the bar is not minimized or not on screen.
 CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height);
+// The expanded bar's glass from the leading edge of its first platter to the trailing edge of its last, in `host`'s
+// coordinates (x only counts): the now playing card above the bar takes these edges, as the Music app's mini
+// player stands as wide as its tab bar. CGRectNull out of a window or in a regular width, where Spotify's bar is not
+// the glass row.
+CGRect SGRTabBarGlassRow(UIView *host);
 
 // A tab's glyph as the glass bar draws it, white, filled when `active` (TabBar.x), for the Tab bar page.
 UIImage *SGRNavbarGlyph(NSDictionary *entry, BOOL active);
