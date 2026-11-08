@@ -63,6 +63,11 @@
 #import "Shared/Sing/Sing.h"
 #import "SystemPlayer.h"
 #import "SystemQueue.h"
+// AMS-beta's ... menu: the Lyrics Source popover (Redesigned/Player/PlayerMenu.m's SGRLyricsSourcePanel)
+// reads the song's lyrics sources' offers, the karaoke timing of their lines, and the page's popover presenter.
+#import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsSources/LyricsSources.h"
+#import "Settings/SGPageStyle.h"
 
 // The page's side margin, the Music app's.
 static const CGFloat kMargin = 28;
@@ -86,10 +91,13 @@ static const CFTimeInterval kEmptyWait = 0.6;
 // The cover rests at the redesigned player's paused size (PlayerArtwork.x's kPausedScale).
 static const CGFloat kPausedScale = 0.84;
 // The progress bar after f728743/Sim-Radio-SwiftUI's ElasticSlider.swift and its .playbackProgress config (MIT,
-// Copyright (c) 2025 Alexey Vorobyov; its owner's pick, 2026-11-01): 7 high at rest and kScrubGrowth in from each end, 17
-// held and the full width, the times moving out with it, on SwiftUI's .smooth(duration: 0.3, extraBounce: 0.3) both
-// ways; no stretch past the ends. And its touch area.
-static const CGFloat kTrackRest = 7, kTrackHeld = 17, kScrubGrowth = 9, kScrubberHeight = 28;
+// Copyright (c) 2025 Alexey Vorobyov; its owner's pick, 2026-11-01): 7 high at rest, 17 held, on SwiftUI's
+// .smooth(duration: 0.3, extraBounce: 0.3) both ways, and its touch area. AMS-beta differs here: its duration
+// unit is a constant width and the bar's two ends always line up with the elapsed/remaining labels' outer edges
+// (PlayerLyrics.x placeDuration scales the WHOLE unit, bar and times together, by kBarScale=0.956; the bar is
+// never inset on its own). So kScrubGrowth is 0: no resting inset, no stretch past the ends, the times never
+// translated. The height still springs, which is the elastic part the eye sees.
+static const CGFloat kTrackRest = 7, kTrackHeld = 17, kScrubGrowth = 0, kScrubberHeight = 28;
 static const NSTimeInterval kScrubSpring = 0.3;
 static const CGFloat kScrubBounce = 0.3;
 // White's opacity: the progress fill at rest and held, and the part still to play.
@@ -100,7 +108,11 @@ static const CFTimeInterval kSeekHold = 1.5;
 // How far a finger moves along the bar before the pans above it go off (the redesigned player's volume's kDragStart).
 static const CGFloat kScrubDragStart = 6;
 // The cover as the thumbnail it shrinks to while the lyrics are up, and the gap between it and the title beside it.
-static const CGFloat kThumbSide = 60, kThumbGap = 14;
+// AMS-beta's own numbers (Redesigned/Player/PlayerLyrics.x): kThumbSide=72, kThumbGap=16, kThumbTop=-15 --
+// the thumbnail's top sits 15pt above the artwork band's top. The m1 page draws the whole row (thumbnail,
+// title, star, the ...) itself, so the row is anchored to beta's coverTop (height*0.1085 clamped) instead of
+// the header's foot; every frame below is derived from this one thumb rect, so the whole row moves together.
+static const CGFloat kThumbSide = 72, kThumbGap = 16, kThumbTop = -15;
 // The lyrics glyph, the redesigned player's footer's.
 static NSString *const kLyricsSymbol = @"quote.bubble", *const kLyricsSymbolOpen = @"quote.bubble.fill";
 
@@ -157,7 +169,12 @@ static const CGFloat kAddGlyph = 22, kAddSide = 44;
 // controls to the volume; 76 and 67 give beta's ~80 and ~91, with the title lifted to just under the cover. The
 // volume's 38 and the footer's own place are unchanged. Beta's AI DJ keeps Spotify's places (sg_ordinaryInfo off);
 // these two gaps follow the ordinary player's.
-static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 76, kTimesAboveControls = 67, kScrubberAboveTimes = 17;
+// kScrubberAboveTimes is the bar's centre above the times' centre. On AMS-beta the times sit kTimeDrop=8
+// further under the bar than Spotify's own (PlayerLyrics.x placeDuration puts a translation(0, kTimeDrop)
+// on both time labels), so the bar/times gap is the native spacing plus 8. m1's 17 is the native spacing;
+// 25 is the same plus beta's 8. It lifts the bar and the title to beta's places as well, while the times
+// keep their own (v4's 569, beta's 569.0).
+static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 76, kTimesAboveControls = 67, kScrubberAboveTimes = 25;
 static const CGFloat kHeaderSide = 16, kHeaderDrop = 2, kSkipShare = 0.25, kSkipGlyph = 32, kPlayGlyph = 44;
 // An episode's skips go back and forward this far, as Spotify's episode player's 15 s buttons do.
 static const double kEpisodeSkip = 15;
@@ -1186,6 +1203,165 @@ UIView *SGRSystemMakeRouteButton(CGFloat pointSize, NSString *place) {
 }
 @end
 
+#pragma mark - the ...'s Lyrics Source (AMS-beta's Redesigned/Player/PlayerMenu.m)
+
+// AMS-beta's ... opens a popover that asks every lyrics source for the playing song and lists each as it
+// answers (issue #67). This page is drawn by the mod, with no Spotify player behind it, so the sheet's
+// quick rows (Share, Add to Playlist, Add to Queue) and the Speed, Pitch & Reverb panel cannot come over:
+// the first are Spotify's own sheet (SGPageStyle's context menu), the second needs
+// SGPlayerShowSpeedPitchPanel / SGPlayerReverb / SpeedPitchMenu.x, none of which this branch has. The
+// song's lyrics sources are the mod's own, so that popover can. The Artwork submenu and the Share /
+// Go to Album / Go to Artist row are already the page's own equivalents of beta's other ... items.
+static const CGFloat kSourcePanelWidth = 300, kSourcePanelMaxHeight = 440;
+
+static NSString *sgrLyricsTimingText(NSArray<SGKaraokeLine *> *lines) {
+    switch (SGKaraokeLinesTiming(lines)) {
+        case SGKaraokeTimingWords: return @"Word by word";
+        case SGKaraokeTimingLine:  return @"Line by line";
+        default:                   return @"Not synced";
+    }
+}
+
+// A row of the panel: a source to pick (nil key: Automatic), or one still asked, or the note that none has lines.
+@interface SGRSourceRow : NSObject
+@property (nonatomic, copy) NSString *key, *title, *subtitle;
+@property (nonatomic) BOOL picked, asking, note;
+@end
+
+@implementation SGRSourceRow
+@end
+
+@interface SGRLyricsSourcePanel : UITableViewController
+@property (nonatomic, copy) NSString *track;
+@end
+
+@implementation SGRLyricsSourcePanel {
+    NSArray<SGRSourceRow *> *_rows;
+}
+
+- (instancetype)init {
+    return [super initWithStyle:UITableViewStylePlain];
+}
+
+- (void)dealloc {
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.tableView.backgroundColor = UIColor.clearColor;
+    UILabel *title = [UILabel new];
+    title.text = @"Lyrics Source";
+    title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    title.textColor = UIColor.labelColor;
+    title.accessibilityTraits = UIAccessibilityTraitHeader;
+    title.frame = CGRectMake(20, 16, kSourcePanelWidth - 40, ceil(title.font.lineHeight));
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kSourcePanelWidth, CGRectGetMaxY(title.frame) + 6)];
+    [header addSubview:title];
+    self.tableView.tableHeaderView = header;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(offersChanged:) name:SGLyricsOffersDidChangeNotification object:nil];
+    SGLyricsAskOffers(_track);
+    [self rebuild];
+}
+
+- (void)offersChanged:(NSNotification *)note {
+    if ([note.object isEqual:_track]) [self rebuild];
+}
+
+// Automatic, checked while nothing is picked and naming what the order chose, then the sources in the
+// order: those with lines for the track, the one picked checked, and those still asked with a spinner.
+- (void)rebuild {
+    NSArray<NSString *> *asking = nil;
+    NSDictionary<NSString *, SGLyricsResult *> *offers = SGLyricsOffersSoFar(_track, &asking);
+    NSString *current = SGLyricsChosenSource(_track);
+    SGRSourceRow *automatic = [SGRSourceRow new];
+    automatic.title = @"Automatic";
+    automatic.subtitle = current ? @"As the order chooses" : SGLyricsCreditFor(_track);
+    automatic.picked = !current;
+    NSMutableArray<SGRSourceRow *> *rows = [NSMutableArray arrayWithObject:automatic];
+    for (NSString *key in SGLyricsOrder()) {
+        SGLyricsResult *offer = offers[key];
+        BOOL out = [asking containsObject:key];
+        if (!offer && !out) continue;
+        SGRSourceRow *row = [SGRSourceRow new];
+        row.key = key;
+        row.title = SGLyricsProviderFor(key).name;
+        row.subtitle = offer ? sgrLyricsTimingText(offer.karaokeLines) : @"Asking...";
+        row.asking = !offer;
+        row.picked = offer && [key isEqualToString:current];
+        [rows addObject:row];
+    }
+    if (rows.count == 1) {
+        SGRSourceRow *none = [SGRSourceRow new];
+        none.title = @"No Source Has Lyrics";
+        none.note = YES;
+        [rows addObject:none];
+    }
+    _rows = rows;
+    [self.tableView reloadData];
+    [self.tableView layoutIfNeeded];
+    self.preferredContentSize = CGSizeMake(kSourcePanelWidth, MIN(self.tableView.contentSize.height, kSourcePanelMaxHeight));
+}
+
+- (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section {
+    return _rows.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
+    SGRSourceRow *row = _rows[path.row];
+    UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"source"] ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"source"];
+    UIListContentConfiguration *content = [UIListContentConfiguration subtitleCellConfiguration];
+    content.text = row.title;
+    content.secondaryText = row.subtitle;
+    BOOL dim = row.asking || row.note;
+    content.textProperties.color = dim ? UIColor.secondaryLabelColor : UIColor.labelColor;
+    content.secondaryTextProperties.color = UIColor.secondaryLabelColor;
+    cell.contentConfiguration = content;
+    cell.backgroundColor = UIColor.clearColor;
+    cell.tintColor = UIColor.labelColor;
+    cell.selectionStyle = dim ? UITableViewCellSelectionStyleNone : UITableViewCellSelectionStyleDefault;
+    cell.accessoryType = row.picked ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+    UIActivityIndicatorView *spinner = nil;
+    if (row.asking) {
+        spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+        [spinner startAnimating];
+    }
+    cell.accessoryView = spinner;
+    cell.accessibilityTraits = dim ? UIAccessibilityTraitNotEnabled : UIAccessibilityTraitButton | (row.picked ? UIAccessibilityTraitSelected : 0);
+    return cell;
+}
+
+- (NSIndexPath *)tableView:(UITableView *)table willSelectRowAtIndexPath:(NSIndexPath *)path {
+    SGRSourceRow *row = _rows[path.row];
+    return row.asking || row.note ? nil : path;
+}
+
+- (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
+    SGRSourceRow *row = _rows[path.row];
+    if (row.key) SGLyricsChooseSource(_track, row.key);
+    else SGLyricsChooseAutomatic(_track);
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+@end
+
+// The one ... item of beta's that this page can open. It names the credit under it and presents the panel
+// from the ... itself; beta held that button in sg_moreButton, here menuItemsFrom: hands us its anchor.
+static UIAction *sgrLyricsSourceItem(UIView *anchor) {
+    NSString *track = SGKaraokePlayingTrack();
+    NSArray<NSString *> *parts = [SGURIString(SGPlayerState().track.URI) componentsSeparatedByString:@":"];
+    if (!SGLyricsEnabled() || !track.length || (parts.count > 2 && [parts[1] isEqualToString:@"episode"])) return nil;
+    __weak UIView *from = anchor;
+    UIAction *open = [UIAction actionWithTitle:@"Lyrics Source" image:[UIImage systemImageNamed:@"quote.bubble"] identifier:nil
+                                       handler:^(UIAction *action) {
+        SGRLyricsSourcePanel *panel = [SGRLyricsSourcePanel new];
+        panel.track = track;
+        panel.preferredContentSize = CGSizeMake(kSourcePanelWidth, 200);
+        SGPresentPopover(panel, from);
+    }];
+    open.subtitle = SGLyricsCreditFor(track);
+    return open;
+}
+
 #pragma mark - the page
 
 @interface SGRSystemPlayerPage () <SGPlayerStateObserver, UIGestureRecognizerDelegate, SGRSystemTurnPage>
@@ -1308,6 +1484,10 @@ UIView *SGRSystemMakeRouteButton(CGFloat pointSize, NSString *place) {
     };
     _more = [self makeMoreButton];
     _context = [UILabel new];
+    // AMS-beta draws no row over its cover: PlayerHeader.x's hideHeaderExtras hides every header UILabel
+    // but the ... ("no down arrow, no "Playing from ..." line"). The context -- the playlist or album
+    // name -- is still built for SGRSystemContextTitle() and refreshQueue(), but is never shown here.
+    _context.hidden = YES;
     // What the redesigned player's header says, in its weight and white (contextTitle).
     _context.font = SGRFont(UIFontTextStyleSubheadline, UIFontWeightBold, UIContentSizeCategoryLarge);
     _context.textColor = SGRPrimary();
@@ -1744,7 +1924,8 @@ UIView *SGRSystemMakeRouteButton(CGFloat pointSize, NSString *place) {
     _close.frame = CGRectMake(kHeaderSide, top, button, button);
     _close.hidden = YES;
     _context.frame = CGRectMake(kHeaderSide + button + 8, top, MAX(0, width - 2 * (kHeaderSide + button + 8)), button);
-    CGFloat headerBottom = top + button;
+    // The header's foot is no longer used: beta anchors the lyrics' top row to the artwork band's top
+    // (coverTop + kThumbTop) instead, so the whole row -- thumbnail, title, star, ... -- moves as one.
 
     // From the bottom up: the row of three with the route line under it, the volume, the controls, the progress, the
     // two lines. The row stands where the redesigned player's footer put it.
@@ -1795,7 +1976,7 @@ UIView *SGRSystemMakeRouteButton(CGFloat pointSize, NSString *place) {
     // beside it, and the lines from there down to the progress. The stage keeps its place either way, so the lines come
     // and go where they stand. On their own, the lines take the whole safe area, kAloneInset in at both ends (with
     // Keep the title, from where they stood down): aloneStage.
-    CGRect thumb = CGRectMake(kMargin, headerBottom + 16, kThumbSide, kThumbSide);
+    CGRect thumb = CGRectMake(kMargin, coverTop + kThumbTop, kThumbSide, kThumbSide);
     CGFloat stageTop = CGRectGetMaxY(thumb) + 8;
     CGRect stage = CGRectMake(0, stageTop, width, MAX(0, scrubberY - 8 - stageTop));
     _stage.frame = _alone ? [self aloneStageFrom:stage] : stage;
@@ -1964,6 +2145,11 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     UIMenu *artwork = SGRPlayerMenuArtwork(changed);
     if (artwork) [own addObject:artwork];
     [own addObject:[self sleepTimerMenu]];
+    // AMS-beta's ... also opens the Lyrics Source popover (PlayerMenu.m's playerItems). Its quick rows
+    // and the speed/pitch panel need Spotify's own sheet, which this page does not have; the lyrics
+    // sources are the mod's own, so this one comes back.
+    UIAction *lyrics = sgrLyricsSourceItem(anchor);
+    if (lyrics) [own addObject:lyrics];
     [menu addObject:inlineGroup(own)];
 
     // The artist's concerts, in the menu itself (its owner, 2026-11-06: no More submenu).
