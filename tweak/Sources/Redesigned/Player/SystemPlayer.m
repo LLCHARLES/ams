@@ -155,27 +155,22 @@ static const CGFloat kAddGlyph = 22, kAddSide = 44;
 // and next out from the middle as a share of the width between the margins; the bottom row's glyphs at a fifth, half
 // and four fifths of the width, as the redesigned player's footer placed them (kLeading, kMiddle, kTrailing).
 //
-// The two gaps over the controls are AMS-beta's own places, not m1's 440x956 screenshots and not the raw dump of
-// Spotify's stack. Beta's tree (trees/clean/player/01.txt, quoted at PlayerLyrics.x:17) is measured on a 402x874
-// iPhone 16 Pro: npv.bottomStackView {0, 576.67, 402, 236}, information unit {0, 0, 402, 64} (title, artist, add),
-// duration unit {0, 64, 402, 40} (bar and times), an 88pt controls unit and a 44pt footer whose middle is 790.67.
-// Beta then lifts them every layout pass: PlayerLyrics.x's placeTitleRow raises the information unit kInfoLift=92
-// (closed and ordinary too), placeDuration raises the bar kBarLift=85 with the times kTimeDrop=8 under it;
-// PlayerFooter.x's SGRPlayerLowerRow drops the footer to height-MAX(safe.bottom+32, 34) -- our rowMid -- and lifts
-// the controls kControlsLift=49 plus kVolumeLift=10 for the volume row. So on 402x874 the controls end up at
-// title 484.67, bar 555.67, times ~584, play ~666, volume ~756, footer 808: spread from just under the cover's
-// foot (66% of the height) down to the row, not crowded into the bottom third. Scaled to 393x852 (x0.975) that is
-// 472 / 542 / 569 / 649 / 737 / 787. m1's 58 and 46 gave 55pt from the times to the controls and 70pt from the
-// controls to the volume; 76 and 67 give beta's ~80 and ~91, with the title lifted to just under the cover. The
-// volume's 38 and the footer's own place are unchanged. Beta's AI DJ keeps Spotify's places (sg_ordinaryInfo off);
-// these two gaps follow the ordinary player's.
-// kScrubberAboveTimes is the bar's centre above the times' centre. On AMS-beta the times sit kTimeDrop=8
-// further under the bar than Spotify's own (PlayerLyrics.x placeDuration puts a translation(0, kTimeDrop)
-// on both time labels), so the bar/times gap is the native spacing plus 8. m1's 17 is the native spacing;
-// 25 is the same plus beta's 8. It lifts the bar and the title to beta's places as well, while the times
-// keep their own (v4's 569, beta's 569.0).
-static const CGFloat kVolumeAboveRow = 38, kControlsAboveVolume = 76, kTimesAboveControls = 67, kScrubberAboveTimes = 25;
-static const CGFloat kHeaderSide = 16, kHeaderDrop = 2, kSkipShare = 0.25, kSkipGlyph = 32, kPlayGlyph = 44;
+// The chain from the bottom row up is calibrated on the owner's two real 402x874 screenshots (2026-11-09):
+// Apple Music's own Now Playing, and this page. Both are the same size, so every control was read off in points.
+// Apple Music: cover 121..449, title 497..513, artist 521..537, bar 573..579, times 593..601, play 646..686,
+// volume 753..759, footer 798..817; its bar spans x 32..369. This page had the bar and the times 10 and 6pt too
+// high and the play and volume 4 and 5pt too low -- the middle was pulled apart. With controlsSpacing() 1.2 on this
+// height and rowMid 808, the target chain is volume 756 -> controls 666 -> times 597 -> bar 576, which
+// round(kVolumeAboveRow*1.2)=52, round(kControlsAboveVolume*1.2)=90, round(kTimesAboveControls*1.2)=69 and
+// kScrubberAboveTimes=21 give exactly. kBarInset pulls the bar and both labels in to Apple's 32..370 without
+// moving the volume, the thumbnail or the buttons; kSkipShare 0.308 puts the skips at 94 and 307, not 113/288.
+// The title and artist keep their own place just under the cover (kTitleAboveScrubber, measured off the bar's
+// top): they used to hang off scrubberY, so bringing the bar down would have dragged them down with it.
+static const CGFloat kVolumeAboveRow = 43, kControlsAboveVolume = 75, kTimesAboveControls = 57.5, kScrubberAboveTimes = 21;
+// The bar and the two time labels sit this far in from kMargin, to Apple Music's 32..370 on a 402pt page, and
+// the title/artist block bottom above the bar's top (it no longer hangs off the bar itself).
+static const CGFloat kBarInset = 4, kTitleAboveScrubber = 24;
+static const CGFloat kHeaderSide = 16, kHeaderDrop = 2, kSkipShare = 0.308, kSkipGlyph = 32, kPlayGlyph = 44;
 // An episode's skips go back and forward this far, as Spotify's episode player's 15 s buttons do.
 static const double kEpisodeSkip = 15;
 // With the volume row off, the controls' middle above the bottom row's: they close up into its room.
@@ -1952,12 +1947,13 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     _next.center = CGPointMake(round(width / 2 + inner * kSkipShare), controlsMid);
     _repeat.center = CGPointMake(width - kMargin - 12, controlsMid);
     CGFloat timesHeight = ceil(_elapsed.font.lineHeight), timesMid = controlsMid - round(kTimesAboveControls * spacing), timesY = round(timesMid - timesHeight / 2);
-    _elapsed.frame = CGRectMake(kMargin, timesY, inner / 2, timesHeight);
-    _remaining.frame = CGRectMake(kMargin + inner / 2, timesY, inner / 2, timesHeight);
+    CGFloat barX = kMargin + kBarInset, barWidth = MAX(0, inner - 2 * kBarInset);
+    _elapsed.frame = CGRectMake(barX, timesY, barWidth / 2, timesHeight);
+    _remaining.frame = CGRectMake(barX + barWidth / 2, timesY, barWidth / 2, timesHeight);
     CGFloat scrubberY = round(timesMid - kScrubberAboveTimes - kScrubberHeight / 2);
-    _scrubber.frame = CGRectMake(kMargin, scrubberY, inner, kScrubberHeight);
+    _scrubber.frame = CGRectMake(barX, scrubberY, barWidth, kScrubberHeight);
     CGFloat titleHeight = ceil(_title.font.lineHeight), artistHeight = ceil(_artist.font.lineHeight);
-    CGFloat artistY = scrubberY - 14 - artistHeight, titleY = artistY - titleHeight;
+    CGFloat artistY = scrubberY - kTitleAboveScrubber - artistHeight, titleY = artistY - titleHeight;
 
     // The cover keeps AMS-beta's place (PlayerArtwork.x coverFrameIn): a share of the screen down,
     // as wide as the screen less 23pt at each side, and never past 66% of the screen's height.
