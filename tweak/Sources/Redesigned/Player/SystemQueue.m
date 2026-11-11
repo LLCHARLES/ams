@@ -1,4 +1,5 @@
 #import "SystemQueue.h"
+#import "SystemHistory.h"
 #import <objc/message.h>
 #import "Core/SGCore.h"
 #import "Headers/SPTPlayer.h"
@@ -125,6 +126,7 @@ BOOL SGRSystemOptionAllowed(SPTPlayerState *state, BOOL repeat) {
     UIButton *_automix;   // one chip, three states as repeat has: off, AutoMix (beat-matched), Crossfade
     UIButton *_shuffle, *_repeat;   // shown while the controls have them hidden (showsShuffle, showsRepeat)
     UIButton *_clear;               // clears Playing Next, dimmed while it holds nothing
+    UIButton *_jam;                 // starts a Jam, or opens it while one is on (onJam)
     UIView *_chipsRow;              // holds the chips, so the row fades as a whole whatever each chip's own dim
     BOOL _shuffling;
     NSInteger _repeatMode;          // 0 off, 1 the playlist or album, 2 the track
@@ -138,6 +140,7 @@ BOOL SGRSystemOptionAllowed(SPTPlayerState *state, BOOL repeat) {
     NSArray<NSString *> *_historyKey;
     BOOL _pastFromQueue;
     UIView *_pinnedHeading;   // the group heading held under the chips once its own has gone under them
+    UIView *_pinnedClip;      // holds it, cut at the chips' foot, so the next group pushing it up never shows it over them
     NSString *_pinnedKey;     // what it was made for
     CGFloat _pinnedBottom;    // where it ends, the top's fade beginning there; 0 with none      // History read from Spotify's whole queue: the state's few no longer stand in for it
     NSArray<SGRQueueGroup *> *_groups;
@@ -206,11 +209,15 @@ BOOL SGRSystemOptionAllowed(SPTPlayerState *state, BOOL repeat) {
     _clear = [self chipWithImage:chipSymbol(@"xmark") title:@"Clear Playing Next"];
     _clear.titleLabel.font = SGRFont(UIFontTextStyleSubheadline, UIFontWeightSemibold, UIContentSizeCategoryExtraLarge);
     [_clear addAction:[UIAction actionWithHandler:^(UIAction *action) { [weakSelf tapClear]; }] forControlEvents:UIControlEventTouchUpInside];
+    _jam = [self chipWithImage:chipSymbol(@"person.2.fill") title:@"Start a Jam"];
+    _jam.titleLabel.font = SGRFont(UIFontTextStyleSubheadline, UIFontWeightSemibold, UIContentSizeCategoryExtraLarge);
+    [_jam addAction:[UIAction actionWithHandler:^(UIAction *action) { if (weakSelf.onJam) weakSelf.onJam(); }]
+   forControlEvents:UIControlEventTouchUpInside];
     _chipsRow = [UIView new];
     _headShown = 1;
     [self addSubview:_list];
     [self addSubview:_chipsRow];
-    for (UIView *view in @[_automix, _shuffle, _repeat, _clear]) [_chipsRow addSubview:view];
+    for (UIView *view in @[_automix, _shuffle, _repeat, _clear, _jam]) [_chipsRow addSubview:view];
     [self syncCrossfade];
     [self syncClear];
     return self;
@@ -287,6 +294,39 @@ static UIImage *chipSymbol(NSString *name) {
     chip.tintColor = ink;
     [chip setTitleColor:ink forState:UIControlStateNormal];
     chip.accessibilityValue = on ? @"On" : @"Off";
+    [self cutOut:chip];
+}
+
+// Lit, the glyph and the name are cut out of the light fill, as the lyrics' and the queue's discs are on the page (its
+// owner, 2026-11-09), so the page shows through them: a mask of the capsule less what the chip draws, made again
+// whenever the chip's size, glyph or name changes. Unlit, no mask.
+- (void)cutOut:(UIButton *)chip {
+    BOOL lit = CGColorEqualToColor(chip.backgroundColor.CGColor, [self fillFor:YES].CGColor);
+    CGSize size = chip.bounds.size;
+    if (!lit || size.width < 1 || size.height < 1) {
+        if (chip.layer.mask) chip.layer.mask = nil;
+        return;
+    }
+    [chip layoutIfNeeded];
+    UIImage *glyph = [chip imageForState:UIControlStateNormal];
+    NSString *title = [chip titleForState:UIControlStateNormal];
+    CGRect glyphFrame = chip.imageView.frame, titleFrame = chip.titleLabel.frame;
+    UIFont *font = chip.titleLabel.font;
+    UIImage *mask = [[[UIGraphicsImageRenderer alloc] initWithSize:size] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [UIColor.blackColor setFill];
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, size.width, size.height) cornerRadius:size.height / 2] fill];
+        CGContextSetBlendMode(context.CGContext, kCGBlendModeDestinationOut);
+        if (glyph && !CGRectIsEmpty(glyphFrame)) [[glyph imageWithTintColor:UIColor.blackColor renderingMode:UIImageRenderingModeAlwaysOriginal] drawInRect:glyphFrame blendMode:kCGBlendModeDestinationOut alpha:1];
+        if (title.length && font && !CGRectIsEmpty(titleFrame))
+            [title drawInRect:titleFrame withAttributes:@{NSFontAttributeName: font, NSForegroundColorAttributeName: UIColor.blackColor}];
+    }];
+    CALayer *layer = [chip.layer.mask isKindOfClass:CALayer.class] ? chip.layer.mask : [CALayer layer];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.frame = chip.bounds;
+    layer.contents = (__bridge id)mask.CGImage;
+    [CATransaction commit];
+    if (chip.layer.mask != layer) chip.layer.mask = layer;
 }
 
 // Mod Settings' AutoMix, the same setting (its owner, 2026-11-02): one chip that steps through it as repeat steps
@@ -325,14 +365,14 @@ static UIImage *chipSymbol(NSString *name) {
               || !([chip titleForState:UIControlStateNormal] == title || [[chip titleForState:UIControlStateNormal] isEqualToString:title]);
     BOOL lights = !CGColorEqualToColor(chip.backgroundColor.CGColor, [self fillFor:on].CGColor);
     BOOL moves = animated && chip.window && (swaps || lights);
+    // The glyph and name change at once: a cross-dissolve showed both names over each other, cut out of the fill by the
+    // mask of only one of them (its owner's recording, 2026-11-09). The fill fades and the chip gives instead.
     if (swaps) {
-        void (^swap)(void) = ^{
+        [UIView performWithoutAnimation:^{
             [chip setImage:image forState:UIControlStateNormal];
             [chip setTitle:title forState:UIControlStateNormal];
-        };
-        if (moves) [UIView transitionWithView:chip duration:SGRCrossfade options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
-                                   animations:swap completion:nil];
-        else [UIView performWithoutAnimation:swap];
+            [chip layoutIfNeeded];
+        }];
     }
     if (moves) {
         SGRAnimate(SGRMotionFade, ^{ [self paintChip:chip on:on]; }, nil);
@@ -387,7 +427,8 @@ static UIImage *chipSymbol(NSString *name) {
     [self clearQueued];
 }
 
-// Clear lit while Playing Next holds tracks it can take out, dimmed while not.
+// Clear shown while Playing Next holds tracks it can take out, and gone while not (its owner, 2026-11-09: not dimmed);
+// the other chips take its room.
 - (void)syncClear {
     BOOL any = NO;
     for (SGRQueueGroup *group in _groups) if ([group.heading isEqualToString:@"Playing Next"] && group.tracks.count) any = YES;
@@ -396,8 +437,26 @@ static UIImage *chipSymbol(NSString *name) {
     if (!([_clear titleForState:UIControlStateNormal] == title || [[_clear titleForState:UIControlStateNormal] isEqualToString:title]))
         [UIView performWithoutAnimation:^{ [self->_clear setTitle:title forState:UIControlStateNormal]; [self->_clear layoutIfNeeded]; }];
     [self paintChip:_clear on:NO];
+    BOOL changed = _clear.enabled != on || _clear.hidden == on;
     _clear.enabled = on;
-    _clear.alpha = on ? 1 : 0.4;
+    if (!changed) return;
+    if (!self.window) {
+        _clear.hidden = !on;
+        _clear.alpha = on ? 1 : 0;
+        [self setNeedsLayout];
+        return;
+    }
+    if (on) {
+        _clear.hidden = NO;
+        _clear.alpha = 0;
+    }
+    [self setNeedsLayout];
+    SGRAnimate(SGRMotionPress, ^{
+        [self layoutIfNeeded];
+        self->_clear.alpha = on ? 1 : 0;
+    }, ^(BOOL finished) {
+        if (!self->_clear.enabled) self->_clear.hidden = YES;
+    });
 }
 
 - (void)stepShuffle {
@@ -429,6 +488,12 @@ static UIImage *chipSymbol(NSString *name) {
     [self syncAutoMixAnimated:YES];
 }
 
+- (void)setJamOn:(BOOL)jamOn {
+    _jamOn = jamOn;
+    [self paintChip:_jam on:jamOn];
+    _jam.accessibilityLabel = jamOn ? @"Jam" : @"Start a Jam";
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGSize size = self.bounds.size;
@@ -436,8 +501,13 @@ static UIImage *chipSymbol(NSString *name) {
     NSMutableArray<UIView *> *chips = [NSMutableArray array];
     if (_showsShuffle) [chips addObject:_shuffle];
     if (_showsRepeat) [chips addObject:_repeat];
+    // Jam in the middle, labelled like AutoMix and Clear (its owner, 2026-11-09): AutoMix, Jam, Clear.
     [chips addObject:_automix];
-    [chips addObject:_clear];
+    [chips addObject:_jam];
+    if (_clear.enabled) [chips addObject:_clear];
+    NSString *jamTitle = self.glyphsOnly ? nil : @" Jam";
+    if (!([_jam titleForState:UIControlStateNormal] == jamTitle || [[_jam titleForState:UIControlStateNormal] isEqualToString:jamTitle]))
+        [UIView performWithoutAnimation:^{ [self->_jam setTitle:jamTitle forState:UIControlStateNormal]; }];
     CGFloat chipWidth = MAX(0, (size.width - 2 * kSideMargin - kChipGap * (chips.count - 1)) / chips.count);
     // With headRoom the chips ride up with the list from under the head, and once at the top they stay there, the tracks
     // passing under them (its owner, 2026-11-06: "i wanted the chips to be stuck on the top"); without, they stand over
@@ -455,6 +525,7 @@ static UIImage *chipSymbol(NSString *name) {
         chip.bounds = CGRectMake(0, 0, chipWidth, kChipHeight);
         chip.center = CGPointMake(kSideMargin + i * (chipWidth + kChipGap) + chipWidth / 2, kChipHeight / 2);
     }];
+    for (UIButton *chip in @[_automix, _shuffle, _repeat, _clear, _jam]) [self cutOut:chip];
     CGFloat listTop = inList ? 0 : kChipHeight + kChipsBelow - kListTopFade / 2;
     _list.frame = CGRectMake(0, listTop, size.width, MAX(0, size.height - listTop));
     [CATransaction begin];
@@ -530,6 +601,12 @@ static UIImage *chipSymbol(NSString *name) {
 // the head, pulled down into view as the Music app's is (its owner, 2026-11-06). Kept where the head was at rest.
 - (void)showHistory:(SPTPlayerState *)state {
     if (_pastFromQueue) return;
+    // The mod's own History (SystemHistory.h) in place of the state's, while its switch is on.
+    NSArray *own = SGRSystemHistoryTracks();
+    if (own) {
+        [self showPast:own];
+        return;
+    }
     id reverse = [state respondsToSelector:@selector(reverse)] ? state.reverse : nil;
     [self showHistoryOf:reverse];
 }
@@ -548,7 +625,8 @@ static UIImage *chipSymbol(NSString *name) {
     NSMutableArray<SPTPlayerTrack *> *tracks = [NSMutableArray array];
     NSMutableArray<NSString *> *key = [NSMutableArray array];
     for (id track in [reverse isKindOfClass:NSArray.class] ? reverse : @[]) {
-        if (![track isKindOfClass:NSClassFromString(@"SPTPlayerTrack")]) continue;
+        // Spotify's tracks, or the mod's own History's songs, which answer the same (SystemHistory.h).
+        if (![track respondsToSelector:@selector(trackTitle)] || ![track respondsToSelector:@selector(URI)]) continue;
         [tracks addObject:track];
         [key addObject:SGURIString([(SPTPlayerTrack *)track URI]) ?: @""];
     }
@@ -717,7 +795,7 @@ static UIImage *chipSymbol(NSString *name) {
 - (void)placePinnedHeading {
     _pinnedBottom = 0;
     if (_headRoom <= 0 || !_groups.count || [self chipsY] > 0) {
-        _pinnedHeading.hidden = YES;
+        _pinnedClip.hidden = YES;
         return;
     }
     CGFloat top = [self pinTop], offset = _list.contentOffset.y, next = CGFLOAT_MAX;
@@ -731,23 +809,32 @@ static UIImage *chipSymbol(NSString *name) {
         }
     }
     if (section < 0) {
-        _pinnedHeading.hidden = YES;
+        _pinnedClip.hidden = YES;
         return;
     }
     SGRQueueGroup *group = _groups[(NSUInteger)section];
     NSString *key = [NSString stringWithFormat:@"%@\n%@", group.heading ?: @"", group.note ?: @""];
     CGFloat height = [self tableView:_list heightForHeaderInSection:section];
+    if (!_pinnedClip) {
+        _pinnedClip = [UIView new];
+        _pinnedClip.clipsToBounds = YES;
+        _pinnedClip.userInteractionEnabled = NO;
+    }
+    if (_pinnedClip.superview != self) [self insertSubview:_pinnedClip aboveSubview:_list];
     if (!_pinnedHeading || ![key isEqualToString:_pinnedKey]) {
         [_pinnedHeading removeFromSuperview];
         _pinnedHeading = [self tableView:_list viewForHeaderInSection:section];
         _pinnedHeading.userInteractionEnabled = NO;
         _pinnedKey = key;
-        [self insertSubview:_pinnedHeading aboveSubview:_list];
+        [_pinnedClip addSubview:_pinnedHeading];
     }
+    // Pushed up by the next group's heading, it slides up under the chips' foot and is cut there, as the list's rows are
+    // (its owner's recording, 2026-11-09: "Continue Playing" was left over the AutoMix chip).
     CGFloat y = MIN(top, next - height);
-    _pinnedHeading.frame = CGRectMake(0, y, self.bounds.size.width, height);
-    _pinnedHeading.hidden = NO;
-    _pinnedBottom = y + height;
+    _pinnedClip.frame = CGRectMake(0, top, self.bounds.size.width, height);
+    _pinnedHeading.frame = CGRectMake(0, y - top, self.bounds.size.width, height);
+    _pinnedClip.hidden = y + height <= top;
+    _pinnedBottom = MAX(top, y + height);
 }
 
 - (void)scrollToTop {

@@ -19,7 +19,7 @@ extern const CGFloat SGRRadiusCard;      // 16, a content card
 extern const CGFloat SGRRadiusCover;     // 8, a release cover in a list
 extern const CGFloat SGRRadiusThumb;     // 6, a row's thumbnail up to 64pt
 extern const CGFloat SGRGlassCircleSize; // 44, a round glass behind a top bar button
-extern const CGFloat SGRActionHeight;    // 48, a button of the action row under a hero
+extern const CGFloat SGRActionHeight;    // 52, a button of the action row under a hero
 extern const CGFloat SGRActionSpacing;   // 12, between the buttons of an action row
 extern const CGFloat SGRGlassSpacing;    // 16, how near two glass shapes merge in one container
 extern const NSTimeInterval SGRCrossfade;   // 0.35, a new image or field color fading in
@@ -27,7 +27,10 @@ extern const NSTimeInterval SGRCrossfade;   // 0.35, a new image or field color 
 UIColor *SGRPrimary(void);      // white
 UIColor *SGRSecondary(void);    // white 65%, 80% with Increase Contrast
 UIColor *SGRTertiary(void);     // white 40%, 60% with Increase Contrast
-UIColor *SGRAccent(void);       // the accent color of Appearance, else Spotify's green
+// The accent of Appearance colors the tab bar alone (its owner, 2026-11-08: "the accent colour to really only impact
+// the tab bar"). Everything else that was the accent, or Spotify's green, is white.
+UIColor *SGRAccent(void);       // white: what the accent or Spotify's green was anywhere but the tab bar
+UIColor *SGRTabAccent(void);    // the accent color of Appearance, else Spotify's green: the tab bar's
 UIColor *SGRNeutralField(void); // #121212, the field before a color arrives; SGRAmoled.x turns it black
 // Where glass cannot be (Reduce Transparency), the shape it would have had: white 16% over the field.
 UIColor *SGRSolidGlassFill(void);

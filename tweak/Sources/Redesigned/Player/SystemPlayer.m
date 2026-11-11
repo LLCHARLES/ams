@@ -58,7 +58,9 @@
 #import "Redesigned/Navbar/Navbar.h"
 #import "Player.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/Player/PlayerSettings.h"
 #import "Shared/Player/SGLastTrack.h"
+#import "Shared/Player/Jam.h"
 #import "Shared/Navigation/Links.h"
 #import "Shared/Sing/Sing.h"
 #import "SystemPlayer.h"
@@ -68,6 +70,8 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Settings/SGPageStyle.h"
+#import "SystemHistory.h"
+#import "SystemDJRing.h"
 
 // The page's side margin, the Music app's.
 static const CGFloat kMargin = 28;
@@ -197,9 +201,99 @@ static BOOL sgr_lyricsLeftOpen;
 
 static char kConnectKey;
 
+// Keeps the borrowed surface the size of the cover: Spotify's bar lays it out again to its own size, and laid out to nothing it
+// came off the video (attached 0, eligible 0, 0x0 two seconds in: the owner's log, 2026-11-09).
+@interface SGRFrameKeeper : NSObject
+@property (nonatomic, weak) UIView *view;
+@property (nonatomic) BOOL busy;
+@property (nonatomic) CFTimeInterval windowStart, restUntil;
+@property (nonatomic) NSInteger corrections;
+@end
+
+@implementation SGRFrameKeeper
+// Put back without animation, and not more than 20 times a second: Spotify moves the surface on its own changes too, and
+// the two answering each other kept the main thread busy until the watchdog killed the app at launch (2026-11-10). Past
+// that it lets go for two seconds.
+- (void)keep {
+    UIView *view = self.view, *holder = view.superview;
+    if (!view || !holder || self.busy) return;
+    if (CGRectEqualToRect(view.frame, holder.bounds) && CGAffineTransformIsIdentity(view.transform)) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now < self.restUntil) return;
+    if (now - self.windowStart > 1) {
+        self.windowStart = now;
+        self.corrections = 0;
+    }
+    if (++self.corrections > 20) {
+        self.restUntil = now + 2;
+        SGLog(@"redesign player: the video surface is being moved back and forth; letting it be for 2s");
+        return;
+    }
+    self.busy = YES;
+    [UIView performWithoutAnimation:^{
+        view.transform = CGAffineTransformIdentity;
+        view.frame = holder.bounds;
+    }];
+    self.busy = NO;
+}
+
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    [self keep];
+}
+@end
+
+// The video's own drawing layer in a surface, an AVSampleBufferDisplayLayer if Spotify's renderer draws into one, which is
+// what Picture in Picture can be run from.
+static AVSampleBufferDisplayLayer *sampleLayerIn(CALayer *layer) {
+    if ([layer isKindOfClass:AVSampleBufferDisplayLayer.class]) return (AVSampleBufferDisplayLayer *)layer;
+    for (CALayer *sub in layer.sublayers) {
+        AVSampleBufferDisplayLayer *found = sampleLayerIn(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
+// A music video: the player plays it on a video surface (media.type and track_player video: the owner's log, 2026-11-09).
+static BOOL isVideoTrack(SPTPlayerTrack *track) {
+    NSDictionary *metadata = [track.metadata isKindOfClass:NSDictionary.class] ? track.metadata : nil;
+    return [metadata[@"track_player"] isEqual:@"video"] || [metadata[@"media.type"] isEqual:@"video"];
+}
+
+// Whether the item playing is the AI DJ talking: its own item, with no length (the owner's DJ log, 2026-11-09:
+// is_narration and suppress_progress true, provider narration/acknowledgment, "Up next" by "DJ X").
+static BOOL isNarration(SPTPlayerTrack *track) {
+    NSDictionary *metadata = [track.metadata isKindOfClass:NSDictionary.class] ? track.metadata : nil;
+    return [metadata[@"is_narration"] isEqual:@"true"] || [metadata[@"suppress_progress"] isEqual:@"true"]
+        || ([track respondsToSelector:@selector(provider)] && [track.provider hasPrefix:@"narration"]);
+}
+
+
+
+// The other of a song and its music video, from the track's metadata (the ⋯ menu's Switch to Video / Audio).
+static NSString *otherVersionURI(SPTPlayerTrack *track) {
+    NSString *videoURI = [track.metadata[@"video_association"] isKindOfClass:NSString.class] ? track.metadata[@"video_association"] : nil;
+    NSString *audioURI = [track.metadata[@"audio_association"] isKindOfClass:NSString.class] ? track.metadata[@"audio_association"] : nil;
+    return isVideoTrack(track) ? audioURI : videoURI;
+}
+
+// How wide a glyph draws, in points: its image's width, or the ⋯'s (17 points, makeMoreButton) for nil.
+static CGFloat glyphWidth(UIImageView *glyph) {
+    if (glyph.image) return glyph.image.size.width;
+    if (glyph) return kAddGlyph;
+    static CGFloat more;
+    if (more <= 0) {
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightRegular];
+        more = [UIImage systemImageNamed:@"ellipsis" withConfiguration:config].size.width ?: 17;
+    }
+    return more;
+}
+
 static BOOL isTrack(id track) {
     return [track isKindOfClass:NSClassFromString(@"SPTPlayerTrack")];
 }
+
+BOOL SGRSystemIsTrack(id track) { return isTrack(track); }
+BOOL SGRSystemIsNarration(id track) { return isTrack(track) && isNarration(track); }
 
 UIImage *SGRSystemNotPlayingArt(void) {
     static UIImage *art;
@@ -1359,7 +1453,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
 
 #pragma mark - the page
 
-@interface SGRSystemPlayerPage () <SGPlayerStateObserver, UIGestureRecognizerDelegate, SGRSystemTurnPage>
+@interface SGRSystemPlayerPage () <SGPlayerStateObserver, UIGestureRecognizerDelegate, SGRSystemTurnPage, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate>
 @end
 
 @implementation SGRSystemPlayerPage {
@@ -1381,6 +1475,19 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     UILabel *_context;
     UIView *_coverHolder;   // the shadow; scaled when paused
     UIImageView *_cover;
+    BOOL _narrating;   // the AI DJ talking
+    SGRDJRingView *_djRing;   // drawn over the cover while it talks
+    UIView *_videoSurface;   // over the cover while a music video plays
+    UIView *_videoBlank;     // black under it, over the album's cover, while the track is a video
+    __weak UIView *_videoHome;   // where the borrowed surface came from
+    CGRect _videoHomeFrame;
+    UIViewAutoresizing _videoHomeMask;
+    BOOL _wantsVideo;
+    NSString *_videoURI;     // the video the borrowed surface was taken for
+    __weak UIView *_nextSurface;            // the new one the clock found, to take next
+    SGRFrameKeeper *_videoKeeper;
+    UIColor *_videoHomeColor;
+    AVPictureInPictureController *_pip;
     SGMarqueeLabel *_title, *_artist;
     UIView *_titleBlock;                       // the title and artist, the swipe's page
     CAGradientLayer *_titleFade;
@@ -1391,6 +1498,8 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     BOOL _episode;                             // an episode or a chapter plays: 15 s skips, the speed in shuffle's place
     BOOL _volumeOff, _shuffleOff, _repeatOff;  // the Player page's Volume off, Hide on the player's Shuffle and Repeat
     SGRGlyphButton *_add;
+    SGRGlyphButton *_switchVideo;   // Switch to Video / Audio, beside the star when the song has the other
+    SGRGlyphButton *_djButton;      // the DJ's sheet, beside them while the DJ plays
     id _savedWatch;
     NSString *_savedTrack;
     BOOL _savedShown;
@@ -1399,6 +1508,12 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     SGRSystemControlButton *_shuffle, *_previous, *_play, *_next, *_repeat;
     UIControl *_volume;
     SGRGlyphButton *_lyrics, *_queue;
+    // While a Spotify Jam is on (Shared/Player/Jam.h): the queue button in a capsule with the faces of who is in it, as the
+    // Music app shows SharePlay (its owner's screenshot, 2026-11-09). The glyph still opens the page's queue; the queue's
+    // Jam chip opens the Jam's details.
+    UIView *_jamCapsule;
+    NSArray<UIImage *> *_jamFaces;
+    NSTimer *_jamTimer;
     SGRSystemRouteButton *_route;
     UILabel *_routeLine;
     UIView *_stage;   // the lines' own view, since the karaoke view dims every sibling it has; out of the page while closed
@@ -1425,6 +1540,8 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     NSTimer *_rest;
     SGRSystemTouchWatcher *_watcher;
     UITapGestureRecognizer *_wake;   // on while alone: the tap that brings the rest back
+    UILongPressGestureRecognizer *_titlePress; // the title and artist pressing in while a tap on them opens the album
+    BOOL _titlePressed;
     NSTimer *_timer;
     double _seekTarget;
     CFTimeInterval _seekUntil;
@@ -1536,12 +1653,34 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     UIPanGestureRecognizer *swipe = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(titleSwiped:)];
     swipe.delegate = self;
     [_titleBlock addGestureRecognizer:swipe];
+    // A tap on the title and the artist opens the album (SGRKeyPlayerTitleAlbum).
+    UITapGestureRecognizer *titleTap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(titleTapped)];
+    [titleTap requireGestureRecognizerToFail:swipe];
+    [_titleBlock addGestureRecognizer:titleTap];
+    // Pressed, they press in as the star beside them does (its owner, 2026-11-10: "make the title click in"); alongside the
+    // tap and the swipe, which let go of it as it starts.
+    _titlePress = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(titlePressed:)];
+    _titlePress.minimumPressDuration = 0;
+    _titlePress.cancelsTouchesInView = NO;
+    _titlePress.delegate = self;
+    [_titleBlock addGestureRecognizer:_titlePress];
     // The add button beside the title, where Spotify's player has its own (InformationElementsUnit's
     // Components.UI.AddToButton, kept by the redesigned player): the Music app's star, as the landscape player has it,
     // filled once the track is in Liked Songs (its owner, 2026-11-06: the star in place of the tick).
     _add = [SGRGlyphButton buttonWithSymbol:@"star" pointSize:kAddGlyph title:@"Add to Liked Songs"];
     _add.glyph.tintColor = SGRPrimary();
     _add.onTap = ^{ [weakSelf toggleSaved]; };
+    // Beside the star, leftwards (its owner, 2026-11-10: next to the star and the ⋯, the top tried and put back): Switch to
+    // Video for a song with a music video, under the Switch to video setting, and the DJ's sheet while the DJ plays.
+    _switchVideo = [SGRGlyphButton buttonWithSymbol:@"music.note.tv" pointSize:kAddGlyph title:@"Music Video"];
+    _switchVideo.glyph.tintColor = SGRPrimary();
+    _switchVideo.hidden = YES;
+    _switchVideo.onTap = ^{ [weakSelf switchVideoTapped]; };
+    _djButton = [SGRGlyphButton buttonWithSymbol:@"waveform" pointSize:kAddGlyph title:@"DJ X"];
+    _djButton.glyph.tintColor = SGRPrimary();
+    _djButton.glyph.image = SGRDJGlyphImage(kAddGlyph);
+    _djButton.hidden = YES;
+    _djButton.onTap = ^{ SGRSystemOpenDJ(); };
 
     _scrubber = [SGRSystemScrubber new];
     _scrubber.onMove = ^(CGFloat value) { [weakSelf scrubbedTo:value]; };
@@ -1634,6 +1773,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     _queueView = [SGRSystemQueueView new];
     _queueView.alpha = 0;
     _queueView.onReorder = ^(NSArray *upcoming) { [weakSelf handQueueBack:upcoming]; };
+    _queueView.onJam = ^{ [weakSelf startOrOpenJam]; };
     // Shuffle and Repeat hidden from the controls on the Player page show in the queue's row instead (its owner, 2026-11-02).
     _queueView.showsShuffle = _shuffleOff;
     _queueView.showsRepeat = _repeatOff;
@@ -1641,7 +1781,10 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     _queueView.onRepeat = ^{ [weakSelf cycleRepeat]; };
     _queueView.onDragging = ^(BOOL dragging) { [weakSelf setQueueDragging:dragging]; };
     _queueView.onHeadPush = ^(CGFloat push) { [weakSelf pushHead:push]; };
-    _queueView.onPickPast = ^(SPTPlayerTrack *track, NSInteger steps) { SGRSystemStepBack(track, steps); };
+    _queueView.onPickPast = ^(SPTPlayerTrack *track, NSInteger steps) {
+        if (SGRSystemHistoryOn()) SGRSystemPlayPast(track);
+        else SGRSystemStepBack(track, steps);
+    };
     _queueView.onPick = ^(SPTPlayerTrack *track) {
         id<SPTPlayer> player = (id<SPTPlayer>)SGPlayer();
         if ([player respondsToSelector:@selector(skipToNextTrackWithOptions:track:)]) [player skipToNextTrackWithOptions:nil track:track];
@@ -1680,7 +1823,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     }
     [_stage addSubview:_lines];
 
-    for (UIView *sub in @[_close, _more, _context, _coverHolder, _titleBlock, _add, _scrubber, _elapsed, _remaining, _shuffle, _previous, _play,
+    for (UIView *sub in @[_close, _more, _context, _coverHolder, _titleBlock, _add, _switchVideo, _djButton, _scrubber, _elapsed, _remaining, _shuffle, _previous, _play,
                           _next, _repeat, _volume, _lyrics, _route, _routeLine, _queue]) {
         [view addSubview:sub];
     }
@@ -1787,6 +1930,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
 // display link would pin the zoom's frames to its rate.
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    [self updateJamAnimated:NO];
     [self paintAccent];
     [self startTicking];
     __weak typeof(self) weakSelf = self;
@@ -1836,8 +1980,141 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     _scrubber.userInteractionEnabled = _volume.userInteractionEnabled = YES;
 }
 
+#pragma mark - the Jam
+
+static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
+
+// Spotify's Jam details sheet (Invite others, who is in it, Auto-invite, End Jam, Guest settings: its owner's screenshot,
+// 2026-11-09), by the link Spotify's own list names for it; if Spotify takes no such link, its Jam queue sheet, whose
+// gear leads there.
+- (void)openJamSettings {
+    if (SGOpenSpotifyURI([NSURL URLWithString:@"spotify:internal:jam-manage-participants-sheet"])) return;
+    SGOpenSpotifyURI([NSURL URLWithString:@"spotify:now-playing:queue"]);
+}
+
+// The queue's Jam chip: while a Jam is on, its sheet; otherwise Spotify's own link that starts one with what plays
+// (spotify:jam:play, from Spotify's link list; untested 2026-11-09), and if Spotify takes no such link, its queue sheet,
+// which has its own Start a Jam.
+- (void)startOrOpenJam {
+    if (_jamFaces || SGOpenSpotifyURI([NSURL URLWithString:@"spotify:jam:play"])) {
+        if (_jamFaces) [self openJamSettings];
+        return;
+    }
+    [self openJamSettings];
+}
+
+// Looked for while the page is in a window: when it opens, on each change of the player, and every two seconds, since
+// joining and leaving change nothing the player reports.
+- (void)updateJam {
+    [self updateJamAnimated:YES];
+}
+
+// Before the page opens it is drawn in place, still (its owner's recording, 2026-11-09: it faded in once the page was up).
+- (void)updateJamAnimated:(BOOL)animated {
+    NSArray<UIImage *> *faces = SGJamFaces(3);
+    if ((!faces && !_jamFaces) || [faces isEqualToArray:_jamFaces]) return;
+    _jamFaces = faces;
+    _queueView.jamOn = faces != nil;
+    if (!faces) {
+        // Back into the queue button: the capsule shrinks onto it as the glyph slides home, the faces fading first.
+        [self.view setNeedsLayout];
+        void (^close)(void) = ^{
+            [self.view layoutIfNeeded];
+            self->_jamCapsule.frame = self->_queue.frame;
+            for (UIView *face in self->_jamCapsule.subviews) face.alpha = 0;
+        };
+        if (!animated) {
+            [UIView performWithoutAnimation:close];
+            _jamCapsule.alpha = 0;
+            return;
+        }
+        [UIView animateWithDuration:0.5 delay:0 usingSpringWithDamping:0.86 initialSpringVelocity:0
+                            options:UIViewAnimationOptionBeginFromCurrentState animations:close completion:^(BOOL finished) {
+            if (!self->_jamFaces) self->_jamCapsule.alpha = 0;
+        }];
+        return;
+    }
+    if (!_jamCapsule) {
+        _jamCapsule = [UIView new];
+        _jamCapsule.backgroundColor = [UIColor colorWithWhite:1 alpha:0.14];
+        _jamCapsule.layer.cornerCurve = kCACornerCurveContinuous;
+        _jamCapsule.clipsToBounds = YES;
+        _jamCapsule.alpha = 0;
+        _jamCapsule.accessibilityElementsHidden = YES;
+        // The faces show who is in it and nothing more (its owner, 2026-11-09): the queue's Jam chip opens the Jam.
+        _jamCapsule.userInteractionEnabled = NO;
+    }
+    if (_jamCapsule.superview != _queue.superview) [_queue.superview insertSubview:_jamCapsule belowSubview:_queue];
+    for (UIView *old in _jamCapsule.subviews.copy) [old removeFromSuperview];
+    // The faces overlap, the first on top; before anyone has joined, two figures in their place.
+    NSArray<UIImage *> *shown = faces.count ? faces : @[[UIImage systemImageNamed:@"person.2.fill"]];
+    for (NSInteger i = shown.count - 1; i >= 0; i--) {
+        UIImageView *face = [[UIImageView alloc] initWithImage:shown[i]];
+        face.contentMode = faces.count ? UIViewContentModeScaleAspectFill : UIViewContentModeScaleAspectFit;
+        face.tintColor = SGRSecondary();
+        face.clipsToBounds = YES;
+        face.layer.cornerRadius = kJamFace / 2;
+        face.tag = i;
+        [_jamCapsule addSubview:face];
+    }
+    [self.view setNeedsLayout];
+    if (animated && _jamCapsule.alpha < 1) {
+        // Out of the queue button: the capsule starts as the button, grows to the left with a spring while the glyph
+        // slides to its right end, and the faces come in as it opens (its owner, 2026-11-09).
+        [UIView performWithoutAnimation:^{
+            self->_jamCapsule.frame = self->_queue.frame;
+            self->_jamCapsule.alpha = 1;
+            for (UIView *face in self->_jamCapsule.subviews) {
+                face.bounds = CGRectMake(0, 0, kJamFace, kJamFace);
+        face.center = CGPointMake(kJamInset + face.tag * kJamFaceStep + kJamFace / 2, 22);
+                face.alpha = 0;
+                face.transform = CGAffineTransformMakeScale(0.6, 0.6);
+            }
+        }];
+        [UIView animateWithDuration:0.55 delay:0 usingSpringWithDamping:0.8 initialSpringVelocity:0
+                            options:UIViewAnimationOptionBeginFromCurrentState animations:^{
+            [self.view layoutIfNeeded];
+        } completion:nil];
+        [UIView animateWithDuration:0.35 delay:0.12 options:UIViewAnimationOptionCurveEaseOut animations:^{
+            for (UIView *face in self->_jamCapsule.subviews) {
+                face.alpha = 1;
+                face.transform = CGAffineTransformIdentity;
+            }
+        } completion:nil];
+    } else {
+        [UIView performWithoutAnimation:^{
+            self->_jamCapsule.alpha = 1;
+            [self.view layoutIfNeeded];
+        }];
+    }
+}
+
+// The capsule stands centred where the queue button stands (its owner, 2026-11-09), the faces on its left and the queue
+// glyph moved to its right end.
+- (void)layoutJamAround:(CGFloat)rowMid {
+    if (!_jamCapsule || !_jamFaces) return;
+    NSUInteger count = MAX(1, _jamFaces.count);
+    CGFloat faces = kJamFace + (count - 1) * kJamFaceStep;
+    CGFloat middle = _queue.center.x, width = kJamInset + faces + 4 + 44;
+    _jamCapsule.frame = CGRectMake(round(middle - width / 2), round(rowMid - 22), width, 44);
+    _queue.center = CGPointMake(CGRectGetMaxX(_jamCapsule.frame) - 22, rowMid);
+    _jamCapsule.layer.cornerRadius = 22;
+    for (UIView *face in _jamCapsule.subviews) {
+        face.bounds = CGRectMake(0, 0, kJamFace, kJamFace);
+        face.center = CGPointMake(kJamInset + face.tag * kJamFaceStep + kJamFace / 2, 22);
+    }
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    [self attachVideoIfShown];
+    if (!_jamTimer) {
+        __weak typeof(self) weakSelf = self;
+        _jamTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer *timer) {
+            if (!weakSelf) [timer invalidate];
+            else if (weakSelf.viewIfLoaded.window) [weakSelf updateJam];
+        }];
+    }
     [self openLanded];
     // Animated's clip is looked up only while the page is in a window (SGRPlayerMotionPreview).
     if (_background == SGRPlayerBackgroundAnimated && !_motion) [self syncClipAnimated:YES];
@@ -1883,6 +2160,10 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
 
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
+    // The video back in the bar once the page has gone, not as a close starts: a swipe begun and let go back is a close
+    // cancelled, the page stays, and the video handed back at its start was gone from it (its owner, 2026-11-10: "if i
+    // slightly swipe on the whole page it breaks").
+    [self returnVideo];
     // The close is over: a tap on the mini player during it opens the page now (Navbar/SystemTabs.x's opened). A turn later, so
     // UIKit has finished with this presentation.
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1932,6 +2213,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
         row[i].center = CGPointMake(round(width * shares[i]), rowMid);
     }
     _queueBubble.center = _lyricsBubble.center = CGPointMake(22, 22);
+    [self layoutJamAround:rowMid];
     CGFloat lineHeight = ceil(_routeLine.font.lineHeight);
     _routeLine.frame = CGRectMake(24, round(rowMid + kRouteLineDrop - lineHeight / 2), MAX(0, width - 48), lineHeight);
     CGFloat spacing = controlsSpacing();
@@ -1960,13 +2242,32 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     CGFloat coverTop = MAX(height * 0.1085, safe.top + 33);
     CGFloat side = MAX(200, width - 2 * 23);
     side = MIN(side, MAX(200, height * 0.66 - coverTop));
-    _coverHolder.bounds = CGRectMake(0, 0, side, side);
+    CGSize art = CGSizeMake(side, side);
+    // A music video: 16:9, as wide as the page, edge to edge, and no taller than the room (its owner, 2026-11-09: "shrink to
+    // the size of the video and make it as big as possible"), from the moment the track is a video, before Spotify's surface
+    // is in. One shape throughout, not the picture's own: that one is read off the area it is laid out in, and following it
+    // the area jumped between sizes as the video came in (its owner, 2026-11-10: "portrait music videos dont need to resize").
+    BOOL video = _videoSurface != nil || _wantsVideo;
+    _videoBlank.hidden = !video;
+    if (video) {
+        CGFloat aspect = 16.0 / 9.0;
+        CGFloat w = width, h = round(w / aspect);
+        if (h > side) {
+            h = floor(side);
+            w = round(h * aspect);
+        }
+        art = CGSizeMake(w, h);
+    }
+    CGFloat corner = video ? 0 : SGRRadiusArtwork;
+    _coverHolder.bounds = CGRectMake(0, 0, art.width, art.height);
     _coverHolder.center = CGPointMake(width / 2, round(coverTop + side / 2));
+    if (_cover.layer.cornerRadius != corner) _cover.layer.cornerRadius = corner;
     if (!CGRectEqualToRect(_shadowBounds, _coverHolder.bounds)) {
         _shadowBounds = _coverHolder.bounds;
-        _coverHolder.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_shadowBounds cornerRadius:SGRRadiusArtwork].CGPath;
+        _coverHolder.layer.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_shadowBounds cornerRadius:corner].CGPath;
     }
     _cover.frame = _coverHolder.bounds;
+    [_videoKeeper keep];
 
     // With the lyrics up, the Music app's top row: the cover as a thumbnail under the header with the title and artist
     // beside it, and the lines from there down to the progress. The stage keeps its place either way, so the lines come
@@ -1996,7 +2297,29 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     // The ⋯ at the trailing margin, the star before it, as the Music app's row has them (its owner, 2026-11-06).
     CGFloat addInset = (kAddSide - kAddGlyph) / 2, moreRight = width - kMargin + (kAddSide - 20) / 2;
     CGFloat addRight = moreRight - kAddSide + 4;
-    CGFloat textRight = (_add.hidden ? addRight + addInset : addRight - kAddSide + addInset) - 8;
+    // Switch to Video and the DJ's button leftwards of the star, the space between the glyphs themselves the same as
+    // between the star and the ⋯, not their centres: the TV glyph is wide and the ⋯ narrow, and equal steps left the TV
+    // crowding the star (its owner, 2026-11-10: "are these buttons spaced out properly?").
+    CGFloat moreInk = glyphWidth(nil), starInk = glyphWidth(_add.glyph);
+    CGFloat gap = (kAddSide - 4) - (starInk + moreInk) / 2;
+    CGFloat prevCentre = _add.hidden ? moreRight - kAddSide / 2 : addRight - kAddSide / 2;
+    CGFloat prevInk = _add.hidden ? moreInk : starInk;
+    CGFloat switchCentre = prevCentre, djCentre = prevCentre;
+    if (!_switchVideo.hidden) {
+        CGFloat ink = glyphWidth(_switchVideo.glyph);
+        switchCentre = round(prevCentre - gap - (prevInk + ink) / 2);
+        prevCentre = switchCentre;
+        prevInk = ink;
+    }
+    if (!_djButton.hidden) {
+        CGFloat ink = glyphWidth(_djButton.glyph);
+        djCentre = round(prevCentre - gap - (prevInk + ink) / 2);
+        prevCentre = djCentre;
+        prevInk = ink;
+    }
+    CGFloat switchRight = switchCentre + kAddSide / 2, djRight = djCentre + kAddSide / 2;
+    CGFloat nextRight = (_switchVideo.hidden && _djButton.hidden) ? (_add.hidden ? addRight : addRight - kAddSide + 4) : prevCentre - kAddSide / 2 + 4;
+    CGFloat textRight = nextRight + addInset - 8;
     BOOL topRow = _lyricsOpen || _queueOpen;
     CGFloat textX = topRow ? CGRectGetMaxX(thumb) + kThumbGap : kMargin;
     CGFloat textY = topRow ? round(CGRectGetMidY(thumb) - (titleHeight + artistHeight) / 2) : titleY;
@@ -2022,6 +2345,9 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     _add.center = CGPointMake(addRight - kAddSide / 2, titleMid);
     _more.bounds = CGRectMake(0, 0, kAddSide, kAddSide);
     _more.center = CGPointMake(moreRight - kAddSide / 2, titleMid);
+    _switchVideo.bounds = _djButton.bounds = CGRectMake(0, 0, kAddSide, kAddSide);
+    _switchVideo.center = CGPointMake(switchRight - kAddSide / 2, titleMid);
+    _djButton.center = CGPointMake(djRight - kAddSide / 2, titleMid);
     _thumb = thumb;
     // The thumbnail is the cover moved and scaled by its transform, so its shadow and corners travel with it; the corners
     // are given back the thumbnail's radius at that scale.
@@ -2031,6 +2357,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     [self placeHeadPush];
     // The hold for 2× on the cover, as on the player's.
     SGRPlayerAttachCoverHold(_coverHolder);
+    [self placeDJRing];
 }
 
 // The thumbnail while the lyrics are up; otherwise full size, smaller while paused (held at full size under Reduce
@@ -2080,8 +2407,9 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     return [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:children];
 }
 
-// The ⋯: Share, Go to Album and Go to Artist in the row at the top; the Artwork submenu and the sleep timer; then the
-// artist's concerts (its owner, 2026-11-06). Before (its
+// The ⋯, from its foot: a row of Share, Sleep Timer and Music Video (or Song); DJ X; a section of Go to Album, Go to
+// Artist, Go to Artist Concerts and (with the star off) Add to Playlist; the Artwork submenu at the top (its owner,
+// 2026-11-06 and 2026-11-10). Before (its
 // owner's screenshots and picks, 2026-11-02). Spotify's player is not behind the page, so its sheet's rows are not
 // read here. Add to Playlist, Add to Queue, Start a Jam, SongDNA and Song credits come from that sheet alone: its links
 // are refused and its mini player has no menu to read (the phone's log, 2026-11-02), so they are left out for now.
@@ -2092,7 +2420,9 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 // The landscape player's ⋯ (SystemLandscape.m) shows the same, from its own button and screen: Share and the sheets
 // come up over it and Go to opens once the page has turned back.
 - (NSArray<UIMenuElement *> *)landscapeMenuItemsFrom:(UIView *)anchor presenter:(UIViewController *)presenter changed:(void (^)(void))changed {
-    return [self menuItemsFrom:anchor presenter:presenter landscape:YES changed:changed];
+    // Its ⋯ is high on the screen, so its menu opens downwards and is read from the top: the same groups the other way
+    // round, so it reads as the page's does (the code review, 2026-11-10).
+    return [self menuItemsFrom:anchor presenter:presenter landscape:YES changed:changed].reverseObjectEnumerator.allObjects;
 }
 
 - (NSArray<UIMenuElement *> *)menuItemsFrom:(UIView *)anchor presenter:(UIViewController *)presenter landscape:(BOOL)landscape
@@ -2105,34 +2435,70 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     __weak typeof(self) weakSelf = self;
     NSMutableArray<UIMenuElement *> *menu = [NSMutableArray array];
 
-    // The row of three: Share, Go to Album and Go to Artist (its owner, 2026-11-06).
-    NSMutableArray<UIMenuElement *> *row = [NSMutableArray array];
+    // The menu opens upwards from the ⋯, so its first group is at the foot and its last at the top. At the foot a row of
+    // Share and Sleep Timer; over it one section of the Go tos, Album, Artist and Concerts, with Add to Playlist when the
+    // star is off the page (its owner, 2026-11-10: "share and sleep timer" in the row, the star and Add to Playlist doing
+    // the same thing, the Go tos and Add to Playlist in one section).
+    NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
     if ((song || [kind isEqualToString:@"episode"]) && parts[2].length) {
         NSURL *link = [NSURL URLWithString:[NSString stringWithFormat:@"https://open.spotify.com/%@/%@", kind, parts[2]]];
-        [row addObject:[UIAction actionWithTitle:@"Share" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
-                                         handler:^(UIAction *action) { [weakSelf share:link from:presenter]; }]];
+        [actions addObject:[UIAction actionWithTitle:@"Share" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
+                                             handler:^(UIAction *action) { [weakSelf share:link from:presenter]; }]];
     }
+    [actions addObject:[self sleepTimerMenu]];
+    // Music Video / Song: a song and its music video are two tracks, each naming the other in its metadata
+    // (video_association on the song: the owner's log, 2026-11-10). Spotify's own switch goes through its playback
+    // settings service, out of reach, so the other is played instead, from the same place, and the context goes on after
+    // it. In the row (its owner, 2026-11-10: "move music video into the bottom of the menu").
+    NSString *otherURI = otherVersionURI(track);
+    if (otherURI.length) {
+        BOOL toVideo = !isVideoTrack(track);
+        [actions addObject:[UIAction actionWithTitle:toVideo ? @"Music\nVideo" : @"Song"
+                                               image:[UIImage systemImageNamed:toVideo ? @"music.note.tv" : @"music.note"] identifier:nil
+                                             handler:^(UIAction *action) { SGRSystemSwitchTo(otherURI, toVideo); }]];
+    }
+    UIMenu *row = [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:actions];
+    row.preferredElementSize = UIMenuElementSizeMedium;
+    [menu addObject:row];
+
+    // The AI DJ, next up (its owner, 2026-11-10): Spotify's own DJ sheet, what the DJ button on its player opens ("What can
+    // I play for you?", a request typed or spoken, Let DJ pick), by the one DJ link Spotify takes from outside (its owner's
+    // link tests, 2026-11-09). Spotify's song menu and its video settings were tried the same way and refused. With the
+    // DJ's icon, as its button.
+    [menu addObject:inlineGroup(@[[UIAction actionWithTitle:@"DJ X" image:SGRDJGlyphImage(20) identifier:nil
+                                      handler:^(UIAction *action) { SGRSystemOpenDJ(); }]])];
+
     // The album from the track's metadata (album_uri, beside the album_title the header reads; a key of the player's
     // metadata in the 9.1.90 binary) and the artist from the track itself (Headers/SPTPlayer.h's artistURI).
+    NSMutableArray<UIMenuElement *> *goTos = [NSMutableArray array];
     id album = track.metadata[@"album_uri"];
     NSString *albumURI = [album isKindOfClass:NSString.class] && [album hasPrefix:@"spotify:album:"] ? album : nil;
-    if (albumURI) {
-        [row addObject:[UIAction actionWithTitle:@"Go to\nAlbum" image:[UIImage systemImageNamed:@"square.stack"] identifier:nil
-                                         handler:^(UIAction *action) { [weakSelf closeAndOpen:albumURI landscape:landscape]; }]];
+    if (albumURI && !SGEnabled(SGRKeyPlayerTitleAlbum)) {
+        [goTos addObject:[UIAction actionWithTitle:@"Go to Album" image:[UIImage systemImageNamed:@"square.stack"] identifier:nil
+                                           handler:^(UIAction *action) { [weakSelf closeAndOpen:albumURI landscape:landscape]; }]];
     }
     NSString *artistURI = SGURIString(track.artistURI);
-    BOOL artist = [artistURI hasPrefix:@"spotify:artist:"];
-    if (artist) {
-        [row addObject:[UIAction actionWithTitle:@"Go to\nArtist" image:[UIImage systemImageNamed:@"music.microphone"] identifier:nil
-                                         handler:^(UIAction *action) { [weakSelf closeAndOpen:artistURI landscape:landscape]; }]];
+    if ([artistURI hasPrefix:@"spotify:artist:"]) {
+        [goTos addObject:[UIAction actionWithTitle:@"Go to Artist" image:[UIImage systemImageNamed:@"music.microphone"] identifier:nil
+                                           handler:^(UIAction *action) { [weakSelf closeAndOpen:artistURI landscape:landscape]; }]];
+        // The artist's concerts ("spotify:artist:%s%cconcerts" in the 9.1.90 binary), in the menu itself (its owner,
+        // 2026-11-06: no More submenu).
+        NSString *concerts = [artistURI stringByAppendingString:@":concerts"];
+        [goTos addObject:[UIAction actionWithTitle:@"Go to Artist Concerts" image:[UIImage systemImageNamed:@"ticket"] identifier:nil
+                                           handler:^(UIAction *action) { [weakSelf closeAndOpen:concerts landscape:landscape]; }]];
     }
-    if (row.count) {
-        UIMenu *top = [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:row];
-        top.preferredElementSize = UIMenuElementSizeMedium;
-        [menu addObject:top];
+    // Add to Playlist: Spotify's own sheet, by its link with the song as `entities`, the parameter its page requires
+    // ("ATP needs 'entities', 'listEntity', 'transitionBlob', or 'defaultSaveLocationCategory'" in the 9.1.90 binary;
+    // uris= was taken and showed nothing: its owner's link tests, 2026-11-09).
+    if (song && SGHidden(SGRKeyPlayerHideAdd)) {
+        NSString *entities = [uri stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.alphanumericCharacterSet];
+        NSString *link = [@"spotify:add-to-playlist?entities=" stringByAppendingString:entities];
+        [goTos addObject:[UIAction actionWithTitle:@"Add to Playlist" image:[UIImage systemImageNamed:@"text.badge.plus"] identifier:nil
+                                           handler:^(UIAction *action) { SGOpenSpotifyURI([NSURL URLWithString:link]); }]];
     }
+    if (goTos.count) [menu addObject:inlineGroup(goTos)];
 
-    // The player's own: the backgrounds and the sleep timer.
+    // The player's own: the backgrounds.
     void (^changed)(void) = ^{
         [weakSelf reloadBackgroundAnimated:YES];
         if (landscapeChanged) landscapeChanged();
@@ -2140,21 +2506,13 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     NSMutableArray<UIMenuElement *> *own = [NSMutableArray array];
     UIMenu *artwork = SGRPlayerMenuArtwork(changed);
     if (artwork) [own addObject:artwork];
-    [own addObject:[self sleepTimerMenu]];
     // AMS-beta's ... also opens the Lyrics Source popover (PlayerMenu.m's playerItems). Its quick rows
     // and the speed/pitch panel need Spotify's own sheet, which this page does not have; the lyrics
     // sources are the mod's own, so this one comes back.
     UIAction *lyrics = sgrLyricsSourceItem(anchor);
     if (lyrics) [own addObject:lyrics];
-    [menu addObject:inlineGroup(own)];
+    if (own.count) [menu addObject:inlineGroup(own)];
 
-    // The artist's concerts, in the menu itself (its owner, 2026-11-06: no More submenu).
-    if (artist) {
-        // Spotify's concerts page of an artist ("spotify:artist:%s%cconcerts" in the 9.1.90 binary).
-        NSString *concerts = [artistURI stringByAppendingString:@":concerts"];
-        [menu addObject:inlineGroup(@[[UIAction actionWithTitle:@"Go to Artist Concerts" image:[UIImage systemImageNamed:@"ticket"] identifier:nil
-                                          handler:^(UIAction *action) { [weakSelf closeAndOpen:concerts landscape:landscape]; }]])];
-    }
     return menu;
 }
 
@@ -2177,7 +2535,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
         [items addObject:[UIAction actionWithTitle:@"Turn Off Timer" image:[UIImage systemImageNamed:@"xmark"] identifier:nil
                                            handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerOff, 0); }]];
     }
-    UIMenu *menu = [UIMenu menuWithTitle:@"Sleep Timer" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
+    UIMenu *menu = [UIMenu menuWithTitle:@"Sleep\nTimer" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
     NSDate *end = SGSleepTimerEnd();
     if (mode == SGSleepTimerAtTime && end) {
         NSInteger left = MAX(0, (NSInteger)ceil(end.timeIntervalSinceNow / 60));
@@ -2205,6 +2563,13 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 
 // A page of Spotify's opens in its navigation under the page, so the page closes first, as the Music app's player does
 // for Go to Album.
+// The album of the track playing, from the title (SGRKeyPlayerTitleAlbum): the album_uri the ⋯'s Go to Album reads.
+- (void)titleTapped {
+    if (!SGEnabled(SGRKeyPlayerTitleAlbum)) return;
+    id album = SGPlayerState().track.metadata[@"album_uri"];
+    if ([album isKindOfClass:NSString.class] && [album hasPrefix:@"spotify:album:"]) [self closeAndOpen:album];
+}
+
 - (void)closeAndOpen:(NSString *)uri landscape:(BOOL)landscape {
     if (!landscape) {
         [self closeAndOpen:uri];
@@ -2222,6 +2587,59 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     [self dismissViewControllerAnimated:YES completion:^{ SGOpenSpotifyURI([NSURL URLWithString:uri]); }];
 }
 
+#pragma mark - Switch to Video and the DJ beside the star
+
+
+// Whether the DJ is what plays: its playlist the context (Shared/AdBlock/DJ.x), the context called DJ, or the DJ talking.
+static BOOL djPlaying(SPTPlayerState *state, SPTPlayerTrack *track) {
+    NSString *context = SGURIString(state.contextURI);
+    return [context containsString:@"37i9dQZF1EYkqdzj48dyYq"] || [contextTitle(state, track) isEqualToString:@"DJ"]
+        || (track && isNarration(track));
+}
+
+// Which of the two show for what plays now, shared with the landscape player (SystemPlayer.h).
+void SGRSystemRowButtons(BOOL *switchShown, BOOL *djShown, BOOL *video) {
+    SPTPlayerState *state = SGPlayerState();
+    SPTPlayerTrack *track = isTrack(state.track) ? state.track : nil;
+    BOOL dj = djPlaying(state, track);
+    // Not both: while the DJ's button shows, the switch stays in the ⋯ menu (its owner, 2026-11-10).
+    if (switchShown) *switchShown = track && !dj && !SGHidden(SGKeyHideVideoSwitch) && otherVersionURI(track).length > 0;
+    if (djShown) *djShown = dj;
+    if (video) *video = track && isVideoTrack(track);
+}
+
+void SGRSystemSwitchVideo(void) {
+    SPTPlayerTrack *track = isTrack(SGPlayerState().track) ? SGPlayerState().track : nil;
+    NSString *other = track ? otherVersionURI(track) : nil;
+    if (other.length) SGRSystemSwitchTo(other, !isVideoTrack(track));
+}
+
+void SGRSystemOpenDJ(void) {
+    SGOpenSpotifyURI([NSURL URLWithString:@"spotify:internal:aidj:interactivity-container"]);
+}
+
+void SGRSystemSyncRowButtons(SGRGlyphButton *switchVideo, SGRGlyphButton *dj, UIView *layout) {
+    BOOL switchShown, djShown, video;
+    SGRSystemRowButtons(&switchShown, &djShown, &video);
+    if (switchShown) {
+        [switchVideo.glyph setSymbol:video ? @"music.note" : @"music.note.tv" animated:NO];
+        switchVideo.accessibilityLabel = video ? @"Song" : @"Music Video";
+    }
+    if (switchVideo.hidden == switchShown || dj.hidden == djShown) {
+        switchVideo.hidden = !switchShown;
+        dj.hidden = !djShown;
+        [layout setNeedsLayout];
+    }
+}
+
+- (void)syncRowButtons {
+    SGRSystemSyncRowButtons(_switchVideo, _djButton, self.view);
+}
+
+- (void)switchVideoTapped {
+    SGRSystemSwitchVideo();
+}
+
 #pragma mark - the add button
 
 // The playing track's place in Liked Songs, from Spotify's collection state (Redesigned/Artist/Artist.h's
@@ -2230,8 +2648,9 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     SPTPlayerTrack *track = isTrack(SGPlayerState().track) ? SGPlayerState().track : nil;
     NSString *uri = SGURIString(track.URI);
     BOOL saveable = [uri hasPrefix:@"spotify:track:"];
-    if (_add.hidden == saveable) {
-        _add.hidden = !saveable;
+    BOOL shown = saveable && !SGHidden(SGRKeyPlayerHideAdd);
+    if (_add.hidden == shown) {
+        _add.hidden = !shown;
         [self.view setNeedsLayout];
     }
     if (!saveable) {
@@ -2318,7 +2737,9 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 // track and whenever the player's clip comes or goes (SGRPlayerMotionDidChangeNotification).
 - (void)syncClipAnimated:(BOOL)animated {
     NSString *track = SGShownTrackNow().uri;
-    BOOL wanted = _background == SGRPlayerBackgroundAnimated && track;
+    // None on a music video: the picture is the page's then, and the clip went over it (its owner, 2026-11-10: Fluid
+    // under music videos).
+    BOOL wanted = _background == SGRPlayerBackgroundAnimated && track && !_wantsVideo;
     if (wanted && _motion && [track isEqualToString:_motionTrack]) return;
     UIView *clip = nil;
     if (wanted) {
@@ -2386,7 +2807,8 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 // clip, as the player's does (PlayerLyrics.x keeps its thumbnail shown with the lyrics open). On their own, the lines
 // hide it as they hide the rest (fadingViews).
 - (void)syncCoverShownAnimated:(BOOL)animated {
-    BOOL shown = (!_motion || _lyricsOpen || _queueOpen) && !(_alone && SGRLyricsHideMode() != SGRLyricsHideControls);
+    BOOL shown = (!_motion || _lyricsOpen || _queueOpen) && !(_alone && SGRLyricsHideMode() != SGRLyricsHideControls)
+        && !(_narrating && !_lyricsOpen && !_queueOpen);
     CGFloat alpha = shown ? 1 : 0;
     if (_coverHolder.alpha == alpha) return;
     UIView *cover = _coverHolder;
@@ -2413,6 +2835,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
     [self show:state];
+    [self updateJam];
     // A pause brings the rest back and keeps it; playing again starts the clock (PlayerLyrics.x).
     if (!state || state.isPaused) {
         [self setAlone:NO animated:YES];
@@ -2425,6 +2848,257 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 // Repeat is no change to the state's observers (PlayerState.x tells shuffle only), so the options are read at every report.
 - (void)playerStateDidReport:(SPTPlayerState *)state {
     [self showOptions:state];
+}
+
+// A music video plays over the cover, as Spotify's player shows it (its owner, 2026-11-09). Its controls are the page's.
+- (void)showVideo:(BOOL)on {
+    BOOL changed = on != _wantsVideo;
+    if (changed) [self.view setNeedsLayout];
+    _wantsVideo = on;
+    if (changed && self.isViewLoaded) [self syncClipAnimated:YES];
+    // Black over the cover from the start, not the album's cover until the picture comes (its owner, 2026-11-10); the
+    // surface goes over it.
+    if (on && !_videoBlank) {
+        _videoBlank = [[UIView alloc] initWithFrame:_cover.bounds];
+        _videoBlank.backgroundColor = UIColor.blackColor;
+        _videoBlank.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        _videoBlank.userInteractionEnabled = NO;
+        [_cover insertSubview:_videoBlank atIndex:0];
+    }
+    _videoBlank.hidden = !on;
+    if (!on) {
+        [self returnVideo];
+        return;
+    }
+    [self attachVideoIfShown];
+}
+
+// Spotify's video surfaces on screen.
+static void collectSurfaces(UIView *view, NSMutableArray<UIView *> *found) {
+    if ([NSStringFromClass(view.class) containsString:@"VideoSurface"]) [found addObject:view];
+    for (UIView *sub in view.subviews) collectSurfaces(sub, found);
+}
+
+// The surface Spotify draws the video on for its now playing bar (identifier now-playing-bar), which is attached and drawing
+// while a video plays (the owner's log, 2026-11-09); a surface of the mod's own was made and eligible but never attached,
+// its manager out of reach. The redesign hides that bar, so its surface is borrowed: moved over the cover while the page
+// shows the video, and put back where it was when the page closes or the video ends.
+// Every surface a page has held, across pages: a page is made for each open, and one kept per page took a surface an
+// earlier page had handed back for the next video's, dropping the attached one (the code review, 2026-11-10). Weak, so
+// Spotify's discarded surfaces go.
+static NSHashTable<UIView *> *usedSurfaces(void) {
+    static NSHashTable<UIView *> *used;
+    if (!used) used = [NSHashTable weakObjectsHashTable];
+    return used;
+}
+
+// The bar's surfaces on screen (identifier now-playing-bar), oldest first as the views are laid out.
+static NSArray<UIView *> *barVideoSurfaces(void) {
+    NSMutableArray<UIView *> *surfaces = [NSMutableArray array];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) collectSurfaces(window, surfaces);
+    }
+    return [surfaces filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(UIView *surface, id bindings) {
+        return [surface.description containsString:@"identifier:now-playing-bar"];
+    }]];
+}
+
+// The attached one, else the first: the next video gets a surface of its own and the last one is let go (attached:0),
+// which held, the next video never showed (the owner's two videos in a row, 2026-11-10).
+static UIView *barVideoSurface(void) {
+    NSArray<UIView *> *surfaces = barVideoSurfaces();
+    for (UIView *surface in surfaces) if ([surface.description containsString:@"attached:1"]) return surface;
+    return surfaces.firstObject;
+}
+
+- (void)attachVideoIfShown {
+    // Only the page that is up: a page made ahead and never presented is in a window too, its cover laid out to nothing,
+    // and taken into it the surface went to 0x0, Spotify let the video go and the picture stayed black (the phone's log,
+    // 2026-11-10: two pages, the hidden one holding the surface).
+    if (!_wantsVideo || _videoSurface || !self.viewIfLoaded.window || !self.presentingViewController || self.isBeingDismissed) return;
+    if (_cover.bounds.size.width < 1 || _cover.bounds.size.height < 1) {
+        [self.view setNeedsLayout];
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [weakSelf attachVideoIfShown]; });
+        return;
+    }
+    UIView *surface = _nextSurface.window ? _nextSurface : barVideoSurface();
+    _nextSurface = nil;
+    if (!surface) {
+        // The bar may build its surface a moment after the video starts.
+        __weak typeof(self) weakSelf = self;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [weakSelf attachVideoIfShown]; });
+        return;
+    }
+    _videoHome = surface.superview;
+    _videoHomeFrame = surface.frame;
+    _videoHomeMask = surface.autoresizingMask;
+    // Laid out by its frame while it is held: Spotify's surface is an Auto Layout view, and moved into the cover with no
+    // constraints of its own there a layout pass sized it to nothing, Spotify let the video go and every video after the
+    // first stayed black (the phone's log, 2026-11-10: translatesAutoresizingMaskIntoConstraints 0, 0x0 once held).
+    surface.translatesAutoresizingMaskIntoConstraints = YES;
+    _videoSurface = surface;
+    [usedSurfaces() addObject:surface];
+    [_cover addSubview:surface];
+    surface.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    // Black, not clear: Spotify attaches the video only to a surface it counts as visible, and a clear one went unattached
+    // (eligibleForAttachment 0) and the next video never showed (2026-11-10). The cover is not to show round the picture
+    // either (its owner, 2026-11-09).
+    _videoHomeColor = surface.backgroundColor;
+    surface.backgroundColor = UIColor.blackColor;
+    // No tap on the picture to take it full screen (its owner, 2026-11-10: "i dont like the tap to open fullscreen");
+    // turned sideways it fills the screen (SystemLandscape.m).
+    [self setUpPictureInPictureFor:surface];
+    _videoKeeper = [SGRFrameKeeper new];
+    _videoKeeper.view = surface;
+    for (NSString *key in @[@"frame", @"bounds", @"center"]) [surface addObserver:_videoKeeper forKeyPath:key options:0 context:NULL];
+    [_videoKeeper keep];
+    [UIView animateWithDuration:0.35 animations:^{
+        [self.view setNeedsLayout];
+        [self.view layoutIfNeeded];
+    }];
+}
+
+// The landscape player holds the video while it is up (SystemLandscape.m); the keeper keeps it filling that holder.
+- (UIView *)landscapeVideoSurface {
+    return _videoSurface;
+}
+
+- (void)landscapeVideoReturned {
+    UIView *surface = _videoSurface;
+    if (!surface || surface.superview == _cover) return;
+    [_cover addSubview:surface];
+    surface.frame = _cover.bounds;
+    if (self.isViewLoaded) [self.view setNeedsLayout];
+}
+
+#pragma mark - the video in Picture in Picture
+
+// Picture in Picture from the surface's own drawing layer, when Spotify's renderer draws into an AVSampleBufferDisplayLayer
+// (iOS's sample buffer Picture in Picture); its play, pause and skips go to Spotify's player.
+- (void)setUpPictureInPictureFor:(UIView *)surface {
+    if (_pip || !AVPictureInPictureController.isPictureInPictureSupported) return;
+    AVSampleBufferDisplayLayer *layer = sampleLayerIn(surface.layer);
+    if (!layer) return;
+    AVPictureInPictureControllerContentSource *source = [[AVPictureInPictureControllerContentSource alloc] initWithSampleBufferDisplayLayer:layer playbackDelegate:self];
+    _pip = [[AVPictureInPictureController alloc] initWithContentSource:source];
+    _pip.delegate = self;
+    _pip.canStartPictureInPictureAutomaticallyFromInline = YES;
+    SGRSystemVideoSetPiP(YES, NO);
+}
+
+- (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)controller {
+    SGRSystemVideoSetPiP(YES, YES);
+}
+
+- (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)controller {
+    SGRSystemVideoSetPiP(_videoSurface != nil, NO);
+}
+
+- (void)startPictureInPicture {
+    if (!_pip) return;
+    [_pip startPictureInPicture];
+}
+
+- (void)pictureInPictureController:(AVPictureInPictureController *)controller setPlaying:(BOOL)playing {
+    id<SPTPlayer> player = (id<SPTPlayer>)SGPlayer();
+    if (playing) [player resume:nil];
+    else [player pause:nil];
+}
+
+// Spotify's clock is its own, so the window shows no scrubber: the range is open.
+- (CMTimeRange)pictureInPictureControllerTimeRangeForPlayback:(AVPictureInPictureController *)controller {
+    return CMTimeRangeMake(kCMTimeNegativeInfinity, kCMTimePositiveInfinity);
+}
+
+- (BOOL)pictureInPictureControllerIsPlaybackPaused:(AVPictureInPictureController *)controller {
+    return SGPlayerState().isPaused;
+}
+
+- (void)pictureInPictureController:(AVPictureInPictureController *)controller didTransitionToRenderSize:(CMVideoDimensions)newRenderSize {
+}
+
+- (void)pictureInPictureController:(AVPictureInPictureController *)controller skipByInterval:(CMTime)skipInterval completionHandler:(void (^)(void))completionHandler {
+    SPTPlayerState *state = SGPlayerState();
+    [(id<SPTPlayer>)SGPlayer() seekTo:MAX(0, positionOf(state) + CMTimeGetSeconds(skipInterval))];
+    completionHandler();
+}
+
+// The borrowed surface back in the bar.
+- (void)returnVideo {
+    UIView *surface = _videoSurface;
+    _videoSurface = nil;
+    if (!surface) return;
+    if (_videoKeeper) {
+        for (NSString *key in @[@"frame", @"bounds", @"center"]) [surface removeObserver:_videoKeeper forKeyPath:key];
+        _videoKeeper = nil;
+    }
+    surface.backgroundColor = _videoHomeColor;
+    if (!_pip.isPictureInPictureActive) {
+        _pip = nil;
+        SGRSystemVideoSetPiP(NO, NO);
+    }
+    if (self.isViewLoaded) [UIView animateWithDuration:0.35 animations:^{
+        [self.view setNeedsLayout];
+        [self.view layoutIfNeeded];
+    }];
+    UIView *home = _videoHome;
+    if (home) {
+        surface.autoresizingMask = _videoHomeMask;
+        surface.frame = _videoHomeFrame;
+        // Left laid out by its frame, at the bar's size: put back to Auto Layout it had no constraints there any more (they
+        // went as it left), was laid out to nothing, and Spotify let the video go, which broke playback after the page was
+        // swiped away and Picture in Picture with it (its owner, 2026-11-10).
+        [home addSubview:surface];
+    } else {
+        [surface removeFromSuperview];
+    }
+}
+
+// While the AI DJ talks: the bar empty and the times dashed, as with nothing playing (tick), since the talk has no
+// length, and the bar not to be dragged. The cover is Spotify's DJ picture. Spotify's DJ animation is drawn live from
+// the voice's loudness inside its own DJ screens (Endless_AIDJVisualizationKit), so there is none to show here (its
+// owner, 2026-11-09).
+// The ring fills the page, centred where the cover is and as large as Spotify's against it (a radius of 0.27 of the
+// cover's side: Spotify's is 87 points on a 375 point screen, the cover there 319).
+- (void)placeDJRing {
+    if (!_djRing.superview) return;
+    _djRing.frame = self.view.bounds;
+    // The holder's place untransformed: with the lyrics or the queue up it is the thumbnail by its transform alone, and
+    // the ring stays where the large cover stands.
+    CGSize side = _coverHolder.bounds.size;
+    _djRing.ringCentre = [self.view convertPoint:_coverHolder.center fromView:_coverHolder.superview];
+    _djRing.ringRadius = round(MIN(side.width, side.height) * 0.27);
+}
+
+- (void)showNarration:(BOOL)on {
+    if (on == _narrating) return;
+    _narrating = on;
+    // Our own DJ ring while it talks (SystemDJRing.h), since Spotify's cannot be borrowed: the page's background, DJ blue
+    // throughout with the ring where the cover was, and the cover away, as on Spotify's own DJ screen (its owner,
+    // 2026-11-10: "it doesn't need to be in its own cover, it can be in the background like Spotify's").
+    if (on && !_djRing) _djRing = [[SGRDJRingView alloc] initWithFrame:self.view.bounds];
+    if (on && _djRing.superview != self.view) {
+        _djRing.alpha = 0;
+        [self.view insertSubview:_djRing aboveSubview:_field];
+        [self placeDJRing];
+    }
+    _djRing.moving = on;
+    SGRDJRingView *ring = _djRing;
+    if (self.view.window) SGRAnimate(SGRMotionFade, ^{ ring.alpha = on ? 1 : 0; }, nil);
+    else ring.alpha = on ? 1 : 0;
+    // The lyrics and the queue closed and their buttons off while the DJ talks: the ring is the page then (its owner,
+    // 2026-11-10: the queue over the ring).
+    if (on) {
+        [self setLyricsOpen:NO];
+        [self setQueueOpen:NO];
+    }
+    _queue.enabled = !on;
+    [self syncCoverShownAnimated:YES];
+    _scrubber.userInteractionEnabled = !on;
+    [self tick];
+    [self syncLyrics];
 }
 
 - (void)show:(SPTPlayerState *)state {
@@ -2453,6 +3127,15 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     _title.text = track ? track.trackTitle : @"Not Playing";
     _artist.text = artistLine(track);
     _context.text = contextTitle(state, track);
+    [self showNarration:track && isNarration(track)];
+    // A new video: the surface taken for the last one goes back and the bar's is taken again once Spotify has the new one
+    // on it -- kept, the next video played on a surface no longer on screen (its owner, 2026-11-10).
+    BOOL video = track && isVideoTrack(track);
+    NSString *uri = video ? SGURIString(track.URI) : nil;
+    if (video && _videoSurface && _videoURI && ![uri isEqualToString:_videoURI]) [self returnVideo];
+    if (video) _videoURI = uri;
+    [self showVideo:video];
+    if (_pip) [_pip invalidatePlaybackState];
     for (SGRSystemControlButton *skip in @[_previous, _next]) {
         skip.glyph.alpha = track ? 1 : 0.35;
         skip.userInteractionEnabled = track != nil;
@@ -2476,6 +3159,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 
 - (void)showHeavy {
     [self syncSaved];
+    [self syncRowButtons];
     if (_shownOnce) [self syncClipAnimated:YES];
     [self refreshCover];
     // Spotify's bar and the Kit's fetch take the new track's cover a moment after the state says so.
@@ -2540,11 +3224,44 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 }
 
 - (void)tick {
+    // The surface held put back to the cover's size from the clock too: Spotify's bar laid it out to nothing in a way no
+    // observer saw, and at 0x0 Spotify let the video go from it and the picture stayed black (Switch to Audio and back:
+    // the phone's log, 2026-11-10).
+    [_videoKeeper keep];
+    // A new surface for the next video: Spotify makes one in the bar for each video and attaches it only once it is
+    // visible, while the last one stays attached, so waiting for the held one to let go could wait for ever (a skip
+    // through music videos: the phone's log, 2026-11-10). Any bar surface never held before is taken at once, the old one
+    // dropped rather than put back: put back, the bar took it up again and the two were swapped on every tick until the
+    // app hung (2026-11-10). One held is never taken again.
+    if (_videoSurface) {
+        UIView *fresh = nil;
+        for (UIView *surface in barVideoSurfaces()) {
+            if (surface != _videoSurface && ![usedSurfaces() containsObject:surface]) fresh = surface;
+        }
+        if (fresh) {
+            SGLog(@"redesign player: video moved to a new surface, following it");
+            UIView *old = _videoSurface;
+            if (_videoKeeper) {
+                for (NSString *key in @[@"frame", @"bounds", @"center"]) [old removeObserver:_videoKeeper forKeyPath:key];
+                _videoKeeper = nil;
+            }
+            [old removeFromSuperview];
+            _videoSurface = nil;
+            if (!_pip.isPictureInPictureActive) {
+                _pip = nil;
+                SGRSystemVideoSetPiP(NO, NO);
+            }
+            _nextSurface = fresh;
+            [self attachVideoIfShown];
+        }
+    }
     [self syncLyrics];
     if (_scrubber.held) return;
     SPTPlayerState *state = SGPlayerState();
-    if (!isTrack(state.track)) {
-        if (_hadTrack) return;
+    // Nothing playing, or the AI DJ talking, which has no length: the bar empty and the times dashed, as Not Playing
+    // (its owner, 2026-11-09).
+    if (!isTrack(state.track) || _narrating) {
+        if (!_narrating && _hadTrack) return;
         _scrubber.value = 0;
         _elapsed.text = _remaining.text = @"--:--";
         _shownTotal = -1;
@@ -2611,7 +3328,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     else [_lyricsSpinner stopAnimating];
 
     // As the footer's: dimmed and off without lines, but always on while the lyrics are up, the way back to the cover.
-    BOOL enabled = lines || _lyricsOpen;
+    BOOL enabled = (lines || _lyricsOpen) && !_narrating;
     NSString *symbol = _lyricsOpen ? kLyricsSymbolOpen : kLyricsSymbol;
     if (_lyrics.enabled == enabled && [_lyrics.glyph.symbol isEqualToString:symbol]) return;
     BOOL animated = _shownOnce && self.view.window;
@@ -2716,11 +3433,15 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     _titleBlock.transform = up;
     _add.transform = up;
     _more.transform = up;
+    _switchVideo.transform = up;
+    _djButton.transform = up;
     // Only the queue's: the lyrics' rest fades the row by its own alpha (fadingViews), the thumbnail's own staying put.
     if (_queueOpen || shown != _shownAlpha) {
         _titleBlock.alpha = shown;
         _add.alpha = shown;
         _more.alpha = shown;
+        _switchVideo.alpha = shown;
+        _djButton.alpha = shown;
     }
     _shownAlpha = shown;
     _cover.alpha = shown;
@@ -2730,6 +3451,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
 }
 
 - (void)toggleQueue {
+    if (_narrating && !_queueOpen) return;
     [self setQueueOpen:!_queueOpen];
 }
 
@@ -2804,7 +3526,10 @@ void SGRSystemHandQueueBack(NSArray<NSString *> *shown, NSArray *upcoming, void 
         if (![next isKindOfClass:NSArray.class]) return;
         me->_spotifyQueueKey = queueKey(next);
         [me->_queueView showState:SGPlayerState() upcoming:next from:from];
-        if ([queue respondsToSelector:@selector(prevTracks)]) [me->_queueView showPast:[(id<SPTPlayerQueue>)queue prevTracks]];
+        // History: the mod's own, the songs listened to (SystemHistory.h), or with its switch off Spotify's prevTracks.
+        NSArray *own = SGRSystemHistoryTracks();
+        if (own) [me->_queueView showPast:own];
+        else if ([queue respondsToSelector:@selector(prevTracks)]) [me->_queueView showPast:[(id<SPTPlayerQueue>)queue prevTracks]];
     } on:dispatch_get_main_queue()];
 }
 
@@ -2877,7 +3602,7 @@ void SGRSystemHandQueueBack(NSArray<NSString *> *shown, NSArray *upcoming, void 
 }
 
 - (void)toggleLyrics {
-    if (!_lyricsOpen && !SGRPlayerLyricsAvailable()) return;
+    if (!_lyricsOpen && (!SGRPlayerLyricsAvailable() || _narrating)) return;
     [self setLyricsOpen:!_lyricsOpen];
 }
 
@@ -2952,7 +3677,7 @@ void SGRSystemHandQueueBack(NSArray<NSString *> *shown, NSArray *upcoming, void 
     // Hidden on the Player page, they stay unseen when the rest comes back.
     if (!_shuffleOff) [views addObject:_shuffle];
     if (!_repeatOff) [views addObject:_repeat];
-    if (SGRLyricsHideMode() != SGRLyricsHideControls) [views addObjectsFromArray:@[_close, _more, _context, _coverHolder, _titleBlock, _add]];
+    if (SGRLyricsHideMode() != SGRLyricsHideControls) [views addObjectsFromArray:@[_close, _more, _context, _coverHolder, _titleBlock, _add, _switchVideo, _djButton]];
     return views;
 }
 
@@ -3043,7 +3768,7 @@ void SGRSystemHandQueueBack(NSArray<NSString *> *shown, NSArray *upcoming, void 
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
-    return recognizer == _wake;
+    return recognizer == _wake || recognizer == _titlePress || other == _titlePress;
 }
 
 // The title's swipe is sideways only: a drag that starts more down than across is never its, so UIKit's swipe close
@@ -3066,7 +3791,36 @@ void SGRSystemHandQueueBack(NSArray<NSString *> *shown, NSArray *upcoming, void 
 // Moved sideways the title and artist go with the finger and the next or previous track's come in beside them, as the
 // mini player's lines do (Navbar/SystemTabs.x's swiped:): far or fast enough it settles on that track and skips to it, short of
 // that it springs back. Left is the next track, right the one before, episodes the same.
+// In while the finger is down on them and a tap opens the album (SGRKeyPlayerTitleAlbum), each scaled from its leading
+// edge, where its text starts, and dimmed, as SGRGlyphPress does the star; out again on letting go or as a swipe starts.
+- (void)titlePressed:(UILongPressGestureRecognizer *)press {
+    BOOL down = press.state == UIGestureRecognizerStateBegan || press.state == UIGestureRecognizerStateChanged;
+    if (down && press.state == UIGestureRecognizerStateChanged) return;
+    [self pressTitle:down && SGEnabled(SGRKeyPlayerTitleAlbum)];
+}
+
+- (void)pressTitle:(BOOL)pressed {
+    if (pressed == _titlePressed) return;
+    _titlePressed = pressed;
+    static const CGFloat scale = 0.95;
+    SGRAnimate(SGRMotionPress, ^{
+        for (UIView *label in @[self->_title, self->_artist]) {
+            CGFloat shift = -label.bounds.size.width * (1 - scale) / 2;
+            label.transform = pressed ? CGAffineTransformScale(CGAffineTransformMakeTranslation(shift, 0), scale, scale) : CGAffineTransformIdentity;
+            label.alpha = pressed ? 0.5 : 1;
+        }
+    }, nil);
+}
+
 - (void)titleSwiped:(UIPanGestureRecognizer *)swipe {
+    if (swipe.state == UIGestureRecognizerStateBegan && _titlePressed) {
+        _titlePressed = NO;
+        for (UIView *label in @[_title, _artist]) {
+            [label.layer removeAllAnimations];
+            label.transform = CGAffineTransformIdentity;
+            label.alpha = 1;
+        }
+    }
     CGFloat step = _titleBlock.bounds.size.width - 2 * kTitleFade + kTitlePageGap, x = [swipe translationInView:_titleBlock].x;
     NSInteger way = x < 0 ? -1 : 1;
     SPTPlayerTrack *beside = [self trackFrom:way];
@@ -3358,6 +4112,134 @@ void SGRSystemStepBack(SPTPlayerTrack *track, NSInteger steps) {
         NSArray *past = [queue respondsToSelector:@selector(prevTracks)] ? [(id<SPTPlayerQueue>)queue prevTracks] : nil;
         if (![past isKindOfClass:NSArray.class] || past.count < (NSUInteger)steps) return;
         stepBackOne(past.count, steps);
+    } on:dispatch_get_main_queue()];
+}
+
+// A song of the mod's History tapped: back to it in Spotify's queue when it is still behind the playing one (the nearest
+// time it is there), or else Spotify's own link for it.
+// After a switch: the same second sought once `target` is the track playing, tried for five seconds. Only the target: a
+// slow switch let the song end, and the next track was sought instead (the code review, 2026-11-10).
+static void SGRSwitchSeek(NSString *target, double position, NSInteger tries) {
+    SPTPlayerState *state = SGPlayerState();
+    NSString *now = SGURIString(state.track.URI);
+    if ([now isEqualToString:target] && !state.isPaused) {
+        SGLog(@"redesign player: switch landed on %@, seeking to %.0f", now, position);
+        if (position > 2) [(id<SPTPlayer>)SGPlayer() seekTo:position];
+        return;
+    }
+    if (tries >= 20) {
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        SGRSwitchSeek(target, position, tries + 1);
+    });
+}
+
+// The navigation stack the page was opened over: the selected tab's, in the key window.
+static UINavigationController *SGRSwitchNavigation(void) {
+    UIWindow *key = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) if (w.isKeyWindow) key = w;
+    }
+    __block UINavigationController *found = nil;
+    __block void (^walk)(UIViewController *) = nil;
+    void (^__block __weak weakWalk)(UIViewController *);
+    walk = ^(UIViewController *vc) {
+        if (found || !vc) return;
+        if ([vc isKindOfClass:UITabBarController.class]) { weakWalk(((UITabBarController *)vc).selectedViewController); return; }
+        if ([vc isKindOfClass:UINavigationController.class] && vc.viewIfLoaded.window) { found = (UINavigationController *)vc; return; }
+        for (UIViewController *child in vc.childViewControllers) weakWalk(child);
+    };
+    weakWalk = walk;
+    walk(key.rootViewController);
+    return found;
+}
+
+// Whether the player page is presented over `nav`'s window.
+static BOOL SGRSwitchPageUp(UINavigationController *nav) {
+    for (UIViewController *vc = nav.view.window.rootViewController.presentedViewController; vc; vc = vc.presentedViewController) {
+        if ([vc isKindOfClass:SGRSystemPlayerPage.class]) return YES;
+    }
+    return NO;
+}
+
+// The track `uri` (a song's music video, or a video's song) played in place of the one playing, from the same second.
+void SGRSystemSwitchTo(NSString *uri, BOOL toVideo) {
+    NSURL *url = [NSURL URLWithString:uri];
+    if (!url) return;
+    double position = positionOf(SGPlayerState());
+    SGLog(@"redesign player: switch to %@ (%@)", uri, toVideo ? @"video" : @"song");
+    // To a video: by its link, the one way Spotify plays it as a video (played as a context or put in the queue, the song
+    // played instead, 2026-11-10); the album page the link pushes under the player is taken off again at once.
+    if (toVideo) {
+        UINavigationController *navigation = SGRSwitchNavigation();
+        NSArray<UIViewController *> *before = navigation.viewControllers;
+        SGOpenSpotifyURI(url);
+        __weak UINavigationController *weakNavigation = navigation;
+        // Only while the player page is still up over it: a page opened from the player (Go to Artist, the title) closes
+        // the player first, and was taken off with the link's (the code review, 2026-11-10).
+        for (NSNumber *after in @[@0.4, @1.0, @2.0]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(after.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                UINavigationController *nav = weakNavigation;
+                if (!nav || !before || nav.viewControllers.count <= before.count || !SGRSwitchPageUp(nav)) return;
+                [nav setViewControllers:before animated:NO];
+            });
+        }
+        SGRSwitchSeek(uri, position, 0);
+        return;
+    }
+    // To the song: its link played as a context (SPTPlayerContext contextForURI:, then playContext:options:), which plays it
+    // with no page; put next in the queue and skipped to, Spotify played another track in its place, and a context of a
+    // bare track (contextWithTracks:) stopped playback (2026-11-10).
+    id player = SGPlayer();
+    Class contextClass = NSClassFromString(@"SPTPlayerContext");
+    SEL forURI = NSSelectorFromString(@"contextForURI:"), play = NSSelectorFromString(@"playContext:options:");
+    if (![contextClass respondsToSelector:forURI] || ![player respondsToSelector:play]) return;
+    @try {
+        id context = ((id (*)(id, SEL, id))objc_msgSend)(contextClass, forURI, url);
+        ((id (*)(id, SEL, id, id))objc_msgSend)(player, play, context, nil);
+    } @catch (NSException *e) {
+        SGLog(@"redesign player: switch to the song threw %@", e.reason);
+        return;
+    }
+    SGRSwitchSeek(uri, position, 0);
+}
+
+// The music video's own shape, width over height: the picture's rectangle in Spotify's display view inside the surface
+// (SPTVideoDisplayView's or BMVideoDisplayView's videoRect), 16:9 until it has one (its owner, 2026-11-10: the video
+// area to follow the video's aspect ratio).
+CGFloat SGRSystemVideoAspect(UIView *surface) {
+    __block CGFloat aspect = 0;
+    SEL rect = NSSelectorFromString(@"videoRect");
+    SGForEachView(surface, ^(UIView *v) {
+        if (aspect > 0 || ![v respondsToSelector:rect]) return;
+        CGRect r = ((CGRect (*)(id, SEL))objc_msgSend)(v, rect);
+        if (r.size.width > 1 && r.size.height > 1) aspect = r.size.width / r.size.height;
+    });
+    return aspect > 0.2 && aspect < 5 ? aspect : 16.0 / 9.0;
+}
+
+void SGRSystemPlayPast(SPTPlayerTrack *track) {
+    NSString *uri = SGURIString(track.URI);
+    id<SPTPlayer> player = (id<SPTPlayer>)SGPlayer();
+    if (!uri || !player) return;
+    void (^open)(void) = ^{ SGOpenSpotifyURI([NSURL URLWithString:uri]); };
+    if (![player respondsToSelector:@selector(fetchQueue:on:)]) {
+        open();
+        return;
+    }
+    [player fetchQueue:^(id queue) {
+        NSArray *past = [queue respondsToSelector:@selector(prevTracks)] ? [(id<SPTPlayerQueue>)queue prevTracks] : nil;
+        if ([past isKindOfClass:NSArray.class]) {
+            for (NSInteger i = (NSInteger)past.count - 1; i >= 0; i--) {
+                SPTPlayerTrack *behind = past[i];
+                if (![behind respondsToSelector:@selector(URI)] || ![SGURIString(behind.URI) isEqualToString:uri]) continue;
+                SGRSystemStepBack(behind, (NSInteger)past.count - i);
+                return;
+            }
+        }
+        open();
     } on:dispatch_get_main_queue()];
 }
 

@@ -1,3 +1,4 @@
+#import <objc/runtime.h>
 // The header's text and controls, the redesign's own. Laid out top down from where the content has to start
 // for its bottom to sit SGRHeaderInfoBottom above the view's.
 #import "Core/SGCore.h"
@@ -10,14 +11,11 @@ const CGFloat SGRHeaderInfoBottom = 14;
 const CGFloat SGRHeaderInfoTitleRise = 56;
 
 BOOL SGRFullBleedCovers(void) {
-    static BOOL on;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ on = SGEnabled(SGRKeyFullBleedCovers); });
-    return on;
+    return NO;
 }
 
 // The text kSide in from the edges; Play at least kPlayWidth wide, the Music app's; the gaps between.
-static const CGFloat kSide = 20, kPlayWidth = 148, kRowSpacing = 16, kRowAbove = 16, kAboutAbove = 14;
+static const CGFloat kSide = 20, kPlayWidth = 160, kRowSpacing = 16, kRowAbove = 16, kAboutAbove = 14;
 
 static UILabel *infoLabel(UIView *parent, UIFont *font, UIColor *color, NSInteger lines, NSTextAlignment alignment) {
     UILabel *label = [UILabel new];
@@ -102,7 +100,7 @@ UIImageView *SGRCreatorPicture(UIView *root) {
     _play = [[SGRPlayCapsule alloc] initWithFrame:CGRectZero];
     _play.fillColor = UIColor.whiteColor;
     _trailing = [[SGRMirrorButton alloc] initWithFrame:CGRectZero];
-    _shuffle.neutralFill = _trailing.neutralFill = YES;
+    _shuffle.flat = _trailing.flat = YES;
     for (UIView *button in @[_shuffle, _play, _trailing]) {
         button.hidden = YES;
         [self addSubview:button];
@@ -272,13 +270,26 @@ UIImageView *SGRCreatorPicture(UIView *root) {
     if (changed) [self setNeedsLayout];
 }
 
+- (void)setLeading:(BOOL)leading {
+    if (_leading == leading) return;
+    _leading = leading;
+    NSTextAlignment alignment = leading ? NSTextAlignmentNatural : NSTextAlignmentCenter;
+    _title.textAlignment = _creator.textAlignment = _length.textAlignment = alignment;
+    _measuredWidth = -1;
+    [self setNeedsLayout];
+}
+
+- (CGFloat)sgr_side {
+    return _leading ? 0 : kSide;
+}
+
 - (void)trailingStateChanged {
     if (_trailing.source) [_trailing feedFrom:_trailing.source];
 }
 
 - (CGFloat)contentHeightForWidth:(CGFloat)width {
     if (width == _measuredWidth) return _measuredHeight;
-    CGFloat text = MAX(0, width - 2 * kSide), height = 0;
+    CGFloat side = [self sgr_side], text = MAX(0, width - 2 * side), height = 0;
     UILabel *previous = nil;
     for (UILabel *label in @[_title, _creator, _length]) {
         if (label.hidden) continue;
@@ -296,7 +307,8 @@ UIImageView *SGRCreatorPicture(UIView *root) {
 
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat width = self.bounds.size.width, text = MAX(0, width - 2 * kSide);
+    CGFloat inset = [self sgr_side], width = self.bounds.size.width, text = MAX(0, width - 2 * inset);
+    BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     CGFloat content = [self contentHeightForWidth:width];
     CGFloat y = round(self.bounds.size.height - SGRHeaderInfoBottom - content);
     if (self.pinnedTop > 0 && self.pinnedTop + content <= self.bounds.size.height) y = round(self.pinnedTop);
@@ -309,21 +321,21 @@ UIImageView *SGRCreatorPicture(UIView *root) {
         if (previous) y += [self sgr_gapAfter:previous];
         CGSize size = [self sgr_sizeOf:label width:text];
         CGFloat height = ceil(size.height);
-        label.frame = CGRectMake(kSide, y, text, height);
+        label.frame = CGRectMake(inset, y, text, height);
         // The name at its own width, so a tap beside it is the page's (-sgr_creatorHit:), and before it the
         // picture, a line high so the line keeps its height, the two centered together. The picture leads, so it
         // is on the right in a right-to-left language.
         if (label == _creator) {
             CGFloat picture = _picture.hidden ? 0 : height + kPictureGap;
             CGFloat named = MIN(ceil(size.width), MAX(0, text - picture));
-            CGFloat x = round((width - picture - named) / 2);
-            BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+            CGFloat x = _leading ? (rtl ? width - picture - named : 0) : round((width - picture - named) / 2);
             _picture.frame = CGRectMake(rtl ? x + named + kPictureGap : x, y, height, height);
             _picture.layer.cornerRadius = height / 2;
             label.frame = CGRectMake(rtl ? x : x + picture, y, named, height);
         }
         if (label == _title && _titleImage) {
-            _logo.frame = CGRectMake(round((width - size.width) / 2), y, size.width, height);
+            CGFloat x = _leading ? (rtl ? width - size.width : 0) : round((width - size.width) / 2);
+            _logo.frame = CGRectMake(x, y, size.width, height);
             _logo.accessibilityLabel = _title.text;
         }
         y += height;
@@ -335,8 +347,10 @@ UIImageView *SGRCreatorPicture(UIView *root) {
     // are there or not.
     CGFloat side = SGRActionHeight;
     // As wide as its word, short of pushing the other two off the page.
-    CGFloat playWidth = MIN(MAX(kPlayWidth, [_play sgr_width]), width - 2 * (kSide + side + kRowSpacing));
-    CGRect play = CGRectMake(round((width - playWidth) / 2), y, playWidth, side);
+    CGFloat playWidth = MIN(MAX(kPlayWidth, [_play sgr_width]), width - 2 * (inset + side + kRowSpacing));
+    // Set from the leading edge, shuffle first, then Play, then the third.
+    CGFloat playX = !_leading ? round((width - playWidth) / 2) : (rtl ? width - side - kRowSpacing - playWidth : side + kRowSpacing);
+    CGRect play = CGRectMake(playX, y, playWidth, side);
     _play.frame = play;
     _shuffle.frame = CGRectMake(CGRectGetMinX(play) - kRowSpacing - side, y, side, side);
     _trailing.frame = CGRectMake(CGRectGetMaxX(play) + kRowSpacing, y, side, side);
@@ -344,8 +358,62 @@ UIImageView *SGRCreatorPicture(UIView *root) {
 
     if (!_about.hidden) {
         y += kAboutAbove;
-        _about.frame = CGRectMake(kSide, y, text, ceil([_about sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)].height));
+        _about.frame = CGRectMake(inset, y, text, ceil([_about sizeThatFits:CGSizeMake(text, CGFLOAT_MAX)].height));
     }
 }
 
 @end
+
+CGFloat SGRWideCoverLeft(UIWindow *window) {
+    UIEdgeInsets safe = window.safeAreaInsets;
+    CGFloat between = window.bounds.size.width - safe.left - safe.right;
+    return round(safe.left + MAX(0, (between - 672) / 2) + SGRSideMargin);
+}
+
+const CGFloat SGRWideCoverSide = 200, SGRWideTop = 42, SGRWideGap = 32, SGRWideBelow = 36;
+
+CGRect SGRWideCover(UIView *view, CGFloat restTop) {
+    UIWindow *window = view.window;
+    if (!window || window.bounds.size.width <= window.bounds.size.height) return CGRectZero;
+    // Smaller on a short screen, so the songs still show under it; not at all below 80pt.
+    CGFloat side = MIN(SGRWideCoverSide, window.bounds.size.height - SGRWideTop - SGRWideBelow - 100);
+    if (side < 80) return CGRectZero;
+    CGFloat x = round([window convertPoint:CGPointMake(SGRWideCoverLeft(window), 0) toView:view].x);
+    return CGRectMake(x, MAX(0, round(SGRWideTop - restTop)), side, side);
+}
+
+void SGRKeepListThroughTurn(UIView *view, UIScrollView *turnList) {
+    // A turn: when the window's width changes. Its first passes leave Spotify's list scrolled 238 to 280pt down, the
+    // header with it, for 0.4s before the list goes back to its rest at 0, which was the jump (the owner's turn log,
+    // 2026-11-09: offset -280 and -238 with the header on screen at 280 and 238, then 0 at 0.39s). So for a second after
+    // a turn, a list that was at rest before it and is not being touched is put back at rest at once.
+    static char kTurnAtKey, kRestedKey, kWidthKey;
+    CGFloat windowWidth = view.window.bounds.size.width;
+    NSNumber *lastWidth = objc_getAssociatedObject(view, &kWidthKey);
+    if (windowWidth > 0 && lastWidth && fabs(windowWidth - lastWidth.doubleValue) > 1) {
+        objc_setAssociatedObject(view, &kTurnAtKey, @(CACurrentMediaTime()), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (windowWidth > 0) objc_setAssociatedObject(view, &kWidthKey, @(windowWidth), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    NSNumber *turnAt = objc_getAssociatedObject(view, &kTurnAtKey);
+    // The wrong places all come in the first 0.03s of the turn (-274, -308, 293.7 in the owner's turn logs); after that the list
+    // is left alone, so a scroll that starts right after a turn is not pulled back frame by frame (the same logs: 23 to 112
+    // pulled back to 0 at 0.5 to 0.6s).
+    BOOL turning = turnAt && CACurrentMediaTime() - turnAt.doubleValue < 0.15;
+    // Wherever the list was before the turn, at rest or scrolled (the same jump scrolled: 80, then -274, then 80 again at
+    // 0.41s: the owner's turn log, 2026-11-09), it is put back there at once.
+    if (turnList && !turning && !turnList.isTracking && !turnList.isDecelerating)
+        objc_setAssociatedObject(view, &kRestedKey, @(turnList.contentOffset.y), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // Only turning sideways, where the jump was, and only where Spotify itself lands 0.4s later: the place before the turn,
+    // no further than the sideways page scrolls (489 upright came back as 270 sideways: the owner's turn log), so nothing
+    // moves when Spotify gets there. Never while the list is moving: that fought a scroll under way.
+    NSNumber *before = objc_getAssociatedObject(view, &kRestedKey);
+    BOOL sideways = view.window.bounds.size.width > view.window.bounds.size.height;
+    if (turning && sideways && before && turnList && !turnList.isTracking && !turnList.isDecelerating && fabs(view.bounds.size.width - turnList.bounds.size.width) < 1) {
+        UIEdgeInsets inset = turnList.adjustedContentInset;
+        CGFloat furthest = MAX(-inset.top, turnList.contentSize.height - turnList.bounds.size.height + inset.bottom);
+        CGFloat target = MAX(-inset.top, MIN(before.doubleValue, furthest));
+        if (fabs(turnList.contentOffset.y - target) > 0.5) {
+            turnList.contentOffset = CGPointMake(turnList.contentOffset.x, target);
+        }
+    }
+}

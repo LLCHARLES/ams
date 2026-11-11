@@ -32,6 +32,7 @@
 #import "Shared/Player/SGLastTrack.h"
 #import "Shared/Player/PlayerSettings.h"
 #import "Player.h"
+#import "SystemHistory.h"
 
 // The card's height as a share of its width, kept between the two bounds.
 static const CGFloat kCardAspect = 0.5, kCardMinHeight = 168, kCardMaxHeight = 220;
@@ -367,9 +368,18 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     [sections addObject:SGNotedSection(@"Controls", @[SGSwitchRow(@"Volume", nil, SGRKeyPlayerVolume),
                                                       SGShownRow(@"Shuffle", nil, SGRKeyPlayerHideShuffle),
                                                       SGShownRow(@"Repeat", nil, SGRKeyPlayerHideRepeat),
-                                                      SGShownRow(@"Switch to video", @"The chip over the title of a song with a music video", SGKeyHideVideoSwitch)],
+                                                      SGShownRow(@"Like button", @"The star beside the title", SGRKeyPlayerHideAdd),
+                                                      SGShownRow(@"Switch to video", @"A button beside the star for a song with a music video", SGKeyHideVideoSwitch),
+                                                      SGSwitchRow(@"Title Opens Album", @"Tap the song's title to go to its album", SGRKeyPlayerTitleAlbum)],
         @"Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. "
-        @"Shuffle and Repeat switched off move into the queue's row.")];
+        @"Shuffle and Repeat switched off move into the queue's row. With Like button off, Add to Playlist joins the ⋯ menu. "
+        @"With Title Opens Album on, Go to Album leaves the ⋯ menu.")];
+    // History in the queue: the songs actually listened to, kept by the mod (SystemHistory.h), or Spotify's own list.
+    [sections addObject:SGNotedSection(@"History", @[SGSwitchRow(@"Listening History", @"The last 50 songs you listened to", SGRKeyOwnHistory),
+                                                     SGChoiceRow(@"Count After", nil, SGRKeyHistoryAfter, SGRSystemHistoryAfterChoices(), 4),
+                                                     SGActionRow(@"Clear History", nil, ^{ SGRSystemHistoryClear(); })],
+        @"A song counts once it has played this long, or half of a shorter song. Off, History shows Spotify's list, which "
+        @"also counts the songs skipped over when you pick one further down the queue.")];
     [sections addObjectsFromArray:more];
     // Fluid, Animated and Visualizer share the field (PlayerMotion.x reads the choice on every track); Still and Colors
     // are a field of another kind.

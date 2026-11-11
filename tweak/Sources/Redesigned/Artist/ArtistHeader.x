@@ -111,10 +111,40 @@ static UIView *containerOf(UIView *header) {
 // right, rather than being handed a picture on each of the header's passes and staying empty between them.
 // The same view again only re-reads it.
 - (void)followArtwork:(UIImageView *)source;
+// Sideways, the photo as a square at this place in the hero's coordinates, as the album's cover is (its owner,
+// 2026-11-08: the artist's top section like the album's in landscape); empty upright, where it runs full bleed.
+@property (nonatomic) CGRect wideSquare;
 @end
 
 @implementation SGRArtistHero {
     __weak UIImageView *_artwork;
+}
+
+- (void)setWideSquare:(CGRect)wideSquare {
+    if (CGRectEqualToRect(_wideSquare, wideSquare)) return;
+    _wideSquare = wideSquare;
+    [self setNeedsLayout];
+}
+
+- (void)layoutSubviews {
+    BOOL wide = !CGRectIsEmpty(_wideSquare);
+    if (self.dissolves == wide) self.dissolves = !wide;
+    if (self.scrim.hidden != wide) self.scrim.hidden = wide;
+    [super layoutSubviews];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    if (wide) {
+        _picture.autoresizingMask = UIViewAutoresizingNone;
+        CGRect square = CGRectOffset(_wideSquare, 0, self.stretch);
+        if (!CGRectEqualToRect(_picture.frame, square)) _picture.frame = square;
+        _picture.layer.cornerRadius = 4;
+        _picture.layer.cornerCurve = kCACornerCurveContinuous;
+    } else {
+        _picture.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        if (!CGRectEqualToRect(_picture.frame, self.content.bounds)) _picture.frame = self.content.bounds;
+        _picture.layer.cornerRadius = 0;
+    }
+    [CATransaction commit];
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -215,6 +245,62 @@ static UIView *keepBar(UIView *header) {
     return foreground;
 }
 
+// The top of the page as it scrolls: iOS's soft fade over the status bar, as the album has, but off while the photo still
+// fills the top, so the photo is never blurred under it; on once the photo's bottom has gone up past the status bar.
+static void shapeArtistTopEdge(UIView *header, UIView *container) {
+    if (@available(iOS 26.0, *)) {
+        UIWindow *window = header.window;
+        if (!window) return;
+        SGRArtistHero *hero = objc_getAssociatedObject(container, &kHeroKey);
+        CGFloat photoBottom = hero ? CGRectGetMaxY([hero convertRect:hero.bounds toView:nil])
+                                   : CGRectGetMaxY([container convertRect:container.bounds toView:nil]);
+        BOOL off = photoBottom > window.safeAreaInsets.top + 0.5;
+        for (UIView *v = container.superview; v; v = v.superview) {
+            if (![v isKindOfClass:UIScrollView.class]) continue;
+            UIScrollView *scroll = (UIScrollView *)v;
+            if (scroll.topEdgeEffect.hidden != off) scroll.topEdgeEffect.hidden = off;
+        }
+    }
+}
+
+// Sideways, the album's top section (Album/AlbumHeader.x, the Music app's landscape): the photo where the Kit puts the
+// cover (SGRWideCover), in line with the album's and the playlist's, the name, the listeners and the row beside it set from
+// the left, and the page's list SGRWideBelow under the square -- the container held to that height, sideways only.
+static char kWideHeightKey;
+
+static UIScrollView *scrollAbove(UIView *view) {
+    for (UIView *v = view.superview; v; v = v.superview) if ([v isKindOfClass:UIScrollView.class]) return (UIScrollView *)v;
+    return nil;
+}
+
+// Where the container's top is on screen with the page at rest: the list's own top and the container's place in it,
+// neither of which moves as the page scrolls, loads or turns (the album's headerRestTop).
+static CGFloat restTop(UIView *container) {
+    UIScrollView *list = scrollAbove(container);
+    if (!list || !list.superview) return [container convertPoint:CGPointZero toView:nil].y;
+    return [list.superview convertPoint:list.frame.origin toView:nil].y + [container convertPoint:CGPointZero toView:list].y - list.contentInset.top;
+}
+
+static CGRect wideSquare(UIView *container) {
+    return SGRWideCover(container, restTop(container));
+}
+
+static void holdContainer(UIView *container, CGFloat height) {
+    NSLayoutConstraint *held = objc_getAssociatedObject(container, &kWideHeightKey);
+    if (height < 1) {
+        if (held.active) held.active = NO;
+        return;
+    }
+    if (!held) {
+        held = [container.heightAnchor constraintEqualToConstant:height];
+        objc_setAssociatedObject(container, &kWideHeightKey, held, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (held.active && fabs(held.constant - height) < 0.5) return;
+    held.constant = round(height);
+    held.active = YES;
+    SGLog(@"redesign artist: header held to %.0fpt sideways", height);
+}
+
 // `full` NO is the header's own pass: a step of the collapse (its height changed, its width did not) then only
 // moves and fades, unless the name or the listeners changed; any other pass and the row's take everything again.
 static void applyHeader(UIView *header, BOOL full) {
@@ -225,11 +311,16 @@ static void applyHeader(UIView *header, BOOL full) {
     UIView *artwork = SGRFindByIdentifier(header, @"Components.Header.UI.ArtworkImage", &kArtworkKey);
     if (!container || !artwork || !SGRArtistPageOf(container)) return;
     objc_setAssociatedObject(header, &kSizeKey, [NSValue valueWithCGSize:size], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // The list kept where it was through a turn, as the album's is (the artist page came back 50pt off, 2026-11-10).
+    SGRKeepListThroughTurn(container, scrollAbove(container));
 
     UIView *bar = keepBar(header);
-    for (UIView *sub in header.subviews) {
-        if (sub != bar) blank(sub);
-    }
+    // The bar goes too, as the album's did (its owner, 2026-11-08: no header with a title, the buttons apart): the
+    // name is still read off it below, and the back button is the Kit's, pinned to the page.
+    for (UIView *sub in header.subviews) blank(sub);
+    UIView *page = SGRArtistPageOf(container);
+    SGRDropNavigationBar(page);
+    shapeArtistTopEdge(header, container);
 
     SGRHeaderInfo *info = objc_getAssociatedObject(container, &kInfoKey);
     if (!info) {
@@ -247,7 +338,22 @@ static void applyHeader(UIView *header, BOOL full) {
         objc_setAssociatedObject(container, &kInfoKey, info, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (info.superview != container) [container addSubview:info];
-    setFrame(info, container.bounds);
+    CGRect wide = wideSquare(container);
+    holdContainer(container, CGRectIsEmpty(wide) ? 0 : CGRectGetMaxY(wide) + SGRWideBelow);
+    info.leading = !CGRectIsEmpty(wide);
+    if (info.leading) {
+        UIWindow *window = container.window;
+        // To the column's right edge, as far in as the cover is on the left (the album's).
+        CGFloat right = [window convertPoint:CGPointMake(window.bounds.size.width - SGRWideCoverLeft(window), 0) toView:container].x;
+        CGFloat x = CGRectGetMaxX(wide) + SGRWideGap;
+        setFrame(info, CGRectMake(x, CGRectGetMinY(wide), MAX(0, right - x), wide.size.height + SGRHeaderInfoBottom));
+        if (info.pinnedTop != 0) {
+            info.pinnedTop = 0;
+            [info setNeedsLayout];
+        }
+    } else {
+        setFrame(info, container.bounds);
+    }
 
     UIView *title = SGRFindByIdentifier(header, @"Encore.AdaptiveTitle", &kTitleKey);
     UIView *listeners = SGRFindByIdentifier(header, @"Components.Header.UI.Metadata", &kMetaKey);
@@ -266,7 +372,7 @@ static void applyHeader(UIView *header, BOOL full) {
     // Collapsing, the text would pass over Spotify's bar with the name in it: it goes over the last kFade of
     // the collapse, from the header's own height, which this pass runs on every step of. More stays: it is
     // outside the header and has nothing to pass over.
-    CGFloat alpha = MAX(0, MIN(1, (header.bounds.size.height - kBar) / kFade));
+    CGFloat alpha = info.leading ? 1 : MAX(0, MIN(1, (header.bounds.size.height - kBar) / kFade));
     if (fabs(info.alpha - alpha) > 0.01) info.alpha = alpha;
 
     // The picture reaches to where the content's top is at rest, plus the name. The container keeps its
@@ -280,7 +386,10 @@ static void applyHeader(UIView *header, BOOL full) {
         objc_setAssociatedObject(container, &kContainerHeightKey, @(rest), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     CGFloat bottom = rest - SGRHeaderInfoBottom - [info contentHeightForWidth:container.bounds.size.width] + SGRHeaderInfoTitleRise;
+    if (!CGRectIsEmpty(wide)) bottom = CGRectGetMaxY(wide) + 1;
     applyHero(container, artwork, bottom);
+    hero = objc_getAssociatedObject(container, &kHeroKey);
+    hero.wideSquare = wide;
 }
 
 // What the header shows besides its text: the logo, the buttons, More, and the watch on the buttons' row.

@@ -92,7 +92,9 @@ static NSMutableArray<UIView *> *controlsIn(UIView *header, NSArray<NSString *> 
 // Puts the controls at the header's trailing edge, the last of them flush against it and each keeping the width
 // it has, and answers where the leading edge of the first of them fell.
 static CGFloat placeTrailing(UIView *header, NSArray<UIView *> *controls) {
-    CGFloat right = header.bounds.size.width - kRowInset;
+    // Sideways, in from the trailing side's safe area too (its owner's screenshot, 2026-11-08: the avatar at the
+    // screen's edge); upright that side is 0.
+    CGFloat right = header.bounds.size.width - kRowInset - header.safeAreaInsets.right;
     for (UIView *control in controls.reverseObjectEnumerator) {
         CGFloat width = control.bounds.size.width;
         // The center is where Auto Layout put the control, whatever transform is on it; its frame is not.
@@ -195,7 +197,7 @@ static NSArray<UIView *> *placeRoot(UIView *header) {
 
     CGFloat leading = placeTrailing(header, trailing);
     CGRect row = SGFrameIn(trailing.firstObject, header);
-    layoutTitle(header, spotifyTitle, SGRSideMargin, leading, CGRectGetMidY(row));
+    layoutTitle(header, spotifyTitle, SGRSideMargin + header.safeAreaInsets.left, leading, CGRectGetMidY(row));
     for (UIView *control in trailing) watchRow(control.superview, header, placeRoot);
     return trailing;
 }
@@ -213,13 +215,70 @@ static NSArray<UIView *> *placeFolder(UIView *header) {
     ], keys);
     if (!placed.count && !back) return placed;
 
-    CGFloat trailingEdge = placed.count ? placeTrailing(header, placed) : header.bounds.size.width - kRowInset;
+    CGFloat trailingEdge = placed.count ? placeTrailing(header, placed) : header.bounds.size.width - kRowInset - header.safeAreaInsets.right;
     if (back) [placed insertObject:back atIndex:0];
     CGRect rowFrame = SGFrameIn(placed.firstObject, header);
-    CGFloat leading = back ? CGRectGetMaxX(rowFrame) + SGRGrid : SGRSideMargin;
+    CGFloat leading = back ? CGRectGetMaxX(rowFrame) + SGRGrid : SGRSideMargin + header.safeAreaInsets.left;
     layoutTitle(header, spotifyTitle, leading, trailingEdge, CGRectGetMidY(rowFrame));
     for (UIView *control in placed) watchRow(control.superview, header, placeFolder);
     return placed;
+}
+
+// Sideways (its owner's screenshot, 2026-11-08): Spotify's chips start at the screen's edge, beside the Dynamic Island,
+// and the list's first row -- Recents and the grid switch -- starts under them. The chips' own scroll view is inset by the
+// side safe areas, so its first chip starts in from the island and its last can still scroll into view (a transform on
+// the row ran its end past the screen), and the list is inset by however far the chips' bottom reaches into it. What is
+// added is kept with the value it was set to: Spotify setting its own inset again (a filter, a reload) is seen as a
+// changed value, taken as its new base, and the addition is made again. Upright both go.
+static char kChipsListKey, kInsetAddedKey, kInsetSetKey, kChipsSidesKey;
+static void clearChips(UIView *page, UIView *header) {
+    UIView *chips = childNamed(header, @"YourLibraryHeaderContentFiltersView");
+    UIWindow *window = header.window;
+    if (!chips || !window) return;
+    BOOL sideways = window.bounds.size.width > window.bounds.size.height;
+
+    __block UIScrollView *row = nil;
+    SGForEachView(chips, ^(UIView *v) {
+        if (!row && [v isKindOfClass:UIScrollView.class] && v.bounds.size.width > chips.bounds.size.width * 0.5) row = (UIScrollView *)v;
+    });
+    if (row) {
+        CGFloat left = sideways ? header.safeAreaInsets.left : 0, right = sideways ? header.safeAreaInsets.right : 0;
+        NSValue *kept = objc_getAssociatedObject(row, &kChipsSidesKey);
+        UIEdgeInsets had = kept ? kept.UIEdgeInsetsValue : UIEdgeInsetsZero;
+        UIEdgeInsets inset = row.contentInset;
+        if (fabs(had.left - left) > 0.5 || fabs(had.right - right) > 0.5 || fabs(inset.left - had.left) > 0.5) {
+            BOOL atStart = row.contentOffset.x <= -inset.left + 1;
+            inset.left = left;
+            inset.right = right;
+            row.contentInset = inset;
+            objc_setAssociatedObject(row, &kChipsSidesKey, [NSValue valueWithUIEdgeInsets:UIEdgeInsetsMake(0, left, 0, right)],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            if (atStart) row.contentOffset = CGPointMake(-left, row.contentOffset.y);
+        }
+    }
+
+    UIView *found = SGRFindByIdentifier(page, SGRLibraryListIdentifier, &kChipsListKey);
+    if (![found isKindOfClass:UIScrollView.class]) return;
+    UIScrollView *list = (UIScrollView *)found;
+    UIEdgeInsets inset = list.contentInset;
+    CGFloat added = [objc_getAssociatedObject(list, &kInsetAddedKey) doubleValue];
+    NSNumber *set = objc_getAssociatedObject(list, &kInsetSetKey);
+    // Spotify set its own since: none of ours is in it any more.
+    if (set && fabs(set.doubleValue - inset.top) > 0.5) added = 0;
+    CGFloat base = inset.top - added, want = 0;
+    if (sideways) {
+        CGFloat chipsBottom = CGRectGetMaxY([chips convertRect:chips.bounds toView:nil]);
+        // Where the content starts with the list at rest: the list's own top and its whole inset before what we add.
+        CGFloat contentTop = [list.superview convertPoint:list.frame.origin toView:nil].y + (list.adjustedContentInset.top - added);
+        want = MAX(0, round(chipsBottom + SGRGrid - contentTop));
+    }
+    if (fabs(want - added) < 0.5 && set) return;
+    BOOL atRest = list.contentOffset.y <= -list.adjustedContentInset.top + 1;
+    inset.top = base + want;
+    list.contentInset = inset;
+    objc_setAssociatedObject(list, &kInsetAddedKey, @(want), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(list, &kInsetSetKey, @(inset.top), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (atRest) list.contentOffset = CGPointMake(list.contentOffset.x, -list.adjustedContentInset.top);
 }
 
 static void layoutRoot(UIView *page) {
@@ -229,6 +288,7 @@ static void layoutRoot(UIView *page) {
     SGRLibraryClearScrim(header);
 
     NSArray<UIView *> *trailing = placeRoot(header);
+    clearChips(page, header);
     if (!trailing.count) return;
 
     // The first pass that laid the header out, not the first pass at all: a page appearing lays out before
@@ -250,6 +310,7 @@ static void layoutFolder(UIView *page) {
     SGRLibraryClearScrim(header);
 
     NSArray<UIView *> *placed = placeFolder(header);
+    clearChips(page, header);
     if (!placed.count) return;
 
     UIView *back = SGRFindByIdentifier(header, @"YourLibraryFolderHeader.back", &kBackKey);

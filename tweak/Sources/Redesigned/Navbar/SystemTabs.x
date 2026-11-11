@@ -781,10 +781,11 @@ void SGRSystemTabsSync(UIViewController *container, UIView *stockBar, NSArray<UI
         // as each scroll goes (TabBarMinimize.x), and UIKit's, where it stands in, is told never (its owner, 2026-11-01).
         UITabBarMinimizeBehavior minimize = SGEnabled(SGRKeyNavbarMinimize) ? UITabBarMinimizeBehaviorOnScrollDown : UITabBarMinimizeBehaviorNever;
         if (controller.tabBarMinimizeBehavior != minimize) controller.tabBarMinimizeBehavior = minimize;
-        // The redesign's accent on the selected tab (its owner, 2026-10-31).
-        UIColor *accent = SGRAccent();
+        // The redesign's accent on the selected tab (its owner, 2026-10-31), and only there (2026-11-08): the pages under
+        // the bar inherit white, not the accent, through the controller's view.
+        UIColor *accent = SGRTabAccent();
         if (![controller.tabBar.tintColor isEqual:accent]) controller.tabBar.tintColor = accent;
-        if (![controller.view.tintColor isEqual:accent]) controller.view.tintColor = accent;
+        if (![controller.view.tintColor isEqual:SGRAccent()]) controller.view.tintColor = SGRAccent();
 
         // The tabs again only when Spotify's items or their names changed; their glyphs follow in place at every pass.
         // Icons only on the Tab bar page (SGRKeyNavbarHideLabels): each tab without
@@ -992,8 +993,45 @@ static UIViewController *presenterOverPage(UIViewController *from, UIViewControl
 
 static char kRedirectedKey;
 
+// Spotify's own player, which Spotify presents itself when the AI DJ starts or its DJ card on Home is tapped (its owner's
+// recordings, 2026-11-09): the mod's page opens in its place, as from the mini player.
+// Spotify presents it in its overlay container (NowPlaying_ViewPageImpl.NowPlayingOverlayContainer, from Spotify's chrome
+// or from under the page: the owner's log, 2026-11-09), never the player's own controller.
+// A music video is the exception: Spotify presents the same overlay to play it (media.type and track_player video in the
+// owner's log, 2026-11-09), and the mod's page draws no video, so Spotify's player opens for it.
+static BOOL playingVideo(void) {
+    NSDictionary *metadata = [SGPlayerState().track.metadata isKindOfClass:NSDictionary.class] ? SGPlayerState().track.metadata : nil;
+    return [metadata[@"track_player"] isEqual:@"video"] || [metadata[@"media.type"] isEqual:@"video"];
+}
+
+static BOOL isSpotifyPlayer(UIViewController *controller) {
+    NSString *name = NSStringFromClass(controller.class);
+    if (![name containsString:@"NowPlayingOverlayContainer"] && ![name hasPrefix:@"NowPlaying_ViewImpl."]) return NO;
+    // Music videos play in the mod's page too (its owner, 2026-11-09), on a video surface of Spotify's own (SystemPlayer.m).
+    (void)playingVideo;
+    return YES;
+}
+
+API_AVAILABLE(ios(26.0)) static SGRSystemMiniPlayer *miniPlayerIn(UIView *root) {
+    if ([root isKindOfClass:SGRSystemMiniPlayer.class]) return (SGRSystemMiniPlayer *)root;
+    for (UIView *sub in root.subviews) {
+        SGRSystemMiniPlayer *found = miniPlayerIn(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
 %hook UIViewController
 - (void)presentViewController:(UIViewController *)presented animated:(BOOL)animated completion:(void (^)(void))completion {
+    if (@available(iOS 26.0, *)) if (presented && isSpotifyPlayer(presented)) {
+        UIViewController *tabs = systemTabsController();
+        SGRSystemMiniPlayer *mini = miniPlayerIn(tabs.view.window ?: tabs.view);
+        if (mini) {
+            if (![tabs.presentedViewController isKindOfClass:SGRSystemPlayerPage.class]) [mini opened];
+            if (completion) completion();
+            return;
+        }
+    }
     UIViewController *top = presented ? presenterOverPage((UIViewController *)self, presented) : nil;
     if (!top) {
         %orig;
@@ -1024,9 +1062,69 @@ static char kRedirectedKey;
 }
 %end
 
+// Sideways, Spotify sets the whole app in a card 8pt in from every edge with 16pt corners: MainUI_TabBarUIImpl's
+// InnerContainer, pinned by Auto Layout inside its PrimaryContentContainer, which a 16 Pro Max's sideways width (regular,
+// as an iPad's) brings out. iOS's tab bar floats over the page instead, so the card only left black bars round every
+// screen. Its edge constraints are set to nothing sideways, so Auto Layout lays it and everything in it out full screen,
+// and its corners go; upright Spotify does not inset it. Setting its frame instead was undone by the next layout pass
+// (the Max's layout record, 2026-11-10: the card {8, 8, 940, 412} in 956x440, every view under it Auto Layout).
+static BOOL sgr_isEdge(NSLayoutAttribute a) {
+    switch (a) {
+        case NSLayoutAttributeLeading: case NSLayoutAttributeTrailing: case NSLayoutAttributeLeft: case NSLayoutAttributeRight:
+        case NSLayoutAttributeTop: case NSLayoutAttributeBottom:
+            return YES;
+        default:
+            return NO;
+    }
+}
+
+static void sgr_fillCard(UIView *host, UIView *card) {
+    BOOL wide = host.bounds.size.width > host.bounds.size.height;
+    if (!wide || !card) return;
+    // Not more than a few changes a second: Spotify answering each with its own would keep the main thread busy.
+    static CFTimeInterval windowStart;
+    static NSInteger changes;
+    CFTimeInterval now = CACurrentMediaTime();
+    if (now - windowStart > 1) {
+        windowStart = now;
+        changes = 0;
+    }
+    BOOL changed = NO;
+    for (UIView *holder in @[host, card]) {
+        for (NSLayoutConstraint *c in holder.constraints) {
+            BOOL mine = (c.firstItem == card && sgr_isEdge(c.firstAttribute)) || (c.secondItem == card && sgr_isEdge(c.secondAttribute));
+            if (!mine || (c.firstItem == card && c.secondItem == card)) continue;
+            // Only to the host or its guides: a constraint between the card and a view inside it is the card's own layout.
+            id other = c.firstItem == card ? c.secondItem : c.firstItem;
+            UIView *otherView = [other isKindOfClass:UIView.class] ? other : [other isKindOfClass:UILayoutGuide.class] ? ((UILayoutGuide *)other).owningView : nil;
+            if (otherView != host) continue;
+            if (fabs(c.constant) > 0.1 && fabs(c.constant) <= 32 && changes < 10) {
+                c.constant = 0;
+                changed = YES;
+            }
+        }
+    }
+    if (card.layer.cornerRadius > 0) card.layer.cornerRadius = 0;
+    if (changed) changes++;
+}
+
+%group SGRCardFill
+%hook _TtC19MainUI_TabBarUIImpl23PrimaryContentContainer
+- (void)viewDidLayoutSubviews {
+    %orig;
+    UIView *host = ((UIViewController *)self).view;
+    for (UIViewController *child in ((UIViewController *)self).childViewControllers) {
+        if (![NSStringFromClass(child.class) hasSuffix:@"InnerContainer"]) continue;
+        if (child.viewIfLoaded.superview == host) sgr_fillCard(host, child.viewIfLoaded);
+    }
+}
+%end
+%end
+
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
+    if (NSClassFromString(@"_TtC19MainUI_TabBarUIImpl23PrimaryContentContainer")) %init(SGRCardFill);
 }
 
 void SGRRefreshMiniPlayer(void) {
