@@ -98,6 +98,12 @@ BOOL SGRPlayerLyricsNone(void);
 BOOL SGRPlayerLyricsOpen(void);
 // Shows them, or puts the cover back; does nothing when there are none to show.
 void SGRPlayerToggleLyrics(void);
+// What a touch at `point`, in `view`'s coordinates, reaches on the ordinary player's title row: the row's
+// own view when it answers with nothing finer, nil when the point is elsewhere. The row is drawn above the
+// bottom stack it is arranged in, so the cover's full screen cell underneath would take the tap and open
+// its tilt mode; the cover's list asks here first (PlayerGestures.x). nil for the AI DJ's player, and while
+// the row is not in a window.
+UIView *SGRPlayerInfoRowHitIn(UIView *view, CGPoint point, UIEvent *event);
 // Called by PlayerLyrics.x whenever either of those two changed, so the footer's lyrics glyph follows
 // (PlayerFooter.x). It returns at once when nothing changed.
 void SGRPlayerLyricsChanged(void);
