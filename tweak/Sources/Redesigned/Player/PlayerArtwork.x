@@ -1,32 +1,52 @@
-// Player redesign: the cover sits on the field with continuous corners and a soft shadow, and shrinks
-// back while playback is paused, the way the Music app's does. Spotify's lyric preview under it, and the cover's size
-// beside it, are Spotify's, as its own lyrics setting has them.
+// Player redesign: the cover is a view of the redesign's own, drawn where the Music app draws it.
 //
-// Tree (trees/clean/player/01.txt:36-43): CoverArtCellImpl > ... > CoverArtTiltView 354x354 > an
-// ElementView the same size > ImageViewProxy > Encore.ImageView (clips) > UIImageView, with
-// Lyrics_NPVContainerKit.LyricsContainerView under the tilt view. The ElementView is what gets the
-// corners and the scale: the tilt view's own transform is left to the tilt Spotify gives it when the
-// cover is inspected. The image clips, so the shadow is a plate of the Kit's behind it.
+// It used to be Spotify's own cover, moved up out of the taller band Spotify centers its tilt view in by
+// a transform on that tilt view. A transform is a correction worked out from where the band stands at the
+// moment of a layout pass, and it goes stale the moment the band moves without one: the queue taking its
+// place on the first open, a page scrolling, a cell reused for the next track. Every fix added another
+// pass that re-read the band and re-wrote the transform, and every pass landed a frame later than the
+// first one the eye saw -- the cover that dropped into place, appeared out of nothing, or jumped to the
+// top when the next track came in paused.
 //
-// A paused cover keeps its shrink while the player opens and closes: the morph flies the bar's cover to
-// the frame the cover is drawn at, transform included (SGRPlayerCoverFrameIn), so it lands at the size it
-// stays at. Holding it at full size through the transition made it land large and spring down after, or
-// grow before a close.
+// So the cover is no longer Spotify's. This file draws one view of its own, in the player's view, at a
+// frame worked out only from that view's own bounds: square, the screen's width less the Music app's
+// margins, its top a share of the screen's height down. No window measurement, no tilt view, no cell, no
+// transform that has to be kept in step, and no pass that has to run before the first frame. It is in the
+// right place on the first open and stays there through a track change; only the picture inside it fades.
+//
+// Spotify's list of covers is left in place and hidden by a mask (not by alpha: a mask still takes the
+// swipe that changes track, and PlayerField.x still reads the picture off its image views to publish it).
+// The picture here is the Kit's SGRNowPlayingArtwork, the same one the bar's card, the field, the lyrics'
+// thumbnail and the open's flown cover read, so the cover and the stand-in that flies into it are the
+// same picture and the hand-over is not seen.
+//
+// Tree (trees/clean/player/01.txt:26-43): SPTNowPlayingView holds the content layers (the sideways list
+// of covers, one per cell), the header row, and the bottom stack with the title, controls and footer. The
+// cover's own view sits in that player view, between the header row and the title. The paused shrink is
+// one transform on that view, and nothing else writes to it.
 #import "Core/SGCore.h"
+#import "Core/SGViewTree.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Shared/Haptics/Haptics.h"
 #import "Shared/Player/SpeedPitch.h"
 #import "Player.h"
 
 static const CGFloat kPausedScale = 0.84;
-// The bar's 40pt cover lives in a tilt view of its own; the player's is 354.
-static const CGFloat kCoverMinWidth = 200;
+// The Music app's cover, measured off its player on the iPhone 16 Pro the layouts were compared on
+// (402 x 874pt, 3x): 356pt square, 23pt in from either side of the screen and its top 94.8pt down it, just
+// under the header row.
+static const CGFloat kArtworkInset = 23;
+// The cover's top as a share of the screen's height (94.8 of 874), and the least room the header row's
+// buttons are left under the safe area's top on a shorter screen.
+static const CGFloat kArtworkTopShare = 0.1085, kArtworkTopGap = 33;
+// The most of the player's height the cover may take, so the title row is never covered on a short screen.
+// A share, not a measurement of Spotify's row: a share is there on the very first frame and never changes.
+static const CGFloat kCoverBottomShare = 0.66;
+static const CGFloat kCoverMinWidth = 200, kPlayerMinHeight = 400;
 
-static char kPlateKey;
-static NSHashTable<UIView *> *sg_tilts;
-// The cover of each tilt view once found. A frame Spotify sets on a scaled view becomes its scaled
-// size, leaving bounds that no longer match the tilt view's, so the cover is not looked for by size again.
-static NSMapTable<UIView *, UIView *> *sg_covers;
+static char kCoverKey, kStackKey, kHoldKey, kBadgeGlassKey, kHideMaskKey, kListKey;
+static __weak UIView *sg_cover;
+static BOOL sg_coverKeptHidden;
 
 static CGFloat currentScale(void) {
     SPTPlayerState *state = SGPlayerState();
@@ -34,119 +54,117 @@ static CGFloat currentScale(void) {
     return SGRReduceMotion() ? 1 : kPausedScale;
 }
 
-// The child of the tilt view the size of the cover.
-static UIView *coverIn(UIView *tilt) {
-    UIView *cover = [sg_covers objectForKey:tilt];
-    if (cover.superview == tilt) return cover;
-    for (UIView *sub in tilt.subviews) {
-        if (![sub isKindOfClass:SGRShadowPlate.class] && CGSizeEqualToSize(sub.bounds.size, tilt.bounds.size)) {
-            [sg_covers setObject:sub forKey:tilt];
-            return sub;
-        }
+// One place decides whether the drawn cover is on screen. A stand-in flies in its place while the player
+// opens (PlayerMorph.x), and the lyrics take its place while they are open (PlayerLyrics.x, by alpha);
+// neither state may be undone by a later pass of the other. Reduce Motion dims a paused cover instead of
+// shrinking it, so that dimming is kept here too.
+static CGFloat coverAlpha(void) {
+    if (sg_coverKeptHidden || SGRPlayerLyricsOpen()) return 0;
+    return (SGRReduceMotion() && SGPlayerState().isPaused) ? 0.75 : 1;
+}
+
+#pragma mark - the drawn cover
+
+@interface SGRPlayerCoverView : UIView
+@property (nonatomic) UIImageView *picture;
+@property (nonatomic) SGRShadowPlate *plate;
+@end
+
+@implementation SGRPlayerCoverView
+
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    self.userInteractionEnabled = NO;   // the swipe that changes track still reaches the list underneath
+    self.backgroundColor = UIColor.clearColor;
+    _plate = [[SGRShadowPlate alloc] initWithFrame:self.bounds];
+    _plate.cornerRadius = SGRRadiusArtwork;
+    [self addSubview:_plate];
+    _picture = [[UIImageView alloc] initWithFrame:self.bounds];
+    _picture.contentMode = UIViewContentModeScaleAspectFill;
+    _picture.clipsToBounds = YES;
+    _picture.layer.cornerRadius = SGRRadiusArtwork;
+    _picture.layer.cornerCurve = kCACornerCurveContinuous;
+    _picture.backgroundColor = [UIColor colorWithWhite:0.08 alpha:1];  // a placeholder, never a blank frame
+    _picture.userInteractionEnabled = NO;
+    [self addSubview:_picture];
+    return self;
+}
+
+// The picture is the Kit's, the same one the stand-in flies in with. Only a new picture fades; the same
+// image published again at a better quality is left alone. A first open draws whatever is already in,
+// or the placeholder until the notification comes, and never a cover that appears out of nothing.
+- (void)setArtwork:(UIImage *)image animated:(BOOL)animated {
+    if (!image || image == _picture.image) return;
+    if (!animated || SGRReduceMotion()) {
+        _picture.image = image;
+        return;
     }
-    return nil;
+    [UIView transitionWithView:_picture duration:0.28
+                       options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
+                    animations:^{ _picture.image = image; } completion:nil];
 }
 
-static BOOL inCoverCell(UIView *tilt) {
-    static Class cell;
-    if (!cell) cell = NSClassFromString(@"_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl");
-    for (UIView *v = tilt.superview; v; v = v.superview) {
-        if ([v isKindOfClass:cell]) return YES;
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGRect bounds = self.bounds;
+    if (!CGRectEqualToRect(_picture.frame, bounds)) _picture.frame = bounds;
+    if (!CGRectEqualToRect(_plate.frame, bounds)) _plate.frame = bounds;
+}
+
+@end
+
+#pragma mark - the geometry, worked out from the player's own bounds
+
+// The one place the cover is drawn. It reads only the player view's bounds and its safe area, so it is
+// the same on the first frame, after a rotation, through a track change and while the player opens or
+// closes -- and there is nothing to correct later.
+static CGRect coverFrameIn(UIView *host) {
+    CGRect b = host.bounds;
+    CGFloat top = MAX(CGRectGetHeight(b) * kArtworkTopShare, host.safeAreaInsets.top + kArtworkTopGap);
+    CGFloat side = MAX(kCoverMinWidth, CGRectGetWidth(b) - 2 * kArtworkInset);
+    side = MIN(side, MAX(kCoverMinWidth, CGRectGetHeight(b) * kCoverBottomShare - top));
+    return CGRectMake(round((CGRectGetWidth(b) - side) / 2), round(top), side, side);
+}
+
+static void placeCover(UIView *host) {
+    SGRPlayerCoverView *cover = (SGRPlayerCoverView *)sg_cover;
+    if (!cover || cover.superview != host) return;
+    CGRect frame = coverFrameIn(host);
+    // Bounds and center, not frame: they hold under the paused shrink's transform, and setting them is
+    // idempotent -- a pass that runs again changes nothing and cuts no animation short.
+    CGSize size = frame.size;
+    if (!CGSizeEqualToSize(cover.bounds.size, size)) cover.bounds = (CGRect){CGPointZero, size};
+    CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    if (!CGPointEqualToPoint(cover.center, middle)) cover.center = middle;
+    [cover setNeedsLayout];
+    [cover layoutIfNeeded];
+}
+
+// Spotify's own covers are still there for their gestures and for PlayerField.x to read the picture
+// from. A mask hides them without turning off hit testing (an alpha of 0 would drop the swipe that
+// changes track), and without changing the image views' own alpha that the read asks about. A mask with
+// an empty frame hides everything and never needs updating as the list's bounds change.
+static UIView *nativeCoverList(UIView *host) {
+    return SGFindRemembered(host, &kListKey, ^BOOL(UIView *v) {
+        return [v isKindOfClass:UICollectionView.class] && SGClassNamed(v.class, @"AccessibleCollectionView")
+            && v.bounds.size.width >= kCoverMinWidth;
+    });
+}
+
+static void hideNativeCovers(UIView *host) {
+    UIView *list = nativeCoverList(host);
+    if (!list) return;
+    CALayer *mask = objc_getAssociatedObject(list, &kHideMaskKey);
+    if (!mask) {
+        mask = [CALayer layer];
+        // A black mask at opacity 0 hides the whole list. The frame is deliberately larger than any
+        // list so a bounds change never needs a new one (PlayerMotion.x fades the same shape).
+        mask.frame = CGRectMake(0, 0, 4096, 4096);
+        mask.backgroundColor = UIColor.blackColor.CGColor;
+        mask.opacity = 0;
+        objc_setAssociatedObject(list, &kHideMaskKey, mask, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    return NO;
-}
-
-static void scaleCover(UIView *tilt, CGFloat scale) {
-    UIView *cover = coverIn(tilt);
-    if (!cover) return;
-    SGRShadowPlate *plate = SGRShadowPlateIn(tilt, &kPlateKey);
-    CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-    cover.transform = transform;
-    plate.transform = transform;
-}
-
-#pragma mark - where the cover is
-
-// The tilt view of the cover on screen: the queue is a cover per cell and the cells out of view are
-// kept hidden (player/02.txt:521), so the one showing is the one in a window with nothing hidden over it. On the first
-// open the cells off to the side are not hidden yet, so it must also sit across the screen, not a page off it.
-static UIView *showingTilt(void) {
-    for (UIView *tilt in sg_tilts) {
-        UIWindow *window = tilt.window;
-        if (!window) continue;
-        if (!SGShownUnder(tilt, nil)) continue;
-        CGFloat middle = CGRectGetMidX([tilt convertRect:tilt.bounds toView:nil]);
-        if (middle >= 0 && middle <= CGRectGetWidth(window.bounds)) return tilt;
-    }
-    return nil;
-}
-
-UIView *SGRPlayerCoverList(void) {
-    for (UIView *v = showingTilt(); v; v = v.superview) {
-        if ([v isKindOfClass:UICollectionView.class]) return v;
-    }
-    return nil;
-}
-
-CGRect SGRPlayerCoverFrameIn(UIView *host) {
-    UIView *tilt = showingTilt();
-    UIView *cover = coverIn(tilt);
-    // The cover's own transform is the paused shrink, which is what the eye sees it at.
-    return cover && host ? [host convertRect:cover.bounds fromView:cover] : CGRectNull;
-}
-
-CGFloat SGRPlayerCoverScale(void) {
-    return currentScale();
-}
-
-CGRect SGRPlayerArtworkAreaIn(UIView *host) {
-    UIView *tilt = showingTilt();
-    if (!tilt || !host) return CGRectNull;
-    // The band is the first view over the cover as wide as the player: the cover sits inset inside it
-    // (01.txt:33-36, CoverArtCellImpl > UIView {0, 110, 402, 466.67} > UIView {24, 8, ...} > the tilt view).
-    for (UIView *v = tilt.superview; v; v = v.superview) {
-        if (v == host) break;
-        if (v.bounds.size.width >= host.bounds.size.width - 1) return [host convertRect:v.bounds fromView:v];
-    }
-    return CGRectNull;
-}
-
-// The cover hidden for a stand-in, so the same one comes back if the list moved on meanwhile.
-static __weak UIView *sg_hiddenCover, *sg_hiddenPlate;
-// Asked for while no cover was laid out yet (the first open): the cover is hidden in the layout pass that makes it,
-// so its first frame on screen is already hidden.
-static BOOL sg_coverKeptHidden;
-
-void SGRPlayerSetCoverHidden(BOOL hidden) {
-    sg_hiddenCover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
-    sg_hiddenPlate.alpha = 1;
-    sg_hiddenCover = sg_hiddenPlate = nil;
-    sg_coverKeptHidden = hidden;
-    if (!hidden) return;
-    UIView *tilt = showingTilt();
-    UIView *cover = coverIn(tilt);
-    if (!cover) return;
-    UIView *plate = SGRShadowPlateIn(tilt, &kPlateKey);
-    cover.alpha = 0;
-    plate.alpha = 0;
-    sg_hiddenCover = cover;
-    sg_hiddenPlate = plate;
-}
-
-#pragma mark - the paused shrink
-
-static void scaleEveryCover(BOOL animated) {
-    CGFloat scale = currentScale();
-    NSArray<UIView *> *tilts = sg_tilts.allObjects;
-    void (^apply)(void) = ^{
-        for (UIView *tilt in tilts) {
-            scaleCover(tilt, scale);
-            UIView *cover = coverIn(tilt);
-            if (cover != sg_hiddenCover) cover.alpha = SGRReduceMotion() && SGPlayerState().isPaused ? 0.75 : 1;
-        }
-    };
-    if (animated) SGRAnimate(SGRReduceMotion() ? SGRMotionRespond : SGRMotionLayout, apply, nil);
-    else apply();
+    if (list.layer.mask != mask) list.layer.mask = mask;
 }
 
 #pragma mark - hold to play faster
@@ -154,9 +172,9 @@ static void scaleEveryCover(BOOL animated) {
 // Holding either side of the cover plays at kHoldSpeed until the finger lifts, and the speed set before
 // comes back. The middle third is left alone, and a hold that starts to move is a swipe to the next track.
 // It is a speed like the menu's, so with Pitch follows speed on (until switched off) it also plays an
-// octave higher, the way a record does. The native look's copy is in Native/Player/PlayerGestures.x.
+// octave higher, the way a record does. The recognizer lives on the player's view: the drawn cover lets
+// touches through to the list, so its own view cannot watch them. The badge is drawn on the cover.
 static const double kHoldSpeed = 2;
-static char kHoldKey, kBadgeGlassKey;
 
 @interface SGRCoverHold : UILongPressGestureRecognizer
 @end
@@ -169,10 +187,14 @@ static char kHoldKey, kBadgeGlassKey;
 }
 
 - (void)sgr_held {
-    UIView *cover = self.view;
+    UIView *host = self.view;
+    SGRPlayerCoverView *cover = (SGRPlayerCoverView *)sg_cover;
     if (self.state == UIGestureRecognizerStateBegan) {
-        CGFloat x = [self locationInView:cover].x, third = cover.bounds.size.width / 3;
-        if ((x > third && x < 2 * third) || !SGPlayerSpeedAllowed()) {
+        CGRect drawn = SGRPlayerCoverFrameIn(host);
+        CGPoint p = [self locationInView:host];
+        CGFloat x = p.x - CGRectGetMinX(drawn), third = drawn.size.width / 3;
+        if (CGRectIsNull(drawn) || !CGRectContainsPoint(drawn, p)
+            || (x > third && x < 2 * third) || !SGPlayerSpeedAllowed()) {
             self.enabled = NO;
             self.enabled = YES;   // cancels this hold
             return;
@@ -190,10 +212,11 @@ static char kHoldKey, kBadgeGlassKey;
     }
 }
 
-// "2×" and a forward glyph on the Kit's glass capsule at the top of the cover while it is held. What fades
+// "2x" and a forward glyph on the Kit's glass capsule at the top of the cover while it is held. What fades
 // is the glass's effect (SGRShowGlass), never an alpha over it; the capsule grows in from 0.9 with the Kit's
 // press spring and goes with its exit, quicker than it came: the finger is already off the cover.
 - (void)showBadge:(BOOL)shown on:(UIView *)cover {
+    if (shown && !cover) return;
     if (shown && !_badge) {
         _badgeLabel = [UILabel new];
         UIFont *font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
@@ -241,102 +264,117 @@ static char kHoldKey, kBadgeGlassKey;
 
 @end
 
-static void watchHold(UIView *tilt) {
-    if (objc_getAssociatedObject(tilt, &kHoldKey)) return;
+static void watchHold(UIView *host) {
+    if (objc_getAssociatedObject(host, &kHoldKey)) return;
     SGRCoverHold *hold = [[SGRCoverHold alloc] initWithTarget:nil action:nil];
     [hold addTarget:hold action:@selector(sgr_held)];
     hold.minimumPressDuration = 0.35;
-    [tilt addGestureRecognizer:hold];
-    objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_ASSIGN);
+    hold.cancelsTouchesInView = NO;   // a swipe to the next track starts on the cover too
+    [host addGestureRecognizer:hold];
+    objc_setAssociatedObject(host, &kHoldKey, hold, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-%hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
-- (void)layoutSubviews {
-    UIView *tilt = (UIView *)self;
-    %orig;
-    // The width first: the bar's and the pages' small tilt views skip the walk up to the cell.
-    if (tilt.bounds.size.width < kCoverMinWidth || !inCoverCell(tilt)) return;
-    UIView *cover = coverIn(tilt);
-    if (!cover) return;
-    [sg_tilts addObject:tilt];
-    // Kept hidden, it is whichever cover is showing: the first open can lay out a second cell in its place. Not animated,
-    // though this pass may run inside Spotify's transition.
-    if (sg_coverKeptHidden && cover != sg_hiddenCover && showingTilt() == tilt) {
-        [UIView performWithoutAnimation:^{ SGRPlayerSetCoverHidden(YES); }];
+#pragma mark - installing the cover
+
+static void ensureCover(UIView *host) {
+    SGRPlayerCoverView *cover = (SGRPlayerCoverView *)objc_getAssociatedObject(host, &kCoverKey);
+    if (!cover) {
+        cover = [[SGRPlayerCoverView alloc] initWithFrame:CGRectZero];
+        objc_setAssociatedObject(host, &kCoverKey, cover, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        sg_cover = cover;
+        // Behind the bottom stack (the title, controls and footer), over the artwork field. The cover's
+        // own rect ends well above the stack, so wherever it sits in the order nothing else is covered.
+        UIView *stack = SGFindIdentifier(host, @"npv.bottomStackView", &kStackKey);
+        if (stack && stack.superview == host) [host insertSubview:cover belowSubview:stack];
+        else [host addSubview:cover];
+        cover.alpha = coverAlpha();
+        [cover setArtwork:SGRNowPlayingArtwork(NULL, NULL) animated:NO];
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ SGLog(@"redesign player: the cover is drawn in the player's own view"); });
+    } else if (cover.superview != host) {
+        [host addSubview:cover];
     }
-    watchHold(tilt);
+    sg_cover = cover;
+    placeCover(host);
+    hideNativeCovers(host);
+    watchHold(host);
     SGRPlayerMotionCoverLaidOut();
-    // The cover fills the tilt view (01.txt:37); bounds and center, unlike a frame, hold under the scale.
-    CGRect bounds = tilt.bounds;
-    CGPoint middle = CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds));
-    if (!CGSizeEqualToSize(cover.bounds.size, bounds.size)) cover.bounds = (CGRect){cover.bounds.origin, bounds.size};
-    if (!CGPointEqualToPoint(cover.center, middle)) cover.center = middle;
-    // Its image is placed again for the new size (the ImageViewProxy hook below makes it fill the cover).
-    for (UIView *image in cover.subviews) {
-        if (!CGRectEqualToRect(image.frame, cover.bounds)) image.bounds = image.bounds, image.center = image.center;
-    }
-
-    cover.layer.cornerRadius = SGRRadiusArtwork;
-    cover.layer.cornerCurve = kCACornerCurveContinuous;
-    cover.clipsToBounds = YES;
-    SGRShadowPlate *plate = SGRShadowPlateIn(tilt, &kPlateKey);
-    plate.bounds = cover.bounds;
-    plate.center = cover.center;
-    // The same value an animation in flight is heading to, so a layout pass never cuts one short.
-    scaleCover(tilt, currentScale());
-
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ SGLog(@"redesign player: cover %@ rounded %.0f with a shadow plate, scale %.2f", NSStringFromClass(cover.class), SGRRadiusArtwork, currentScale()); });
-}
-%end
-
-// The cover's image (ImageViewProxy > Encore.ImageView) keeps the size Spotify gave it for a cell with the preview,
-// 317 in a 345 box on a track with lyrics, at the box's top left: the image sat off center with a blank band right
-// and under it (issue #21). In the player's cover it fills the box the cover now is, whatever size it is given.
-// Auto Layout places it through its bounds and center, a frame set by hand through its frame.
-static UIView *coverOfImage(UIView *image) {
-    UIView *box = image.superview;
-    return box && coverIn(box.superview) == box ? box : nil;
 }
 
-%hook _TtC22NowPlaying_ElementsKitP33_1D6A1393FEB35D7207F503DA17E7748E14ImageViewProxy
-- (void)setFrame:(CGRect)frame {
-    UIView *box = coverOfImage((UIView *)self);
-    %orig(box ? box.bounds : frame);
-}
-- (void)setBounds:(CGRect)bounds {
-    UIView *box = coverOfImage((UIView *)self);
-    %orig(box ? (CGRect){bounds.origin, box.bounds.size} : bounds);
-}
-- (void)setCenter:(CGPoint)center {
-    UIView *box = coverOfImage((UIView *)self);
-    %orig(box ? CGPointMake(CGRectGetMidX(box.bounds), CGRectGetMidY(box.bounds)) : center);
-}
-// What it holds keeps its own 317 unless it is laid out to this view's size again: the Encore image view here,
-// and the image and placeholder in that (below).
-- (void)layoutSubviews {
+%hook _TtC19NowPlaying_ViewImpl24NowPlayingViewController
+- (void)viewWillLayoutSubviews {
     %orig;
-    UIView *proxy = (UIView *)self;
-    if (!coverOfImage(proxy)) return;
-    for (UIView *image in proxy.subviews) {
-        if (!CGRectEqualToRect(image.frame, proxy.bounds)) image.frame = proxy.bounds;
-    }
+    UIView *host = ((UIViewController *)self).viewIfLoaded;
+    if (!host || host.bounds.size.height < kPlayerMinHeight) return;
+    ensureCover(host);
+}
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    UIView *host = ((UIViewController *)self).viewIfLoaded;
+    if (!host || host.bounds.size.height < kPlayerMinHeight) return;
+    ensureCover(host);
 }
 %end
 
-%hook _TtCE15Encore_MediaKitO16EncoreFoundation6Encore9ImageView
-- (void)layoutSubviews {
-    %orig;
-    UIView *view = (UIView *)self;
-    static Class proxyClass;
-    if (!proxyClass) proxyClass = NSClassFromString(@"_TtC22NowPlaying_ElementsKitP33_1D6A1393FEB35D7207F503DA17E7748E14ImageViewProxy");
-    if (![view.superview isKindOfClass:proxyClass] || !coverOfImage(view.superview)) return;
-    for (UIView *part in view.subviews) {
-        if (!CGRectEqualToRect(part.frame, view.bounds)) part.frame = view.bounds;
-    }
-}
-%end
+#pragma mark - the cover's public geometry, all read off the drawn view
 
+UIView *SGRPlayerCoverList(void) {
+    // The lyrics fade this by alpha and an animated artwork masks its layer, so it stands for "the cover
+    // on screen" now that the cover is a view of our own rather than Spotify's list.
+    return sg_cover;
+}
+
+// The frame from pure geometry, with the paused shrink about the center: an answer before the drawn view
+// has been made on a first open, so the morph's stand-in has somewhere to fly to on its very first frame
+// instead of being hidden and then appearing. Once the view exists the conversion below takes over, and
+// both give the same rect.
+static CGRect coverRestIn(UIView *host, BOOL scaled) {
+    if (!host) return CGRectNull;
+    CGRect frame = coverFrameIn(host);
+    if (scaled) {
+        CGFloat scale = currentScale();
+        frame = CGRectInset(frame, frame.size.width * (1 - scale) / 2, frame.size.height * (1 - scale) / 2);
+    }
+    return frame;
+}
+
+CGRect SGRPlayerCoverFrameIn(UIView *host) {
+    UIView *cover = sg_cover;
+    if (!host) return CGRectNull;
+    // Includes the paused shrink's transform, which is what the eye sees and what the flown cover lands on.
+    return cover ? [host convertRect:cover.bounds fromView:cover] : coverRestIn(host, YES);
+}
+
+CGFloat SGRPlayerCoverScale(void) {
+    return currentScale();
+}
+
+CGRect SGRPlayerCoverRestFrameIn(UIView *host) {
+    UIView *cover = sg_cover;
+    if (!host) return CGRectNull;
+    if (!cover || !cover.superview) return coverRestIn(host, NO);
+    // The frame without the paused shrink: center and bounds, held in the player's own coordinates.
+    CGSize size = cover.bounds.size;
+    CGRect rest = CGRectMake(cover.center.x - size.width / 2, cover.center.y - size.height / 2, size.width, size.height);
+    return [host convertRect:rest fromView:cover.superview];
+}
+
+CGRect SGRPlayerArtworkAreaIn(UIView *host) {
+    // Pure geometry again: the lyrics' first layout may run before the cover view has been made, and the
+    // room the artwork is given is known from the player's bounds either way.
+    if (!host) return CGRectNull;
+    CGRect frame = coverFrameIn(host);
+    CGFloat bottom = MAX(CGRectGetMaxY(frame), CGRectGetHeight(host.bounds) * kCoverBottomShare);
+    return CGRectMake(0, CGRectGetMinY(frame), CGRectGetWidth(host.bounds), bottom - CGRectGetMinY(frame));
+}
+
+void SGRPlayerSetCoverHidden(BOOL hidden) {
+    sg_coverKeptHidden = hidden;
+    UIView *cover = sg_cover;
+    if (cover) cover.alpha = coverAlpha();
+}
+
+#pragma mark - the paused shrink and the picture
 
 @interface SGRPlayerArtworkWatcher : NSObject <SGPlayerStateObserver>
 @end
@@ -355,24 +393,32 @@ static UIView *coverOfImage(UIView *image) {
     NSInteger paused = state.isPaused ? 1 : 0;
     if (paused == _paused) return;
     _paused = paused;
-    scaleEveryCover(YES);
-    static NSUInteger logged;
-    if (logged++ < 3) SGLog(@"redesign player: state paused=%d loading=%d, %lu covers scaled", state.isPaused, state.isLoading, (unsigned long)sg_tilts.count);
+    UIView *cover = sg_cover;
+    if (!cover) return;
+    CGFloat scale = currentScale();
+    SGRAnimate(SGRReduceMotion() ? SGRMotionRespond : SGRMotionLayout, ^{
+        cover.transform = CGAffineTransformMakeScale(scale, scale);
+    }, nil);
 }
 
 @end
 
 static SGRPlayerArtworkWatcher *sg_artworkWatcher;
+static id sg_artworkObserver;
 
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
-    sg_tilts = [NSHashTable weakObjectsHashTable];
-    sg_covers = [NSMapTable weakToWeakObjectsMapTable];
     sg_artworkWatcher = [SGRPlayerArtworkWatcher new];
     SGAddPlayerStateObserver(sg_artworkWatcher);
+    sg_artworkObserver = [NSNotificationCenter.defaultCenter
+        addObserverForName:SGRNowPlayingArtworkDidChangeNotification object:nil
+        queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            UIImage *image = note.userInfo[@"image"];
+            [(SGRPlayerCoverView *)sg_cover setArtwork:image animated:YES];
+        }];
     SGRequireClasses(@[
-        @"_TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView",
-        @"_TtC28NowPlaying_ContentLayersImpl16CoverArtCellImpl",
+        @"_TtC19NowPlaying_ViewImpl24NowPlayingViewController",
+        @"_TtC35NowPlaying_ContentLayerPlatformImpl24AccessibleCollectionView",
     ]);
 }

@@ -11,6 +11,7 @@
 
 static const CGFloat kCheckSize = 19;
 static char kCheckKey, kAnimationKey;
+char SGRTitleAddButtonKey;   // read by both looks, so it is one key: SGRAccent.h
 
 BOOL SGRPlainCheckOn(void) {
     static BOOL on;
@@ -19,7 +20,7 @@ BOOL SGRPlainCheckOn(void) {
     return on;
 }
 
-static UIView *animationIn(UIButton *button) {
+UIView *SGRAddButtonAnimation(UIButton *button) {
     UIView *found = objc_getAssociatedObject(button, &kAnimationKey);
     if (found.superview) return found;
     static Class lottie;
@@ -35,7 +36,9 @@ static UIView *animationIn(UIButton *button) {
 }
 
 static void showState(UIButton *button) {
-    UIView *animation = animationIn(button);
+    // The player's title row is the star's (Player/PlayerHeader.x): the checkmark keeps the other rows'.
+    if (objc_getAssociatedObject(button, &SGRTitleAddButtonKey)) return;
+    UIView *animation = SGRAddButtonAnimation(button);
     if (!animation) return;
     UIImageView *check = objc_getAssociatedObject(button, &kCheckKey);
     BOOL saved = button.isSelected;
