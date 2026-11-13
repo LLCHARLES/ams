@@ -669,8 +669,27 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
     return nil;
 }
 
+// Waiting through the switch it waits on too: a row under a switch that itself waits on another (Music Haptics >
+// Everywhere > On the lock screen) is grayed while either is off, not only its own (On the lock screen stayed
+// live with Music Haptics off). A few steps at most, so a loop of rows cannot hang the page.
 - (BOOL)isWaiting:(SGModRow *)row {
-    return row.waitsOn && !SGFlag(row.waitsOn, [self switchFor:row].defaultOn);
+    SGModRow *at = row;
+    for (int step = 0; step < 4 && at.waitsOn; step++) {
+        SGModRow *on = [self switchFor:at];
+        if (!SGFlag(at.waitsOn, on.defaultOn)) return YES;
+        at = on;
+    }
+    return NO;
+}
+
+// Whether `row` waits on `key`, directly or through a switch it waits on.
+- (BOOL)row:(SGModRow *)row waitsOnKey:(NSString *)key {
+    SGModRow *at = row;
+    for (int step = 0; step < 4 && at.waitsOn; step++) {
+        if ([at.waitsOn isEqualToString:key]) return YES;
+        at = [self switchFor:at];
+    }
+    return NO;
 }
 
 - (NSIndexPath *)pathOfRow:(SGModRow *)row {
@@ -1037,7 +1056,7 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
     // The rows waiting on this switch stay where they are and fade to their new state.
     NSMutableArray<NSIndexPath *> *waiting = [NSMutableArray array];
     for (NSIndexPath *visible in self.tableView.indexPathsForVisibleRows) {
-        if ([[self rowAt:visible].waitsOn isEqualToString:row.key]) [waiting addObject:visible];
+        if ([self row:[self rowAt:visible] waitsOnKey:row.key]) [waiting addObject:visible];
     }
     if (waiting.count) [self.tableView reloadRowsAtIndexPaths:waiting withRowAnimation:UITableViewRowAnimationFade];
     if (row.changed && !moved) reload();

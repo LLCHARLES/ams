@@ -619,15 +619,17 @@ Redesigned:
                   (LyricsLook.h): five presets and a sheet of sliders, applied at once to every view, under a live
                   preview of the view playing a song of its own (LyricsLookSettings.m). Laid out on the Mac against
                   harness/lyrics/; the page against harness/lyrics-page/
-    Home/         Home decluttered to music on black (an allow list of its sections: shortcuts, the DJ without its heading and
-                  transcript, the shelves of cards, each with a switch on the Home page of Mod Settings; the previews and the
+    Home/         Home decluttered to music on black (an allow list of its sections: shortcuts, the DJ without its heading and its
+                  Beta badge, what it says kept, the shelves of cards, each with a switch on the Home page of Mod Settings; the previews and the
                   song suggestions only when switched on), a large title where the filter pills were, the title rising and
                   fading with the feed as it scrolls, as the Music app's does (or, with Title stays on scroll, staying put
                   over the feed's hard top edge, shaped to the row, and no scroll observer), the shelves' headings at the
                   Music app's size,
                   continuous corners on the covers, and, under the Home look switch (the Home page's first row; off, none of
                   its hooks install and Home is as before it): at the trailing edge a glass pill of the filter (a menu that
-                  drives Spotify's own chips, with the device picker and the top shelf's Show all) and the avatar, Top picks
+                  drives Spotify's own chips, with the device picker and the top shelf's Show all) and the avatar, on a Friday
+                  a thin ring of pinks and purples turning round that pill (at 30 frames a second, still under Reduce Motion,
+                  going and coming back with the pill as the title row scrolls), Top picks
                   (the first shelf, or the one Cards from names, found in Spotify's feed model before its cells are
                   built, moved above the shortcuts and drawn as large cards in their covers' colors with no heading
                   unless Show Top picks heading is on, the page tinted by the first card) and each shortcut tile as

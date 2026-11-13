@@ -27,3 +27,7 @@ notes/
 .zsign_cache/
 .phone.env
 .claude/worktrees/
+
+# The Vitrine Haptics add-on build (addons/haptics)
+addons/haptics/.theos/
+addons/haptics/packages/

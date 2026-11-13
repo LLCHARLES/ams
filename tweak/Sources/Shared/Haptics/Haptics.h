@@ -87,6 +87,8 @@ extern NSNotificationName const SGMusicHapticsSwitchesChangedNotification;
 void SGMusicHapticsSetSystemCovers(BOOL covers);
 // From its strength and its choice of what to follow: reads them again, for the next tap.
 void SGMusicHapticsSettingsChanged(void);
+// The relay went quiet or came back (SGHapticRelayQuiet): whether Spotify's output is listened to is decided again.
+void SGMusicHapticsRelayQuietChanged(void);
 // One kick of the mod's own at its strength, with the rumble under it unless it follows the beat alone, played
 // at once: the Vibrations preview's tap. Nothing while the mod's own is not listening.
 void SGMusicHapticsPreview(void);
