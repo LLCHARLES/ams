@@ -54,6 +54,59 @@ void SGRFoldNavbarSplit(void) {
     [store removeObjectForKey:kNavbarSplit];
 }
 
+void SGRMigrateNavbarSplit(void) {
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    if (![store objectForKey:kNavbarSplitWas]) return;
+    if ([store objectForKey:kNavbarSplit]) {
+        [store removeObjectForKey:kNavbarSplitWas];
+        return;
+    }
+    NSMutableOrderedSet<NSString *> *split = [NSMutableOrderedSet orderedSetWithArray:listOfKind(kNavbarSplitWas, NSString.class)];
+    NSMutableArray<NSDictionary *> *layout = [NSMutableArray array], *apart = [NSMutableArray array];
+    for (NSDictionary *entry in SGRNavbarLayout()) {
+        NSString *ident = entry[SGRNavbarID];
+        BOOL listed = [ident isKindOfClass:NSString.class] && [split containsObject:ident];
+        if (listed) [split removeObject:ident];
+        if (!listed || [entry[SGRNavbarHidden] boolValue]) {
+            [layout addObject:entry];
+            continue;
+        }
+        if (entry[SGRNavbarURI]) [apart addObject:entry];
+        else {
+            [layout addObject:entry];
+            [apart addObject:@{SGRNavbarID: ident, SGRNavbarTitle: entry[SGRNavbarTitle] ?: ident}];
+        }
+    }
+    // Spotify's tabs the bar's list never named stood where Spotify put them: in Spotify's order, not the old list's,
+    // which was saved from a set and so in none.
+    NSArray<NSString *> *stock = SGRNavbarStock();
+    NSArray<NSString *> *rest = [split.array sortedArrayWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSString *a, NSString *b) {
+        NSUInteger ia = [stock indexOfObject:a], ib = [stock indexOfObject:b];
+        return ia < ib ? NSOrderedAscending : ia > ib ? NSOrderedDescending : NSOrderedSame;
+    }];
+    for (NSString *ident in rest) [apart addObject:@{SGRNavbarID: ident, SGRNavbarTitle: ident}];
+    SGRSetNavbarLayout(layout);
+    SGRSetNavbarSplit(apart);
+    [store removeObjectForKey:kNavbarSplitWas];
+}
+
+NSArray<NSDictionary *> *SGRNavbarSplit(void) {
+    return listOfKind(kNavbarSplit, NSDictionary.class);
+}
+
+// Below iOS 26 the capsule bar has one round button for the split tab, so it shows the last one set apart. Only the
+// bar reads it this way: the Split tabs page reads and writes the whole list, so an edit below iOS 26 keeps the rest
+// for iOS 26.
+NSArray<NSDictionary *> *SGRNavbarSplitShown(void) {
+    NSArray<NSDictionary *> *split = SGRNavbarSplit();
+    if (split.count > 1 && SGRLegacyTabBarOn()) return @[split.lastObject];
+    return split;
+}
+
+void SGRSetNavbarSplit(NSArray<NSDictionary *> *split) {
+    [NSUserDefaults.standardUserDefaults setObject:split ?: @[] forKey:kNavbarSplit];
+}
+
 NSArray<NSString *> *SGRNavbarStock(void) {
     return listOfKind(kNavbarStock, NSString.class);
 }

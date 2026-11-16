@@ -39,7 +39,7 @@
 #import "Redesigned/ContextMenu/ContextMenu.h"
 #import "Player.h"
 
-static char kGlassKey, kCloseKey, kMoreKey, kPressKey;
+static char kGlassKey, kDimKey, kCloseKey, kMoreKey, kPressKey;
 static char kStarKey, kStarStateKey, kEllipsisKey, kSizedKey, kMoreRowKey, kLikeKey, kTitleKey, kFrameKey;
 static char kTreeKey, kTreeAfterKey, kDupKey, kArrowKey;
 static const CGFloat kPressScale = 0.92;
@@ -66,6 +66,7 @@ static UIView *circleOf(UIControl *control) {
     return objc_getAssociatedObject(control, &kGlassKey) ?: objc_getAssociatedObject(control.superview, &kGlassKey);
 }
 - (void)down:(UIControl *)control {
+    if (SGUseLegacyGlass()) return;    // the glass answers the press itself (SGGlassInteractiveVia)
     UIView *circle = circleOf(control);
     SGRAnimate(SGRMotionPress, ^{ circle.transform = CGAffineTransformMakeScale(kPressScale, kPressScale); }, nil);
 }
@@ -87,9 +88,9 @@ static void pressFrom(UIControl *control, BOOL throughMenu) {
     [control addTarget:press action:@selector(up:) forControlEvents:throughMenu ? up : up | UIControlEventTouchCancel];
 }
 
-// `identifiers` holds, for each button, the identifiers it may carry, the first found winning. `watchMenu`: the ⋯ is
-// handed to PlayerMenu.m, which takes it for the ordinary player's; the AI DJ's ⋯ keeps Spotify's own menu.
-static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *identifiers, const void **findKeys, BOOL watchMenu) {
+// `identifiers` holds, for each button, the identifiers it may carry, the first found winning. `watchMenu` hands the ⋯
+// to PlayerMenu.m, which opens the system menu from it: the ordinary player's, or the AI DJ's under a kind of its own.
+static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *identifiers, const void **findKeys, void (*watchMenu)(UIView *)) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
     NSUInteger found = 0;
@@ -113,17 +114,21 @@ static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *
         // there leaves whatever state a menu, a hide or a trait change gave it, and glass that has lost its
         // effect draws nothing. The call is idempotent and never makes a second view.
         SGRShowGlass(circle, YES);
+        // The down arrow and the ⋯ dimmed as the tab bar's glass is, below iOS 26.
+        SGRDarkenGlass(circle, &kDimKey, SGRGlassCircleSize / 2, SGRBarDim);
         if (![said containsObject:name] && button.bounds.size.width > 0) {
             [said addObject:name];
             SGLog(@"redesign player: a %.0fpt glass circle in %@ (id %@, %.0fx%.0f, %@)", circle.bounds.size.width, NSStringFromClass(button.class),
                   button.accessibilityIdentifier, button.bounds.size.width, button.bounds.size.height,
                   button.hidden || button.alpha < 0.01 ? @"hidden" : @"shown");
         }
-        if (watchMenu && [name isEqualToString:@"Context menu"]) {
-            SGRPlayerMenuWatch(button);
+        if ([name isEqualToString:@"Context menu"]) {
+            watchMenu(button);
         }
         UIControl *front = SGRSystemMenuFront(button);
         pressFrom(front ?: (UIControl *)button, front != nil);
+        // The mod's button over the ⋯ takes its touches, so the press is watched there and moves the ⋯.
+        if (front) SGGlassInteractiveVia(front, button, circle);
         found++;
     }
 
@@ -138,7 +143,7 @@ static void glassInside(UIViewController *unit, NSArray<NSArray<NSString *> *> *
 
 // `arrow`: the header's down arrow is still there to be given a circle. The ordinary player takes it away
 // (hideHeaderExtras), so only its ⋯ is looked for; the AI DJ keeps its arrow.
-static void glassHeader(UIViewController *unit, BOOL watchMenu, BOOL arrow) {
+static void glassHeader(UIViewController *unit, void (*watchMenu)(UIView *), BOOL arrow) {
     static const void *keys[] = {&kCloseKey, &kMoreKey};
     if (arrow) glassInside(unit, @[@[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"], @[@"Context menu"]], keys, watchMenu);
     else glassInside(unit, @[@[@"Context menu"]], keys + 1, watchMenu);
@@ -413,7 +418,7 @@ static void rowUnitLaidOut(UIViewController *unit) {
 %hook _TtC20NowPlaying_ModesImpl18HeaderElementsUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    glassHeader((UIViewController *)self, YES, NO);
+    glassHeader((UIViewController *)self, SGRPlayerMenuWatch, NO);
     // Once the ⋯ is in the title row it has left this view and the walk is skipped. A header that was
     // rebuilt keeps a fresh ⋯ of its own: that one is taken and the moved one, wherever it stands, goes, so
     // the row never shows two. The identifier's view is taken whatever its class, since the phone that stayed
@@ -484,7 +489,7 @@ static void rowUnitLaidOut(UIViewController *unit) {
 %hook SGRDJHeaderUnit
 - (void)viewDidLayoutSubviews {
     %orig;
-    glassHeader((UIViewController *)self, NO, YES);
+    glassHeader((UIViewController *)self, SGRDJPlayerMenuWatch, YES);
 }
 %end
 %end

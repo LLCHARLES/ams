@@ -11,6 +11,19 @@ __weak UIView *sgr_albumRoot = nil;
 __weak UIView *sgr_artistRoot = nil;
 
 void SGRComposeTabBar(UIView *tabBar) {}
+// With `split` among the launch words, Search is a split tab, which TabBar.x stands on a bar of its own;
+// with `split2`, Create is one too.
+BOOL SGRTabIsApart(UIView *item) {
+    NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
+    BOOL two = [args containsObject:@"split2"];
+    if (![args containsObject:@"split"] && !two) return NO;
+    for (UIView *sub in item.subviews) {
+        if (![sub isKindOfClass:UILabel.class]) continue;
+        NSString *text = ((UILabel *)sub).text;
+        if ([text isEqualToString:@"Search"] || (two && [text isEqualToString:@"Create"])) return YES;
+    }
+    return NO;
+}
 void SGRRefreshTabBar(void) {}
 void SGAddPlayerStateObserver(id observer) {}
 
@@ -26,3 +39,20 @@ void SGOpenModSettings(UIView *source) {}
 // Shared/Player/PlayerEvents.x, which TabBarMinimize.x listens to.
 NSString *const SGPlayerTransitionNotification = @"spotifyglass.playerTransition";
 BOOL SGPlayerTransitionOpens(void) { return YES; }
+NSString *const SGPlayerTransitionEndedNotification = @"spotifyglass.playerTransitionEnded";
+// TabBarLegacy.x, the bar below iOS 26 with Legacy Liquid Glass: the harness drives the bar main has, so it is off.
+BOOL SGRLegacyTabBarOn(void) { return NO; }
+BOOL SGRLegacyTabBarMinimized(void) { return NO; }
+void SGRLegacyApplyTabBarMinimized(BOOL minimized, BOOL animated) {}
+CGRect SGRLegacyTabBarInlineSlot(UIView *host, CGFloat height) { return CGRectNull; }
+// SGRRepaint.x, the layer hooks that keep a glassed sheet clear of Spotify's grey: the harness has no Spotify sheet.
+__weak UIView *sgr_sheetChromeRoot = nil;
+void SGRWatchSheetPaint(UIView *root) {}
+// The toast and the tooltip (SGRSnackbar.x, SGRTooltip.x), which follow the now playing bar: the harness shows neither.
+void SGRSnackbarFollowNowPlayingBar(void) {}
+void SGRTooltipFollowNowPlayingBar(void) {}
+// SGRRestyle.m's lookup, as it is there.
+Class SGRSwiftClass(NSString *module, NSString *name) {
+    NSString *mangled = [NSString stringWithFormat:@"_TtC%lu%@%lu%@", (unsigned long)module.length, module, (unsigned long)name.length, name];
+    return NSClassFromString(mangled) ?: NSClassFromString([NSString stringWithFormat:@"%@.%@", module, name]);
+}

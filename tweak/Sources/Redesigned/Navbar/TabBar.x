@@ -116,12 +116,51 @@ static id encoreIconOf(UIView *view) {
     return type && type[0] == '@' ? object_getIvar(view, ivar) : nil;
 }
 
+// An SPTEncoreIcon's name, which is what tells two icons apart: Spotify may hand a view a new instance of the
+// same glyph. Nil for an icon that does not say.
+static NSString *iconName(id icon) {
+    id name = [icon respondsToSelector:@selector(name)] ? [icon name] : nil;
+    return [name isKindOfClass:NSString.class] ? name : nil;
+}
+
+// The filled variant of a tab's SPTEncoreIcon (-active, which fillBar's log prints), when it has one. A filled
+// icon has none: its -active is itself, or the same glyph again.
+static id activeVariantOf(id icon) {
+    SEL selector = NSSelectorFromString(@"active");
+    if (!icon || ![icon respondsToSelector:selector]) return nil;
+    id variant = ((id (*)(id, SEL))objc_msgSend)(icon, selector);
+    if (variant == icon || ![variant isKindOfClass:[icon class]]) return nil;
+    NSString *name = iconName(icon);
+    return name && [name isEqualToString:iconName(variant)] ? nil : variant;
+}
+
+// A tab of the mod's own that wears an SF Symbol hands UIKit the symbol itself, with no size of its own, so the
+// bar sizes it the way UIKit sizes every app's tab symbols, the Music app's included. One object per name, so
+// setGlyphs sees the same image again and leaves the item alone.
+static UIImage *symbolGlyph(NSString *name) {
+    if (!name.length) return nil;
+    static NSCache<NSString *, UIImage *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSCache new]; });
+    UIImage *image = [cache objectForKey:name];
+    if (image) return image;
+    image = [[UIImage systemImageNamed:name] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+    if (image) [cache setObject:image forKey:name];
+    return image;
+}
+
 // Encore draws a tab's icon from one SPTEncoreIcon in two states: isActive picks its filled variant.
 // Both are drawn on an icon view of our own, off screen, so the images do not wait for Spotify's
 // views to lay out and paint, and UITabBar swaps image and selectedImage itself.
 static UIImage *glyphOf(UIView *item, BOOL active) {
     UIView *live = iconIn(item);
     if (!live) return nil;
+    NSString *symbol = SGTabIconSymbolName(live);
+    if (symbol.length) {
+        NSString *activeSymbol = active && ![symbol hasSuffix:@".fill"] ? [symbol stringByAppendingString:@".fill"] : symbol;
+        UIImage *glyph = symbolGlyph(activeSymbol) ?: symbolGlyph(symbol);
+        if (glyph) return glyph;
+    }
     CGSize size = live.bounds.size;
     id icon = encoreIconOf(live);
     Class viewClass = NSClassFromString(@"SPTEncoreIconView");
@@ -455,6 +494,7 @@ static void placeFade(UIView *stockBar, CGRect glass, BOOL minimized) {
 
 #pragma mark - room for the glass bar
 
+// The room itself is TabBarRoom.m's, shared with the capsule bar below iOS 26.
 // UIKit's glass bar asks for 83 pt, the platter the top 62 of it, over no more safe area than a Face ID
 // phone's 34 (simulator, iOS 26.5 and 27). Spotify's bar is its 49 pt row over the bottom safe area of
 // TabBarContainerImpl's view: a guide from 49 pt above the safe area's bottom to the view's bottom sets
@@ -1025,6 +1065,7 @@ static void syncBar(UIView *stockBar) {
 // bars get their new items and are laid out where they are going at once; then every view of theirs goes back
 // to where it was and moves on one spring with the card (see "one move"); nothing fades a bar's glass.
 BOOL SGRTabBarMinimized(void) {
+    if (SGRLegacyTabBarOn()) return SGRLegacyTabBarMinimized();
     return sg_minimized;
 }
 
@@ -1036,21 +1077,26 @@ static void setMinimized(BOOL minimized, BOOL animated);
 // down to it (harness/tabbar, `nested`). So an animated change asked for inside an animation is made on the main
 // queue's next turn, outside it, and only if nothing was asked for since; one asked for outside any is made at
 // once. A change with no animation stays at once too: the player's transition takes its pictures of the bars
-// right after asking.
+// right after asking. The same for the capsule bar below iOS 26 (TabBarLegacy.x), which makes the change itself.
 static NSUInteger sg_request;
+
+static void applyMinimized(BOOL minimized, BOOL animated) {
+    if (SGRLegacyTabBarOn()) SGRLegacyApplyTabBarMinimized(minimized, animated);
+    else setMinimized(minimized, animated);
+}
 
 void SGRSetTabBarMinimized(BOOL minimized, BOOL animated) {
     NSUInteger request = ++sg_request;
     if (!animated) {
-        [UIView performWithoutAnimation:^{ setMinimized(minimized, NO); }];
+        [UIView performWithoutAnimation:^{ applyMinimized(minimized, NO); }];
         return;
     }
     if (UIView.areAnimationsEnabled && UIView.inheritedAnimationDuration <= 0) {
-        setMinimized(minimized, YES);
+        applyMinimized(minimized, YES);
         return;
     }
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (request == sg_request) setMinimized(minimized, YES);
+        if (request == sg_request) applyMinimized(minimized, YES);
     });
 }
 
@@ -1380,6 +1426,7 @@ static void setMinimized(BOOL minimized, BOOL animated) {
 }
 
 CGRect SGRTabBarInlineSlot(UIView *host, CGFloat height) {
+    if (SGRLegacyTabBarOn()) return SGRLegacyTabBarInlineSlot(host, height);
     UIView *stockBar = sg_stockBar;
     UIView *bar = stockBar ? objc_getAssociatedObject(stockBar, &kBarKey) : nil;
     UIView *trailBar = stockBar ? objc_getAssociatedObject(stockBar, &kTrailBarKey) : nil;
@@ -1576,7 +1623,7 @@ static BOOL inGlassBar(UIView *view) {
 %end
 
 %ctor {
-    if (!SGRedesignedUI()) return;
+    if (!SGRedesignedUI() || SGRLegacyTabBarOn()) return;   // below iOS 26 TabBarLegacy.x is the bar
     %init;
     if (objc_getClass("_TtC23NavigationUI_TabBarImpl18TabBarGradientView")) %init(SpotifyBarFade);
     SGRequireClasses(@[

@@ -8,5 +8,8 @@
 extern NSString *const SGPlayerTransitionNotification;
 extern NSString *const SGPlayerTransitionEndedNotification;
 CFTimeInterval SGPlayerTransitionEnds(void);
+// Whether the full screen player is open, or opening: YES from the moment it starts to come up until it starts to go,
+// and back as it was when a swipe is let go of before it has gone.
+BOOL SGPlayerIsOpen(void);
 // Whether the transition last announced opens the player (YES) or closes it.
 BOOL SGPlayerTransitionOpens(void);
