@@ -2397,7 +2397,7 @@ static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
     more.showsMenuAsPrimaryAction = YES;
     more.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     more.accessibilityLabel = @"More";
-    SGRGlyphView *glyph = [[SGRGlyphView alloc] initWithSymbol:@"ellipsis" pointSize:17 weight:UIImageSymbolWeightRegular];
+    SGRGlyphView *glyph = [[SGRGlyphView alloc] initWithSymbol:@"ellipsis" pointSize:17 weight:UIImageSymbolWeightSemibold];
     glyph.tintColor = SGRAddedSecondary();
     glyph.userInteractionEnabled = NO;
     glyph.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin
