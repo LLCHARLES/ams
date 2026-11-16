@@ -123,7 +123,11 @@ Shared:
                   screen's line and artwork, the Live Activity, the native look's lyrics page for local files), and a
                   tap on a line seeks to its start plus the delay. Karaoke's audio, the scrubber and the lyrics preview
                   are left alone. It is read at every use, so a change applies at once (checked by harness/lyrics' -check). With EeveeSpotify injected (SGEeveeSpotifyInjected), its lyrics
-                  answer Spotify's requests and the mod's sources and its own requests stand aside
+                  answer Spotify's requests and the mod's sources and its own requests stand aside. A timed line is
+                  drawn by KaraokeLines (its words swept, glow and wave, backing row, pronunciation, Latin letters and
+                  translation, the dots of a break) for both columns of lyrics there are, the redesign's lyrics page and
+                  the lock screen's large cover in Vitrine Addon, which builds the file into MediaRemoteUI; the model
+                  builds without the protobuf reader, whose bodies KaraokeBody.m reads
     LyricsSources/ the sources lyrics come from, asked in the order the Lyrics page puts them in and merged into the
                   best answer (LyricsSources.m, the list to drag in LyricsSourcesPage.m): Apple Music's TTML from
                   BiniLyrics.m (now lrc.red: first the TTML filed under Spotify's ISRC for the track, from
@@ -216,7 +220,12 @@ Shared:
                   mode outlives a relaunch and the page's row follows it. The star takes the slot of Spotify's like
                   and dislike buttons, so their flag is forced off at launch while the switch is on, over the row's
                   own override, and the row shows it locked. The cut and the service's wire format are checked on
-                  the Mac against harness/motion/
+                  the Mac against harness/motion/. Below iOS 26 with a jailbreak, Vitrine Addon draws the Canvas in
+                  place of the lock screen's large cover (LockScreenAddonClip.x hands it the clip) and, with Lyrics on
+                  the large cover, the song's lines over it from a button in the lock screen player's header, in the
+                  place of its small cover while the large one is open (LockScreenAddonLyrics.x hands it the lines with
+                  the lyrics page's look, and the song's clock in a notification's state, only while the lyrics are
+                  picked; SpringBoard catches the touches over them, as the cover sheet takes every touch there)
     LocalFiles/   local files (LocalFiles.h lists its files): Edit info in the player's ⋯ menu, the table's footer
                   under Speed and pitch, which closes the menu and opens a form sheet (the three names, the cover
                   with a menu to change it, Restore file's info; nothing is stored before Save, and a swipe away
@@ -514,6 +523,17 @@ Redesigned:
                   apart from the native look's). The playlist, album and artist pages take their field's color from the
                   cover's main color (checked on the Mac by harness/palette/), and come in whole: a black veil over the
                   page until the cover has been read, at most SGRFieldHoldLimit (1 s), then faded away (SGRField.h)
+                  Below iOS 26 every UIAlertController (alert or action sheet) comes up as Telegram's alert, a glass
+                  card with 35pt corners and capsule buttons (SGRAlertScreen.m, swapped in at presentViewController by
+                  SGRAlertHook.x); the system's alert is never shown, its handlers and text fields are used as they are.
+                  The page behind it is only dimmed a little (kScrimAlert, kScrimSheet), never blurred
+                  Spotify's own white pop-up dialogs (Get smoother transitions, Discard changes?, Make this playlist private?,
+                  Update preferred location: id=PopUp.Dialog and PopUpConfirmationDialog, each in a window of its own) are
+                  shown the same way below iOS 26: the window goes invisible the moment the dialog comes into it, the dialog's
+                  title, text and buttons are read once Spotify has filled them in, and a UIAlertController made of them is
+                  presented over the app's window (SGRDialogPopups.x), its actions firing Spotify's own buttons. Nothing of
+                  Spotify's is repainted, so there is no frame of the white dialog first; one that cannot be read in a second
+                  is shown as Spotify's and dressed
     Navbar/       the glass tab bar (TabBar.x) over its own composition (Navbar.x, NavbarLayout.m) and editor, the glass search field.
                   Spotify is made to leave the glass bar its height where its own bar is shorter (a phone with a home button,
                   Offline or Private Session under the bar), so the now playing bar and the pages move up with it. Under both
@@ -541,7 +561,8 @@ Redesigned:
                   rides above it at its width (harness/tabbar/, jam). Another hat on the bar keeps the card above the tab bar.
                   Follow the cover (Player/PlayerCoverAccent.x) paints the card's lit device and like buttons too
     ContextMenu/  the ⋯ of the player and the ⋯ pinned over the playlist, album and artist pages open the system menu,
-                  always (ContextMenu.h). The player's ⋯ is a pull-down button of the mod's over Spotify's: the menu
+                  always (ContextMenu.h); below iOS 26 it wears the mod's glass and opens out of a drop (ContextMenuGlass.x).
+                  The player's ⋯ is a pull-down button of the mod's over Spotify's: the menu
                   opens on touch down with the quick row (Spotify's items 9, 19 and 11), the player's items and More,
                   waiting on nothing of Spotify's (the button holds a stand-in menu from the start, since UIKit opens
                   a button's menu on touch down only while it holds one, and the session's replaces it as the touch
@@ -562,7 +583,8 @@ Redesigned:
                   harness/system-menu/
     Player/       the redesigned full screen player (Player.h lists its files); its more button opens the system
                   menu (ContextMenu/), Spotify's rows and then Speed, Pitch & Reverb, which opens the sliders and
-                  Pitch follows speed in a popover from the ⋯ (SpeedPitchMenu.x), and the backgrounds it can switch
+                  Pitch follows speed in a popover from the ⋯ (SpeedPitchMenu.x; below iOS 26 its background is the ⋯ menu's
+                  glass, PlayerPanelGlass.m), and the backgrounds it can switch
                   to (PlayerMenu.m), and a hold on either side of the
                   cover plays at 2x until the finger lifts (PlayerArtwork.x), an octave higher while Pitch follows
                   speed is on. Hide on the player's Shuffle and Repeat (spotifyglass.redesign.player.hideShuffle,
@@ -638,7 +660,17 @@ Redesigned:
     Search/       the Browse page decluttered to its category cards (an allow list of the list's cells: the watch feed
                   carousels and promos collapse, and the cards move up by the spacing they leave), the header the way Home
                   has it without the camera, and each card as Liquid Glass tinted by its own color, read off the Box's
-                  shape layer (Search.h lists its files)
+                  shape layer (Search.h lists its files). Below iOS 26 the results page's header (SearchHeader.x) loses
+                  Spotify's #1F1F1F backing and nothing put in its place (a plate sized on layout passes
+                  cut the header's animations off), the field and Cancel are glass capsules with a faint white film floating over
+                  the page (dressed from the field's own layout as well as the header's, since Spotify rebuilds the field's fill
+                  on passes the header never sees) and the filter
+                  chips are glass as the Library's are (LibraryHeader.x takes both rows). The search in the Library, the podcast
+                  "Find in this show" page and "Find on this page" have their field and Cancel on glass the same way
+    Profile/      below iOS 26, the lists a profile opens (Followers, Following, playlists): UIKit's bar with the back
+                  button on a glass circle, the title on a glass capsule and Spotify's dark blur behind the bar hidden
+                  while such a page is on top; the page that adds playlists to the profile has that bar without a capsule
+                  (it has no title) and the queue's glass behind its Remove from profile button (Profile.h lists its files)
     Library/      Your Library the way Home and Search have their headers: a large title at the leading edge, the avatar
                   at the trailing edge with the search and create buttons before it, the header's scrim gone, each row's
                   artwork at the Kit's radius with a circular one left round, a hairline between the rows, and the search

@@ -1,5 +1,6 @@
-// What the redesign's tab bar does to Spotify's own bar apart from drawing itself (TabBar.x): the hold on Home that
-// opens Mod Settings, and the room made under Spotify's bar for the taller bar of the mod's.
+// What the redesign's two tab bars do to Spotify's own bar the same way, whichever of them is in place (TabBar.x from
+// iOS 26, TabBarLegacy.x below it; only one is per launch): the hold on Home that opens Mod Settings, the room made
+// under Spotify's bar for the taller bar of the mod's, and whether Create's menu is up.
 // Threading: main thread only.
 #import "Core/SGCore.h"
 #import "Navbar.h"
@@ -39,7 +40,7 @@ void SGRHoldHomeForModSettings(UIView *stockBar) {
 // tab bar, which takes the home indicator's inset for itself, so the glass bar would stand over the now
 // playing bar. So the view gets the rest of the glass bar's height as safe area, and Spotify lays its bar,
 // the now playing bar, the pages and the hide out for the glass bar itself, and moves them all with the
-// message bar.
+// message bar. The capsule bar below iOS 26 is a UITabBar too and is given its room the same way.
 static const CGFloat kStockRow = 49;
 static CGFloat sg_room, sg_glassHeight;
 
@@ -68,4 +69,17 @@ void SGRMakeTabBarRoom(UIViewController *container, UIView *stockBar, UITabBar *
     sg_room = extra.bottom = room;
     container.additionalSafeAreaInsets = extra;
     SGLog(@"tab bar: %.0f pt of room made under Spotify's bar for the glass bar's %.0f, over an inset of %.0f", room, height, inset);
+}
+
+#pragma mark - Create's menu
+
+static char kCreateMenuKey;
+
+// Matched by id and by class name, so one changed id does not hide it. The view found is remembered on the window and
+// the tree is walked again only once it has left, which matters to the capsule bar's poll while the menu is up.
+BOOL SGRCreateMenuUp(UIView *view) {
+    UIView *root = view.window ?: view;
+    return SGFindRemembered(root, &kCreateMenuKey, ^BOOL(UIView *v) {
+        return [v.accessibilityIdentifier isEqualToString:@"CreateMenu"] || [NSStringFromClass(v.class) containsString:@"CreateMenuView"];
+    }) != nil;
 }

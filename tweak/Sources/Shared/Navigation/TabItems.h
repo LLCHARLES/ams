@@ -1,6 +1,6 @@
 // Reads of Spotify's tab bar that both looks' bars make: the items it shows, the one that is Home or active, the
-// glyphs it draws and the bar or container an item stands in, and a tap passed on to one of its items. The redesign's TabBar.x and the
-// Native bar both take them from here.
+// glyphs it draws and the bar or container an item stands in, and a tap passed on to one of its items. TabBar.x (iOS 26), TabBarLegacy.x (below) and the
+// Native bar all take them from here.
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <objc/runtime.h>

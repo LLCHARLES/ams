@@ -773,10 +773,18 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     SGInsetForBars(self.tableView);
+    SGDressPageBar(self);
+}
+
+// The page is its own table, so the glass Back pinned to it is a subview of what scrolls: it is put back at the
+// top of the screen as the table moves. Only placed: the bar was dressed by the page's passes.
+- (void)scrollViewDidScroll:(UIScrollView *)scrollView {
+    SGPlacePageBar(self);
 }
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
+    SGDressPageBar(self);
     // Reloaded whether or not anything ticks: a choice row is showing whatever was picked on the
     // page it opened, which is gone by the time this one comes back, and may bring rows or take them.
     _shown = [self rowsToShow];
@@ -803,6 +811,20 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
             cell.accessoryView = [self menuButtonFor:row];
         }
     }
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    // UIKit makes the bar's Back and title once the push has settled.
+    __weak SGModPage *weak = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weak) SGDressPageBar(weak);
+    });
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    SGUndressPageBar(self);
 }
 
 - (void)viewDidDisappear:(BOOL)animated {
@@ -1038,6 +1060,28 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
 }
 
 // A UISwitch or an SGGlowSwitch, both answering isOn.
+// Reloads the table once no slider on it is under a finger. A reload mid-drag gave the dragged slider's cell to another
+// row, so the finger went on moving that row's slider instead (a Strength slider dragged just after the switch over it
+// was turned on handed the drag to the Strength slider above it).
+static BOOL sliderHeld(UIView *view) {
+    if ([view isKindOfClass:UISlider.class] && ((UISlider *)view).isTracking) return YES;
+    for (UIView *sub in view.subviews) if (sliderHeld(sub)) return YES;
+    return NO;
+}
+
+// How long the glass switch takes from a tap to rest: the drop falls back 0.2 s after it sets off and settles over the
+// next 0.6 s (Core/SGGlassThumb.m: kTapDropDelay, kDropDuration), with a little to spare. At 0.7 s the reload still
+// cut the fall short now and then.
+static const NSTimeInterval kGlassSwitchSettle = 0.95;
+
+- (void)reloadWhenIdle {
+    if (sliderHeld(self.tableView)) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self reloadWhenIdle]; });
+        return;
+    }
+    [self.tableView reloadData];
+}
+
 - (void)toggled:(UIControl *)toggle {
     BOOL on = [(UISwitch *)toggle isOn];
     NSIndexPath *path = [self pathOf:toggle];
@@ -1047,10 +1091,12 @@ static void showWaiting(UITableViewCell *cell, BOOL waiting, NSString *switchTit
     else SGSetEnabled(row.key, on != row.inverted);
     if (row.changed) row.changed(on);
     // A glowing switch is let finish its slide before the reload puts a new one in its place; rows coming
-    // or going are let finish first too.
-    NSTimeInterval wait = [toggle isKindOfClass:SGGlowSwitch.class] ? 0.45 : 0;
+    // or going are let finish first too. So is iOS 26's switch below iOS 26 (SGGlassSwitch.x): its drop crosses the
+    // track and falls back over about 0.7 s, and a reload at once put a fresh switch in its place mid-way, so all
+    // that showed of a flip was the drop coming up and going.
+    NSTimeInterval wait = [toggle isKindOfClass:SGGlowSwitch.class] ? 0.45 : SGUseLegacyGlass() ? kGlassSwitchSettle : 0;
     void (^reload)(void) = ^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self.tableView reloadData]; });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ [self reloadWhenIdle]; });
     };
     BOOL moved = [self showRowsThen:row.changed ? reload : nil];
     // The rows waiting on this switch stay where they are and fade to their new state.
