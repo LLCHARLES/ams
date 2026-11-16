@@ -108,7 +108,7 @@ jobs:
 
       - name: Build the dylib
         run: |
-          env -u MAKELEVEL gmake -C tweak SG_DRIVER=0 2>&1 | tee /tmp/gmake.log
+          env -u MAKELEVEL gmake -k -C tweak SG_DRIVER=0 2>&1 | tee /tmp/gmake.log
           mkdir -p out
           cp tweak/.theos/obj/spotifyglass.dylib out/spotifyglass.dylib
           # The copy in .theos/obj is unsigned: Theos signs the one it puts in the .deb, not this one, and
@@ -121,7 +121,7 @@ jobs:
         if: failure()
         run: |
           if [ -f /tmp/gmake.log ]; then
-            grep -inE "error:|fatal error|undefined symbol|duplicate symbol|Error [0-9]|no visible @interface|use of undeclared" /tmp/gmake.log | head -20 | while IFS= read -r line; do echo "::error::$line"; done || true
+            grep -inE "error:|fatal error|undefined symbol|duplicate symbol|no visible @interface|use of undeclared" /tmp/gmake.log | grep -v "gmake" | head -35 | while IFS= read -r line; do echo "::error::$line"; done || true
             tail -12 /tmp/gmake.log | while IFS= read -r line; do echo "::error::TAIL $line"; done || true
           fi
 

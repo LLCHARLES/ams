@@ -1004,20 +1004,22 @@ static char kPressKey, kSheenKey;
         spring.duration = spring.settlingDuration;
         [layer addAnimation:spring forKey:@"sgr.press"];
     }
+    // A UIVisualEffectView takes its subviews on contentView; the legacy glass below iOS 26 is a plain view.
+    UIView *host = [glass isKindOfClass:UIVisualEffectView.class] ? ((UIVisualEffectView *)glass).contentView : glass;
     UIView *sheen = objc_getAssociatedObject(glass, &kSheenKey);
     if (!sheen) {
-        sheen = [[UIView alloc] initWithFrame:glass.contentView.bounds];
+        sheen = [[UIView alloc] initWithFrame:host.bounds];
         sheen.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         sheen.backgroundColor = UIColor.whiteColor;
         sheen.userInteractionEnabled = NO;
         sheen.alpha = 0;
         sheen.layer.cornerCurve = kCACornerCurveContinuous;
-        [glass.contentView addSubview:sheen];
+        [host addSubview:sheen];
         objc_setAssociatedObject(glass, &kSheenKey, sheen, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     // The glass is shaped by its corner configuration, which does not clip its content view: the sheen showed as a
     // square behind the card's rounded ends on a press (its owner's recording, 2026-10-27). So it is rounded as the card.
-    sheen.frame = glass.contentView.bounds;
+    sheen.frame = host.bounds;
     sheen.layer.cornerRadius = MIN(kCardRadius, glass.bounds.size.height / 2);
     SGRAnimate(SGRMotionRespond, ^{ sheen.alpha = down ? kPressSheen : 0; }, nil);
 }
