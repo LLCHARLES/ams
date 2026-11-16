@@ -77,7 +77,7 @@ CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius) {
 }
 
 UIView *SGRNowPlayingCardView(void) {
-    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *glass = sg_cardGlass;
     return glass.window ? glass : nil;
 }
 
@@ -750,7 +750,7 @@ static void appendShape(UIView *view, NSUInteger depth, NSMutableString *out) {
 // The card's glass where the card is, and the bar masked to it, so nothing of the full width bar shows past the card
 // in the row (a page sliding in, a button moving over). Not in a Jam, whose strip stands outside the card.
 static void placeCardGlass(UIViewController *container) {
-    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *glass = sg_cardGlass;
     UIView *bar = container.childViewControllers.firstObject.viewIfLoaded;
     CGRect frame = !CGRectIsNull(sg_rowGlass) ? sg_rowGlass : sg_wideGlass;
     if (!glass || !bar || CGRectIsNull(frame) || glass.superview != container.view) return;
@@ -982,7 +982,7 @@ static char kPressKey, kSheenKey;
 }
 
 - (void)press:(BOOL)down on:(UIView *)view {
-    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *glass = sg_cardGlass;
     if (!view || glass.superview != view) return;
     CALayer *layer = view.layer;
     CGPoint off = CGPointMake(glass.center.x - CGRectGetMidX(view.bounds), glass.center.y - CGRectGetMidY(view.bounds));
@@ -1200,7 +1200,7 @@ static void styleNowPlayingBar(UIViewController *container) {
     // In the row the bar keeps the expanded bar's width, masked to its card (placeInline): a touch beside the card, on
     // the tab bar's circles, landed on the bar's own views under the mask and never reached the circles (its owner,
     // 2026-10-27). Only a touch on the card's glass is the bar's.
-    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *glass = sg_cardGlass;
     if (glass.window) {
         CGPoint onGlass = [(UIView *)self convertPoint:point toView:glass];
         if (!CGRectContainsPoint(CGRectInset(glass.bounds, -4, -4), onGlass)) return hit && ![hit isDescendantOfView:moved] ? hit : nil;
@@ -1259,7 +1259,7 @@ static BOOL isBarSwipe(UIGestureRecognizer *recognizer) {
 }
 
 static BOOL offCard(UIGestureRecognizer *recognizer, NSSet<UITouch *> *touches) {
-    UIVisualEffectView *glass = sg_cardGlass;
+    UIView *glass = sg_cardGlass;
     if (!sg_inline || !glass.window || !inBar(recognizer)) return NO;
     CGPoint point = [touches.anyObject locationInView:glass];
     return !CGRectContainsPoint(CGRectInset(glass.bounds, -4, -4), point);
