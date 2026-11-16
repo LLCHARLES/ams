@@ -278,14 +278,14 @@ static NSString *otherVersionURI(SPTPlayerTrack *track) {
     return isVideoTrack(track) ? audioURI : videoURI;
 }
 
-// How wide a glyph draws, in points: its image's width, or the ⋯'s (17 points, makeMoreButton) for nil.
+// How wide a glyph draws, in points: its image's width, or the ⋯'s (20 points, makeMoreButton) for nil.
 static CGFloat glyphWidth(UIImageView *glyph) {
     if (glyph.image) return glyph.image.size.width;
     if (glyph) return kAddGlyph;
     static CGFloat more;
     if (more <= 0) {
-        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:17 weight:UIImageSymbolWeightRegular];
-        more = [UIImage systemImageNamed:@"ellipsis" withConfiguration:config].size.width ?: 17;
+        UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightSemibold];
+        more = [UIImage systemImageNamed:@"ellipsis" withConfiguration:config].size.width ?: 20;
     }
     return more;
 }
@@ -2397,7 +2397,7 @@ static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
     more.showsMenuAsPrimaryAction = YES;
     more.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     more.accessibilityLabel = @"More";
-    SGRGlyphView *glyph = [[SGRGlyphView alloc] initWithSymbol:@"ellipsis" pointSize:17 weight:UIImageSymbolWeightSemibold];
+    SGRGlyphView *glyph = [[SGRGlyphView alloc] initWithSymbol:@"ellipsis" pointSize:20 weight:UIImageSymbolWeightSemibold];
     glyph.tintColor = SGRAddedSecondary();
     glyph.userInteractionEnabled = NO;
     glyph.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin | UIViewAutoresizingFlexibleTopMargin
