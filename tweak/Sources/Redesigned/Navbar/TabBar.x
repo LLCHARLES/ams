@@ -116,24 +116,6 @@ static id encoreIconOf(UIView *view) {
     return type && type[0] == '@' ? object_getIvar(view, ivar) : nil;
 }
 
-// An SPTEncoreIcon's name, which is what tells two icons apart: Spotify may hand a view a new instance of the
-// same glyph. Nil for an icon that does not say.
-static NSString *iconName(id icon) {
-    id name = [icon respondsToSelector:@selector(name)] ? [icon name] : nil;
-    return [name isKindOfClass:NSString.class] ? name : nil;
-}
-
-// The filled variant of a tab's SPTEncoreIcon (-active, which fillBar's log prints), when it has one. A filled
-// icon has none: its -active is itself, or the same glyph again.
-static id activeVariantOf(id icon) {
-    SEL selector = NSSelectorFromString(@"active");
-    if (!icon || ![icon respondsToSelector:selector]) return nil;
-    id variant = ((id (*)(id, SEL))objc_msgSend)(icon, selector);
-    if (variant == icon || ![variant isKindOfClass:[icon class]]) return nil;
-    NSString *name = iconName(icon);
-    return name && [name isEqualToString:iconName(variant)] ? nil : variant;
-}
-
 // A tab of the mod's own that wears an SF Symbol hands UIKit the symbol itself, with no size of its own, so the
 // bar sizes it the way UIKit sizes every app's tab symbols, the Music app's included. One object per name, so
 // setGlyphs sees the same image again and leaves the item alone.
