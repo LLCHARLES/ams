@@ -4,6 +4,11 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ko</string>
+	</array>
 	<key>CFBundleIdentifier</key>
 	<string>com.vitrine.tweak.resources</string>
 	<key>CFBundleInfoDictionaryVersion</key>

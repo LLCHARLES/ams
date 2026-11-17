@@ -2,17 +2,18 @@
 
 static NSString *const kBundleName = @"Vitrine.bundle";
 
-static NSBundle *resourceBundle(void) {
+static NSArray<NSBundle *> *resourceBundles(void) {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
     NSString *inApp = [NSBundle.mainBundle pathForResource:@"Vitrine" ofType:@"bundle"];
     if (inApp) [paths addObject:inApp];
     [paths addObject:[@"/var/jb/Library/Application Support" stringByAppendingPathComponent:kBundleName]];
     [paths addObject:[@"/Library/Application Support" stringByAppendingPathComponent:kBundleName]];
+    NSMutableArray<NSBundle *> *bundles = [NSMutableArray array];
     for (NSString *path in paths) {
         NSBundle *bundle = [NSBundle bundleWithPath:path];
-        if (bundle) return bundle;
+        if (bundle) [bundles addObject:bundle];
     }
-    return nil;
+    return bundles;
 }
 
 // Spotify's own language, which iOS picks from the languages Spotify has and the one set for it in Settings. An app
@@ -96,17 +97,21 @@ static NSDictionary<NSString *, NSString *> *sg_table;
 static void load(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSBundle *bundle = resourceBundle();
-        if (!bundle) return;
         NSInteger choice = [NSUserDefaults.standardUserDefaults integerForKey:SGKeyLanguage];
         NSString *wanted = choice == 1 ? @"en" : choice == 2 ? @"ko" : appLanguage();
-        NSString *language = matchLanguage(wanted, bundle.localizations);
-        if ([language isEqualToString:@"en"]) return;
-        NSString *path = [bundle pathForResource:@"Localizable" ofType:@"strings" inDirectory:nil forLocalization:language];
-        NSDictionary *table = path ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
-        if (![table isKindOfClass:NSDictionary.class] || !table.count) return;
-        sg_table = table;
-        sg_language = language;
+        // An explicit choice must not silently fall back to English just because one bundle lacks the
+        // language (an old copy left inside the app shadows the deb's). Try every location and keep the
+        // first one that actually resolves the wanted localization and yields a non-empty table.
+        for (NSBundle *bundle in resourceBundles()) {
+            NSString *language = matchLanguage(wanted, bundle.localizations);
+            if ([language isEqualToString:@"en"]) continue;
+            NSString *path = [bundle pathForResource:@"Localizable" ofType:@"strings" inDirectory:nil forLocalization:language];
+            NSDictionary *table = path ? [NSDictionary dictionaryWithContentsOfFile:path] : nil;
+            if (![table isKindOfClass:NSDictionary.class] || !table.count) continue;
+            sg_table = table;
+            sg_language = language;
+            return;
+        }
     });
 }
 
