@@ -147,3 +147,26 @@ NSNumber *SGGeniusSongIn(NSDictionary *response, NSString *title, NSString *arti
     }
     return best;
 }
+
+#pragma mark - matching helpers shared with the name-searching sources
+
+// The text stripped to what two spellings of a title or artist share: lower case, no punctuation,
+// no spaces. Kept here so the Genius search, the song match and AMLL agree on what "the same" means.
+NSString *SGLyricsMatchKey(NSString *text) {
+    static NSCharacterSet *dropped;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableCharacterSet *building = [NSMutableCharacterSet whitespaceAndNewlineCharacterSet];
+        [building formUnionWithCharacterSet:NSCharacterSet.punctuationCharacterSet];
+        [building formUnionWithCharacterSet:NSCharacterSet.symbolCharacterSet];
+        dropped = [building copy];
+    });
+    if (![text isKindOfClass:NSString.class]) return @"";
+    return [[text.lowercaseString componentsSeparatedByCharactersInSet:dropped] componentsJoinedByString:@""];
+}
+
+// The artist without the guests: "A feat. B" searches as "A".
+NSString *SGLyricsLeadArtist(NSString *artist) {
+    NSRange featuring = [artist rangeOfString:@" feat" options:NSCaseInsensitiveSearch];
+    return featuring.location == NSNotFound ? artist : [artist substringToIndex:featuring.location];
+}

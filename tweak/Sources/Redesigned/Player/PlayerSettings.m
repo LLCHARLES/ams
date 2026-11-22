@@ -400,7 +400,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     [sections addObjectsFromArray:more];
     // Fluid, Animated and Visualizer share the field (PlayerMotion.x reads the choice on every track, PlayerVisualiser.m
     // on the field's layout); Still and Colors are a field of another kind, made once a launch (PlayerField.x).
-    NSString *footer = @"Fluid, Animated and Visualizer change with the next song. Still, Colors, Hide on the player and Spotify's icons apply after you restart Spotify.";
+    NSString *footer = @"Fluid, Animated and Visualizer change with the next song. Still, Colors and Hide on the player apply after you restart Spotify.";
     SGRPlayerPage *page = [[SGRPlayerPage alloc] initWithTitle:@"Player" intro:nil sections:sections footer:footer];
     weakPage = page;
     page.showcase = showcase;

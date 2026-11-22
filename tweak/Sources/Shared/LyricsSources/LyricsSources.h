@@ -125,6 +125,10 @@ void SGLyricsMigrateLegacyKeys(void);
 // The requests the sources share; each calls back on the main queue, with nil when it failed.
 NSURL *SGLyricsURL(NSString *base, NSDictionary<NSString *, NSString *> *query);
 void SGLyricsGetJSON(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root));
+// For a host that answers slowly: the same call, willing to wait longer than the shared six seconds,
+// and told the status code as well so a 404 (nothing there) can be told from a failed request.
+void SGLyricsGetJSONWithin(NSURL *url, NSDictionary<NSString *, NSString *> *headers, NSTimeInterval seconds,
+                           void (^done)(id root, NSInteger status));
 // The same with the reply's status and headers, and the body read whatever the status: an error's
 // body says why. response is nil when the request never got an answer.
 void SGLyricsGetJSONReply(NSURL *url, NSDictionary<NSString *, NSString *> *headers, void (^done)(id root, NSHTTPURLResponse *response));
@@ -180,7 +184,9 @@ extern SGLyricsAsk SGNetEaseAsk;
 extern SGLyricsAsk SGLrcLibAsk;
 extern SGLyricsAsk SGSpicyLyricsAsk;
 extern SGLyricsAsk SGQQMusicAsk;
+extern SGLyricsAsk SGLuoyueAsk;
 extern SGLyricsAsk SGKuGouAsk;
+extern SGLyricsAsk SGAMLLAsk;
 extern SGLyricsAsk SGGeniusAsk;
 // Genius.m. The rows of the lyrics in Genius's embed script, "" between stanzas and the [Chorus]
 // headings left out; nil when the script is not the shape it reads or holds no line.

@@ -38,20 +38,32 @@
 static const CGFloat kLyricsGlyphSize = 20;
 // Filled and at full strength while the lyrics are up, the way the Music app marks the control that is on.
 static NSString *const kLyricsSymbol = @"quote.bubble", *const kLyricsSymbolOpen = @"quote.bubble.fill";
-// Where the three glyphs sit, as parts of the footer's width.
-static const CGFloat kLeading = 0.2, kMiddle = 0.5, kTrailing = 0.8;
+// Where the three glyphs sit, as parts of the footer's width. Measured against the Music app's own player
+// (both shots scaled to a 393pt screen): its lyric glyph is at 0.215 of the width, the middle at 0.5, and
+// the queue at 0.781, all three evenly 171px apart. Spotify's defaults put the outer two 0.2 and 0.8,
+// which spreads the row about 6% too wide.
+static const CGFloat kLeading = 0.215, kMiddle = 0.5, kTrailing = 0.781;
 static const CGFloat kGlyphMaxWidth = 30;
 
 // Issue #54: Spotify ends its bottom stack 61pt above the screen's bottom (01.txt:127, 576.67 + 236 of
 // 874), so the row's middle sat 83pt up, well clear of the home indicator, and the controls crowded it.
 // The Music app keeps that row just over the home indicator: its middle this far above the safe area's
 // bottom, and never less than kRowMinBottom above the screen's on a phone without a home indicator.
-static const CGFloat kRowAboveSafeArea = 20, kRowMinBottom = 34;
+// The Music app's row middle is 65pt up from the bottom on the home-indicator phone measured here (the
+// shot's buttons are at y 1203 of a 1304px-tall frame, 101px = 66pt from the bottom); with a 34pt safe
+// area that is 31pt above it. The earlier 20 left the row 12pt too low against the Music app.
+static const CGFloat kRowAboveSafeArea = 31, kRowMinBottom = 34;
 // The controls follow a share of the row's move when nothing stands between them, so the gaps above
 // and below them even out instead of all the room opening under them.
 static const CGFloat kControlsShare = 0.3;
-// The volume row's sides, the player's own margin.
-static const CGFloat kVolumeMargin = 24;
+// The volume row's sides, measured from the Music app's (its speaker glyphs 36pt in from the screen's edge).
+static const CGFloat kVolumeMargin = 28;
+// The Music app draws the controls this much nearer its footer than Spotify's bottom stack does.
+static const CGFloat kControlsLift = 49;
+// The Music app's volume row sits below the middle of the room the lifted controls leave it. Raising the
+// footer by 11pt narrows that room from below; drop the row a further 6pt so the volume row, already at the
+// Music app's height, stays where it is.
+static const CGFloat kVolumeDrop = 16;
 // And the controls go up this much over it, so the gaps above and below the volume row match.
 static const CGFloat kVolumeLift = 10;
 
@@ -412,16 +424,19 @@ void SGRPlayerLowerRow(UIView *row) {
     // The volume row is placed against the controls where they would stand for it; one that does not show leaves them
     // following the footer as they do without it.
     BOOL volume = SGRPlayerVolumeOn() && controls;
-    CGFloat share = volume ? 0 : kControlsShare, lift = volume ? kVolumeLift : 0;
+    // The Music app's places are the ordinary player's; the AI DJ's keep the places it gave them.
+    BOOL ordinary = controls && SGClassNamed(unit, @"PlaybackControlsElementsUnit");
+    CGFloat share = volume ? 0 : kControlsShare;
+    CGFloat lift = (volume ? kVolumeLift : 0) + (ordinary ? kControlsLift : 0);
     CGAffineTransform follow = CGAffineTransformMakeTranslation(0, controls ? round(move * share) - lift : 0);
     if (above && controls && !CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     SGRPlayerPaintCover(stack);
-    if (volume && !SGRPlayerPlaceVolume(stack, above, row, kVolumeMargin)) {
+    if (volume && !SGRPlayerPlaceVolume(stack, above, row, kVolumeMargin, ordinary ? kVolumeDrop : 0)) {
         share = kControlsShare;
-        follow = CGAffineTransformMakeTranslation(0, round(move * share));
+        follow = CGAffineTransformMakeTranslation(0, round(move * share) - (ordinary ? kControlsLift : 0));
         if (!CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     } else if (!volume) {
-        SGRPlayerPlaceVolume(stack, nil, row, kVolumeMargin);
+        SGRPlayerPlaceVolume(stack, nil, row, kVolumeMargin, 0);
     }
 
     SGRFooterReach *reach = objc_getAssociatedObject(row, &kReachKey);
@@ -469,11 +484,6 @@ void SGRPlayerLowerRow(UIView *row) {
         SGRPlayerVanish(arrangedAround(gone[i], host));
     }
 
-    SGRGlyphButton *lyrics = SGRPlayerLyricsGlyphIn(host);
-    lyrics.bounds = CGRectMake(0, 0, 44, 44);
-    lyrics.center = CGPointMake(round(width * (rtl ? kTrailing : kLeading)), middleY);
-    SGRPlayerLyricsChanged();
-
     UIView *connect = SGRFindByIdentifier(host, @"Components.ConnectButtonOutputSwitcher", &kConnectKey);
     UIView *glyph = SGRPlayerConnectGlyphIn(host, connect);
     CGFloat connectFrom = glyph ? SGRPlayerTranslateArranged(arrangedAround(connect, host), glyph, CGPointMake(CGRectGetMidX(glyph.bounds), CGRectGetMidY(glyph.bounds)), host, round(width * kMiddle)) : -1;
@@ -482,12 +492,21 @@ void SGRPlayerLowerRow(UIView *row) {
     standInForQueue((SPTEncoreIconView *)SGRFindByIdentifier(queue, @"Encore.IconView", &kQueueIconKey));
     CGFloat queueFrom = SGRPlayerTranslateArranged(arrangedAround(queue, host), queue, CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds)), host, round(width * (rtl ? kLeading : kTrailing)));
 
+    // Lyrics on the line of Spotify's own glyphs, not the unit's middle: with Spotify's AI prompt bar on the player
+    // (Labs > Agent button) the unit is taller than the row and its middle falls on the bar. The queue's arranged view
+    // is moved sideways only, so its middle is the row's.
+    CGFloat rowY = queue.window ? round([queue convertPoint:CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds)) toView:host].y) : middleY;
+    SGRGlyphButton *lyrics = SGRPlayerLyricsGlyphIn(host);
+    lyrics.bounds = CGRectMake(0, 0, 44, 44);
+    lyrics.center = CGPointMake(round(width * (rtl ? kTrailing : kLeading)), rowY);
+    SGRPlayerLyricsChanged();
+
     SGRPlayerLowerRow(host);
     SGRPlayerCoverConnect(arrangedAround(connect, host), glyph);
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        SGLog(@"redesign player: footer lyrics at %.0f, connect %.0f (%@) to %.0f, queue %.0f to %.0f, share %@", lyrics.center.x,
+        SGLog(@"redesign player: footer lyrics at %.0f,%.0f (unit middle %.0f), connect %.0f (%@) to %.0f, queue %.0f to %.0f, share %@", lyrics.center.x, lyrics.center.y, middleY,
               connectFrom, glyph ? @"glyph" : @"button", round(width * kMiddle), queueFrom, round(width * (rtl ? kLeading : kTrailing)), share ? @"gone" : @"not found");
     });
 }

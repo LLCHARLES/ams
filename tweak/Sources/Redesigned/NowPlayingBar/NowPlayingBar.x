@@ -52,6 +52,11 @@ CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius) {
     return [host convertRect:glass.bounds fromView:glass];
 }
 
+UIView *SGRNowPlayingCardView(void) {
+    UIVisualEffectView *glass = sg_cardGlass;
+    return glass.window ? glass : nil;
+}
+
 CGFloat SGRNowPlayingStripHeight(void) {
     return sg_stripFrame.size.height;
 }

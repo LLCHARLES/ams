@@ -37,11 +37,20 @@
 
 static const CGFloat kThumbSide = 72;          // the cover once the lyrics are up
 static const CGFloat kThumbGap = 16;           // between the thumbnail and the title beside it
+static const CGFloat kTitleInset = 9;          // the title's leading in from Spotify's, where the Music app's is
 static const CGFloat kTitleGap = 12;           // between the title and the controls at the trailing edge
 static const CGFloat kTitleFade = 20;          // over how much of its end a title too long to fit fades out
-static const CGFloat kThumbTop = 8;            // below the top of the artwork band
+static const CGFloat kThumbTop = -15;          // above the top of the artwork band, where the Music app's thumb sits
 static const CGFloat kLyricsTop = 20;          // between the title row and the first line
 static const CGFloat kLyricsBottom = 8;        // above the progress bar
+// Spotify's bottom stack spreads the title, the times and the bar further apart than the Music app, which
+// draws them nearer the cover and the controls: what the stack leaves standing too low, and the bar's width,
+// measured on the iPhone 16 Pro the layouts were compared on (402 x 874pt, 3x).
+static const CGFloat kInfoLift = 92;           // the title row rises this much
+static const CGFloat kCoverGap = 16;           // but never nearer the cover than this
+static const CGFloat kBarLift = 85;            // the bar and its times rise this much
+static const CGFloat kBarScale = 0.956;        // and the unit narrows to the Music app's bar (336 of 351pt)
+static const CGFloat kTimeDrop = 8;            // the times sit this much further under the bar than Spotify's
 // The lines are a surface arriving, not something moving: they come up from just under full size as the
 // room for them opens, and go at once when it closes. An exit the eye waits through reads as a stall.
 static const CGFloat kLyricsEnterScale = 0.96;
@@ -55,14 +64,16 @@ static const CGFloat kLivingHeight = 200;
 // The lines on their own: the controls under them fade after this long without a touch.
 static const NSTimeInterval kRest = 4;
 
-static char kOverlayKey, kPlateKey, kTitleKey, kStackKey;
+static char kOverlayKey, kPlateKey, kTitleKey, kStackKey, kTimeTakeKey, kTimeRemainingKey;
 static BOOL sg_open;
 static BOOL sg_moving;                      // the transition is in flight, so no layout pass may re-place it
 static __weak UIView *sg_host;              // SPTNowPlayingView
 static __weak UIViewController *sg_info, *sg_duration, *sg_floating, *sg_header;
 static __weak UIView *sg_titleElement;      // the arranged element view holding the title and the artist
 static __weak UIViewController *sg_player;  // NowPlayingViewController, whose units the controls are
+static CGFloat sg_titleTopInWindow = NAN;   // the title row's top before this file lifts it, NAN until it lays out
 static BOOL sg_alone;                       // the lines have the player to themselves
+static BOOL sg_ordinaryInfo, sg_ordinaryDuration; // the ordinary player's units, whose places the Music app's are
 static BOOL sg_touching;                    // a finger is on the player, which holds the clock (SGRPlayerTouchWatcher)
 static NSTimer *sg_rest;
 static __weak UIGestureRecognizer *sg_wake; // on the player, on while alone: the tap that brings the controls back
@@ -196,15 +207,19 @@ static SGRLyricsLayout layoutIn(UIView *host) {
     if (!host || host.bounds.size.height < kLivingHeight || !info || !duration) return l;
     CGRect area = SGRPlayerArtworkAreaIn(host), cover = SGRPlayerCoverFrameIn(host);
     if (CGRectIsNull(area) || CGRectIsNull(cover)) return l;
-    CGRect row = untransformed(info, host), bar = untransformed(duration, host);
-    // The thumbnail takes the title's own leading edge, so the two line up down the page.
-    CGFloat leading = title ? CGRectGetMinX(untransformed(title, host)) : CGRectGetMinX(area) + SGRSideMargin;
+    CGRect row = untransformed(info, host);
+    // The bar as it is drawn, the lift and scale on the unit taken in: the lines stop above where it stands.
+    CGRect bar = SGFrameIn(duration, host);
+    // The thumbnail takes the title's own leading edge, the Music app's inset and all, so the two line up
+    // down the page.
+    CGFloat inset = sg_ordinaryInfo ? kTitleInset : 0;
+    CGFloat leading = title ? CGRectGetMinX(untransformed(title, host)) + inset : CGRectGetMinX(area) + SGRSideMargin;
     l.cover = cover;
     l.thumb = CGRectMake(leading, CGRectGetMinY(area) + kThumbTop, kThumbSide, kThumbSide);
     // Beside the thumbnail when the title can be moved clear of it, under it when it cannot be found.
     CGFloat top = title ? CGRectGetMidY(l.thumb) - row.size.height / 2 : CGRectGetMaxY(l.thumb) + SGRGrid;
     l.lift = top - CGRectGetMinY(row);
-    l.shift = title ? kThumbSide + kThumbGap : 0;
+    l.shift = title ? inset + kThumbSide + kThumbGap : 0;
     CGFloat lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + kLyricsTop;
     l.stage = CGRectMake(CGRectGetMinX(area), lines, area.size.width, CGRectGetMinY(bar) - kLyricsBottom - lines);
     l.ok = l.stage.size.height > kLivingHeight / 2 && l.lift < 0;
@@ -212,6 +227,38 @@ static SGRLyricsLayout layoutIn(UIView *host) {
 }
 
 #pragma mark - the title row
+
+// The row's touches belong to it, not to the cover underneath. The row is lifted to the Music app's place
+// (kInfoLift below), which draws it above the bottom stack it is arranged in; UIKit stops looking at a view
+// whose bounds the touch is not in, so the full screen cover's cell behind the stack took the tap, and
+// tapping the title, the star or the ⋯ opened the cover's tilt mode. Asked by the cover's list before it
+// takes a touch (PlayerGestures.x), the row answers for where it is drawn: the buttons it holds take the
+// touch themselves, and the title's own place is the row's, so the cover never opens from there.
+UIView *SGRPlayerInfoRowHitIn(UIView *view, CGPoint point, UIEvent *event) {
+    if (!sg_ordinaryInfo || !sg_host || !view.window) return nil;
+    UIView *info = sg_info.viewIfLoaded, *row = sg_titleElement.superview ?: info;
+    if (!row || !row.window || row.window != view.window || ![row isDescendantOfView:sg_host]) return nil;
+    // The row and its buttons: the add button's 48pt slot, and the ⋯'s beside it, stand taller than the
+    // row's own bounds, so their frames are taken in.
+    CGRect area = row.bounds;
+    if ([row isKindOfClass:UIStackView.class]) {
+        for (UIView *item in ((UIStackView *)row).arrangedSubviews) {
+            if (item.hidden || item.alpha < 0.01 || item.bounds.size.width < 1) continue;
+            area = CGRectUnion(area, [item convertRect:item.bounds toView:row]);
+        }
+    }
+    CGPoint local = [row convertPoint:point fromView:view];
+    if (!CGRectContainsPoint(CGRectInset(area, -2, -2), local)) return nil;
+    // What the row answers at the point: its own subviews walked as UIKit walks them, since the point can be
+    // outside the row's bounds (over a button's taller slot) where the row's own hit test would refuse it.
+    for (UIView *item in row.subviews.reverseObjectEnumerator) {
+        if (item.hidden || item.alpha < 0.01 || !item.userInteractionEnabled) continue;
+        CGPoint at = [item convertPoint:point fromView:view];
+        UIView *hit = CGRectContainsPoint(item.bounds, at) ? [item hitTest:at withEvent:event] : nil;
+        if (hit) return hit;
+    }
+    return row;
+}
 
 // Where the row's trailing controls start, in the unit's coordinates: the nearest arranged view on the
 // trailing side of the title that is still there to be seen. The title may not reach it.
@@ -257,22 +304,91 @@ static void clipTitle(UIView *element, CGFloat width) {
     [CATransaction commit];
 }
 
+// The title row's top before this file lifts it, in the window: the unit's untransformed frame plus the
+// element's place inside it -- the same on every pass, flying or standing. NAN without a host or a unit whose
+// view is in it.
+static CGFloat titleRowTopInWindow(void) {
+    UIView *info = sg_info.viewIfLoaded, *host = sg_host;
+    if (!info || !host || !host.window || info.window != host.window) return NAN;
+    UIView *element = sg_titleElement ?: info;
+    CGFloat rowTop = CGRectGetMinY(untransformed(info, host));
+    if (element != info) rowTop += CGRectGetMinY([info convertRect:element.bounds fromView:element]);
+    return [host convertPoint:CGPointMake(0, rowTop) toView:nil].y;
+}
+
 // The unit's row lays its arranged views out after the unit's own pass, so the transforms go on after it.
 static void placeTitleRow(SGRLyricsLayout l) {
     UIView *info = sg_info.viewIfLoaded;
     if (!info) return;
     [SGRowIn(info) layoutIfNeeded];
-    CGFloat lift = sg_open ? l.lift : 0, shift = sg_open ? l.shift : 0;
+    // Closed, the Music app's row still stands where its cover leaves it: kInfoLift nearer the cover and this
+    // much in from the edge, or as near as the cover leaves room for on a shorter screen. The AI DJ's row
+    // keeps Spotify's places.
+    BOOL ordinary = sg_ordinaryInfo;
+    if (!ordinary) sg_titleTopInWindow = NAN;
+    CGFloat lift = sg_open ? l.lift : 0;
+    if (!sg_open && ordinary) {
+        CGFloat wanted = kInfoLift;
+        if (sg_host) {
+            UIView *element = sg_titleElement ?: info;
+            CGFloat rowTop = CGRectGetMinY(untransformed(info, sg_host));
+            if (element != info) rowTop += CGRectGetMinY([info convertRect:element.bounds fromView:element]);
+            // The row's place before this file lifts it, in the window, for the cover's size to stop above
+            // (SGRPlayerCoverMaxBottomInWindow, PlayerArtwork.x).
+            CGFloat top = titleRowTopInWindow();
+            if (!isnan(top)) sg_titleTopInWindow = top;
+            // The cover at the place it settles at, not the frame a pass happens to draw: a cell reused for
+            // the next track can still be at Spotify's own place when this reads it, and following that put
+            // the row under a cover that was about to be lifted.
+            CGRect cover = SGRPlayerCoverRestFrameIn(sg_host);
+            if (CGRectIsNull(cover)) cover = SGRPlayerCoverFrameIn(sg_host);
+            if (!CGRectIsNull(cover)) wanted = MIN(wanted, MAX(0, rowTop - CGRectGetMaxY(cover) - kCoverGap));
+        }
+        lift = -wanted;
+    }
+    CGFloat shift = sg_open ? l.shift : (ordinary ? kTitleInset : 0);
     CGAffineTransform rise = CGAffineTransformMakeTranslation(0, round(lift));
     if (!CGAffineTransformEqualToTransform(info.transform, rise)) info.transform = rise;
     UIView *title = sg_titleElement;
     if (!title) return;
     CGAffineTransform slide = CGAffineTransformMakeTranslation(round(shift), 0);
     if (!CGAffineTransformEqualToTransform(title.transform, slide)) title.transform = slide;
-    // Closed it reaches as far as Spotify meant it to; moved, only as far as the controls it moved toward.
+    // Never further than the controls at the trailing edge: the title's own shift, and the Music app's inset
+    // when it sits in the ordinary player's row, are taken in.
     CGFloat room = CGFLOAT_MAX;
-    if (sg_open) room = trailingEdgeIn(info) - kTitleGap - (CGRectGetMinX(untransformed(title, info)) + shift);
+    if (sg_open || shift > 0) room = trailingEdgeIn(info) - kTitleGap - (CGRectGetMinX(untransformed(title, info)) + shift);
     clipTitle(title, room);
+}
+
+// The lowest the cover may reach and still leave the ordinary player's title row where the Music app has it, in
+// window coordinates: the row's top, as it stands before this file lifts it, less the lift and the gap. Read
+// from the row itself rather than from the last pass that placed it, so the cover's first pass has it too.
+// NAN in the AI DJ's player, whose uncovered row keeps Spotify's place, and before the row is in the window.
+CGFloat SGRPlayerCoverMaxBottomInWindow(void) {
+    if (!sg_ordinaryInfo || !sg_host.window) return NAN;
+    CGFloat top = isnan(sg_titleTopInWindow) ? titleRowTopInWindow() : sg_titleTopInWindow;
+    // A row read before the stack placed it stands at the top of the window; its cover is not sized to that.
+    if (isnan(top) || top <= 0) return NAN;
+    return top - kInfoLift - kCoverGap;
+}
+
+// Spotify's bottom stack leaves the bar lower and wider than the Music app's, which draws it this much
+// higher and this much narrower. Onto the duration unit's view, which holds the bar and its times: the
+// scale leaves the height as it is, so the two only change place across the page.
+static void placeDuration(void) {
+    UIView *view = sg_duration.viewIfLoaded;
+    if (!view || !sg_ordinaryDuration) return;
+    CGAffineTransform place = CGAffineTransformMakeScale(kBarScale, 1);
+    place = CGAffineTransformTranslate(place, 0, -kBarLift);
+    if (!CGAffineTransformEqualToTransform(view.transform, place)) view.transform = place;
+    // The times under the bar, which the unit set nearer it than the Music app does.
+    static NSString *const identifiers[] = { @"now-playing-time-take-label-internal", @"now-playing-time-remaning-label-internal" };
+    static const void *const keys[] = { &kTimeTakeKey, &kTimeRemainingKey };
+    for (NSUInteger i = 0; i < 2; i++) {
+        UIView *label = SGRFindByIdentifier(view, identifiers[i], keys[i]);
+        CGAffineTransform under = CGAffineTransformMakeTranslation(0, kTimeDrop);
+        if (label && !CGAffineTransformEqualToTransform(label.transform, under)) label.transform = under;
+    }
 }
 
 #pragma mark - opening and closing
@@ -375,20 +491,6 @@ static NSArray<UIView *> *fadingViews(void) {
         }
     });
     return views;
-}
-
-BOOL SGRPlayerLyricsFadeView(UIView *view, BOOL fits) {
-    if (!view) return NO;
-    if (!fits) {
-        view.alpha = 0;
-        [sg_faded removeObject:view];
-        return YES;
-    }
-    if (!sg_alone) return NO;
-    view.alpha = 0;
-    if (!sg_faded) sg_faded = [NSHashTable weakObjectsHashTable];
-    [sg_faded addObject:view];
-    return YES;
 }
 
 static void fadeControls(BOOL faded) {
@@ -604,6 +706,8 @@ static void setOpen(BOOL open, BOOL animated) {
         SGLog(@"redesign player: the lyrics were asked for before the player laid out");
         return;
     }
+    // The bar's place first, so the room the lines are given is measured from where it is drawn.
+    placeDuration();
     SGRLyricsLayout l = layoutIn(host);
     if (open && !l.ok) {
         SGLog(@"redesign player: the lyrics have nowhere to go (stage %.0fx%.0f, lift %.0f)", l.stage.size.width, l.stage.size.height, l.lift);
@@ -709,6 +813,8 @@ void SGRPlayerToggleLyrics(void) {
 static void replace(void) {
     UIView *host = sg_host;
     if (!host || sg_moving) return;   // a pass in the middle of the transition would cut it short
+    // The bar's place first, since the room the lines are given stops above it.
+    placeDuration();
     // Closed, placeTitleRow reads nothing of the layout, so the cover is not measured for it.
     SGRLyricsLayout l = sg_open ? layoutIn(host) : (SGRLyricsLayout){0};
     if (sg_open && !l.ok) return;
@@ -764,6 +870,10 @@ static void replace(void) {
 // hold the same title row and progress bar) are measured the same way, so the DJ's player has these lyrics too.
 static void informationUnitLaidOut(UIViewController *unit) {
     sg_info = unit;
+    // The DJ's information unit gets the Music app's title-row place too, so its layout matches the
+    // ordinary player's (the ⋯ and the title row lift together); both units hold the same row.
+    sg_ordinaryInfo = [NSStringFromClass(unit.class) containsString:@"InformationElementsUnit"]
+                   || [NSStringFromClass(unit.class) containsString:@"DJMInformationUnit"];
     UIView *host = unit.viewIfLoaded;
     // The title and the artist are two labels of one arranged element view, which is what moves.
     UIView *label = SGRFindByIdentifier(host, @"now-playing-title-label", &kTitleKey);
@@ -781,6 +891,7 @@ static void informationUnitLaidOut(UIViewController *unit) {
 
 static void durationUnitLaidOut(UIViewController *unit) {
     sg_duration = unit;
+    sg_ordinaryDuration = [NSStringFromClass(unit.class) containsString:@"DurationElementUnit"];
     replace();
 }
 

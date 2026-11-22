@@ -14,4 +14,9 @@
 // edge, the way the Music app's titles do (the system tab bar's player page, its owner, 2026-11-01). 0, the default, is
 // none: the text starts at the edge and only its trailing end fades.
 @property (nonatomic) CGFloat leadingFade;
+// Its leading edge faded too while it scrolls, as the Music app's mini player has both. Off unless set. The text then
+// starts leadingInset in (0 unless set), so that much of the fade lies before it at rest: the caller places the view that
+// much further out.
+@property (nonatomic) BOOL fadesLeadingEdge;
+@property (nonatomic) CGFloat leadingInset;
 @end

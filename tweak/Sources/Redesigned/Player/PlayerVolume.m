@@ -145,24 +145,31 @@ static UIImageView *glyph(NSString *symbol) {
     dispatch_async(dispatch_get_main_queue(), ^{ [self refreshFromSystem]; });
 }
 
-// Our own pushVolume sets the slider too, and refreshFromSystem skips that echo.
+// The system has just set the slider: its value is the volume. Our own pushVolume sets it too, and refreshTo: skips
+// that echo.
 - (void)systemSliderSet {
-    [self refreshFromSystem];
+    UISlider *slider = [self systemSlider];
+    if (slider) [self refreshTo:slider.value];
 }
 
+// The session's volume, not the slider's: a volume view made at launch holds 0 in its slider until it has asked the
+// system, which it does with no setValue: the row then stood empty until touched (the session said 0.6, the slider 0).
 - (void)refreshFromSystem {
+    [self refreshTo:AVAudioSession.sharedInstance.outputVolume];
+}
+
+- (void)refreshTo:(CGFloat)system {
     // Not while the finger is on it, nor just after it let go: the system settles on its own steps a moment later.
     if (_held || CACurrentMediaTime() - _lastPush < 0.6) return;
-    UISlider *slider = [self systemSlider];
-    CGFloat system = slider ? slider.value : AVAudioSession.sharedInstance.outputVolume;
     if (fabs(system - _value) > 0.002) [self setValue:system fromUser:NO];
 }
 
-// The KVO the system sends as it settles falls inside the guard above, so the row reads it once the guard has passed.
+// The KVO the system sends as it settles falls inside the guard above, so the row reads it once the guard has passed,
+// from the slider it moved.
 - (void)refreshAfterPush {
     __weak SGRVolumeRow *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.65 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [weakSelf refreshFromSystem];
+        [weakSelf systemSliderSet];
     });
 }
 
@@ -354,10 +361,10 @@ static void settle(UIView *stack, UIView *row, BOOL moved, CGRect frame) {
     });
 }
 
-BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin) {
+BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin, CGFloat drop) {
     SGRVolumeRow *volume = objc_getAssociatedObject(stack, &kVolumeKey);
     if (!SGRPlayerVolumeOn() || !controls) {
-        SGRPlayerLyricsFadeView(volume, NO);
+        if (volume) volume.alpha = 0;
         return NO;
     }
     if (!volume) {
@@ -381,21 +388,21 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
             logged = YES;
             SGLog(@"redesign player: no play button in %@, so no volume row", NSStringFromClass(controls.class));
         }
-        SGRPlayerLyricsFadeView(volume, NO);
+        volume.alpha = 0;
         return NO;
     }
     CGFloat above = CGRectGetMaxY([play convertRect:play.bounds toView:stack]);
     CGFloat below = [row convertPoint:CGPointMake(CGRectGetMidX(row.bounds), CGRectGetMidY(row.bounds)) toView:stack].y - kGlyphsHalf;
     CGFloat height = kRowHeight, room = below - above;
-    CGRect frame = CGRectMake(margin, round((above + below - height) / 2), MAX(0, stack.bounds.size.width - 2 * margin), height);
+    CGRect frame = CGRectMake(margin, round((above + below - height) / 2) + drop, MAX(0, stack.bounds.size.width - 2 * margin), height);
     BOOL moved = !CGRectEqualToRect(volume.frame, frame);
     if (moved) volume.frame = frame;
     settle(stack, row, moved, frame);
     // The lyrics fade the stack's views by their alpha and bring back only the ones they faded.
     // The track is 7pt of the row's 32: it fits with the glyphs' and buttons' own clearance around it.
     BOOL fits = room >= height * 0.6;
-    BOOL faded = SGRPlayerLyricsFadeView(volume, fits);
-    if (!faded && volume.alpha < 0.01 && controls.alpha > 0.99) volume.alpha = 1;
+    if (!fits) volume.alpha = 0;
+    else if (volume.alpha < 0.01 && controls.alpha > 0.99) volume.alpha = 1;
     return fits;
 }
 

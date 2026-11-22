@@ -61,22 +61,34 @@ void SGRPlayerHoldField(void);
 
 #pragma mark - the cover (PlayerArtwork.x)
 
-// The sideways list of covers behind the player, nil until one has laid out.
+// The player's cover is a view of the redesign's own (PlayerArtwork.x), drawn in the player's view at a
+// frame worked out only from that view's bounds, and Spotify's own list of covers is hidden under a mask.
+// What follows is that drawn view and its geometry; nothing here reads a cell, a tilt view or a band.
+// The lyrics fade it by alpha and an animated artwork masks its layer, so this stands for "the cover on
+// screen". Nil until the player has laid out once.
 UIView *SGRPlayerCoverList(void);
-// The cover on screen as it is drawn, its paused shrink included, in `host`'s coordinates; CGRectNull
-// when no cover has laid out.
+// The cover as it is drawn, its paused shrink included, in `host`'s coordinates. Answered from pure
+// geometry even before the view has been made, so the morph's stand-in has a place to fly to on its first
+// frame; CGRectNull only when `host` is nil.
 CGRect SGRPlayerCoverFrameIn(UIView *host);
 // Holding either side of `cover` plays at 2× until the finger lifts, with the 2× badge on it, as the player's cover does
 // (PlayerArtwork.x's SGRCoverHold): for the system tab bar's player page's cover (SystemPlayer.m). Once per view.
 void SGRPlayerAttachCoverHold(UIView *cover);
-// The band that cover sits in -- the room the player gives its artwork, between the header row and the
-// title -- in `host`'s coordinates; CGRectNull when no cover has laid out.
-CGRect SGRPlayerArtworkAreaIn(UIView *host);
 // The scale the cover is drawn at: 1 while playing, its shrink while paused, so a stand-in can draw its
 // corners the size the cover's are.
 CGFloat SGRPlayerCoverScale(void);
-// Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
-// (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
+// The room the player gives its artwork, between the header row and the title, in `host`'s coordinates;
+// CGRectNull when there is no host.
+CGRect SGRPlayerArtworkAreaIn(UIView *host);
+// The cover without the paused shrink, in `host`'s coordinates. It is what the title row measures its gap
+// from (PlayerLyrics.x); answered from the same pure geometry on a first open.
+CGRect SGRPlayerCoverRestFrameIn(UIView *host);
+// The lowest the cover may reach and still leave the ordinary player's title row at its Music-app place, in
+// window coordinates; NAN until that row has laid out. The title row reads it for its own lift; the drawn
+// cover caps its side by a share of the player's height instead, so neither waits for the other.
+CGFloat SGRPlayerCoverMaxBottomInWindow(void);
+// Hides the drawn cover (and its shadow) or shows it again, for a stand-in to fly in its place
+// (PlayerMorph.x). Until NO, a cover made on a first open is hidden too.
 void SGRPlayerSetCoverHidden(BOOL hidden);
 
 #pragma mark - the lyrics in the player (PlayerLyrics.x)
@@ -87,10 +99,14 @@ BOOL SGRPlayerLyricsAvailable(void);
 BOOL SGRPlayerLyricsNone(void);
 // Whether the player is showing them.
 BOOL SGRPlayerLyricsOpen(void);
-// Hides a control that does not fit or while the lines are alone; records it in sg_faded when it fits.
-BOOL SGRPlayerLyricsFadeView(UIView *view, BOOL fits);
 // Shows them, or puts the cover back; does nothing when there are none to show.
 void SGRPlayerToggleLyrics(void);
+// What a touch at `point`, in `view`'s coordinates, reaches on the ordinary player's title row: the row's
+// own view when it answers with nothing finer, nil when the point is elsewhere. The row is drawn above the
+// bottom stack it is arranged in, so the cover's full screen cell underneath would take the tap and open
+// its tilt mode; the cover's list asks here first (PlayerGestures.x). nil for the AI DJ's player, and while
+// the row is not in a window.
+UIView *SGRPlayerInfoRowHitIn(UIView *view, CGPoint point, UIEvent *event);
 // Called by PlayerLyrics.x whenever either of those two changed, so the footer's lyrics glyph follows
 // (PlayerFooter.x). It returns at once when nothing changed.
 void SGRPlayerLyricsChanged(void);
@@ -119,11 +135,12 @@ SGModRow *SGRLyricsHideRow(void);
 
 // A volume slider under the controls (PlayerVolume.m), the system's: this iPhone's, or the Connect device's.
 // On until switched off. Placed by the footer's layout, between the controls (`controls`) and the footer row
-// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side.
+// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side and `drop` below the middle of
+// the room between them.
 #define SGRKeyPlayerVolume @"spotifyglass.redesign.player.volume"
 BOOL SGRPlayerVolumeOn(void);
 // YES when the row shows; NO when it is off, has no controls to sit under or no room between them and the footer.
-BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin);
+BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin, CGFloat drop);
 // Called after any slider's setValue:animated: (PlayerFooter.x), so the row follows its hidden system slider.
 void SGRPlayerVolumeSliderSet(UISlider *slider);
 
@@ -142,8 +159,7 @@ UIColor *SGRPlayerLitColor(void);
 
 // Shuffle and repeat left out of the controls (PlayerControls.x), each on its own switch under Hide on the player, the
 // way the Music app keeps them off its main controls. Off until switched on, read at launch. The buttons go by alpha
-// and keep their slots. With one gone, previous, play and next stay where they are, centered; with both gone,
-// previous and next move out a quarter of the row either side of play, as the Music app spaces them (issue #162).
+// and keep their slots, so previous, play and next stay where they are, centered.
 #define SGRKeyPlayerHideShuffle @"spotifyglass.redesign.player.hideShuffle"
 #define SGRKeyPlayerHideRepeat @"spotifyglass.redesign.player.hideRepeat"
 // Native redesign's player page: the star beside the title left out, Add to Playlist taking its place in the ⋯ beside Go
@@ -241,11 +257,6 @@ UIView *SGRPlayerConnectGlyphIn(UIView *host, UIView *connect);
 // Connect's touches only in a 44pt square over its glyph: `holder` is the view of the footer that holds Connect, whose
 // own view reaches far past the glyph (over Queue and the DJ button once the glyph is moved).
 void SGRPlayerCoverConnect(UIView *holder, UIView *glyph);
-// Translates `arranged`, a view a stack arranges, so that `point` of `view` inside it lands at `x` in `host`: a transform
-// survives the stack laying it out again, and the arranged view takes its touches along. Measured where the stack put
-// it, its own transform left out, which is returned (-1 for no `arranged`). The footer's glyphs (PlayerFooter.x) and
-// previous and next with shuffle and repeat both hidden (PlayerControls.x) move by it.
-CGFloat SGRPlayerTranslateArranged(UIView *arranged, UIView *view, CGPoint point, UIView *host, CGFloat x);
 // Whether a control is drawn lit: in the accent, judged as Follow the cover judges what it repaints.
 BOOL SGRPlayerAccentLike(UIColor *color);
 // The color an image is drawn in: the average of its opaque pixels, read once at 16 by 16 and kept on the image; nil

@@ -48,6 +48,18 @@ static NSString *const kScroll = @"sg.marquee";
     [self setNeedsLayout];
 }
 
+- (void)setLeadingInset:(CGFloat)inset {
+    if (_leadingInset == inset) return;
+    _leadingInset = inset;
+    _scrolled = -1;
+    [self setNeedsLayout];
+}
+
+- (void)setFadesLeadingEdge:(BOOL)fades {
+    _fadesLeadingEdge = fades;
+    [self setNeedsLayout];
+}
+
 - (void)setTextColor:(UIColor *)textColor {
     _label.textColor = textColor;
 }
@@ -69,24 +81,30 @@ static NSString *const kScroll = @"sg.marquee";
     [super layoutSubviews];
     CGSize size = self.bounds.size;
     // The text's own room is what lies past the leading zone, none unless one was asked for.
-    CGFloat inset = MIN(_leadingFade, size.width / 3), room = MAX(0, size.width - inset);
+    CGFloat inset = MIN(_leadingFade, size.width / 3);
+    CGFloat lead = inset > 0 ? inset : (_fadesLeadingEdge ? MAX(0, _leadingInset) : 0);
+    lead = MIN(lead, size.width / 3);
+    CGFloat room = MAX(0, size.width - lead);
     CGFloat textWidth = ceil([_label sizeThatFits:CGSizeMake(CGFLOAT_MAX, size.height)].width);
     CGFloat overflow = textWidth - room;
     BOOL scrolls = overflow > 0.5 && !UIAccessibilityIsReduceMotionEnabled() && self.window;
     _label.lineBreakMode = scrolls ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
-    CGRect frame = CGRectMake(inset, 0, scrolls ? textWidth : room, size.height);
+    CGRect frame = CGRectMake(lead, 0, scrolls ? textWidth : room, size.height);
     if (!CGRectEqualToRect(_label.frame, frame)) _label.frame = frame;
 
     self.layer.mask = scrolls ? _fade : nil;
     if (scrolls) {
         _fade.frame = self.bounds;
         CGFloat edge = MIN(kFade / size.width, 0.2);
-        // The trailing edge fades, where the text runs on; its start stays crisp at rest.
+        // The trailing edge fades, where the text runs on; a leading zone, when asked for, is faded too.
         id opaque = (id)UIColor.blackColor.CGColor, none = (id)UIColor.clearColor.CGColor;
         if (inset > 0) {
             // The leading zone lies before the text, so the text fades only as it scrolls out through it.
             _fade.colors = @[none, opaque, opaque, none];
             _fade.locations = @[@0, @(inset / size.width), @(1 - edge), @1];
+        } else if (_fadesLeadingEdge) {
+            _fade.colors = @[none, opaque, opaque, none];
+            _fade.locations = @[@0, @(edge), @(1 - edge), @1];
         } else {
             _fade.colors = @[opaque, opaque, none];
             _fade.locations = @[@0, @(1 - edge), @1];
