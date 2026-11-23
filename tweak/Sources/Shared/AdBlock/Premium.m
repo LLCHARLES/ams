@@ -8,6 +8,7 @@
 // AssignedValue: 1 { 1 scope, 2 name }, 3 BoolValue { 1 }, 4 IntValue { 1 }, 5 EnumValue { 1 }
 // A customize body is CustomizeMessage { 1 UcsResponse }; bootstrap wraps that in 2 { 1 { 1 { it } } }.
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "AdBlock.h"
 #import "Protobuf.h"
 
@@ -390,7 +391,7 @@ static void setValue(NSMutableArray<SGPBField *> *value, SGPBField *replacement)
     [value addObject:replacement];
 }
 
-// The configuration as the server sent it, one "scope.name = value" a line, in Caches/Vitrine/live-config.txt: what a
+// The configuration as the server sent it, one "scope.name = value" a line, in Caches/Retrine/live-config.txt: what a
 // Free account in this country is told, to set beside a Premium one when ads still play. Names and values only;
 // replaced by each fetch.
 static void keepLiveConfiguration(NSArray<SGPBField *> *fields) {
@@ -414,8 +415,8 @@ static void keepLiveConfiguration(NSArray<SGPBField *> *fields) {
         loggedCrossfadeFlag = YES;
         SGLog(@"premium: server sent playback-settings.use_playback_settings_crossfade = %@", crossfadeFlag);
     }
-    NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-    NSURL *folder = [caches URLByAppendingPathComponent:@"Vitrine" isDirectory:YES];
+    NSURL *folder = SGDataRoot(NSCachesDirectory);
+    if (!folder) return;
     [NSFileManager.defaultManager createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil];
     [text writeToURL:[folder URLByAppendingPathComponent:@"live-config.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
@@ -487,4 +488,18 @@ NSData *SGPatchCustomize(NSData *body) {
 
 NSData *SGPatchBootstrap(NSData *body) {
     return SGPBEdit(body, @[@2, @1, @1, @1], ^NSData *(NSData *ucs) { return patchUcs(ucs); });
+}
+
+NSData *SGPatchAccountAttributes(NSData *body) {
+    for (SGPBField *field in SGPBParse(body)) {
+        if (field.number == 1 && field.wire == 2 && SGPBText(SGPBFirst(SGPBParse(field.payload), 1)).length)
+            return patchAttributes(body);
+    }
+    return nil;
+}
+
+NSData *SGPatchRemoteConfiguration(NSData *body) {
+    return SGPBEdit(body, @[@1], ^NSData *(NSData *configuration) {
+        return SGPBFirst(SGPBParse(configuration), 3).wire == 2 ? patchConfiguration(configuration) : nil;
+    });
 }

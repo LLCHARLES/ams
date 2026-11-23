@@ -6,15 +6,6 @@ on:
     paths: ['tweak/**', 'harness/**', 'vendor/**', 'scripts/harness-plan.py', 'scripts/test_harness_plan.py', '.github/**']
   pull_request:
     paths: ['tweak/**', 'harness/**', 'vendor/**', 'scripts/harness-plan.py', 'scripts/test_harness_plan.py', '.github/**']
-  workflow_dispatch:
-    inputs:
-      paths:
-        description: 'Plan from these changed paths, space-separated; empty runs every harness'
-        required: false
-        default: ''
-  schedule:
-    # Weekly full run; scheduled events have no changed-file list.
-    - cron: '0 3 * * 1'
 
 permissions:
   contents: read
@@ -32,68 +23,43 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       any: ${{ steps.plan.outputs.any }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Check harness selection
         run: python3 -B -m unittest discover -s scripts -p test_harness_plan.py
       - name: Select harnesses
+        if: github.event_name == 'pull_request'
         id: plan
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
-          ZERO: '0000000000000000000000000000000000000000'
-          DISPATCH_PATHS: ${{ inputs.paths }}
         run: |
-          set -u
           changed=$(mktemp)
-          mode=diff
-          if [ "$EVENT_NAME" = workflow_dispatch ] && [ -n "${DISPATCH_PATHS:-}" ]; then
-            set -f
-            printf '%s\n' $DISPATCH_PATHS > "$changed"
-            set +f
-          elif [ "$EVENT_NAME" = workflow_dispatch ] || [ "$EVENT_NAME" = schedule ]; then
-            mode=all
-          elif [ "$EVENT_NAME" = pull_request ]; then
-            git fetch --no-tags origin "$BASE_REF" >/dev/null 2>&1 || true
-            if ! git diff --no-renames --name-only "origin/$BASE_REF...$SHA" > "$changed"; then
-              echo "pull request diff failed; running everything" >&2
-              mode=all
-            fi
-          elif [ "$EVENT_NAME" = push ]; then
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "$ZERO" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-              echo "no usable before commit; running everything" >&2
-              mode=all
-            elif ! git merge-base --is-ancestor "$BEFORE" "$SHA" 2>/dev/null; then
-              echo "before is not an ancestor (force push); running everything" >&2
-              mode=all
-            elif ! git diff --no-renames --name-only "$BEFORE" "$SHA" > "$changed"; then
-              echo "push diff failed; running everything" >&2
-              mode=all
-            fi
-          else
-            mode=all
-          fi
-          if [ "$mode" = all ]; then
-            python3 scripts/harness-plan.py plan --all --github-output "$GITHUB_OUTPUT"
-          else
+          if HARNESS_PLAN_BASE=$(git merge-base "origin/$BASE_REF" "$SHA") &&
+             git diff --no-renames --name-only "$HARNESS_PLAN_BASE" "$SHA" > "$changed"; then
+            export HARNESS_PLAN_BASE
             python3 scripts/harness-plan.py plan --changed-from "$changed" --github-output "$GITHUB_OUTPUT"
+          else
+            echo "pull request diff failed; running everything" >&2
+            python3 scripts/harness-plan.py plan --all --github-output "$GITHUB_OUTPUT"
           fi
 
   harness:
     name: Harnesses ${{ matrix.shard }}
     needs: plan
-    if: needs.plan.outputs.any == 'true'
+    if: github.event_name == 'pull_request' && needs.plan.outputs.any == 'true'
     runs-on: macos-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Set up Theos for Logos hooks only
         if: matrix.theos
         uses: ./.github/actions/setup-theos
@@ -101,4 +67,6 @@ jobs:
         shell: bash
         env:
           THEOS: ${{ github.workspace }}/theos
-        run: python3 scripts/harness-plan.py run --shard "${{ matrix.shard }}" --names "${{ matrix.harnesses }}"
+          SHARD: ${{ matrix.shard }}
+          NAMES: ${{ matrix.harnesses }}
+        run: python3 scripts/harness-plan.py run --shard "$SHARD" --names "$NAMES"

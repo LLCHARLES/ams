@@ -2,6 +2,8 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "SGRAccent.h"
+#import "SGRGlass.h"
+#import "SGRRefinements.h"
 #import "SGRHeaderInfo.h"
 #import "SGRHeroVeil.h"
 #import "Redesigned/Navigation/PageZoom.h"
@@ -58,11 +60,39 @@ NSArray<SGModRow *> *SGRAppearanceRows(void) {
                       SGRAccentRecentFrom([NSUserDefaults.standardUserDefaults objectForKey:SGRKeyAccentRecent]), ^(NSInteger rgb) { chooseColor(rgb); });
     });
     colour.swatch = ^UIColor *{ return SGColorRGB(SGRPickedAccentRGB()); };
+    // The glass of the redesign's buttons (Kit/SGRGlass.h), read at launch; the menus show what is stored.
+    NSArray *materials = @[SGL(@"settings.appearance.glass_material.regular", @"Regular"),
+                           SGL(@"settings.appearance.glass_material.clear", @"Clear")];
+    SGModRow *material = SGMenuRow(SGL(@"settings.appearance.glass_material.title", @"Glass material"), materials,
+        ^NSString *{ return materials[(NSUInteger)SGRStoredGlassMaterial()]; },
+        ^(NSInteger index) { SGSetInt(SGRKeyGlassMaterial, index); });
+    material.subtitle = SGL(@"settings.appearance.glass_material.subtitle", @"Clear lets more of what is behind the buttons through. On iOS 26");
+    NSArray *tints = @[SGL(@"settings.appearance.glass_tint.none", @"None"),
+                       SGL(@"settings.appearance.glass_tint.light", @"Light"),
+                       SGL(@"settings.appearance.glass_tint.dark", @"Dark")];
+    SGModRow *tint = SGMenuRow(SGL(@"settings.appearance.glass_tint.title", @"Glass tint"), tints,
+        ^NSString *{ return tints[(NSUInteger)SGRStoredGlassTint()]; },
+        ^(NSInteger index) { SGSetInt(SGRKeyGlassTint, index); });
+    tint.subtitle = SGL(@"settings.appearance.glass_tint.subtitle", @"A light or dark shade in the glass. On iOS 26");
+    SGModRow *touch = SGSwitchRow(SGL(@"settings.appearance.glass_touch.title", @"Glass touch response"),
+        SGL(@"settings.appearance.glass_touch.subtitle", @"The glass gives under your finger. Its button works either way"), SGRKeyGlassInteractive);
+    // Saved mark took Plain checkmark's place: nothing stored keeps that switch's choice (SGRSavedMarkFrom), and a pick
+    // stores only Saved mark's own key.
+    NSArray *marks = @[SGL(@"settings.appearance.saved_mark.spotify", @"Spotify's"),
+                       SGL(@"settings.appearance.saved_mark.plain_checkmark", @"Plain checkmark"),
+                       SGL(@"settings.appearance.saved_mark.dot", @"Dot")];
+    SGModRow *mark = SGMenuRow(SGL(@"settings.appearance.saved_mark.title", @"Saved mark"), marks,
+        ^NSString *{ return marks[(NSUInteger)SGRSavedMarkFrom(SGInt(SGRKeySavedMark, -1), SGHidden(SGRKeyPlainCheck))]; },
+        ^(NSInteger index) { SGSetInt(SGRKeySavedMark, index); });
+    mark.subtitle = SGL(@"settings.appearance.saved_mark.subtitle", @"How a saved song shows: Spotify's circled tick, or a tick or a dot in the accent");
     return @[
         SGWithSymbol(mode, @"paintbrush"),
         SGWithSymbol(menu, @"paintpalette"),
         SGWithSymbol(colour, @"eyedropper"),
-        SGWithSymbol(SGOptionRow(SGL(@"settings.appearance.plain_checkmark.title", @"Plain checkmark"), SGL(@"settings.appearance.plain_checkmark.subtitle", @"A saved song's tick without its circle, in the accent"), SGRKeyPlainCheck), @"checkmark"),
+        SGWithSymbol(SGSearchIdentified(material, SGRKeyGlassMaterial), @"cube.transparent"),
+        SGWithSymbol(SGSearchIdentified(tint, SGRKeyGlassTint), @"circle.lefthalf.filled"),
+        SGWithSymbol(touch, @"hand.tap"),
+        SGWithSymbol(SGSearchIdentified(mark, SGRKeySavedMark), @"checkmark"),
         SGWithSymbol(explicit, @"e.square"),
         // The album, playlist and artist headers (Kit/SGRHeroVeil.h, Kit/SGRHeaderInfo.h), read at launch.
         SGWithSymbol(SGOptionRow(SGL(@"settings.appearance.scroll_veil.title", @"Blur covers on scroll"),

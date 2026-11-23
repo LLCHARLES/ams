@@ -70,7 +70,7 @@ BOOL SGFlag(NSString *key, BOOL fallback) { return lowData; }
 
 int main(void) {
     @autoreleasepool {
-        NSString *path = NSProcessInfo.processInfo.environment[@"VITRINE_TEST_ROOT"];
+        NSString *path = NSProcessInfo.processInfo.environment[@"RETRINE_TEST_ROOT"];
         CHECK(path.length > 0);
         root = [NSURL fileURLWithPath:path isDirectory:YES];
         attempts = [NSMutableDictionary dictionary];

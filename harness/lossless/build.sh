@@ -25,7 +25,7 @@ cat > "$APP/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>LosslessProbe</string>
-<key>CFBundleIdentifier</key><string>dev.vitrine.lossless-probe</string>
+<key>CFBundleIdentifier</key><string>dev.retrine.lossless-probe</string>
 <key>CFBundleName</key><string>LosslessProbe</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>

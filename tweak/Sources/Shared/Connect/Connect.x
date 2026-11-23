@@ -1,16 +1,49 @@
 // Connect receivers found with Bonjour for the relay (Connect.h), and Spotify's imports of sendto,
-// sendmsg and recvfrom rebound to it. The browse runs from launch on the main thread, so the receivers
-// are known by the time Spotify asks; each one found is resolved to its addresses, kept with the mDNS
+// sendmsg and recvfrom rebound to it. The browse runs on main while foregrounded or playing remotely;
+// each receiver found is resolved to its addresses, kept with the mDNS
 // port in place of the service's own, and forgotten when Bonjour says it went.
 #import <arpa/inet.h>
 #import <netinet/in.h>
 #import "Core/SGLog.h"
 #import "Core/SGRebind.h"
+#import "Shared/Player/PlayerState.h"
+#import <Network/Network.h>
+#import <dns_sd.h>
 #import "Connect.h"
 
 // A resolve that fails or finds nothing to send to is tried again kFirstRetry later, doubling up to
 // kLastRetry; a browse that fails starts again after kBrowseRetry.
 static const NSTimeInterval kResolveTimeout = 5, kFirstRetry = 2, kLastRetry = 30, kBrowseRetry = 3;
+static NSHashTable *sg_pickers;
+static NSNotificationName const SGConnectPickerDemandChanged = @"SGConnectPickerDemandChanged";
+
+static void pickerVisible(id picker, BOOL visible) {
+    if (!sg_pickers) sg_pickers = [NSHashTable weakObjectsHashTable];
+    if (visible) [sg_pickers addObject:picker];
+    else [sg_pickers removeObject:picker];
+    [NSNotificationCenter.defaultCenter postNotificationName:SGConnectPickerDemandChanged object:nil];
+}
+
+%group PickerDemand
+// Verified in Spotify 9.1.90's class metadata; UIKit's lifecycle remains the authority for dismissal.
+%hook _TtC26Connect_DevicePickerUIImpl26DevicePickerViewController
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    pickerVisible(self, YES);
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    %orig;
+    pickerVisible(self, NO);
+}
+- (void)dealloc {
+    if (NSThread.isMainThread) pickerVisible(self, NO);
+    else dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:SGConnectPickerDemandChanged object:nil];
+    });
+    %orig;
+}
+%end
+%end
 
 // The address with the mDNS port, or nil for one no query can go to: unspecified, loopback, multicast.
 static NSData *queryAddress(NSData *data) {
@@ -34,7 +67,7 @@ static NSData *queryAddress(NSData *data) {
     return nil;
 }
 
-@interface SGConnectBrowser : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate>
+@interface SGConnectBrowser : NSObject <NSNetServiceBrowserDelegate, NSNetServiceDelegate, SGPlayerStateObserver>
 - (void)start;
 @end
 
@@ -42,9 +75,51 @@ static NSData *queryAddress(NSData *data) {
     NSNetServiceBrowser *_browser;
     NSMutableDictionary<NSString *, NSNetService *> *_services;
     NSMutableDictionary<NSString *, NSNumber *> *_retries;
+    BOOL _foreground, _denied;
+    NSUInteger _generation;
+    nw_path_monitor_t _path;
+    NSTimer *_browseRetry;
 }
 
 - (void)start {
+    _foreground = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(background) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center addObserver:self selector:@selector(foreground) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [center addObserver:self selector:@selector(update) name:SGPlayerPlaybackLocationDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(update) name:SGConnectPickerDemandChanged object:nil];
+    SGAddPlayerStateObserver(self);
+    _path = nw_path_monitor_create();
+    nw_path_monitor_set_queue(_path, dispatch_get_main_queue());
+    __weak SGConnectBrowser *weakSelf = self;
+    nw_path_monitor_set_update_handler(_path, ^(nw_path_t path) {
+        [weakSelf pathChanged];
+    });
+    nw_path_monitor_start(_path);
+    [self update];
+}
+
+- (void)background { _foreground = NO; [self update]; }
+- (void)foreground { _foreground = YES; [self pathChanged]; }
+- (void)pathChanged { _denied = NO; [self update]; }
+- (void)playerStateDidChange:(SPTPlayerState *)state { [self update]; }
+- (BOOL)needed { return _foreground || SGPlayerPlaybackIsRemote() || sg_pickers.allObjects.count != 0; }
+- (void)stop {
+    _generation++;
+    [_browseRetry invalidate];
+    _browseRetry = nil;
+    _browser.delegate = nil;
+    [_browser stop];
+    _browser = nil;
+    for (NSString *name in _services.allKeys) [self forget:name];
+}
+- (void)update {
+    BOOL active = [self needed] && !_denied;
+    SGConnectSetDiscoveryActive(active);
+    if (!active) { [self stop]; return; }
+    if (!_browser && !_browseRetry) [self browse];
+}
+- (void)browse {
     _services = [NSMutableDictionary dictionary];
     _retries = [NSMutableDictionary dictionary];
     _browser = [NSNetServiceBrowser new];
@@ -74,14 +149,19 @@ static NSData *queryAddress(NSData *data) {
 }
 
 - (void)netServiceBrowser:(NSNetServiceBrowser *)browser didNotSearch:(NSDictionary<NSString *, NSNumber *> *)error {
+    if (browser != _browser) return;
+    NSInteger code = [error[NSNetServicesErrorCode] integerValue];
+    _denied = code == kDNSServiceErr_PolicyDenied || code == NSNetServicesMissingRequiredConfigurationError;
+    [self stop];
+    if (_denied || ![self needed]) { [self update]; return; }
     SGLog(@"connect: Bonjour browse failed (%@), again in %.0f s", error[NSNetServicesErrorCode], kBrowseRetry);
-    _browser.delegate = nil;
-    [_browser stop];
-    for (NSString *name in _services.allKeys) [self forget:name];
     __weak SGConnectBrowser *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kBrowseRetry * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [weakSelf start];
-    });
+    _browseRetry = [NSTimer scheduledTimerWithTimeInterval:kBrowseRetry repeats:NO block:^(NSTimer *timer) {
+        SGConnectBrowser *browser = weakSelf;
+        if (!browser) return;
+        browser->_browseRetry = nil;
+        [browser update];
+    }];
 }
 
 // Called again as more of a receiver's addresses come in, each time with all of them.
@@ -105,6 +185,12 @@ static NSData *queryAddress(NSData *data) {
 }
 
 - (void)netService:(NSNetService *)service didNotResolve:(NSDictionary<NSString *, NSNumber *> *)error {
+    NSInteger code = [error[NSNetServicesErrorCode] integerValue];
+    if (code == kDNSServiceErr_PolicyDenied || code == NSNetServicesMissingRequiredConfigurationError) {
+        _denied = YES;
+        [self update];
+        return;
+    }
     if (_services[service.name] == service) [self retry:service];
 }
 
@@ -113,10 +199,11 @@ static NSData *queryAddress(NSData *data) {
     NSNumber *last = _retries[name];
     NSTimeInterval delay = last ? MIN(last.doubleValue * 2, kLastRetry) : kFirstRetry;
     _retries[name] = @(delay);
+    NSUInteger generation = _generation;
     __weak SGConnectBrowser *weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         SGConnectBrowser *browser = weakSelf;
-        if (!browser || browser->_services[name] != service) return;
+        if (!browser || browser->_generation != generation || browser->_services[name] != service) return;
         [service stop];
         [service resolveWithTimeout:kResolveTimeout];
     });
@@ -139,6 +226,8 @@ static SGConnectBrowser *sg_browser;
         SGLog(@"connect: Spotify imports neither sendto nor sendmsg, Connect discovery is Spotify's own");
         return;
     }
+    Class picker = NSClassFromString(@"_TtC26Connect_DevicePickerUIImpl26DevicePickerViewController");
+    if ([picker isSubclassOfClass:UIViewController.class]) { %init(PickerDemand); }
     dispatch_async(dispatch_get_main_queue(), ^{
         sg_browser = [SGConnectBrowser new];
         [sg_browser start];

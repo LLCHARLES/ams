@@ -13,11 +13,12 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC"/Native/Appearance/AppearanceSettings.m "$SRC"/Redesigned/Kit/SGRAppearanceSettings.m "$SRC"/Shared/Fonts/FontImport.m \
     "$SRC"/Native/Appearance/AccentHistory.m "$SRC"/Native/Appearance/AccentSheet.m \
     "$SRC"/Redesigned/Kit/SGRAccentHistory.m "$SRC"/Redesigned/Kit/SGRAccentSheet.m \
+    "$SRC"/Redesigned/Kit/SGRGlass.m "$SRC"/Redesigned/Kit/SGRRefinements.m \
     "$SRC"/Shared/Fonts/FontLibrary.m "$SRC"/Shared/Fonts/FontLibraryPage.m "$SRC"/Shared/Fonts/FontSelection.m "$SRC"/Core/SGFileHash.m \
     "$SRC"/Settings/SGPage.m "$SRC"/Settings/SGPageStyle.m "$SRC"/Settings/SGModPage.m "$SRC"/Settings/SGSettingsSearch.m "$SRC"/Settings/SGSettingsIndex.m "$SRC"/Settings/SGGlowSwitch.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLocalize.m "$SRC"/Core/SGGlass.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGFlagForce.m "$SRC"/Core/SGUIMode.m \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework Foundation -framework CoreText -framework UniformTypeIdentifiers \
-    -o "$OUT/AppearancePageHarness.app/AppearancePageHarness"
+    "$SRC/Core/SGDataRoot.m" -o "$OUT/AppearancePageHarness.app/AppearancePageHarness"
 
 cat > "$OUT/AppearancePageHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

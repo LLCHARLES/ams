@@ -27,7 +27,7 @@ SGMotionTicket *SGMotionRequestFile(NSURL *remote, void (^done)(NSURL *)) {
     if (!holdFile) dispatch_async(dispatch_get_main_queue(), ^{ if (!ticket.cancelled) done(remote); });
     return ticket;
 }
-SGMotionTicket *SGMotionRequestAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *)) {
+SGMotionTicket *SGMotionRequestSongCover(NSString *artist, NSString *album, NSString *song, NSString *albumURI, NSString *trackURI, CGFloat pixels, void (^done)(NSURL *)) {
     CHECK(allowAlbum);
     SGMotionTicket *ticket = [SGMotionTicket new];
     dispatch_async(dispatch_get_main_queue(), ^{

@@ -4,7 +4,7 @@
 static NSString *const kMetadataHost = @"spclient.wg.spotify.com";
 
 static NSError *metadataError(NSInteger code, NSString *reason) {
-    return [NSError errorWithDomain:@"Vitrine.SpotifyMetadata" code:code userInfo:@{NSLocalizedDescriptionKey: reason}];
+    return [NSError errorWithDomain:@"Retrine.SpotifyMetadata" code:code userInfo:@{NSLocalizedDescriptionKey: reason}];
 }
 
 static NSURL *metadataURL(NSString *path, BOOL post) {
@@ -78,11 +78,16 @@ static NSURL *metadataURL(NSString *path, BOOL post) {
 }
 @end
 
-void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
-    if (!NSThread.isMainThread) {
-        dispatch_async(dispatch_get_main_queue(), ^{ SGSpotifyMetadataRequest(path, body, done); });
-        return;
-    }
+dispatch_block_t SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
+    return SGSpotifyMetadataRequestAllowConstrained(path, body, YES, done);
+}
+
+dispatch_block_t SGSpotifyMetadataRequestAllowConstrained(NSString *path, NSData *body, BOOL allowConstrained,
+                                                          SGSpotifyMetadataReply done) {
+    __block BOOL cancelled = NO;
+    __block NSURLSessionDataTask *task;
+    void (^start)(void) = ^{
+    if (cancelled) return;
     NSURL *url = metadataURL(path, body != nil);
     if (!url) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -91,7 +96,9 @@ void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataRep
         return;
     }
     SGSpclientHeaders(^(NSDictionary<NSString *, NSString *> *headers) {
+        if (cancelled) return;
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+        request.allowsConstrainedNetworkAccess = allowConstrained;
         request.allHTTPHeaderFields = headers;
         if (body) {
             request.HTTPMethod = @"POST";
@@ -106,6 +113,19 @@ void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataRep
         SGSpotifyMetadataTransfer *transfer = [SGSpotifyMetadataTransfer new];
         transfer.done = done;
         transfer.session = [NSURLSession sessionWithConfiguration:configuration delegate:transfer delegateQueue:nil];
-        [[transfer.session dataTaskWithRequest:request] resume];
+        task = [transfer.session dataTaskWithRequest:request];
+        [task resume];
     });
+    };
+    if (NSThread.isMainThread) start();
+    else dispatch_async(dispatch_get_main_queue(), start);
+    return ^{
+        void (^cancel)(void) = ^{
+            cancelled = YES;
+            [task cancel];
+            task = nil;
+        };
+        if (NSThread.isMainThread) cancel();
+        else dispatch_async(dispatch_get_main_queue(), cancel);
+    };
 }

@@ -7,6 +7,7 @@
 #import "Core/SGCore.h"
 #import "Shared/Haptics/Haptics.h"
 #import "LyricsSources.h"
+#import "LyricsHosts.h"
 
 static NSString *const kAPI = @"https://lyrics-api.binimum.org/";
 static NSString *const kByISRC = @"https://lrc.red/s/%@.ttml";
@@ -50,6 +51,7 @@ static void searchByName(SGLyricsQuery *query, void (^done)(SGLyricsResult *resu
     NSInteger seconds = query.seconds;
     SGLyricsGetJSONTransformIn(query.requestContext, SGLyricsURL(kAPI, search), nil, ^id(id root) {
         id results = [root isKindOfClass:NSDictionary.class] ? root[@"results"] : nil;
+        if (root && ![results isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
         if ([results isKindOfClass:NSArray.class] && ![results count])
             query.requestContext.emptyNameSearch = ^(SGLyricsQuery *again, void (^answer)(SGLyricsResult *)) { searchByName(again, answer); };
         return bestOf(results, seconds);
@@ -60,8 +62,16 @@ static void searchByName(SGLyricsQuery *query, void (^done)(SGLyricsResult *resu
             return;
         }
         BOOL wordTimed = [found[@"timing_type"] isEqual:@"word"];
-        SGLyricsGetTextTransformIn(query.requestContext, [NSURL URLWithString:found[@"lyricsUrl"]], ^id(NSString *ttml) {
-            return SGTTMLResult(ttml, wordTimed);
+        NSURL *fileURL = [NSURL URLWithString:found[@"lyricsUrl"]];
+        if (!SGLyricsBiniFileURLAllowed(fileURL)) {
+            [query.requestContext noteFailure:YES];
+            done(nil);
+            return;
+        }
+        SGLyricsGetTextTransformIn(query.requestContext, fileURL, ^id(NSString *ttml) {
+            SGLyricsResult *result = SGTTMLResult(ttml, wordTimed);
+            if (ttml && !result) [query.requestContext noteFailure:YES];
+            return result;
         }, ^(SGLyricsResult *result) {
             if (!result) SGLog(@"binilyrics: %@ gave nothing the page could show", found[@"lyricsUrl"]);
             else SGLog(@"binilyrics: %@ by %@ has %lu %@ lines", query.title, query.artist,
@@ -85,14 +95,17 @@ SGLyricsAsk SGBiniLyricsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
         return;
     }
     // Asked once: the lyrics wait on it, and the search is there when Spotify does not answer.
-    SGSpotifyISRCWithOutcome([@"spotify:track:" stringByAppendingString:query.trackID], 1, ^(NSString *isrc, BOOL failed) {
+    dispatch_block_t cancelMetadata = SGSpotifyISRCWithOutcome([@"spotify:track:" stringByAppendingString:query.trackID], 1, ^(NSString *isrc, BOOL failed) {
+        if (query.requestContext.cancelled) return;
         [query.requestContext noteFailure:failed];
         if (!isrc) {
             searchByName(query, done);
             return;
         }
         SGLyricsGetTextTransformIn(query.requestContext, [NSURL URLWithString:[NSString stringWithFormat:kByISRC, isrc]], ^id(NSString *ttml) {
-            return SGTTMLResult(ttml, [ttml containsString:@"timing=\"Word\""]);
+            SGLyricsResult *result = SGTTMLResult(ttml, [ttml containsString:@"timing=\"Word\""]);
+            if (ttml && !result) [query.requestContext noteFailure:YES];
+            return result;
         }, ^(SGLyricsResult *result) {
             if (!result) {
                 SGLog(@"binilyrics: nothing filed under %@, searched by name", isrc);
@@ -104,4 +117,5 @@ SGLyricsAsk SGBiniLyricsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
             done(result);
         });
     });
+    [query.requestContext onCancel:cancelMetadata];
 };

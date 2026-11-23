@@ -195,8 +195,9 @@ static UIViewController *modSettingsPage(void) {
                 SGL(@"settings.search.listening_stats.keywords", @"statistics history top songs streaks charts")),
     ]];
 #if SG_WIREGUARD
-    [features addObject:pageRow(SGL(@"settings.wireguard.title", @"In-app WireGuard / Proxy"), @"network", UIColor.systemTealColor,
-                               ^UIViewController *{ return [SGWGSettingsController new]; })];
+    [features addObject:foundBy(pageRow(SGL(@"settings.wireguard.title", @"In-app WireGuard / Proxy"), @"network", UIColor.systemTealColor,
+                               ^UIViewController *{ return [SGWGSettingsController new]; }), @"wireguard",
+                               SGL(@"settings.search.wireguard.keywords", @"lyrics requests Genius direct blocked sources tunnel proxy VPN"))];
 #endif
     [sections addObject:SGSection(nil, features)];
 
@@ -228,7 +229,7 @@ static UIViewController *modSettingsPage(void) {
         ]),
         SGSection(nil, @[mod]),
     ]];
-    SGModPage *page = [[SGModPage alloc] initWithTitle:@"Vitrine" intro:nil sections:sections footer:nil];
+    SGModPage *page = [[SGModPage alloc] initWithTitle:@"Retrine" intro:nil sections:sections footer:nil];
     page.tiles = YES;
     page.searchable = YES;
     // The page can stay open as Redesigned UI is flipped and the root is not rebuilt (the restart can be put off), so

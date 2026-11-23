@@ -1,6 +1,7 @@
 #import "SGWGCore.h"
 #import "SGWGBridge.h"
 #import "SGWGABI.h"
+#import "Shared/LyricsSources/LyricsHosts.h"
 #import <Network/Network.h>
 #import <Security/Security.h>
 #import <objc/message.h>
@@ -19,6 +20,7 @@
 NSString *const SGWGVersion = @"1.0";
 
 static NSString *const kDefaultsKey = @"spotifyglass.wireguard";
+// Stable Keychain service for existing profiles, including deletion.
 static NSString *const kKeychainService = @"Vitrine.WireGuard";
 static NSString *const kKeychainAccount = @"profile";
 static NSString *const kKeychainProxyAccount = @"proxy-password";
@@ -33,8 +35,12 @@ NSString *const SGWGKindSOCKS5 = @"socks5";
 static atomic_int gState = SGWGStateOff;
 static atomic_bool gActive;       // armed before checking any capability
 static atomic_bool gReady, gGuardsReady, gEngineReady;
+static atomic_bool gEngineRecoverable;
+static os_unfair_lock gReadinessLock = OS_UNFAIR_LOCK_INIT;
+static uint64_t gReadinessGeneration;
+static BOOL gEngineAvailable;    // unvalidated engine event, protected by gReadinessLock
 static BOOL gSessionGuards;
-static int gPort = -1;            // local proxy port (fixed for the launch)
+static int gPort = -1;            // fixed before session hooks are installed
 static int gListenerFD = -1;      // reserved socket handed to Go on start
 static char gUser[33], gPass[33]; // per-launch random proxy credentials
 static dispatch_queue_t gQueue;
@@ -52,7 +58,9 @@ static atomic_int gCredentialStatus;
 
 SGWGState SGWGCurrentState(void) { return (SGWGState)atomic_load(&gState); }
 BOOL SGWGActiveThisLaunch(void) { return gActive; }
-BOOL SGWGReady(void) { return atomic_load_explicit(&gReady, memory_order_acquire); }
+BOOL SGWGReady(void) {
+    return atomic_load_explicit(&gReady, memory_order_acquire) && atomic_load(&gEngineReady);
+}
 BOOL SGWGGuardsInstalled(void) { return atomic_load(&gGuardsReady); }
 
 NSString *SGWGStateDescription(SGWGState state) {
@@ -93,6 +101,24 @@ BOOL SGWGSettingEnabled(void) {
     return [SettingsDict()[@"enabled"] boolValue];
 }
 void SGWGSetSettingEnabled(BOOL enabled) { SetSetting(@"enabled", @(enabled)); }
+
+SGWGLyricsRoute SGWGSettingLyricsRoute(void) {
+    NSInteger value = [SettingsDict()[@"lyricsRoute"] integerValue];
+    return value == SGWGLyricsBlockedDirect || value == SGWGLyricsAllDirect ? value : SGWGLyricsThroughTunnel;
+}
+void SGWGSetSettingLyricsRoute(SGWGLyricsRoute route) { SetSetting(@"lyricsRoute", @(route)); }
+
+BOOL SGWGLyricsRequestIsDirect(NSURLRequest *request) {
+    if (!gActive || !SGLyricsRequestIsMarked(request)) return NO;
+    NSURL *url = request.URL;
+    NSSet *hosts;
+    switch (SGWGSettingLyricsRoute()) {
+        case SGWGLyricsBlockedDirect: hosts = SGLyricsBlockedProviderHosts(); break;
+        case SGWGLyricsAllDirect: hosts = SGLyricsProviderHosts(); break;
+        default: return NO;
+    }
+    return url.host && [hosts containsObject:url.host.lowercaseString];
+}
 
 
 NSString *SGWGSettingKind(void) {
@@ -175,14 +201,14 @@ BOOL SGWGIsSupportedOS(void) {
 
 #pragma mark - Fail-closed protocol
 
-// Used only if a configuration cannot be given the tunnel proxy. Every web
-// request on that configuration fails instead of being sent directly.
+// Used only if a configuration cannot be given the tunnel proxy. Non-exempt
+// web requests fail instead of being sent directly.
 @interface SGWGBlockedURLProtocol : NSURLProtocol
 @end
 @implementation SGWGBlockedURLProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *scheme = request.URL.scheme.lowercaseString;
-    return [@[@"http", @"https", @"ws", @"wss"] containsObject:scheme ?: @""];
+    return !SGWGLyricsRequestIsDirect(request) && [@[@"http", @"https", @"ws", @"wss"] containsObject:scheme ?: @""];
 }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
@@ -204,6 +230,94 @@ BOOL SGWGIsSupportedOS(void) {
     struct in_addr v4; struct in6_addr v6;
     return [host isEqualToString:@"localhost"] || [host hasSuffix:@".localhost"] || [host hasSuffix:@".local"] ||
         inet_pton(AF_INET, address.UTF8String, &v4) == 1 || inet_pton(AF_INET6, address.UTF8String, &v6) == 1;
+}
+@end
+
+// Only construction of this protocol's private one-hop session skips the
+// configuration hooks. No app configuration/request property can opt out.
+static char kLyricsDirectConfiguration;
+static NSURLSessionConfiguration *CopyRoutingConfiguration(NSURLSessionConfiguration *configuration) {
+    NSURLSessionConfiguration *copy = [configuration copy];
+    if (objc_getAssociatedObject(configuration, &kLyricsDirectConfiguration))
+        objc_setAssociatedObject(copy, &kLyricsDirectConfiguration, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return copy;
+}
+
+@interface SGWGLyricsDirectProtocol : NSURLProtocol <NSURLSessionDataDelegate>
+@property (nonatomic, strong) NSURLSession *session;
+@property (nonatomic, strong) NSURLSessionDataTask *task;
+@property (nonatomic) BOOL stopped;
+@end
+@implementation SGWGLyricsDirectProtocol
++ (BOOL)canInitWithRequest:(NSURLRequest *)request { return SGWGLyricsRequestIsDirect(request); }
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)startLoading {
+    @synchronized (self) {
+        if (self.stopped) return;
+        // A preference change between selection and start may revoke permission.
+        if (!SGWGLyricsRequestIsDirect(self.request)) {
+            [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];
+            return;
+        }
+            NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+            objc_setAssociatedObject(config, &kLyricsDirectConfiguration, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            config.connectionProxyDictionary = @{};
+            config.HTTPCookieStorage = nil;
+            config.URLCredentialStorage = nil;
+            config.URLCache = nil;
+            config.HTTPShouldSetCookies = NO;
+            config.timeoutIntervalForRequest = self.request.timeoutInterval;
+            config.timeoutIntervalForResource = self.request.timeoutInterval;
+            if (sSetProxyConfigurations)
+                ((void (*)(id, SEL, id))objc_msgSend)(config, sSetProxyConfigurations, @[]);
+            config.protocolClasses = @[];
+            self.session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
+        self.task = [self.session dataTaskWithRequest:self.request];
+        [self.task resume];
+    }
+}
+- (void)stopLoading {
+    @synchronized (self) {
+        self.stopped = YES;
+        [self.task cancel];
+        [self.session invalidateAndCancel];
+        self.task = nil;
+        self.session = nil;
+    }
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
+ didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
+    @synchronized (self) {
+        if (!self.stopped) [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+        completion(self.stopped ? NSURLSessionResponseCancel : NSURLSessionResponseAllow);
+    }
+}
+- (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task didReceiveData:(NSData *)data {
+    @synchronized (self) {
+        if (!self.stopped) [self.client URLProtocol:self didLoadData:data];
+    }
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task
+ willPerformHTTPRedirection:(NSHTTPURLResponse *)response newRequest:(NSURLRequest *)request
+ completionHandler:(void (^)(NSURLRequest *))completion {
+    @synchronized (self) {
+        // Never follow a redirect in the direct session: the original session
+        // and its delegate must decide, then guards classify the new URL again.
+        completion(nil);
+        NSMutableURLRequest *redirect = [request mutableCopy];
+        SGLyricsMarkRequest(redirect);
+        if (!self.stopped) [self.client URLProtocol:self wasRedirectedToRequest:redirect redirectResponse:response];
+        [self stopLoading];
+    }
+}
+- (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+    @synchronized (self) {
+        if (!self.stopped) {
+            if (error) [self.client URLProtocol:self didFailWithError:error];
+            else [self.client URLProtocolDidFinishLoading:self];
+        }
+        [self stopLoading];
+    }
 }
 @end
 
@@ -260,8 +374,10 @@ id SGWGCreateNativeProxyConfig(void) {
 @end
 
 static void ApplyProxy(NSURLSessionConfiguration *config) {
-    if (!gActive || ![config isKindOfClass:NSURLSessionConfiguration.class]) return;
+    if (objc_getAssociatedObject(config, &kLyricsDirectConfiguration) || !gActive || ![config isKindOfClass:NSURLSessionConfiguration.class]) return;
     NSArray *classes = config.protocolClasses ?: @[];
+    if (![classes containsObject:SGWGLyricsDirectProtocol.class])
+        classes = [@[SGWGLyricsDirectProtocol.class] arrayByAddingObjectsFromArray:classes];
     if (![classes containsObject:SGWGUnavailableProtocol.class])
         classes = [@[SGWGUnavailableProtocol.class] arrayByAddingObjectsFromArray:classes];
     config.protocolClasses = classes;
@@ -325,13 +441,13 @@ static id HookBackground(id self, SEL _cmd, id identifier) {
 // The session constructors re-apply the proxy to a copy, so later changes to a
 // configuration object by the app cannot remove it.
 static id HookSession(id self, SEL _cmd, NSURLSessionConfiguration *config) {
-    NSURLSessionConfiguration *copy = [config copy];
+    NSURLSessionConfiguration *copy = CopyRoutingConfiguration(config);
     ApplyProxy(copy);
     atomic_fetch_add(&gSessionsProxied, 1);
     return origSession(self, _cmd, copy);
 }
 static id HookSessionDelegate(id self, SEL _cmd, NSURLSessionConfiguration *config, id delegate, id queue) {
-    NSURLSessionConfiguration *copy = [config copy];
+    NSURLSessionConfiguration *copy = CopyRoutingConfiguration(config);
     ApplyProxy(copy);
     atomic_fetch_add(&gSessionsProxied, 1);
     return origSessionDelegate(self, _cmd, copy, delegate, queue);
@@ -434,7 +550,7 @@ static BOOL InstallInitializers(void) {
         void *(*original)(void *, SEL, id, id, id, id) = (void *)method_getImplementation(method);
         IMP replacement = imp_implementationWithBlock(^void *(void *receiver, NSURLSessionConfiguration *configuration,
                                                              id delegate, id queue, id dispatchQueue) {
-            NSURLSessionConfiguration *copy = [configuration copy];
+            NSURLSessionConfiguration *copy = CopyRoutingConfiguration(configuration);
             ApplyProxy(copy);
             return original(receiver, sessionInit, copy, delegate, queue, dispatchQueue);
         });
@@ -704,25 +820,50 @@ NSDictionary *SGWGEngineStatus(void) {
     return JSONFromGo(SGWGStatus()) ?: @{@"running": @NO};
 }
 
+static void EngineChanged(int state) {
+    if (state == SGWGEngineDestinationFailed) return;
+    BOOL available = state == SGWGEngineAvailable;
+    os_unfair_lock_lock(&gReadinessLock);
+    gReadinessGeneration++;
+    gEngineAvailable = available;
+    atomic_store(&gEngineRecoverable, state == SGWGEngineUnavailable || available);
+    atomic_store(&gEngineReady, false);
+    atomic_store_explicit(&gReady, false, memory_order_release);
+    atomic_store(&gState, available ? SGWGStateRunning : SGWGStateFailed);
+    os_unfair_lock_unlock(&gReadinessLock);
+    // Rebind may still occupy gQueue. Revoke admission before returning to Go, not behind that work.
+    if (!available) SGWGNotifyRecovery();
+    dispatch_async(gQueue, ^{ SGWGRefreshReadiness(); });
+}
+
+static void RefuseListener(void) {
+    gBlockAll = YES;
+    if (gListenerFD >= 0) {
+        close(gListenerFD);
+        gListenerFD = -1;
+    }
+}
 static void StartEngine(void) {
     dispatch_async(gQueue, ^{
         SGWGState state = SGWGCurrentState();
-        if (atomic_load(&gEngineReady) || state == SGWGStateFailed) return;
+        if (atomic_load(&gEngineReady) || state == SGWGStateFailed || gBlockAll) return;
         OSStatus status = errSecSuccess;
         NSString *profile = ReadProfile(&status);
         if (!profile.length) {
             atomic_store(&gCredentialStatus, status);
-            atomic_store(&gState, (status == errSecInteractionNotAllowed || status == errSecNotAvailable)
-                ? SGWGStateWaitingProfile : SGWGStateBlocked);
+            BOOL retryable = status == errSecInteractionNotAllowed || status == errSecNotAvailable;
+            if (!retryable) RefuseListener();
+            atomic_store(&gState, retryable ? SGWGStateWaitingProfile : SGWGStateBlocked);
             return;
         }
         atomic_store(&gCredentialStatus, errSecSuccess);
+        if (gListenerFD < 0) return; // already handed to Go or definitively refused
         atomic_store(&gState, SGWGStateStarting);
         int fd = gListenerFD;
         gListenerFD = -1; // ownership moves to Go
+        SGWGSetStateCallback((uintptr_t)EngineChanged);
         int port = SGWGStart((char *)profile.UTF8String, gUser, gPass, fd, gPort);
-        atomic_store(&gEngineReady, port == gPort);
-        atomic_store(&gState, port == gPort ? SGWGStateRunning : SGWGStateFailed);
+        if (port != gPort) EngineChanged(SGWGEngineStopped);
         SGWGRefreshReadiness();
     });
 }
@@ -733,7 +874,7 @@ void SGWGRequestRebind(NSString *reason) {
         SGWGState state = SGWGCurrentState();
         if (state == SGWGStateWaitingProfile) {
             StartEngine();
-        } else if (state == SGWGStateRunning) {
+        } else if (state == SGWGStateRunning || (state == SGWGStateFailed && atomic_load(&gEngineRecoverable))) {
             SGWGRebind();
             atomic_fetch_add(&gRebinds, 1);
         }
@@ -848,33 +989,57 @@ static void StartExternalProxy(void) {
         }
     }
     atomic_store(&gState, gBlockAll ? SGWGStateBlocked : SGWGStateExternalProxy);
-    atomic_store(&gEngineReady, !gBlockAll);
+    os_unfair_lock_lock(&gReadinessLock);
+    gReadinessGeneration++;
+    gEngineAvailable = !gBlockAll;
+    atomic_store(&gEngineReady, false);
+    atomic_store_explicit(&gReady, false, memory_order_release);
+    os_unfair_lock_unlock(&gReadinessLock);
     SGWGRefreshReadiness();
 }
 
 void SGWGRefreshReadiness(void) {
+    os_unfair_lock_lock(&gReadinessLock);
+    uint64_t generation = gReadinessGeneration;
+    BOOL available = gEngineAvailable;
+    os_unfair_lock_unlock(&gReadinessLock);
+    // Patching can itself load an image. Validate outside the lock, then commit only that generation.
     BOOL native = SGWGInstallNativePatches();
     BOOL guards = gSessionGuards && native;
-    atomic_store(&gGuardsReady, guards);
-    BOOL ready = guards && SGWGIsSupportedOS() && SGWGAdmissionReady() && atomic_load(&gEngineReady) && !gBlockAll;
-    atomic_store_explicit(&gReady, ready, memory_order_release);
+    BOOL ready = guards && SGWGIsSupportedOS() && SGWGAdmissionReady() && available && !gBlockAll;
+    os_unfair_lock_lock(&gReadinessLock);
+    if (generation == gReadinessGeneration) {
+        atomic_store(&gGuardsReady, guards);
+        atomic_store(&gEngineReady, available);
+        atomic_store_explicit(&gReady, ready, memory_order_release);
+    }
+    os_unfair_lock_unlock(&gReadinessLock);
 }
 
 static void ImageChanged(const struct mach_header *header, intptr_t slide) {
     if (!gActive) return;
+    os_unfair_lock_lock(&gReadinessLock);
+    gReadinessGeneration++;
     atomic_store_explicit(&gReady, false, memory_order_release);
+    os_unfair_lock_unlock(&gReadinessLock);
     dispatch_async(gQueue, ^{ SGWGRefreshReadiness(); });
 }
 
 __attribute__((constructor)) static void SGWGInit(void) {
     @autoreleasepool {
-        gQueue = dispatch_queue_create("vitrine.wireguard", DISPATCH_QUEUE_SERIAL);
+        gQueue = dispatch_queue_create("retrine.wireguard", DISPATCH_QUEUE_SERIAL);
         if (!SGWGSettingEnabled()) return;
         atomic_store(&gActive, true);
         gKind = SGWGSettingKind();
         RandomHex(gUser);
         RandomHex(gPass);
-        if (!ReserveListener()) { gBlockAll = YES; gPort = 1; }
+        BOOL supported = SGWGIsSupportedOS();
+        BOOL tunnel = [gKind isEqualToString:SGWGKindWireGuard];
+        // A session created while SpotifyShared is still loading keeps its proxy for life.
+        if (supported && tunnel && !ReserveListener()) gBlockAll = YES;
+        BOOL pending = NO;
+        BOOL admitted = supported && SGWGCheckAdmission(&pending);
+        if (tunnel && !admitted && !pending) RefuseListener();
         gSessionGuards = InstallSessionHooks();
         SGWGRefreshReadiness();
         _dyld_register_func_for_add_image(ImageChanged);
@@ -889,23 +1054,28 @@ __attribute__((constructor)) static void SGWGInit(void) {
                 else StartExternalProxy();
             } else if (SGWGCurrentState() == SGWGStateBlocked && !gBlockAll &&
                        !atomic_load(&gEngineReady) && !atomic_load(&gCredentialStatus) &&
-                       SGWGIsSupportedOS() && SGWGAdmissionReady()) {
-                if ([gKind isEqualToString:SGWGKindWireGuard]) StartEngine();
-                else StartExternalProxy();
+                       SGWGIsSupportedOS()) {
+                BOOL stillPending = NO;
+                if (SGWGCheckAdmission(&stillPending)) {
+                    if (tunnel) StartEngine();
+                    else StartExternalProxy();
+                } else if (tunnel && !stillPending) RefuseListener();
+            } else if (SGWGCurrentState() == SGWGStateFailed && atomic_load(&gEngineRecoverable)) {
+                SGWGRequestRebind(@"engine unavailable");
             }
 #ifndef SGWG_TESTING
-            SGWGNotifyRecovery();
+            if (!SGWGReady()) SGWGNotifyRecovery();
 #endif
         });
         dispatch_resume(recovery);
-        if (!SGWGIsSupportedOS()) {
+        if (!supported) {
             atomic_store(&gState, SGWGStateUnsupported);
             return;
         }
         // A saved opt-in may survive an app update. Do not start a tunnel or
         // touch Spotify's delegates on an uninspected version. The stable Apple
         // entry points still block their covered traffic, not the whole app.
-        if (!SGWGAdmissionReady()) {
+        if (!admitted) {
             atomic_store(&gState, SGWGStateBlocked);
             return;
         }
@@ -914,10 +1084,7 @@ __attribute__((constructor)) static void SGWGInit(void) {
             StartExternalProxy();
             return;
         }
-        // Reserve the loopback port synchronously: hooks may run before the Go
-        // runtime of this image is initialized, and Go must never be entered
-        // from a constructor (it would wait for its own initializer).
-        atomic_store(&gState, SGWGStateStarting);
+        atomic_store(&gState, gBlockAll ? SGWGStateBlocked : SGWGStateStarting);
         ObserveLifecycle();
         StartEngine();
     }
@@ -952,7 +1119,7 @@ static NSString *N(id v) { return v ? [NSString stringWithFormat:@"%@", v] : @"-
 NSString *SGWGDiagnosticsReport(NSDictionary<NSString *, NSString *> *checks) {
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
     NSProcessInfo *info = NSProcessInfo.processInfo;
-    [lines addObject:[NSString stringWithFormat:@"Vitrine app-local WireGuard diagnostics v%@", SGWGVersion]];
+    [lines addObject:[NSString stringWithFormat:@"Retrine app-local WireGuard diagnostics v%@", SGWGVersion]];
     [lines addObject:[NSString stringWithFormat:@"app: Spotify %@ | OS %@ | %@", SGWGAppVersion(), info.operatingSystemVersionString, DeviceModel()]];
     [lines addObject:[NSString stringWithFormat:@"setting.enabled: %@ | active this launch: %@ | supported OS: %@",
         SGWGSettingEnabled() ? @"yes" : @"no", gActive ? @"yes" : @"no", SGWGIsSupportedOS() ? @"yes" : @"no"]];

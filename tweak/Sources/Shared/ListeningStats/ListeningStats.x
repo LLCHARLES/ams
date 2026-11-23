@@ -7,6 +7,7 @@
 // A play in progress is also written down when the app terminates or the mod restarts it (SGWillRestartNotification).
 // ponytail: a play cut off by Spotify being killed is lost; position polling would catch it.
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "Shared/Player/PlayerState.h"
 #import "ListeningStats.h"
 #import "SGPlayLog.h"
@@ -23,8 +24,8 @@ static NSTimeInterval continuousSeconds(void) {
 SGPlayLog *SGListeningLog(void) {
     static SGPlayLog *log;
     if (!log) {
-        NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-        log = [[SGPlayLog alloc] initWithPath:[support stringByAppendingPathComponent:@"Vitrine/Listening.tsv"]];
+        NSURL *file = [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Listening.tsv"];
+        if (file) log = [[SGPlayLog alloc] initWithPath:file.path];
     }
     return log;
 }

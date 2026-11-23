@@ -7,7 +7,7 @@
 #import "Settings/SGPageStyle.h"
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
-typedef NS_ENUM(NSInteger, WGSection) { WGSectionTunnel, WGSectionServer, WGSectionProfile, WGSectionChecks, WGSectionResult, WGSectionCount };
+typedef NS_ENUM(NSInteger, WGSection) { WGSectionTunnel, WGSectionServer, WGSectionProfile, WGSectionLyrics, WGSectionChecks, WGSectionResult, WGSectionCount };
 typedef NS_ENUM(NSInteger, WGCheckRow) { WGCheckCountry, WGCheckConnection, WGCheckScan, WGCheckCopy, WGCheckCount };
 
 @interface SGWGSettingsController ()
@@ -20,7 +20,6 @@ typedef NS_ENUM(NSInteger, WGCheckRow) { WGCheckCountry, WGCheckConnection, WGCh
 @property (nonatomic, copy) NSArray<NSString *> *scanLines;
 @property (nonatomic, strong) NSURLSession *session;
 @property (nonatomic) BOOL busy;
-@property (nonatomic, strong) NSTimer *statusTimer;
 @end
 
 @implementation SGWGSettingsController
@@ -30,28 +29,21 @@ typedef NS_ENUM(NSInteger, WGCheckRow) { WGCheckCountry, WGCheckConnection, WGCh
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self reloadState];
-    __weak typeof(self) weakSelf = self;
-    self.statusTimer = [NSTimer scheduledTimerWithTimeInterval:1 repeats:YES block:^(NSTimer *timer) {
-        typeof(self) self = weakSelf;
-        UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:WGSectionTunnel]];
-        UIListContentConfiguration *content = (UIListContentConfiguration *)cell.contentConfiguration;
-        NSString *line = [self stateLine];
-        if (![content isKindOfClass:UIListContentConfiguration.class] || [content.secondaryText isEqualToString:line]) return;
-        BOOL taller = [content.secondaryText componentsSeparatedByString:@"\n"].count != [line componentsSeparatedByString:@"\n"].count;
-        content.secondaryText = line;
-        cell.contentConfiguration = content;
-        if (taller) { [self.tableView beginUpdates]; [self.tableView endUpdates]; }
-    }];
+    self.refreshSelector = @selector(refreshStatus);
 }
 
-- (void)viewWillDisappear:(BOOL)animated {
-    [super viewWillDisappear:animated];
-    [self.statusTimer invalidate];
-    self.statusTimer = nil;
+- (void)refreshStatus {
+    UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:WGSectionTunnel]];
+    UIListContentConfiguration *content = (UIListContentConfiguration *)cell.contentConfiguration;
+    NSString *line = [self stateLine];
+    if (![content isKindOfClass:UIListContentConfiguration.class] || [content.secondaryText isEqualToString:line]) return;
+    BOOL taller = [content.secondaryText componentsSeparatedByString:@"\n"].count != [line componentsSeparatedByString:@"\n"].count;
+    content.secondaryText = line;
+    cell.contentConfiguration = content;
+    if (taller) { [self.tableView beginUpdates]; [self.tableView endUpdates]; }
 }
 
 - (void)dealloc {
-    [self.statusTimer invalidate];
     [self.session invalidateAndCancel];
 }
 
@@ -65,7 +57,7 @@ typedef NS_ENUM(NSInteger, WGCheckRow) { WGCheckCountry, WGCheckConnection, WGCh
     [self.enabledSwitch addTarget:self action:@selector(toggleEnabled:) forControlEvents:UIControlEventValueChanged];
     self.kindControl = [[UISegmentedControl alloc] initWithItems:@[@"WireGuard", @"HTTP", @"HTTPS", @"SOCKS5"]];
     [self.kindControl addTarget:self action:@selector(kindChanged) forControlEvents:UIControlEventValueChanged];
-    // The same segmented control Vitrine's Flags page draws: the accent behind the chosen segment, 11pt text.
+    // The same segmented control Retrine's Flags page draws: the accent behind the chosen segment, 11pt text.
     self.kindControl.selectedSegmentTintColor = SGGreen();
     UIFont *segmentFont = SGCappedFont(SGSubtitleFont(), 15);
     [self.kindControl setTitleTextAttributes:@{NSForegroundColorAttributeName: UIColor.whiteColor, NSFontAttributeName: segmentFont} forState:UIControlStateNormal];
@@ -185,6 +177,7 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     switch (section) {
         case WGSectionTunnel: return 3;
+        case WGSectionLyrics: return 3;
         case WGSectionServer:
             if (!self.selectedWireGuard) return 5; // host, port, user, password, save
             return [SGWGSettingKind() isEqualToString:SGWGKindWireGuard] ? 0 : 1; // save
@@ -199,6 +192,7 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
 - (NSString *)headerTextForSection:(NSInteger)section {
     switch (section) {
         case WGSectionTunnel: return SGL(@"settings.wireguard.section_tunnel", @"Connection");
+        case WGSectionLyrics: return SGL(@"settings.wireguard.lyrics", @"Lyrics requests");
         case WGSectionServer: return self.selectedWireGuard ? nil : SGL(@"settings.wireguard.section_server", @"Proxy server");
         case WGSectionProfile: return self.selectedWireGuard ? SGL(@"settings.wireguard.section_profile", @"WireGuard profile") : nil;
         case WGSectionChecks: return SGL(@"settings.wireguard.section_checks", @"Checks");
@@ -210,7 +204,16 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
 - (NSString *)footerTextForSection:(NSInteger)section {
     switch (section) {
         case WGSectionTunnel:
-            return SGL(@"settings.wireguard.footer_tunnel", @"Routes inspected Spotify paths through the tunnel or proxy and blocks guarded paths when unavailable. Not a leak-proof or device-wide VPN. Background sessions, web sign-in, AVURLAsset, pre-initializer traffic and local-network exemptions are outside coverage. Builds without WireGuard drop enforcement even if enabled previously. Restart after changes.");
+            return SGL(@"settings.wireguard.footer_tunnel", @"Routes inspected Spotify paths through the tunnel or proxy and blocks guarded paths when unavailable. Not a leak-proof or device-wide VPN. Background sessions, web sign-in, AVURLAsset, pre-initializer traffic and local-network exemptions are outside coverage. Builds without WireGuard drop enforcement even if enabled previously. Restart after connection or enable changes; lyrics routing changes apply immediately.");
+        case WGSectionLyrics:
+            switch (SGWGSettingLyricsRoute()) {
+                case SGWGLyricsBlockedDirect:
+                    return SGL(@"settings.wireguard.lyrics_blocked_footer", @"Only Retrine's own lyrics requests to Genius connect directly, even when the tunnel is not ready. Genius sees your real IP and the song you look up. Other requests, including Spotify's own traffic, keep the tunnel's existing protection. Applies to new requests immediately.");
+                case SGWGLyricsAllDirect:
+                    return SGL(@"settings.wireguard.lyrics_all_footer", @"Only Retrine's own lyrics requests to listed HTTPS provider hosts connect directly, even when the tunnel is not ready. Those sites see your real IP and the song you look up. Other requests, including Spotify's own traffic, keep the tunnel's existing protection. Applies to new requests immediately.");
+                default:
+                    return SGL(@"settings.wireguard.lyrics_tunnel_footer", @"Retrine's own lyrics requests use the tunnel and fail when it is not ready; blocked sources can fall back. Direct connections would reveal your real IP and the song you look up to those sites. Spotify's own traffic keeps the tunnel's existing protection. Applies to new requests immediately.");
+            }
         case WGSectionServer:
             return self.selectedWireGuard ? nil : SGL(@"settings.wireguard.footer_server", @"HTTP and HTTPS use CONNECT. HTTP sends proxy credentials without encryption; prefer HTTPS. HTTPS verifies the proxy certificate. Credentials are bound to the connection type, server, port and user, and cleared when these change.");
         case WGSectionProfile:
@@ -222,7 +225,7 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
     return nil;
 }
 
-// Headers, notes and the gap over a card are Vitrine's own (Settings/SGPageStyle): 11pt gray uppercase headings and
+// Headers, notes and the gap over a card are Retrine's own (Settings/SGPageStyle): 11pt gray uppercase headings and
 // notes, and a section with no row showing has none of them.
 - (UIView *)tableView:(UITableView *)tableView viewForHeaderInSection:(NSInteger)section {
     NSString *title = [self headerTextForSection:section];
@@ -244,7 +247,7 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
     return text.length && [self tableView:tableView numberOfRowsInSection:section] ? SGSectionFooterHeight(tableView, text) : CGFLOAT_MIN;
 }
 
-// A row as Vitrine draws it: 13pt title over an 11pt gray subtitle on a #1C1C1E card (SGFillCell). The controls these
+// A row as Retrine draws it: 13pt title over an 11pt gray subtitle on a #1C1C1E card (SGFillCell). The controls these
 // rows hold are single instances moved between cells, so every cell is new rather than reused.
 - (UITableViewCell *)cellTitled:(NSString *)title subtitle:(NSString *)subtitle color:(UIColor *)color {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
@@ -311,6 +314,14 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
             cell = [self cellTitled:titles[action] subtitle:nil color:action == 2 ? ButtonRed() : ButtonBlue()];
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
         }
+    } else if (indexPath.section == WGSectionLyrics) {
+        NSArray *titles = @[SGL(@"settings.wireguard.lyrics_tunnel", @"Through the tunnel"),
+                            SGL(@"settings.wireguard.lyrics_blocked", @"Direct for blocked sources only"),
+                            SGL(@"settings.wireguard.lyrics_all", @"All lyrics sources direct")];
+        cell = [self cellTitled:titles[row] subtitle:nil color:nil];
+        cell.accessoryType = row == SGWGSettingLyricsRoute() ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+        cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+        cell.accessibilityTraits |= row == SGWGSettingLyricsRoute() ? UIAccessibilityTraitSelected : 0;
     } else if (indexPath.section == WGSectionChecks) {
         NSArray *titles = @[SGL(@"settings.wireguard.check_country", @"Check country and exit IP"),
                             SGL(@"settings.wireguard.check_connection", @"Run connection diagnostics (DNS · HTTPS · 206)"),
@@ -332,7 +343,10 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    if (indexPath.section == WGSectionServer && (self.selectedWireGuard || indexPath.row == 4)) {
+    if (indexPath.section == WGSectionLyrics) {
+        SGWGSetSettingLyricsRoute((SGWGLyricsRoute)indexPath.row);
+        [tableView reloadSections:[NSIndexSet indexSetWithIndex:WGSectionLyrics] withRowAnimation:UITableViewRowAnimationNone];
+    } else if (indexPath.section == WGSectionServer && (self.selectedWireGuard || indexPath.row == 4)) {
         [self saveConnection];
     } else if (indexPath.section == WGSectionProfile) {
         NSInteger action = indexPath.row - (NSInteger)self.profileRows.count;
@@ -564,7 +578,7 @@ static NSString *ErrorText(NSError *error) {
         [lines addObject:[NSString stringWithFormat:@"HTTPS www.google.com: %@ HTTP %ld %@ (%.1f s)", ok ? @"OK" : @"FAIL", (long)response.statusCode, ErrorText(error), seconds]];
         self.checks[@"https.generate_204"] = [NSString stringWithFormat:@"HTTP %ld %@ %.1fs", (long)response.statusCode, ErrorText(error), seconds];
         [self checkRange:@[@"https://www.gstatic.com/images/branding/googlelogo/2x/googlelogo_color_272x92dp.png",
-                           @"https://raw.githubusercontent.com/kes158/vitrine/main/LICENSE"] index:0 lines:lines];
+                           @"https://raw.githubusercontent.com/oneulddu/Retrine/main/LICENSE"] index:0 lines:lines];
     }];
 }
 
@@ -621,15 +635,15 @@ static NSString *ErrorText(NSError *error) {
 
 @end
 
-void SGWGNotifyRecovery(void) {
-    if (!SGWGActiveThisLaunch()) return;
-    NSDictionary *status = SGWGEngineStatus();
-    BOOL failedTunnel = [SGWGActiveKind() isEqualToString:SGWGKindWireGuard] &&
-        [status[@"handshakeAgeSec"] longLongValue] < 0 && [status[@"connections"][@"failed"] unsignedLongLongValue] > 0;
-    if (SGWGReady() && !failedTunnel) return;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        static BOOL shown;
-        if (shown) return;
+static BOOL sg_recoveryPending, sg_recoveryShown;
+
+static void PresentPendingRecovery(void) {
+        if (!sg_recoveryPending) return;
+        if (SGWGReady() || !SGWGActiveThisLaunch() || sg_recoveryShown) {
+            sg_recoveryPending = NO;
+            return;
+        }
+        if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
         UIViewController *presenter = nil;
         for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
             if (scene.activationState != UISceneActivationStateForegroundActive || ![scene isKindOfClass:UIWindowScene.class]) continue;
@@ -648,6 +662,21 @@ void SGWGNotifyRecovery(void) {
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.wireguard.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
         SGPresentDark(alert);
         [presenter presentViewController:alert animated:YES completion:nil];
-        shown = YES;
+        sg_recoveryShown = YES;
+        sg_recoveryPending = NO;
+}
+
+void SGWGNotifyRecovery(void) {
+    if (!SGWGActiveThisLaunch()) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil
+            usingBlock:^(NSNotification *note) {
+                dispatch_async(dispatch_get_main_queue(), ^{ PresentPendingRecovery(); });
+            }];
+    });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!SGWGReady()) sg_recoveryPending = YES;
+        PresentPendingRecovery();
     });
 }

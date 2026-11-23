@@ -11,4 +11,4 @@ NSURL *SGPublicSpotifyURLFromText(NSString *text);
 BOOL SGIsSpotifyHTTPSURL(NSURL *url);
 BOOL SGSpotifyURLNeedsResolution(NSURL *url);
 NSURL *SGSpotifyLinkInSharedText(NSString *text);
-NSURL *SGVitrineURLForSpotifyURL(NSURL *url);
+NSURL *SGRetrineURLForSpotifyURL(NSURL *url);

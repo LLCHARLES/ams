@@ -4,7 +4,7 @@
 # argument to try another (./build.sh 0.12.0).
 set -e
 SRC=$(cd "$(dirname "$0")/../../tweak/Sources" && pwd)
-OUT=$(dirname "$0")/build
+OUT=${OUT:-$(dirname "$0")/build}
 VERSION=${1:-0.18.0}
 rm -rf "$OUT"; mkdir -p "$OUT/UpdateHarness.app"
 

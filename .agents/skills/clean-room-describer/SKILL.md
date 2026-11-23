@@ -2,13 +2,13 @@
 name: clean-room-describer
 description: >
   Learn what upstream spoti.pw (github.com/skopevoj/spoti.pw) changed or what its users report, without
-  anyone on Vitrine seeing upstream code. Use when the user asks about an upstream issue, pull request,
-  release or feature, or wants to know whether Vitrine needs something upstream did.
+  anyone on Retrine seeing upstream code. Use when the user asks about an upstream issue, pull request,
+  release or feature, or wants to know whether Retrine needs something upstream did.
 ---
 
 # Clean-room describer
 
-Upstream is under a license that does not allow reuse, so Vitrine is written clean room. Whoever implements
+Upstream is under a license that does not allow reuse, so Retrine is written clean room. Whoever implements
 must never see upstream code. One agent, the describer, reads upstream and hands back behavior only.
 
 ## The rule
@@ -58,10 +58,10 @@ new agent, so it keeps what it already read.
 ## After the report
 
 - Read only the report, never the raw dumps beside it.
-- Check each item against Vitrine yourself: grep `git log` for the fix by its behavior, then read our code.
+- Check each item against Retrine yourself: grep `git log` for the fix by its behavior, then read our code.
   Many upstream bugs are already fixed here under our own commit.
 - A spec built from the report keeps its numbers, its costs and the limits upstream removed, each as a point
   for the implementer to decide, never dropped silently.
-- What Vitrine still needs becomes a behavior spec in `notes/` (gitignored, so it stays on this Mac, as
+- What Retrine still needs becomes a behavior spec in `notes/` (gitignored, so it stays on this Mac, as
   `notes/cleanroom-specs/` and `notes/beta-gaps/` do), which the implementer reads instead of the upstream
   thread.

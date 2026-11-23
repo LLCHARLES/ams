@@ -276,13 +276,16 @@ void SGRPlayerMixSliderLaidOut(UISlider *slider) {
 
 @end
 
-#pragma mark - the next song's cover
+#pragma mark - a track's cover
 
-// The cover a track's metadata names, largest first: a local file's cover, or Spotify's picture on i.scdn.co.
-static NSURL *coverURL(SPTPlayerTrack *track) {
+// The cover a track's metadata names, a local file's cover or Spotify's picture on i.scdn.co: the largest for the
+// stage, the 300 px one a row's thumbnail needs (Playing Next) when `small`.
+static NSURL *coverURL(SPTPlayerTrack *track, BOOL small) {
     NSDictionary *metadata = [track respondsToSelector:@selector(metadata)] ? track.metadata : nil;
     if (![metadata isKindOfClass:NSDictionary.class]) return nil;
-    for (NSString *field in @[@"image_xlarge_url", @"image_large_url", @"image_url"]) {
+    NSArray<NSString *> *fields = small ? @[@"image_url", @"image_large_url", @"image_xlarge_url"]
+                                        : @[@"image_xlarge_url", @"image_large_url", @"image_url"];
+    for (NSString *field in fields) {
         id value = metadata[field];
         if (![value isKindOfClass:NSString.class] || ![value length]) continue;
         NSString *local = SGLocalFileCoverInURL(value);
@@ -296,7 +299,7 @@ static NSURL *coverURL(SPTPlayerTrack *track) {
 static dispatch_queue_t coverQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ queue = dispatch_queue_create("spotifyglass.redesign.automix.covers", DISPATCH_QUEUE_SERIAL); });
+    dispatch_once(&once, ^{ queue = dispatch_queue_create("spotifyglass.redesign.player.covers", DISPATCH_QUEUE_SERIAL); });
     return queue;
 }
 
@@ -312,26 +315,35 @@ static NSURLSession *coverSession(void) {
     return session;
 }
 
-// Fetched and decoded for display on the serial queue; `done` on main with the image, nil when there is none.
-static void prepareCover(SPTPlayerTrack *track, void (^done)(UIImage *image)) {
-    NSURL *url = coverURL(track);
+NSProgress *SGRPlayerTrackCover(SPTPlayerTrack *track, BOOL small, void (^done)(UIImage *image)) {
+    NSURL *url = coverURL(track, small);
     if (!url) {
-        SGLog(@"redesign player: AutoMix finds no cover in %@'s metadata", SGURIString(track.URI));
+        SGLog(@"redesign player: no cover in %@'s metadata", SGURIString(track.URI));
         done(nil);
-        return;
+        return nil;
     }
+    NSProgress *progress = [NSProgress discreteProgressWithTotalUnitCount:1];
     void (^decode)(NSData *) = ^(NSData *data) {
+        if (progress.cancelled) return;
         UIImage *image = [[UIImage imageWithData:data] imageByPreparingForDisplay];
-        if (!image) SGLog(@"redesign player: AutoMix's cover %@ did not come", url.lastPathComponent);
-        dispatch_async(dispatch_get_main_queue(), ^{ done(image); });
+        if (!image) SGLog(@"redesign player: the cover %@ did not come", url.lastPathComponent);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (progress.cancelled) return;
+            progress.completedUnitCount = 1;
+            done(image);
+        });
     };
     if (url.isFileURL) {
-        dispatch_async(coverQueue(), ^{ decode([NSData dataWithContentsOfURL:url]); });
-        return;
+        dispatch_async(coverQueue(), ^{ decode(progress.cancelled ? nil : [NSData dataWithContentsOfURL:url]); });
+        return progress;
     }
-    [[coverSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    NSURLSessionDataTask *task = [coverSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         dispatch_async(coverQueue(), ^{ decode(error ? nil : data); });
-    }] resume];
+    }];
+    __weak NSURLSessionDataTask *weakTask = task;
+    progress.cancellationHandler = ^{ [weakTask cancel]; };
+    [task resume];
+    return progress;
 }
 
 #pragma mark - the stage
@@ -374,6 +386,7 @@ static BOOL stateHolds(SPTPlayerState *state) {
 @interface SGRMixStage : NSObject
 - (void)follow;
 - (void)restart;
+- (void)coverLaidOut;
 @end
 
 @implementation SGRMixStage {
@@ -384,6 +397,7 @@ static BOOL stateHolds(SPTPlayerState *state) {
     SGRMixStageView *_view;
     CADisplayLink *_link;
     NSTimer *_arm;
+    BOOL _inactive;
     BOOL _onNext;                // the next song is the one playing
     CGFloat _progress;
     CFTimeInterval _overdueSince;
@@ -391,16 +405,35 @@ static BOOL stateHolds(SPTPlayerState *state) {
 
 - (instancetype)init {
     if (!(self = [super init])) return nil;
+    _inactive = UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resigned) name:UIApplicationWillResignActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(activated) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(follow) name:SGRPlayerVisibilityDidChangeNotification object:nil];
     return self;
 }
 
 - (void)resigned {
-    if (_view) [self stop:@"the app is not active" done:NO];
+    _inactive = YES;
+    [self follow];
+}
+
+- (void)activated {
+    _inactive = NO;
+    [self follow];
+}
+
+- (void)coverLaidOut {
+    if (!_arm && !_view) [self follow];
 }
 
 // A report, new facts or a cover that came in.
 - (void)follow {
+    if (_inactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive || !SGRPlayerIsVisible()) {
+        [_arm invalidate];
+        _arm = nil;
+        if (_view) [self stop:@"the player is not visible or active" done:NO];
+        return;
+    }
     SPTPlayerState *state = SGPlayerState();
     if (_view) {
         // On the outgoing song the facts must still be the plan's; on the incoming one the plan is the blend that
@@ -449,10 +482,10 @@ static BOOL stateHolds(SPTPlayerState *state) {
     _fromImage = _toImage = nil;
     SPTPlayerState *state = SGPlayerState();
     SPTPlayerTrack *from = state.track, *next = SGPlayerUpcomingTracks(state, 1).firstObject;
-    if (SGRMixTrackIs(from, plan.fromURI, plan.fromUID)) prepareCover(from, ^(UIImage *image) {
+    if (SGRMixTrackIs(from, plan.fromURI, plan.fromUID)) SGRPlayerTrackCover(from, NO, ^(UIImage *image) {
         if (self->_imagesOf == plan) self->_fromImage = image;
     });
-    if (SGRMixTrackIs(next, plan.toURI, plan.toUID)) prepareCover(next, ^(UIImage *image) {
+    if (SGRMixTrackIs(next, plan.toURI, plan.toUID)) SGRPlayerTrackCover(next, NO, ^(UIImage *image) {
         if (self->_imagesOf != plan) return;
         self->_toImage = image;
         [self follow];
@@ -463,7 +496,8 @@ static BOOL stateHolds(SPTPlayerState *state) {
 - (void)arm {
     [_arm invalidate];
     _arm = nil;
-    if (!_plan || _done || _view) return;
+    if (_inactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive || !SGRPlayerIsVisible()
+        || !seen(SGRPlayerShowingCover()) || !_plan || _done || _view) return;
     SPTPlayerState *state = SGPlayerState();
     if (!SGRMixTrackIs(state.track, _plan.fromURI, _plan.fromUID) || stateHolds(state) || state.playbackSpeed <= 0) return;
     double position = positionOf(state);
@@ -559,6 +593,10 @@ static BOOL stateHolds(SPTPlayerState *state) {
 
 static void stageFollows(void) {
     [sg_mixStage follow];
+}
+
+void SGRPlayerMixCoverLaidOut(void) {
+    [sg_mixStage coverLaidOut];
 }
 
 #pragma mark - wiring

@@ -35,6 +35,10 @@ Back at rest the hero must be the height it had at 4 s: a hero that kept its pul
 
 What it does not cover: the real element framework's autolayout, and the flags `PlaylistField.x` forces.
 
+`rows-check.sh` runs `PlaylistRows.x`'s row pass on a 402x64 track row with its 48pt artwork, as a plain executable in a
+simulator of its own: the separator runs from 12pt after the artwork to 16pt short of the trailing edge, left to right
+76..386 and right to left, with the artwork on the right, 16..326.
+
 `veil` / `veil-off` check the scroll veil as on the album (`../album/README.md`, `../album/hero-veil-check.h`) instead
 of the scripted states: the list scrolls from its adjusted top inset and the header goes up with it. The playlist's
 hero already stretches with its plane on a pull, so the veil adds no zoom there. `veil-card`, with

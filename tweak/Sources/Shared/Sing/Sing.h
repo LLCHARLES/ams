@@ -18,7 +18,7 @@
 // The voice model is public and MIT licensed: Mel-Band RoFormer (Ju-Chiang Wang, Wei-Tsung Lu, Minz Won) with
 // KimberleyJensen's vocal checkpoint, its spectral core exported for Core ML with two-second windows, from
 // https://huggingface.co/My-Name-Is-Jeff/vitrine-sing's separator-ane.mlmodelc (App/About/Licenses.m carries its
-// notice): Vitrine's export of that checkpoint for the Neural Engine (its layout (B, C, 1, S), 1x1 convolutions,
+// notice): Retrine's export of that checkpoint for the Neural Engine (its layout (B, C, 1, S), 1x1 convolutions,
 // attention per head, an RMSNorm that divides by the row's largest value first so half precision does not overflow),
 // palettized to 6 bits. Every operation runs on the Neural Engine, and the CPU runs it too, more slowly. Its floor is
 // iOS 18, the Core ML it was built with. No audio leaves the phone. Voice model can choose a light model instead, from
@@ -181,7 +181,7 @@ void SGSingCancelModelDownload(void);
 void SGSingDeleteModel(void);
 // The chosen model's compiled folder once it is downloaded and checked; for the full model, else the old model
 // (separator.mlmodelc) where it is still on the iPhone; else nil. On a FLEX build a copy put in Application
-// Support/Vitrine/Sing/dev/<separator-ane or separator-light>.mlmodelc by hand comes first, unchecked.
+// Support/Retrine/Sing/dev/<separator-ane or separator-light>.mlmodelc by hand comes first, unchecked.
 NSURL *SGSingModelURL(void);
 // The model is the old one: it runs on the CPU alone, and the download is its update.
 BOOL SGSingModelUpdateAvailable(void);

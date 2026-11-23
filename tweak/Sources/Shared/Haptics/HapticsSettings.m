@@ -153,7 +153,7 @@ static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^ex
     // Under In the Background while the install lacks the key iOS lists apps for Music Haptics by.
     SGModRow *unlisted = SGWarningRow(SGL(@"settings.vibrations.missing.title", @"In the Background is missing from this install"), SGL(@"settings.vibrations.missing.subtitle", @"Tap for why"), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.vibrations.alert.missing.title", @"In the Background is missing")
-            message:SGL(@"settings.vibrations.alert.missing.message", @"iOS plays Music Haptics only for apps that say they support it, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Vitrine to get both.")
+            message:SGL(@"settings.vibrations.alert.missing.message", @"iOS plays Music Haptics only for apps that say they support it, and only Retrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Retrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Retrine to get both.")
             preferredStyle:UIAlertControllerStyleAlert];
         alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];

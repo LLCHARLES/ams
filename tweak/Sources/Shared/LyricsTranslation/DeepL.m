@@ -6,6 +6,7 @@
 #import "AIServicesInternal.h"
 #import "CredentialSettings.h"
 
+// Stable Keychain service for existing keys, including deletion.
 static NSString *const kService = @"Vitrine.DeepL", *const kAccount = @"api-key";
 static NSMutableDictionary *sg_done;
 

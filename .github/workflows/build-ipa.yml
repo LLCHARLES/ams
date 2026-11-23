@@ -20,9 +20,13 @@ on:
         description: "Include app-local WireGuard / proxy (inspected Spotify IPA only; off until enabled)"
         type: boolean
         default: true
+      enable_pixie:
+        description: "Include Pixie native downloads (exact Spotify 9.2.0 or 9.1.90 build only)"
+        type: boolean
+        default: true
       bundle_id:
-        description: "Bundle ID must match the signing App ID; extension IDs follow it (empty keeps Spotify's ID)"
-        default: ""
+        description: "Bundle ID must match the signing App ID; extension IDs follow it (type com.spotify.client to keep Spotify's ID)"
+        default: "app.retrine.player"
         required: false
         type: string
 
@@ -103,15 +107,20 @@ jobs:
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: out/extension
-          key: extension-${{ steps.spotify.outputs.version }}-${{ hashFiles('extension/LiveActivity/**', 'tweak/Sources/Shared/LiveActivity/**', 'scripts/build-extension.sh') }}
+          key: extension-${{ steps.spotify.outputs.version }}-${{ hashFiles('extension/LiveActivity/**', 'extension/OpenInRetrine/**', 'tweak/Sources/Shared/LiveActivity/**', 'tweak/Sources/Shared/Navigation/LinkURL.*', 'scripts/build-extension.sh') }}
 
       - name: Build IPA
         env:
-          BUNDLE_ID: ${{ inputs.bundle_id }}
+          # A cleared field is the default again, never Spotify's ID: a free Apple ID registers the
+          # ID it signs under with Apple, so Spotify's has to be asked for by name.
+          BUNDLE_ID: ${{ inputs.bundle_id || 'app.retrine.player' }}
           WIREGUARD: ${{ inputs.enable_wireguard && '1' || '0' }}
+          PIXIE: ${{ inputs.enable_pixie && '1' || '0' }}
           MAKEFLAGS: -k
         run: |
           set -o pipefail
+          # The pipeline keeps Spotify's ID when it is given none.
+          if [[ "$BUNDLE_ID" == "com.spotify.client" ]]; then export BUNDLE_ID=; fi
           if make release IPA=ipa/spotify.ipa NO_PLUGINS=${{ inputs.remove_plugins && '1' || '0' }} 2>&1 | tee "$RUNNER_TEMP/ipa-build.log"; then
             exit 0
           else
@@ -157,14 +166,14 @@ jobs:
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: inputs.upload_method != 'filebin'
         with:
-          name: vitrine.ipa
+          name: retrine.ipa
           path: out/*.ipa
           if-no-files-found: error
 
       - name: Upload to filebin.net
         if: inputs.upload_method != 'artifacts'
         run: |
-          BIN="vitrine-${{ github.run_id }}"
+          BIN="retrine-${{ github.run_id }}"
           echo "### filebin.net download" >> "$GITHUB_STEP_SUMMARY"
           for f in out/*.ipa; do
             curl -fsS -X POST -H "Content-Type: application/octet-stream" --data-binary "@$f" "https://filebin.net/$BIN/$(basename "$f")" >/dev/null

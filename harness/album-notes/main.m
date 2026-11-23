@@ -189,7 +189,7 @@ int main(int argc, const char **argv) {
     @autoreleasepool {
         CHECK(argc == 2);
         CatalogStart(@(argv[1]));
-        CHECK(([@{@"album\n1\nthe weeknd\nafter hours":
+        CHECK(([@{@"album\n4\nthe weeknd\nafter hours":
             @{@"url": @"https://fixture.invalid/after-hours/clip.mp4", @"at": NSDate.date}}
             writeToURL:SGMotionTestAlbumAnswersFile() atomically:YES]));
         NSArray *records = CatalogFixture[@"results"][@"albums"][@"data"];

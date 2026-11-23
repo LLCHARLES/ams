@@ -274,6 +274,30 @@ static void check(OSStatus status, const char *what) {
     [self.window makeKeyAndVisible];
     [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:nil];
     [AVAudioSession.sharedInstance setActive:YES error:nil];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"maintenance"]) {
+        extern void (^HarnessMaintenanceChanged)(BOOL);
+        atomic_store(&sg_mute, true);
+        __block NSUInteger phase = 0;
+        HarnessMaintenanceChanged = ^(BOOL active) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BOOL expected = phase != 1;
+                if (active != expected) { NSLog(@"FAIL unexpected maintenance lifecycle"); exit(1); }
+                phase++;
+                if (phase == 1) check(AudioOutputUnitStop(self->_output), "stop maintenance output");
+                else if (phase == 2) check(AudioOutputUnitStart(self->_output), "restart maintenance output");
+                else {
+                    HarnessMaintenanceChanged = nil;
+                    check(AudioOutputUnitStop(self->_output), "stop checked output");
+                    puts("PASS effects maintenance stops with output and resumes on start");
+                    exit(0);
+                }
+            });
+        };
+        [self startSpotifyChainAt:44100];
+        SGDSPSetSwitch(SGKeyDSP, YES);
+        [self after:10 do:^{ NSLog(@"FAIL maintenance lifecycle did not finish"); exit(1); }];
+        return YES;
+    }
     double sine = 20 * log10(kAmplitude / M_SQRT2), nothing = -200, any = NAN;
     NSLog(@"[harness] the sine's level is %.1f dB RMS in the left channel", sine);
     SGDSPSetSwitch(SGKeyDSP, NO);

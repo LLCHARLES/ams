@@ -126,7 +126,7 @@ typedef NS_ENUM(NSInteger, SGDSPFileKind) {
     SGDSPFileLiveprog,          // Liveprog's .eel
 };
 
-// Documents/Vitrine/Audio effects/<Convolver|DDC|Liveprog>, made on first use, empty until files are imported.
+// Documents/Retrine/Audio effects/<Convolver|DDC|Liveprog>, made on first use, empty until files are imported.
 NSString *SGDSPFileKey(SGDSPFileKind kind); // the selected-file key; nil for an invalid kind
 NSString *SGDSPLibraryDirectory(SGDSPFileKind kind);
 NSArray<NSString *> *SGDSPLibraryFiles(SGDSPFileKind kind);   // names, sorted

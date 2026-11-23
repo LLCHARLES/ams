@@ -1,12 +1,28 @@
 #import <UIKit/UIKit.h>
 #import "AudioProbeUI.h"
 #import "Localization.h"
+#import "NativeDownloadQuality.h"
+#import "OfflineDevices.h"
+#import "OfflineLibraryUI.h"
+#import "TrackDownload.h"
+#import "TrackExport.h"
 // Fixture-only preference store and action counter. The shipping bridge forwards
 // to TrackDownload's spotifyglass.pixie.autoLikeDownloads preference.
 static BOOL SAPFixtureAutoLike=NO;
 static BOOL SAPFixtureDownloadActive=NO;
 static NSInteger SAPFixtureActionsPerformed=0;
 BOOL SAPFixtureAutoLikeEnabled(void) {return SAPFixtureAutoLike;}
+BOOL SAPAutoLikeDownloadsEnabled(void) {return SAPFixtureAutoLike;}
+void SAPSetAutoLikeDownloadsEnabled(BOOL enabled) {SAPFixtureAutoLike=enabled;}
+NSString *SAPAlbumURIForPage(id page) {return nil;}
+NSString *SAPAudioExportFormat(void) {return @"m4a";}
+void SAPShowOfflineLibrary(UIViewController *presenter) {}
+NSString *const SAPNativeDownloadQualityOfferDidChangeNotification=@"FixtureQualityChanged";
+BOOL SAPShouldOfferNativeDownloadQuality(void) {return NO;}
+BOOL SAPDismissNativeDownloadQualityOfferAndOpenSettings(void) {return NO;}
+void SAPPreviewOfflineDeviceSlots(void (^completion)(NSDictionary *,NSString *)) {completion(nil,@"fixture");}
+void SAPDisableOfflineDevice(NSString *plan,NSString *token,void (^completion)(NSDictionary *,NSString *)) {completion(nil,@"fixture");}
+void SAPEnableOfflineOnCurrentDevice(void (^completion)(NSDictionary *,NSString *)) {completion(nil,@"fixture");}
 void SAPFixtureSetDownloadActive(BOOL active) {SAPFixtureDownloadActive=active;}
 NSInteger SAPFixtureActionCount(void) {return SAPFixtureActionsPerformed;}
 @implementation SAPSettingsActions
@@ -18,6 +34,7 @@ NSInteger SAPFixtureActionCount(void) {return SAPFixtureActionsPerformed;}
 + (NSDictionary *)snapshotForDetails:(BOOL)journal {return [self snapshot];}
 + (void)loadDetails:(BOOL)journal completion:(void (^)(NSDictionary *))completion {dispatch_async(dispatch_get_main_queue(),^{completion([self snapshot]);});}
 + (void)perform:(SAPSettingsAction)action { SAPFixtureActionsPerformed++; }
++ (void)downloadAlbum:(NSString *)albumURI {SAPFixtureActionsPerformed++;}
 + (void)setKeyRequestMode:(NSInteger)mode completion:(void (^)(BOOL,NSString *))completion {NSCAssert(mode==0,@"Selecting mode 1 must not be offered");if(completion)completion(NO,@"Spotify reports 0 free device-license slots. Mode was not changed.");}
 + (void)refreshDownloadCompatibility:(void (^)(NSDictionary *))completion {if(completion)completion(@{@"status":@"complete"});}
 + (void)previewOfflineDeviceSlots:(void (^)(NSDictionary *,NSString *))completion {completion(nil,@"fixture: no mutation performed");}

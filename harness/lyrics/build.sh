@@ -16,8 +16,10 @@ if [ "$VARIANT" = old ]; then
 fi
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
+# Link the actual switch callback and holder registry without the unrelated search/sync sheets.
+sed -n '/^#pragma mark - Keep screen on/,$p' "$SRC/Redesigned/Lyrics/LyricsTools.m" > "$OUT/awake-row-under-check.inc"
 xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g ${OPT:--O0} \
-    -I"$SRC" -I"$SRC/Redesigned/Lyrics" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
+    -I"$OUT" -I"$SRC" -I"$SRC/Redesigned/Lyrics" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/stubs.m" "$HERE/translation-check.m" \
     "$SRC"/Redesigned/Lyrics/AutoTranslatorName.m \
     $( [ -f "$SRC"/Redesigned/Lyrics/AutoTranslation.m ] && echo "$SRC"/Redesigned/Lyrics/AutoTranslation.m ) $( [ -f "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ] && echo "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ) "$SRC"/Redesigned/Lyrics/SGRKaraokeView.m $( [ -f "$SRC"/Redesigned/Lyrics/LyricsText.m ] && echo "$SRC"/Redesigned/Lyrics/LyricsText.m ) $( [ -f "$SRC"/Redesigned/Lyrics/LyricsLook.m ] && echo "$SRC"/Redesigned/Lyrics/LyricsLook.m ) $( [ -f "$SRC"/Redesigned/Lyrics/LyricsStyle.m ] && echo "$SRC"/Redesigned/Lyrics/LyricsStyle.m ) "$SRC"/Shared/Lyrics/KaraokeTiming.m $( [ -f "$SRC"/Shared/Lyrics/Romanise.m ] && echo "$SRC"/Shared/Lyrics/Romanise.m ) "$SRC"/Shared/AdBlock/Protobuf.m \

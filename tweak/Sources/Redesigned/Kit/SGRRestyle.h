@@ -34,6 +34,11 @@ void SGRConcealView(UIView *view);
 // on the next call, and a log line says so once.
 void SGRSuppress(UIView *view);
 
+// Alpha 1 whatever Spotify sets, for one of Spotify's own classes, through the same override on its class that
+// SGRSuppress uses (only the instances asked for are held); elsewhere it is only set on each call and a log line says so.
+// For a header the redesign keeps solid where Spotify fades it as the page scrolls (Album/AlbumHeader.x).
+void SGRKeepOpaque(UIView *view);
+
 // Alpha 0, no touches, hidden from accessibility, set again on every call: for Spotify's Swift views,
 // which SGRSuppress cannot keep.
 void SGRVanish(UIView *view);
@@ -52,6 +57,12 @@ void SGRMonospacedDigits(UILabel *label);
 // ancestor out, so nothing else tells the screen it is there.
 BOOL SGRObserveImage(UIImageView *view, void (^changed)(UIImageView *view));
 
+// `changed` after every setText: and setAttributedText: on a plain UILabel, Spotify's included, for as long as the
+// label lives, by a runtime subclass of the instance like SGRSuppress. A second call replaces the block. NO when the
+// label cannot be subclassed. For a label of the redesign's drawn over one of Spotify's: a cell reused for another
+// item is given its new text without any layout pass that would tell.
+BOOL SGRObserveText(UILabel *label, void (^changed)(UILabel *label));
+
 // `laidOut` after every layoutSubviews of the view, Spotify's included, for as long as the view lives, by
 // a runtime subclass of the instance like SGRSuppress. A second call replaces the block, and a pass started
 // from inside the block is not reported again. NO when the view cannot be subclassed (one of Spotify's Swift
@@ -60,6 +71,41 @@ BOOL SGRObserveImage(UIImageView *view, void (^changed)(UIImageView *view));
 // For a screen that arranges Spotify's controls its own way: a parent lays its children out after the
 // hook that placed them has returned, so frames set from an ancestor's pass are the ones overwritten.
 BOOL SGRObserveLayout(UIView *view, void (^laidOut)(UIView *view));
+
+// Hidden, alpha, window and superview changes of this view or any ancestor, including an ancestor
+// reparented within the same window. One callback per target; nil removes it. Main thread only.
+void SGRObserveVisibility(UIView *view, dispatch_block_t changed);
+
+static inline CGRect SGRVisibleRectInWindow(UIView *view) {
+    UIWindow *window = view.window;
+    if (!window) return CGRectNull;
+    CGRect remaining = CGRectIntersection(window.bounds, [view convertRect:view.bounds toView:window]);
+    for (UIView *v = view; v; v = v.superview) {
+        if (v.hidden || v.alpha <= 0 || CGRectIsEmpty(remaining)) return CGRectNull;
+        if (v != view && v != window && v.clipsToBounds)
+            remaining = CGRectIntersection(remaining, [v convertRect:v.bounds toView:window]);
+    }
+    return remaining;
+}
+
+static inline BOOL SGRViewInViewport(UIView *view, CGRect covered) {
+    CGRect visible = SGRVisibleRectInWindow(view);
+    return !CGRectIsEmpty(visible) && !CGRectContainsRect(covered, visible);
+}
+
+// Observe only scroll views above a live clip. Weak membership does not keep a former page alive.
+static inline void SGRBindViewportScrolls(UIView *view, NSHashTable *bound, id observer, void *context) {
+    for (UIView *scroll in bound.allObjects) {
+        if (view.window && [view isDescendantOfView:scroll]) continue;
+        [scroll removeObserver:observer forKeyPath:@"contentOffset" context:context];
+        [bound removeObject:scroll];
+    }
+    for (UIView *v = view.window ? view.superview : nil; v; v = v.superview) {
+        if (![v isKindOfClass:UIScrollView.class] || [bound containsObject:v]) continue;
+        [bound addObject:v];
+        [v addObserver:observer forKeyPath:@"contentOffset" options:0 context:context];
+    }
+}
 
 // The first view under `root` (itself included) with the accessibility identifier, depth first. The
 // answer is kept weakly on `root` under `cacheKey` and searched for again only when it is gone, has

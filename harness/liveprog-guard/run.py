@@ -18,7 +18,7 @@ def run(args, **kwargs):
     return subprocess.run([str(a) for a in args], check=True, **kwargs)
 
 
-with tempfile.TemporaryDirectory(prefix="vitrine-liveprog-guard-") as directory:
+with tempfile.TemporaryDirectory(prefix="retrine-liveprog-guard-") as directory:
     out = pathlib.Path(directory)
     run(["make", "-s", "-C", VENDOR, "PLATFORM=mac", f"BUILD={out / 'vendor'}", "-j8"])
     flags = ["xcrun", "clang", "-fobjc-arc", "-O2", "-g", "-Wall", "-Werror",

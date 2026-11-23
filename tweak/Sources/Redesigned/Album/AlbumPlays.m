@@ -1,4 +1,4 @@
-// Album redesign: how many times each track of an album was played, from Vitrine's own listening history
+// Album redesign: how many times each track of an album was played, from Retrine's own listening history
 // (Shared/ListeningStats), for the track rows to show (AlbumRows.x).
 //
 // A row exposes no track URI that has been proven against the tree, so a play is matched by its album and its

@@ -65,7 +65,7 @@ BOOL SGOptionalWorkMayRun(BOOL allowsExpensive) {
         case SGOptionalWorkHeat: message = @"serious or critical thermal state"; break;
         case SGOptionalWorkNoPath: message = @"network path unavailable"; break;
         case SGOptionalWorkConstrained: message = @"Low Data Mode"; break;
-        case SGOptionalWorkExpensive: message = @"expensive network for artwork"; break;
+        case SGOptionalWorkExpensive: message = @"expensive network"; break;
         case SGOptionalWorkAllowed: return YES;
     }
     // SGLogOnce owns a main-thread-only set. Never make an asking queue wait for main.

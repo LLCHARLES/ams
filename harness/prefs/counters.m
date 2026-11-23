@@ -51,7 +51,7 @@ int main(void) {
         checkDataHash();
         checkHash();
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-        NSString *key = [@"vitrine.counter-check." stringByAppendingString:NSUUID.UUID.UUIDString];
+        NSString *key = [@"retrine.counter-check." stringByAppendingString:NSUUID.UUID.UUIDString];
         checkKey = key;
         atexit(cleanDefaults);
 

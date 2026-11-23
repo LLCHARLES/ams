@@ -1,9 +1,10 @@
-// Home redesign: a shelf's heading at the Music app's size, the title 2 style in bold (22pt at the default
+// Home redesign: a shelf's heading at the Music app's size, the title 3 style in bold (20pt at the default
 // text size) over Spotify's 17pt. The title is a label of the Kit's own on the same baseline, drawn over
 // Spotify's, which goes transparent: Spotify's label measures the heading, so the shelf keeps its layout,
-// and the heading button keeps its touch and its accessibility label. The larger title reaches a few
-// points up into the gap above the shelf. A small line over the title ("For fans of") and the artist's
-// picture beside it stay Spotify's.
+// and the heading button keeps its accessibility label. Where Spotify offers "Show all", it goes and a chevron
+// after the title stands for it, as the Music app's "Recently Played ›": a tap anywhere on the heading fires
+// Spotify's concealed "Show all", so it opens the same page. A small line over the title ("For fans of") and the
+// artist's picture beside it stay Spotify's.
 //
 // The label is held on Spotify's by constraints, not by a frame worked out here: a heading with a picture lays
 // its labels out in a stack of its own, which is positioned after this hook has run, so a frame taken here put
@@ -22,10 +23,55 @@
 #import "Redesigned/Kit/SGRKit.h"
 #import "Home.h"
 
-static char kTitleKey, kShowAllKey, kHeldKey, kTriesKey, kAskedKey;
+static char kTitleKey, kShowAllKey, kHeldKey, kTriesKey, kAskedKey, kChevronKey, kTapKey;
 
 // How often a heading with no title yet is looked at again.
 static const NSUInteger kTries = 3;
+// Between the title and its chevron, the Music app's "Recently Played ›".
+static const CGFloat kChevronGap = 4;
+
+// The chevron after the title, in the heading (so a tap on it is the heading's), sized from the title's font.
+static UIImageView *chevronIn(UIView *heading, UIFont *font) {
+    UIImageView *chevron = objc_getAssociatedObject(heading, &kChevronKey);
+    if (!chevron) {
+        chevron = [UIImageView new];
+        chevron.translatesAutoresizingMaskIntoConstraints = NO;
+        chevron.userInteractionEnabled = NO;
+        chevron.isAccessibilityElement = NO;
+        chevron.tintColor = SGRSecondary();
+        chevron.contentMode = UIViewContentModeCenter;
+        objc_setAssociatedObject(heading, &kChevronKey, chevron, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (chevron.superview != heading) [heading addSubview:chevron];
+    UIImageSymbolConfiguration *size = [UIImageSymbolConfiguration configurationWithFont:font scale:UIImageSymbolScaleSmall];
+    if (![chevron.preferredSymbolConfiguration isEqual:size]) {
+        chevron.preferredSymbolConfiguration = size;
+        chevron.image = [UIImage systemImageNamed:@"chevron.forward"];
+    }
+    return chevron;
+}
+
+// The heading's tap fires Spotify's own "Show all", concealed in the heading, so it opens what that opens; the
+// title button's own touch is cancelled as the tap is recognized.
+@interface SGRHeadingTapTarget : NSObject
+@end
+
+@implementation SGRHeadingTapTarget
++ (void)showAllTapped:(UITapGestureRecognizer *)tap {
+    UIView *heading = tap.view;
+    UIView *showAll = SGRFindByIdentifier(heading, @"Components.UI.NavigationButtonHome", &kShowAllKey);
+    if (showAll && SGShownUnder(showAll, heading)) SGRActivate(showAll);
+}
+@end
+
+static UITapGestureRecognizer *headingTap(UIView *heading) {
+    UITapGestureRecognizer *tap = objc_getAssociatedObject(heading, &kTapKey);
+    if (tap) return tap;
+    tap = [[UITapGestureRecognizer alloc] initWithTarget:SGRHeadingTapTarget.class action:@selector(showAllTapped:)];
+    [heading addGestureRecognizer:tap];
+    objc_setAssociatedObject(heading, &kTapKey, tap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return tap;
+}
 
 // What the title is held on, so the constraints are made again only when it changes.
 @interface SGRHeadingHold : NSObject
@@ -79,6 +125,8 @@ static void restyle(UIView *button) {
     if (!theirs) {
         // A heading between two shelves: nothing to hold the title on until its label has text again.
         mine.hidden = YES;
+        ((UIView *)objc_getAssociatedObject(heading, &kChevronKey)).hidden = YES;
+        ((UIGestureRecognizer *)objc_getAssociatedObject(heading, &kTapKey)).enabled = NO;
         if (held.constraints) [NSLayoutConstraint deactivateConstraints:held.constraints];
         objc_setAssociatedObject(button, &kHeldKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         return;
@@ -95,19 +143,35 @@ static void restyle(UIView *button) {
     if (added) [button addSubview:mine];
     mine.hidden = NO;
 
-    UIFont *font = SGCategoryCappedFont(UIFontTextStyleTitle2, UIFontWeightBold, UIContentSizeCategoryLarge);
+    UIFont *font = SGCategoryCappedFont(UIFontTextStyleTitle3, UIFontWeightBold, UIContentSizeCategoryLarge);
     if (![mine.font isEqual:font]) mine.font = font;
     if (![mine.text isEqualToString:theirs.text]) mine.text = theirs.text;
     if (![mine.textColor isEqual:theirs.textColor]) mine.textColor = theirs.textColor;
     if (theirs.alpha != 0) theirs.alpha = 0;
 
-    // The leading edge and the baseline are Spotify's label's; the title ends before "Show all", or before the
-    // heading's trailing edge while there is none, and truncates rather than push anything.
     // Whether "Show all" is offered is read off the hidden flags, not off its width: it has none to go by until
-    // the layout resolves, and a title held to the heading's own edge then ran under it.
+    // the layout resolves. Offered, it goes and a chevron after the title stands for it, the whole heading opening
+    // what it opens by firing it (showAllTapped), so the destination stays Spotify's own.
     UIView *showAll = SGRFindByIdentifier(heading, @"Components.UI.NavigationButtonHome", &kShowAllKey);
     BOOL offered = showAll && SGShownUnder(showAll, heading);
-    UIView *limit = offered ? showAll : heading;
+    UIImageView *chevron = chevronIn(heading, font);
+    chevron.hidden = !offered;
+    if (offered) SGRSuppress(showAll);
+    headingTap(heading).enabled = offered;
+    // VoiceOver keeps "Show all" as an action of the heading, under Spotify's own name for it.
+    NSString *showAllName = offered ? showAll.accessibilityLabel : nil;
+    if (![button.accessibilityCustomActions.firstObject.name ?: @"" isEqualToString:showAllName ?: @""]) {
+        __weak UIView *weakHeading = heading;
+        button.accessibilityCustomActions = showAllName.length ? @[[[UIAccessibilityCustomAction alloc] initWithName:showAllName
+            actionHandler:^BOOL(UIAccessibilityCustomAction *action) {
+                UIView *source = SGRFindByIdentifier(weakHeading, @"Components.UI.NavigationButtonHome", &kShowAllKey);
+                return source && SGRActivate(source);
+            }]] : nil;
+    }
+
+    // The leading edge and the baseline are Spotify's label's; the title ends before the chevron, or before the
+    // heading's trailing edge while there is none, and truncates rather than push anything.
+    UIView *limit = offered ? chevron : heading;
     if (added || held.label != theirs || held.limit != limit) {
         if (held.constraints) [NSLayoutConstraint deactivateConstraints:held.constraints];
         NSMutableArray<NSLayoutConstraint *> *constraints = [NSMutableArray arrayWithArray:@[
@@ -115,7 +179,11 @@ static void restyle(UIView *button) {
             [mine.firstBaselineAnchor constraintEqualToAnchor:theirs.firstBaselineAnchor],
             [mine.trailingAnchor constraintLessThanOrEqualToAnchor:heading.trailingAnchor],
         ]];
-        if (offered) [constraints addObject:[mine.trailingAnchor constraintLessThanOrEqualToAnchor:showAll.leadingAnchor constant:-SGRGrid]];
+        if (offered) [constraints addObjectsFromArray:@[
+            [chevron.leadingAnchor constraintEqualToAnchor:mine.trailingAnchor constant:kChevronGap],
+            [chevron.centerYAnchor constraintEqualToAnchor:mine.centerYAnchor],
+            [chevron.trailingAnchor constraintLessThanOrEqualToAnchor:heading.trailingAnchor],
+        ]];
         [NSLayoutConstraint activateConstraints:constraints];
         held = [SGRHeadingHold new];
         held.label = theirs;

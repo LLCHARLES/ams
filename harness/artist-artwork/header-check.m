@@ -1,4 +1,5 @@
 #import "../album-notes/catalog-boundary.h"
+#import "motion-view-stubs.h"
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Redesigned/Artist/Artist.h"

@@ -61,10 +61,10 @@ void SGTestTypography(NSString *directory) {
     SGTestAssert([s.sizes isEqual:@[@40, @26, @26]] && [s.weights isEqual:@[@2, @0, @0]],
         @"default role sizes and weights preserve original hierarchy");
     NSArray *content = @[@"별빛을 따라 걸어요\n바람이 불어오는 밤",
-        @"A new day is on its way", @"Sample lyrics · Vitrine · Provider credit",
+        @"A new day is on its way", @"Sample lyrics · Retrine · Provider credit",
         @"Byeolbicheul ttara georeoyo\nBarami bureooneun bam",
         @"We walk beneath the stars\nOn a night carried by the wind",
-        @"Sample song · Night walk", @"Sample artist · Vitrine"];
+        @"Sample song · Night walk", @"Sample artist · Retrine"];
     NSArray *sizes = @[[NSValue valueWithCGSize:CGSizeMake(640, 640)],
         [NSValue valueWithCGSize:CGSizeMake(800, 450)], [NSValue valueWithCGSize:CGSizeMake(480, 720)]];
     NSArray *names = @[@"sample-square", @"sample-landscape", @"sample-portrait"];

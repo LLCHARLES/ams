@@ -6,6 +6,8 @@
 //   -sheet S    opens the sliders' sheet S seconds in, as a tap on its button would
 //   -check 1    asserts the page's behavior (see runChecks), prints PASS and FAIL lines and quits with the
 //               number of failures
+//   -pushCheck 1 pushes the page as Mod Settings does, for Apple Music, Vivid and a look of the sliders', and checks
+//               the presets arrive where they rest (see runPushCase), the same way
 //   -textCheck 1 asserts the Text sizes page and each text's look (see runTextChecks) the same way
 //   -textPage N opens the Text sizes page, then text N's own page (0 lyrics, 1 pronunciation, 2 translation),
 //               for a screenshot; -textLook 1 stores 130%, regular and 140% for it first
@@ -54,6 +56,9 @@ static void runChecks(UIViewController *page) {
     SGRKaraokeView *preview = [page valueForKey:@"preview"];
     NSArray<UIButton *> *chips = chipsOf(page);
     expect(chips.count == SGRLyricsLookPresetNames().count && lit(chips[0]), @"with nothing stored Apple Music is lit");
+    expect([[preview valueForKey:@"fontSize"] doubleValue] == 34 && [[preview valueForKey:@"margin"] doubleValue] == 32,
+           [NSString stringWithFormat:@"with nothing stored the lines are the Music app's 34 pt, 32 pt in from the sides (%@ pt, %@ pt)",
+            [preview valueForKey:@"fontSize"], [preview valueForKey:@"margin"]]);
     expect([preview valueForKey:@"tops"] != nil && !preview.hidden, @"the preview plays its lines");
     UIView *header = ((UITableViewController *)page).tableView.tableHeaderView;
     expect(CGRectGetMaxY([chips[0] convertRect:chips[0].bounds toView:header]) < header.bounds.size.height,
@@ -79,6 +84,8 @@ static void runChecks(UIViewController *page) {
         expect([nav isKindOfClass:UINavigationController.class] && [NSStringFromClass(sheet.class) isEqualToString:@"SGRLyricsStyleSheet"],
                @"the sliders' button opens the sheet");
         NSArray<UISlider *> *sliders = find(sheet.tableView, UISlider.class);
+        expect([sheet.tableView numberOfRowsInSection:1] == 2,
+               @"only player and landscape/full-screen lyrics have a percentage size");
         expect(sliders.count == 5, [NSString stringWithFormat:@"the sheet has five sliders (%lu)", (unsigned long)sliders.count]);
         UISlider *spacing = nil;
         for (UISlider *slider in sliders) {
@@ -105,12 +112,103 @@ static void runChecks(UIViewController *page) {
     });
 }
 
+#pragma mark - the page pushed
+
+// Where the strip is drawn each frame: its presentation while UIKit animates it, else the model.
+@interface SGStripSampler : NSObject
+@property (nonatomic, weak) UIViewController *page;
+@property (nonatomic, strong) NSMutableArray<NSNumber *> *offsets;
+@end
+
+@implementation SGStripSampler
+- (void)tick:(CADisplayLink *)link {
+    UIViewController *page = self.page;
+    if (!page.isViewLoaded || !page.view.window) return;
+    UIScrollView *strip = [page valueForKey:@"strip"];
+    CALayer *shown = strip.layer.presentationLayer ?: strip.layer;
+    [self.offsets addObject:@(shown.bounds.origin.x)];}
+@end
+
+static SGStripSampler *sampling(UIViewController *page, CADisplayLink **link) {
+    SGStripSampler *sampler = [SGStripSampler new];
+    sampler.page = page;
+    sampler.offsets = [NSMutableArray array];
+    *link = [CADisplayLink displayLinkWithTarget:sampler selector:@selector(tick:)];
+    [*link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+    return sampler;
+}
+
+static NSString *offsetsText(NSArray<NSNumber *> *offsets) {
+    NSMutableArray *seen = [NSMutableArray array];
+    for (NSNumber *x in offsets) if (![seen.lastObject isEqual:x]) [seen addObject:x];
+    return [seen componentsJoinedByString:@" "];
+}
+
+// Mod Settings pushes the page: the presets come in already where they rest -- the chosen one in sight, or the first at
+// the card's inset for a look of the sliders' -- and do not move once it is on screen (issue #41). A preset picked after
+// that still scrolls to it.
+static void runPushCase(UINavigationController *nav, NSArray *cases, NSUInteger index) {
+    if (index == cases.count) {
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:SGRKeyLyricsLook];
+        printf("%d failed\n", sg_failures);
+        fflush(stdout);
+        exit(sg_failures);
+    }
+    NSInteger preset = [cases[index] integerValue];
+    SGRLyricsLook look = SGRLyricsLookPreset(preset < 0 ? 0 : (NSUInteger)preset);
+    if (preset < 0) look.size += 1;
+    SGRSetLyricsLook(look, nil);
+    NSString *name = preset < 0 ? @"the sliders' own look" : SGRLyricsLookPresetNames()[(NSUInteger)preset];
+    if (preset < 0) expect(SGRLyricsLookPresetIndex(SGRLyricsLookNow()) < 0, @"the sliders' own look is no preset");
+    UIViewController *page = SGRLyricsSettingsPage(@"Lyrics", SGRestartNote, @[]);
+    CADisplayLink *link;
+    SGStripSampler *sampler = sampling(page, &link);
+    [nav pushViewController:page animated:YES];
+    after(1.5, ^{
+        [link invalidate];
+        UIScrollView *strip = [page valueForKey:@"strip"];
+        UIView *card = [page valueForKey:@"card"];
+        NSArray<UIButton *> *chips = chipsOf(page);
+        NSArray<NSNumber *> *offsets = sampler.offsets;
+        CGFloat rest = strip.contentOffset.x;
+        BOOL still = offsets.count > 0;
+        for (NSNumber *x in offsets) still &= fabs(x.doubleValue - rest) < 0.5;
+        expect(still, [NSString stringWithFormat:@"%@: the presets are where they rest from the first frame on screen (%@ over %lu frames)",
+                       name, offsetsText(offsets), (unsigned long)offsets.count]);
+        if (preset < 0) {
+            expect(fabs(rest + CGRectGetMinX(card.frame)) < 0.5,
+                   [NSString stringWithFormat:@"%@: the first preset starts at the card's inset (offset %.1f, card %.1f)", name, rest, CGRectGetMinX(card.frame)]);
+        } else {
+            UIButton *chosen = chips[(NSUInteger)preset];
+            CGRect shown = [strip convertRect:chosen.bounds fromView:chosen];
+            expect(CGRectContainsRect(strip.bounds, shown), [NSString stringWithFormat:@"%@: the chosen preset is in sight", name]);
+        }
+        // Picked from the other end, the strip scrolls there over several frames.
+        UIButton *other = preset == (NSInteger)chips.count - 1 ? chips.firstObject : chips.lastObject;
+        CADisplayLink *pickLink;
+        SGStripSampler *picked = sampling(page, &pickLink);
+        [other sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
+        after(1.0, ^{
+            [pickLink invalidate];
+            NSMutableSet *distinct = [NSMutableSet setWithArray:picked.offsets];
+            CGRect shown = [strip convertRect:other.bounds fromView:other];
+            BOOL moves = fabs(strip.contentOffset.x - rest) >= 0.5;
+            BOOL within = strip.contentOffset.x > -strip.adjustedContentInset.left - 0.5;
+            expect(CGRectContainsRect(strip.bounds, shown) && within && (!moves || distinct.count > 2),
+                   [NSString stringWithFormat:@"%@: a preset picked afterwards is scrolled into sight%@ (%@)", name,
+                    moves ? @" smoothly" : @"", offsetsText(picked.offsets)]);
+            [nav popToRootViewControllerAnimated:NO];
+            after(0.3, ^{ runPushCase(nav, cases, index + 1); });
+        });
+    });
+}
+
 #pragma mark - the Text sizes page
 
-// The view's private style, made as the view makes it: 30 pt, the stored order, every text shown.
-static id styleNow(BOOL romanised) {
+// The view's private style, made as the view makes it: 30 pt and the stored order.
+static id styleNow(BOOL pronunciation, BOOL romanised) {
     return ((id (*)(id, SEL, CGFloat, NSArray *, BOOL, BOOL, BOOL))objc_msgSend)([NSClassFromString(@"SGRKaraokeStyle") alloc],
-        NSSelectorFromString(@"initWithSize:order:pronunciation:translation:romanised:"), 30, SGRLyricsTextOrder(), YES, YES, romanised);
+        NSSelectorFromString(@"initWithSize:order:pronunciation:translation:romanised:"), 30, SGRLyricsTextOrder(), pronunciation, YES, romanised);
 }
 
 static UIFontWeight weightOf(UIFont *font) {
@@ -140,16 +238,17 @@ static NSString *fontText(UIFont *font) {
 static void runTextChecks(UINavigationController *nav) {
     clearTextLooks();
     // Nothing stored is the look there always was: 30, 20 and 16 pt, bold, bold and semibold, the usual brightness.
-    id style = styleNow(YES);
+    id style = styleNow(YES, NO);
     UIFont *lyrics = [style valueForKey:@"lyrics"], *spoken = [style valueForKey:@"pronunciation"], *translation = [style valueForKey:@"translation"];
-    UIFont *romanised = [style valueForKey:@"romanised"];
-    expect(lyrics.pointSize == 30 && spoken.pointSize == 20 && translation.pointSize == 16 && romanised.pointSize == 20,
-           [NSString stringWithFormat:@"unset sizes stay 30, 20, 16 and the romanized 20 (%@, %@, %@, %@)", fontText(lyrics), fontText(spoken), fontText(translation), fontText(romanised)]);
+    // Generated readings now occupy Pronunciation, including when source pronunciation is switched off.
+    UIFont *generated = [styleNow(NO, YES) valueForKey:@"pronunciation"];
+    expect(lyrics.pointSize == 30 && spoken.pointSize == 20 && translation.pointSize == 16 && generated.pointSize == 20,
+           [NSString stringWithFormat:@"unset sizes stay 30, 20, 16 and the generated pronunciation 20 (%@, %@, %@, %@)", fontText(lyrics), fontText(spoken), fontText(translation), fontText(generated)]);
     expect(near(weightOf(lyrics), weightOf([UIFont systemFontOfSize:30 weight:UIFontWeightBold]))
            && near(weightOf(spoken), weightOf([UIFont systemFontOfSize:20 weight:UIFontWeightBold]))
            && near(weightOf(translation), weightOf([UIFont systemFontOfSize:16 weight:UIFontWeightSemibold]))
-           && near(weightOf(romanised), weightOf([UIFont systemFontOfSize:20 weight:UIFontWeightSemibold])),
-           @"unset weights stay bold, bold, semibold and the romanized semibold");
+           && near(weightOf(generated), weightOf([UIFont systemFontOfSize:20 weight:UIFontWeightBold])),
+           @"unset weights stay bold, bold, semibold and the generated pronunciation bold");
     expect(near([[style valueForKey:@"translationDim"] doubleValue], 0.3) && near([[style valueForKey:@"translationLit"] doubleValue], 0.6)
            && near([[style valueForKey:@"spokenDim"] doubleValue], 0.3) && near([[style valueForKey:@"spokenLit"] doubleValue], 0.6)
            && near([[style valueForKey:@"spokenSung"] doubleValue], 1) && near([[style valueForKey:@"noteDim"] doubleValue], 0.22)
@@ -169,7 +268,7 @@ static void runTextChecks(UINavigationController *nav) {
                                                              usingBlock:^(NSNotification *n) { posted++; }];
     SGRSetLyricsTextLook(SGRLyricsTextTranslation, (SGRLyricsTextLook){115, 0, 140});
     SGRSetLyricsTextLook(SGRLyricsTextLyrics, (SGRLyricsTextLook){120, 1, 60});
-    style = styleNow(NO);
+    style = styleNow(YES, NO);
     translation = [style valueForKey:@"translation"];
     lyrics = [style valueForKey:@"lyrics"];
     expect(posted == 2, @"each change is posted, so every lyrics view sets its lines again");
@@ -185,11 +284,11 @@ static void runTextChecks(UINavigationController *nav) {
     expect([[backing valueForKey:@"lyrics"] pointSize] == 22 && near(weightOf([backing valueForKey:@"lyrics"]), weightOf([UIFont systemFontOfSize:22 weight:UIFontWeightSemibold])),
            @"the backing row follows the lyrics' size and weight");
     SGRSetLyricsTextLook(SGRLyricsTextPronunciation, (SGRLyricsTextLook){100, 2, 140});
-    style = styleNow(NO);
+    style = styleNow(YES, NO);
     expect(near([[style valueForKey:@"spokenSung"] doubleValue], 1) && near([[style valueForKey:@"spokenDim"] doubleValue], 0.42),
            @"a bright pronunciation never goes past white as it is sung");
     SGRSetLyricsTextLook(SGRLyricsTextPronunciation, (SGRLyricsTextLook){100, 2, 40});
-    style = styleNow(NO);
+    style = styleNow(YES, NO);
     expect(near([[style valueForKey:@"spokenSung"] doubleValue], 0.4) && near([[style valueForKey:@"spokenDim"] doubleValue], 0.12),
            @"a dim pronunciation is dimmer waiting and sung");
     // What a sung word shows is its lit copy over the waiting one still under it: composited, that is the brightness asked for.
@@ -207,7 +306,7 @@ static void runTextChecks(UINavigationController *nav) {
     line.pronunciation = spokenLine;
     for (NSNumber *bright in @[@40, @100, @140]) {
         SGRSetLyricsTextLook(SGRLyricsTextPronunciation, (SGRLyricsTextLook){100, 2, bright.integerValue});
-        id lineStyle = styleNow(NO);
+        id lineStyle = styleNow(YES, NO);
         UIView *lineView = ((id (*)(id, SEL, id, CGFloat, id, id, BOOL, BOOL))objc_msgSend)([NSClassFromString(@"SGRKaraokeLineView") alloc],
             NSSelectorFromString(@"initWithLine:width:style:under:blurred:sweepsEstimates:"), line, 300, lineStyle, nil, NO, NO);
         NSArray<UIView *> *words = [lineView valueForKey:@"words"];
@@ -295,7 +394,8 @@ static void runTextChecks(UINavigationController *nav) {
         expect(fabs(scrolled - onScreen) < 0.5, [NSString stringWithFormat:@"scrolling leaves the preview where it was (%.1f)", scrolled]);
         after(1.0, ^{
             id restyled = styleOf([page valueForKey:@"preview"]);
-            expect([[restyled valueForKey:@"translation"] pointSize] == 19, @"the preview sets its translation at 120% once restyled");
+            // The default Apple Music look is 34 pt: its third-place text is 18 pt, then 22 at 120%.
+            expect([[restyled valueForKey:@"translation"] pointSize] == 22, @"the preview sets its translation at 120% once restyled");
             [nav popViewControllerAnimated:NO];
             [nav pushViewController:SGRLyricsTextLookPage(SGRLyricsTextLyrics) animated:NO];
             after(0.6, ^{
@@ -321,7 +421,9 @@ static void runTextChecks(UINavigationController *nav) {
     [args removeObjectForKey:SGRKeyLyricsLook];   // each launch starts from its own arguments
     if ([args objectForKey:@"preset"]) SGRSetLyricsLook(SGRLyricsLookPreset((NSUInteger)[args integerForKey:@"preset"]), nil);
     SGModSection *stand = SGSection(@"Sources", @[SGSwitchRow(@"Lyrics for every track", @"Even where Spotify has none", @"harness.everyTrack")]);
-    UIViewController *page = SGRLyricsSettingsPage(@"Lyrics", SGRestartNote, @[stand]);
+    BOOL push = [args boolForKey:@"pushCheck"];
+    UIViewController *page = push ? [[UITableViewController alloc] initWithStyle:UITableViewStyleInsetGrouped]
+                                  : SGRLyricsSettingsPage(@"Lyrics", SGRestartNote, @[stand]);
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:page];
     nav.navigationBar.prefersLargeTitles = NO;
     nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -333,6 +435,7 @@ static void runTextChecks(UINavigationController *nav) {
             [(UIButton *)[page valueForKey:@"adjust"] sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
         });
     }
+    if (push) after(1.0, ^{ runPushCase(nav, @[@0, @4, @-1], 0); });
     if ([args boolForKey:@"check"]) after(2.5, ^{ runChecks(page); });   // the preview measures its lines off the main thread
     if ([args boolForKey:@"textCheck"]) after(1.5, ^{ runTextChecks(nav); });
     if ([args objectForKey:@"textPage"]) {

@@ -30,7 +30,11 @@ static NSString *const kZlib =
     @"3. This notice may not be removed or altered from any source distribution.";
 
 UIViewController *SGLicensesPage(void) {
-    SGModRow *mod = SGLinkRow(@"Vitrine", SGL(@"settings.mod.licenses.vitrine.subtitle", @"GNU General Public License v3.0"), @"https://www.gnu.org/licenses/gpl-3.0.html");
+    // Keep the existing localization key for the license shared with upstream.
+    NSString *gpl = SGL(@"settings.mod.licenses.vitrine.subtitle", @"GNU General Public License v3.0");
+    SGModRow *mod = SGLinkRow(@"Retrine", gpl, @"https://www.gnu.org/licenses/gpl-3.0.html");
+    SGModRow *upstream = SGLinkRow(@"Vitrine", gpl, @"https://github.com/My-Name-Is-Jeff/vitrine");
+    SGModRow *original = SGLinkRow(@"spoti.pw", nil, @"https://github.com/skopevoj/spoti.pw");
     SGModRow *bs2b = SGLinkRow(@"libbs2b", SGL(@"settings.mod.licenses.bs2b.subtitle", @"Crossfeed · MIT License"), @"https://github.com/alexmarsev/libbs2b");
     SGModRow *wdl = SGLinkRow(@"WDL", SGL(@"settings.mod.licenses.wdl.subtitle", @"Liveprog's EEL2 · zlib License"), @"https://github.com/justinfrankel/WDL");
     // EeveeSpotify's repo was taken down, so the row opens the license both projects are under.
@@ -42,8 +46,8 @@ UIViewController *SGLicensesPage(void) {
     SGModRow *lightVoice = SGLinkRow(SGL(@"settings.mod.licenses.light_voice_model.title", @"Karaoke's light voice model"), SGL(@"settings.mod.licenses.light_voice_model.subtitle", @"Mini-BS-RoFormer-18M · MIT License"),
                                      @"https://huggingface.co/HiDolen/Mini-BS-RoFormer-18M");
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.mod.licenses.title", @"Licenses") intro:SGL(@"settings.mod.licenses.intro", @"The mod's own license, and the code from others it includes.") sections:@[
-        SGSection(nil, @[mod]),
-        SGNotedSection(nil, @[eevee], SGL(@"settings.mod.licenses.eevee.note", @"By whoeevee (whoeevee/EeveeSpotify), under the GNU General Public License v3.0, as Vitrine is.\n\n"
+        SGSection(nil, @[mod, upstream, original]),
+        SGNotedSection(nil, @[eevee], SGL(@"settings.mod.licenses.eevee.note", @"By whoeevee (whoeevee/EeveeSpotify), under the GNU General Public License v3.0, as Retrine is.\n\n"
                                       @"Ported from it, on the Premium, ads & privacy page: Hide ads (the ad services kept from starting, "
                                       @"ad components taken out of Home and Search, ad sections out of the feeds, ad requests answered empty), "
                                       @"Hide upsells (the Premium pop-ups, and the ad and upsell flags it turns off) and Spoof Premium "

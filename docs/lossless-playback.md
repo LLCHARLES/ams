@@ -1,4 +1,4 @@
-# Lossless playback inside Vitrine
+# Lossless playback inside Retrine
 
 Investigation and native decoder experiment, 2026-10-08. **No production playback integration yet.**
 Read with the [provider design](lossless-sources.md) and [addon compatibility notes](lossless-addons.md).
@@ -88,7 +88,7 @@ Constraints from the current code:
   a lossless source with resampled output, not preserved hi-res output.
 - Selection is after Spotify's mixer/EQ. Overwriting its samples can bypass upstream gain,
   normalization, fade and duck behavior. Measure and reproduce necessary gains explicitly; exclude
-  crossfade/Automix initially. Vitrine's downstream processing is a separate stage.
+  crossfade/Automix initially. Retrine's downstream processing is a separate stage.
 - Follow `SGPlayerWatchMusicOutput`, disposal and format changes. Keep buffers alive through render.
   Preserve native sound information used to choose the music output; replacement sound must not keep
   an obsolete output selected.

@@ -1,4 +1,4 @@
-// Switch to video hidden from the player, under either look (SGKeyHideVideoSwitch, off until switched on).
+// Redesigned opts in to Spotify's video chip; Native keeps it unless explicitly hidden.
 //
 // The switch is the chip Spotify puts over the track's title for a song with a music video, Switch to
 // video and, once switched, Switch to audio. Its accessibility identifier is nowplaying-npv-musicvideos-switch:
@@ -8,11 +8,16 @@
 // presence, without setting hidden on Spotify's stacks (AGENTS.md).
 #import "Core/SGCore.h"
 #import "PlayerSettings.h"
+#import "Settings/SGModPage.h"
 
-static NSString *const kSwitchIdentifier = @"nowplaying-npv-musicvideos-switch";
+SGModRow *SGNativeVideoSwitchRow(void) {
+    SGModRow *video = SGHideRow(SGL(@"settings.player.hide_video_switch.title", @"Switch to video"), SGL(@"settings.player.hide_video_switch.subtitle", @"The chip over the title of a song with a music video"), SGKeyHideVideoSwitch);
+    video.readSwitch = ^BOOL { return SGVideoSwitchHiddenForLook(NO); };
+    return video;
+}
 
 static UIView *switchIn(UIView *root, int depth) {
-    if ([root.accessibilityIdentifier isEqualToString:kSwitchIdentifier]) return root;
+    if ([root.accessibilityIdentifier isEqualToString:SGVideoSwitchIdentifier]) return root;
     if (depth > 10) return nil;
     for (UIView *child in root.subviews) {
         UIView *found = switchIn(child, depth + 1);
@@ -25,7 +30,7 @@ static UIView *switchIn(UIView *root, int depth) {
 - (void)viewDidLayoutSubviews {
     %orig;
     // Read on each pass so the switch applies without a relaunch; off, Spotify's chip is left alone.
-    if (!SGHidden(SGKeyHideVideoSwitch)) return;
+    if (!SGVideoSwitchHidden()) return;
     UIView *videoSwitch = switchIn(((UIViewController *)self).viewIfLoaded, 0);
     if (!videoSwitch) return;
     static BOOL logged;

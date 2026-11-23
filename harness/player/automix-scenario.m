@@ -81,7 +81,7 @@ static SPTPlayerTrack *song(NSString *uri, NSString *title, NSString *image) {
     SPTPlayerTrack *track = [SPTPlayerTrack new];
     [track setValue:uri forKey:@"URI"];
     [track setValue:title forKey:@"trackTitle"];
-    [track setValue:@"Vitrine harness" forKey:@"artistName"];
+    [track setValue:@"Retrine harness" forKey:@"artistName"];
     NSMutableDictionary *metadata = [@{@"title": title} mutableCopy];
     if (image) metadata[@"image_xlarge_url"] = image;
     [track setValue:metadata forKey:@"metadata"];
@@ -874,9 +874,11 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
     });
 
     // Each stop: the stage up inside the window, then what stops it, then the cover looked at.
+    // The stage waits for the incoming cover (PlayerMix.x's -start), fetched again after a track change, so the stop
+    // waits for the stage itself rather than a fixed time.
     void (^stops)(NSString *, NSTimeInterval, dispatch_block_t, dispatch_block_t) = ^(NSString *name, NSTimeInterval look, dispatch_block_t up, dispatch_block_t stop) {
         step(0.2, up);
-        step(0.6, ^{
+        stepUntil([name stringByAppendingString:@": the stage up inside the window (10 s)"], ^BOOL { return stage() != nil; }, ^{
             weakStage = stage();
             wasOn = weakStage != nil;
             stop();
@@ -908,7 +910,7 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
             playA(14.2, 16);
             SGRHarnessSetTransition(blend());
         });
-        step(0.6, ^{
+        stepUntil([name stringByAppendingString:@": the stage up inside the window (10 s)"], ^BOOL { return stage() != nil; }, ^{
             weakStage = stage();
             wasOn = weakStage != nil;
             change();

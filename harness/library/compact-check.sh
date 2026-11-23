@@ -2,7 +2,9 @@
 # Compact library's checks (main.m `check`, settings-check.m) in an iOS simulator of the run's own, made for the run
 # and deleted after it: Compact library off; on, with the list loading late, without a sort row and with a filter the
 # menu has no clear chip for; on at the largest accessibility text size and right to left; the Library page of Mod
-# Settings, left to right and right to left. Exits nonzero on the first failed check.
+# Settings, left to right and right to left; on, with the top safe area changing under the folded chips, Spotify's
+# passes setting the whole inset, or the bottom first. SHOTS=<dir>
+# keeps the screenshots the runs take. Exits nonzero on the first failed check.
 #     THEOS=$HOME/theos ./compact-check.sh
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -24,14 +26,24 @@ run() {
     xcrun simctl launch --console-pty --terminate-running-process "$UDID" com.vojta.libraryharness \
         -AppleLanguages '(en)' -AppleLocale en_US "$@" > "$OUT/run.log" 2>&1 || true
     cat "$OUT/run.log"
+    if [ -n "${SHOTS:-}" ]; then
+        mkdir -p "$SHOTS"
+        sed -n 's/^SHOT //p' "$OUT/run.log" | tr -d '\r' | while read -r shot; do cp "$shot" "$SHOTS/"; done
+    fi
     grep -q "$expected" "$OUT/run.log" || { echo "FAILED: $*"; exit 1; }
 }
 
 run "PASS all off" check
+run "PASS all off" check wrapped
 run "PASS all compact" check compact late
 run "PASS all compact" check compact
 run "PASS all nosort" check compact nosort
 run "PASS all noclear" check compact noclear
+run "PASS all compact" check compact wrapped
+run "PASS all noclear" check compact noclear wrapped
+run "PASS all safearea" check compact safearea
+run "PASS all safearea" check compact wrapped safearea
+run "PASS all safearea" check compact safearea bottomfirst
 run "PASS all compact" check compact -tag large-text -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
 run "PASS all compact" check compact -tag rtl -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
 run "PASS all settings" settings

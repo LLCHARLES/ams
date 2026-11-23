@@ -12,6 +12,7 @@
 
 // Pin the default; a saved model remains the user's choice.
 static NSString *const kModel = @"gemini-4-hydrogen";
+// Stable Keychain service for existing keys, including deletion.
 static NSString *const kService = @"Vitrine.Gemini", *const kAccount = @"api-key";
 
 NSString *SGGeminiModel(void) {

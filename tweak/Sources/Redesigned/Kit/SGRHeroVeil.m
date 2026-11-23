@@ -1,7 +1,6 @@
 // The scroll veil over a page's hero (SGRHeroVeil.h).
 #import "Core/SGCore.h"
 #import "SGRHeroVeil.h"
-#import "SGRHeaderInfo.h"
 
 @interface CAFilter : NSObject
 + (instancetype)filterWithType:(NSString *)type;
@@ -192,7 +191,6 @@ static NSNumber *radiusNumber(CGFloat radius) {
     [CATransaction commit];
     [self sgr_drawRadius:SGRHeroVeilBlurRadius(distance) alpha:SGRHeroVeilDimAlpha(distance)
                    place:SGRHeroVeilArtPlace(pull, hero.bounds.size.height, displacement, beyond)];
-    [_info clipUnderTopBar];
 }
 
 - (void)sgr_drawRadius:(CGFloat)radius alpha:(CGFloat)alpha place:(SGRHeroArtPlace)place {

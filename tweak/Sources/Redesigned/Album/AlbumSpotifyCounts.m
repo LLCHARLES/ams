@@ -1,4 +1,5 @@
 #import "AlbumSpotifyCounts.h"
+#import "Core/SGDataRoot.h"
 
 static const NSUInteger kMaxTracksPerAlbum = 500, kMaxCachedAlbums = 64, kMaxCacheBytes = 2 * 1024 * 1024;
 static const NSUInteger kMaxPendingAlbums = 16, kMaxAlbumWaiters = 16;
@@ -6,82 +7,56 @@ static const NSTimeInterval kCountLifetimeSeconds = 24 * 60 * 60, kUnavailableLi
 // Extended-metadata play count: the request asks for kind 185; the response carries it in payload field 3
 // (a varint, or a message with varint field 1).
 static const uint64_t kPlayCountExtension = 185;
-static NSString *const kBase62 = @"0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-static BOOL validURI(NSString *uri, NSString *kind) {
-    if (![uri isKindOfClass:NSString.class]) return NO;
-    NSString *prefix = [NSString stringWithFormat:@"spotify:%@:", kind];
-    if (![uri hasPrefix:prefix] || uri.length != prefix.length + 22) return NO;
-    for (NSUInteger i = prefix.length; i < uri.length; i++) {
-        if ([kBase62 rangeOfString:[uri substringWithRange:NSMakeRange(i, 1)]].location == NSNotFound) return NO;
-    }
-    return YES;
-}
-
-NSString *SGRAlbumMetadataPath(NSString *albumURI) {
-    if (!validURI(albumURI, @"album")) return nil;
-    NSString *identifier = [albumURI substringFromIndex:@"spotify:album:".length];
-    uint8_t gid[16] = {0};
-    for (NSUInteger i = 0; i < identifier.length; i++) {
-        NSUInteger carry = [kBase62 rangeOfString:[identifier substringWithRange:NSMakeRange(i, 1)]].location;
-        for (NSInteger j = sizeof(gid) - 1; j >= 0; j--) {
-            carry += gid[j] * 62;
-            gid[j] = carry & 255;
-            carry >>= 8;
-        }
-        if (carry) return nil; // A 22-digit base62 value need not fit Spotify's 128-bit GID.
-    }
-    NSMutableString *hex = [NSMutableString string];
-    for (NSUInteger i = 0; i < sizeof(gid); i++) [hex appendFormat:@"%02x", gid[i]];
-    return [NSString stringWithFormat:@"/metadata/4/album/%@?market=from_token", hex];
-}
-
-static NSString *trackFromGID(id hex) {
-    if (![hex isKindOfClass:NSString.class] || [hex length] != 32 ||
-        [hex rangeOfString:@"^[0-9A-Fa-f]{32}$" options:NSRegularExpressionSearch].location == NSNotFound) return nil;
-    uint8_t bytes[16];
-    for (NSUInteger i = 0; i < sizeof(bytes); i++) {
-        unsigned int value = 0;
-        [[NSScanner scannerWithString:[hex substringWithRange:NSMakeRange(i * 2, 2)]] scanHexInt:&value];
-        bytes[i] = value;
-    }
-    unichar identifier[22];
-    for (NSInteger digit = 21; digit >= 0; digit--) {
-        NSUInteger remainder = 0;
-        for (NSUInteger i = 0; i < sizeof(bytes); i++) {
-            NSUInteger value = remainder * 256 + bytes[i];
-            bytes[i] = value / 62;
-            remainder = value % 62;
-        }
-        identifier[digit] = [kBase62 characterAtIndex:remainder];
-    }
-    return [@"spotify:track:" stringByAppendingString:[NSString stringWithCharacters:identifier length:22]];
-}
 
 NSString *SGRAlbumTrackURIFromMenuIdentifier(NSString *identifier) {
     NSString *prefix = @"Components.UI.ContextMenuButton-";
     if (![identifier hasPrefix:prefix]) return nil;
     NSString *uri = [@"spotify:track:" stringByAppendingString:[identifier substringFromIndex:prefix.length]];
-    return validURI(uri, @"track") ? uri : nil;
+    return SGSpotifyValidURI(uri, @"track") ? uri : nil;
 }
 
-NSArray<NSString *> *SGRAlbumMetadataTracks(NSData *json) {
+@implementation SGRAlbumTrackIndex {
+    NSDictionary *_byURI, *_byTitle;
+}
++ (instancetype)fromMetadata:(NSData *)json {
     if (!json.length || json.length > kMaxCacheBytes) return nil;
     id album = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
     if (![album isKindOfClass:NSDictionary.class] || ![album[@"disc"] isKindOfClass:NSArray.class]) return nil;
     NSMutableOrderedSet *tracks = [NSMutableOrderedSet orderedSet];
+    NSMutableDictionary *uris = [NSMutableDictionary dictionary], *names = [NSMutableDictionary dictionary];
+    BOOL allTitlesKnown = YES;
     for (id disc in album[@"disc"]) {
         if (![disc isKindOfClass:NSDictionary.class] || ![disc[@"track"] isKindOfClass:NSArray.class]) return nil;
+        NSUInteger position = 0;
         for (id track in disc[@"track"]) {
             if (![track isKindOfClass:NSDictionary.class]) return nil;
-            NSString *uri = track[@"uri"], *gidURI = trackFromGID(track[@"gid"]);
-            if (!validURI(uri, @"track")) uri = gidURI;
+            NSString *uri = track[@"uri"], *gidURI = SGSpotifyTrackURIFromGID(track[@"gid"]);
+            if (!SGSpotifyValidURI(uri, @"track")) uri = gidURI;
             if (!uri || (gidURI && ![uri isEqual:gidURI])) return nil;
             [tracks addObject:uri];
+            NSNumber *number = @(++position);
+            uris[uri] = uris[uri] ? @0 : number;
+            NSString *name = track[@"name"];
+            if ([name isKindOfClass:NSString.class] && name.length) names[name] = names[name] ? @0 : number;
+            else allTitlesKnown = NO;
             if (tracks.count > kMaxTracksPerAlbum) return nil;
         }
     }
-    return tracks.count ? tracks.array : nil;
+    if (!tracks.count) return nil;
+    SGRAlbumTrackIndex *index = [self new];
+    index->_tracks = tracks.array;
+    index->_byURI = uris;
+    index->_byTitle = allTitlesKnown ? names : nil;
+    return index;
+}
+- (NSNumber *)numberForURI:(NSString *)uri title:(NSString *)title {
+    NSNumber *number = uri ? _byURI[uri] : title ? _byTitle[title] : nil;
+    return number.unsignedIntegerValue ? number : nil;
+}
+@end
+
+NSArray<NSString *> *SGRAlbumMetadataTracks(NSData *json) {
+    return [SGRAlbumTrackIndex fromMetadata:json].tracks;
 }
 
 // Preflight without allocating a field object for each attacker-controlled tag. The common parser
@@ -192,7 +167,7 @@ static BOOL validCounts(id counts) {
     if (![counts isKindOfClass:NSDictionary.class] || [counts count] > kMaxTracksPerAlbum) return NO;
     for (id uri in counts) {
         id number = counts[uri];
-        if (!validURI(uri, @"track") || ![number isKindOfClass:NSNumber.class] ||
+        if (!SGSpotifyValidURI(uri, @"track") || ![number isKindOfClass:NSNumber.class] ||
             CFGetTypeID((__bridge CFTypeRef)number) == CFBooleanGetTypeID() ||
             [number doubleValue] < 0 || [number unsignedLongLongValue] > (unsigned long long)LLONG_MAX ||
             floor([number doubleValue]) != [number doubleValue]) return NO;
@@ -204,14 +179,15 @@ static BOOL validCounts(id counts) {
     NSURL *_url;
     SGRAlbumCountsTransport _transport;
     dispatch_queue_t _queue;
-    NSMutableDictionary *_records, *_pending;
+    NSMutableDictionary *_records, *_pending, *_pendingIndexes;
 }
 - (instancetype)initWithCacheURL:(NSURL *)url transport:(SGRAlbumCountsTransport)transport {
     if (!(self = [super init])) return nil;
     _url = url;
     _transport = [transport copy];
-    _queue = dispatch_queue_create("vitrine.album-counts", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+    _queue = dispatch_queue_create("retrine.album-counts", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
     _pending = [NSMutableDictionary dictionary];
+    _pendingIndexes = [NSMutableDictionary dictionary];
     return self;
 }
 - (void)readCache {
@@ -225,7 +201,7 @@ static BOOL validCounts(id counts) {
     if (![records isKindOfClass:NSDictionary.class] || [records count] > kMaxCachedAlbums) return;
     for (NSString *uri in records) {
         id record = records[uri];
-        if (!SGRAlbumMetadataPath(uri) || ![record isKindOfClass:NSDictionary.class] ||
+        if (!SGSpotifyAlbumMetadataPath(uri) || ![record isKindOfClass:NSDictionary.class] ||
             ![record[@"expires"] isKindOfClass:NSDate.class] || ![record[@"saved"] isKindOfClass:NSDate.class] ||
             !validCounts(record[@"counts"])) continue;
         if ([record[@"expires"] timeIntervalSinceNow] > 0) _records[uri] = record;
@@ -257,8 +233,35 @@ static BOOL validCounts(id counts) {
         for (SGRAlbumCountsReply done in waiters) done(counts);
     });
 }
+- (void)loadTrackIndex:(NSString *)uri completion:(void (^)(SGRAlbumTrackIndex *))done {
+    NSString *path = SGSpotifyAlbumMetadataPath(uri);
+    if (!path) { done(nil); return; }
+    dispatch_async(_queue, ^{
+        NSMutableArray *waiters = self->_pendingIndexes[uri];
+        if (waiters) {
+            if (waiters.count < kMaxAlbumWaiters) [waiters addObject:[done copy]];
+            else dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+            return;
+        }
+        if (self->_pendingIndexes.count >= kMaxPendingAlbums) {
+            dispatch_async(dispatch_get_main_queue(), ^{ done(nil); });
+            return;
+        }
+        self->_pendingIndexes[uri] = [NSMutableArray arrayWithObject:[done copy]];
+        self->_transport(path, nil, ^(NSData *json, NSInteger status, NSError *error) {
+            dispatch_async(self->_queue, ^{
+                SGRAlbumTrackIndex *index = status == 200 && !error ? [SGRAlbumTrackIndex fromMetadata:json] : nil;
+                NSArray *callbacks = self->_pendingIndexes[uri];
+                [self->_pendingIndexes removeObjectForKey:uri];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    for (void (^callback)(SGRAlbumTrackIndex *) in callbacks) callback(index);
+                });
+            });
+        });
+    });
+}
 - (void)loadAlbum:(NSString *)uri completion:(SGRAlbumCountsReply)done {
-    NSString *path = SGRAlbumMetadataPath(uri);
+    NSString *path = SGSpotifyAlbumMetadataPath(uri);
     if (!path) { done(nil); return; }
     dispatch_async(_queue, ^{
         [self readCache];
@@ -278,9 +281,9 @@ static BOOL validCounts(id counts) {
             return;
         }
         self->_pending[uri] = [NSMutableArray arrayWithObject:[done copy]];
-        self->_transport(path, nil, ^(NSData *json, NSInteger status, NSError *error) {
+        [self loadTrackIndex:uri completion:^(SGRAlbumTrackIndex *index) {
             dispatch_async(self->_queue, ^{
-                NSArray *tracks = status == 200 && !error ? SGRAlbumMetadataTracks(json) : nil;
+                NSArray *tracks = index.tracks;
                 if (!tracks) { [self finishAlbum:uri counts:nil]; return; }
                 // TRACK_V4 alongside count metadata is the established request shape; titles are never read.
                 NSData *body = SGSpotifyExtensionRequest(tracks, @[@10, @(kPlayCountExtension)]);
@@ -291,7 +294,7 @@ static BOOL validCounts(id counts) {
                     });
                 });
             });
-        });
+        }];
     });
 }
 @end
@@ -300,8 +303,8 @@ SGRAlbumCountsStore *SGRAlbumSpotifyCountsStore(void) {
     static SGRAlbumCountsStore *store;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        NSURL *base = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-        store = [[SGRAlbumCountsStore alloc] initWithCacheURL:[base URLByAppendingPathComponent:@"Vitrine/AlbumCounts.plist"]
+        NSURL *base = SGDataRoot(NSCachesDirectory);
+        if (base) store = [[SGRAlbumCountsStore alloc] initWithCacheURL:[base URLByAppendingPathComponent:@"AlbumCounts.plist"]
             transport:^(NSString *path, NSData *body, SGSpotifyMetadataReply done) { SGSpotifyMetadataRequest(path, body, done); }];
     });
     return store;
@@ -322,7 +325,7 @@ SGRAlbumCountsStore *SGRAlbumSpotifyCountsStore(void) {
     _counts = nil;
     NSUInteger generation = ++_generation;
     changed();
-    if (!SGRAlbumMetadataPath(uri)) return;
+    if (!SGSpotifyAlbumMetadataPath(uri)) return;
     __weak SGRAlbumCountPage *weakSelf = self;
     [_store loadAlbum:uri completion:^(NSDictionary *counts) {
         SGRAlbumCountPage *page = weakSelf;

@@ -7,7 +7,7 @@ does (a snapshot view opening, a `renderInContext:` image closing). The bar, the
 are plain views standing in for Spotify's; the morph's inputs from `NowPlayingBar.x` and
 `PlayerArtwork.x` are stubbed in `main.m`.
 
-    export MORPH_OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-morph-preview.XXXXXX")
+    export MORPH_OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-morph-preview.XXXXXX")
     THEOS=$HOME/theos sh harness/morph/build.sh
     xcrun simctl install booted "$MORPH_OUT/MorphHarness.app"
     xcrun simctl launch booted com.vojta.morphharness          # opens and closes once, then exits

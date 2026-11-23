@@ -8,7 +8,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d /tmp/vitrine-artist-cutout.XXXXXX)
+OUT=$(mktemp -d /tmp/retrine-artist-cutout.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 APP="$OUT/CutOut.app"
@@ -18,7 +18,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>cutout-check</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.artist.cutout-check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.artist.cutout-check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>UIApplicationSceneManifest</key><dict>
 <key>UIApplicationSupportsMultipleScenes</key><false/>

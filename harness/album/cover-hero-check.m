@@ -214,6 +214,22 @@ static BOOL holdStillReading;
 static NSURL *clipFile;
 static UIImage *redPoster;
 static SGRCoverReading *redReading;
+static NSMutableArray *headerRequests, *rowRequests;
+static void (^headerResult)(NSURL *);
+static void (^rowResult)(NSURL *);
+static void (^identifierResult)(NSURL *);
+static NSString *const fixtureURI = @"spotify:album:FixtureAlbum";
+static NSMutableArray<NSURL *> *shownClips;
+
+@interface SGAlbumQueuePage : NSObject @end
+@implementation SGAlbumQueuePage
++ (NSString *)albumURI:(UIViewController *)controller { return controller.restorationIdentifier; }
+@end
+
+void SGRAlbumTestIdentifierCover(NSString *uri, NSString *album, CGFloat pixels, void (^done)(NSURL *)) {
+    HARNESS_CHECK([uri isEqual:fixtureURI] && [album isEqual:@"Fixture Album"]);
+    identifierResult = [done copy];
+}
 
 @interface CoverReadyPlayerLayer : AVPlayerLayer @end
 @implementation CoverReadyPlayerLayer
@@ -228,12 +244,188 @@ AVPlayerLayer *SGRAlbumTestPlayerLayer(AVPlayer *player) {
 }
 
 void SGRAlbumTestAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *)) {
+    if (headerRequests) { [headerRequests addObject:album]; headerResult = [done copy]; return; }
     if (!stillTest()) { SGMotionAlbumCover(artist, album, pixels, done); return; }
     HARNESS_CHECK([album isEqualToString:@"A"] || [album isEqualToString:@"B"]);
     done([album isEqualToString:@"A"] ? clipFile : nil);
 }
 
+static NSUInteger rowSearches;
+void SGRAlbumTestPageCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *, BOOL)) {
+    SGRAlbumTestAlbumCover(artist, album, pixels, ^(NSURL *file) { done(file, file != nil || [album isEqual:@"Known Still"]); });
+}
+void SGRAlbumTestRowMatcher(NSString *albumArtist, NSString *album, CGFloat pixels, void (^ready)(BOOL (^)(NSString *, NSString *)), void (^done)(NSURL *)) {
+    HARNESS_CHECK(rowRequests);
+    rowSearches++;
+    ready(^BOOL(NSString *artist, NSString *song) {
+        [rowRequests addObject:@[artist, album, song]];
+        if ([artist isEqual:@"현지화된 이름"] || [artist hasPrefix:@"Outgoing "]) return NO;
+        rowResult = [done copy];
+        return YES;
+    });
+}
+
+@interface FixtureRetrievalListStructuredData : UIView @end
+@implementation FixtureRetrievalListStructuredData @end
+@interface _TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView : UICollectionView @end
+@implementation _TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView @end
+@interface _TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI9TitleView : UIView @end
+@implementation _TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI9TitleView @end
+@interface _TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI12SubtitleView : UIView @end
+@implementation _TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI12SubtitleView @end
+@interface MotionRows : NSObject <UICollectionViewDataSource> @end
+@implementation MotionRows
+- (NSInteger)collectionView:(UICollectionView *)list numberOfItemsInSection:(NSInteger)section { return 1; }
+- (UICollectionViewCell *)collectionView:(UICollectionView *)list cellForItemAtIndexPath:(NSIndexPath *)path {
+    UICollectionViewCell *cell = [list dequeueReusableCellWithReuseIdentifier:@"track" forIndexPath:path];
+    UIView *content = [FixtureRetrievalListStructuredData new], *row = [UIView new];
+    [cell.contentView addSubview:content]; [content addSubview:row];
+    row.accessibilityIdentifier = @"Components.UI.RetrievalRowElementUI_Loaded";
+    for (NSArray *part in @[@[_TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI9TitleView.class, @"Lose My Mind (feat. Doja Cat)"],
+                            @[_TtCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI12SubtitleView.class, @"Don Toliver 및 Doja Cat"]]) {
+        UIView *wrapper = [part[0] new]; [row addSubview:wrapper];
+        UILabel *label = [UILabel new]; label.text = part[1]; [wrapper addSubview:label];
+    }
+    return cell;
+}
+@end
+
+static UICollectionViewCell *mountTrack(Page p, MotionRows *rows) {
+    UIView *wrapper = [[_TtC32CreativeWorkPlatform_TemplateKit28CreativeWorkTemplateListView alloc] initWithFrame:p.page.bounds];
+    [p.page addSubview:wrapper];
+    UICollectionView *list = [[_TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView alloc]
+        initWithFrame:wrapper.bounds collectionViewLayout:[UICollectionViewFlowLayout new]];
+    [wrapper addSubview:list];
+    [list registerClass:_TtC12Element_List18CollectionViewCell.class forCellWithReuseIdentifier:@"track"];
+    list.dataSource = rows;
+    [list layoutIfNeeded];
+    UICollectionViewCell *cell = list.visibleCells.firstObject;
+    HARNESS_CHECK(cell);
+    return cell;
+}
+
+static void checkMotionIdentifiers(BOOL rowMatches, BOOL rowFirst) {
+    headerRequests = [NSMutableArray array]; rowRequests = [NSMutableArray array];
+    shownClips = [NSMutableArray array];
+    identifierResult = nil; rowResult = nil;
+    Page p = makePage(solidDarkCover());
+    __attribute__((objc_precise_lifetime)) UIViewController *owner = [UIViewController new];
+    owner.restorationIdentifier = fixtureURI;
+    owner.view = p.page;
+    __attribute__((objc_precise_lifetime)) MotionRows *rows = [MotionRows new];
+    UICollectionViewCell *cell = mountTrack(p, rows);
+    NSString *credit = rowMatches ? @"IU" : @"현지화된 이름";
+    UIView *row = cell.contentView.subviews.firstObject.subviews.firstObject;
+    ((UILabel *)row.subviews.lastObject.subviews.firstObject).text = credit;
+    [p.hero playMotionForArtist:@"Artist" album:@"Fixture Album"];
+    HARNESS_CHECK(headerResult);
+    headerResult(nil);
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK([rowRequests.lastObject[0] isEqual:credit] && (rowResult != nil) == rowMatches);
+    if (!identifierResult) HARNESS_FAIL(@"No identifier lookup alongside the candidate row matcher");
+    NSURL *idClip = [NSURL fileURLWithPath:@"/fixture-identifiers.mov"];
+    NSURL *rowClip = [NSURL fileURLWithPath:@"/fixture-row.mov"];
+    if (rowFirst) rowResult(rowClip);
+    identifierResult(idClip);
+    if (rowMatches && !rowFirst) rowResult(rowClip);
+    HARNESS_CHECK([p.hero valueForKey:@"player"]);
+    HARNESS_CHECK([shownClips isEqual:@[rowFirst ? rowClip : idClip]]);
+    NSLog(@"[harness] PASS motion: %@ shown once (%@)", shownClips.firstObject.lastPathComponent,
+          rowMatches ? @"both sources replied" : @"no row matched");
+}
+
+static void checkMotionRow(void) {
+    headerRequests = [NSMutableArray array]; rowRequests = [NSMutableArray array];
+    __attribute__((objc_precise_lifetime)) MotionRows *rows = [MotionRows new];
+    Page p = makePage(solidDarkCover()), other = makePage(solidDarkCover());
+    NSString *f1 = @"F1 The Album";
+    NSURL *file = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"fixture.mov"]];
+    [p.hero playMotionForArtist:f1 album:f1];
+    headerResult(nil);
+    UICollectionViewCell *foreign = mountTrack(other, rows);
+    [foreign layoutSubviews];
+    HARNESS_CHECK(!rowRequests.count);
+    UICollectionViewCell *cell = mountTrack(p, rows);
+    [cell layoutSubviews];
+    [cell layoutIfNeeded];
+    HARNESS_CHECK(([rowRequests isEqual:@[@[@"Don Toliver, Doja Cat", f1, @"Lose My Mind (feat. Doja Cat)"]]]));
+    rowResult(file);
+    [p.hero playMotionForArtist:f1 album:f1]; [cell layoutSubviews];
+    HARNESS_CHECK([p.hero valueForKey:@"player"] && rowRequests.count == 1);
+    // A separate page whose list (including its one and only cell) settled before the header.
+    Page first = makePage(solidDarkCover());
+    cell = mountTrack(first, rows);
+    UICollectionView *list = (id)cell.superview;
+    UILabel *creditLabel = nil;
+    UIView *row = cell.contentView.subviews.firstObject.subviews.firstObject;
+    creditLabel = (id)row.subviews.lastObject.subviews.firstObject;
+    __block BOOL committed = NO;
+    [list performBatchUpdates:^{
+        [first.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
+        [cell layoutSubviews]; // the index path is valid but this is still the prior batch's content
+        HARNESS_CHECK(rowRequests.count == 1);
+        creditLabel.text = @"현지화된 이름";
+        [cell layoutSubviews];
+        HARNESS_CHECK(rowRequests.count == 1);
+    } completion:^(BOOL finished) { committed = YES; }];
+    HARNESS_CHECK(waitUntil(2, ^BOOL { return committed; }));
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK([rowRequests.lastObject[0] isEqual:@"현지화된 이름"]);
+    creditLabel.text = @"Ed Sheeran";
+    ((UILabel *)row.subviews.firstObject.subviews.firstObject).text = @"Drive";
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK(([rowRequests.lastObject isEqual:@[@"Ed Sheeran", f1, @"Drive"]]));
+    HARNESS_CHECK(rowSearches == 2); // one for each missed header, not one per row
+    [first.hero playMotionForArtist:@"Singer" album:@"Last"]; headerResult(nil);
+    rowResult(file); // the F1 reply is now stale
+    HARNESS_CHECK(![first.hero valueForKey:@"player"]);
+
+    Page hits = makePage(solidDarkCover());
+    cell = mountTrack(hits, rows);
+    [hits.hero playMotionForArtist:@"A" album:@"Greatest Hits"]; headerResult(file);
+    [cell layoutSubviews]; // A's header hit; its track list still belongs to this page
+    NSUInteger searches = rowSearches;
+    [hits.hero playMotionForArtist:@"B" album:@"Greatest Hits"]; headerResult(nil);
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    if (rowSearches != searches) rowResult(file); // the outgoing row would select A
+    HARNESS_CHECK(![hits.hero valueForKey:@"player"] && rowSearches == searches);
+
+    Page moved = makePage(solidDarkCover());
+    [moved.page addSubview:cell.superview.superview]; // a new header with the outgoing track collection
+    [moved.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK(rowSearches == searches && ![moved.hero valueForKey:@"player"]);
+
+    Page listFirst = makePage(solidDarkCover());
+    cell = mountTrack(listFirst, rows);
+    [cell layoutSubviews];
+    [listFirst.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
+    [cell layoutSubviews]; [cell layoutIfNeeded]; rowResult(file);
+    HARNESS_CHECK([listFirst.hero valueForKey:@"player"]);
+
+    Page limit = makePage(solidDarkCover());
+    cell = mountTrack(limit, rows);
+    creditLabel = (id)cell.contentView.subviews.firstObject.subviews.firstObject.subviews.lastObject.subviews.firstObject;
+    NSUInteger before = rowRequests.count;
+    [limit.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
+    for (NSUInteger i = 0; i < 8; i++) {
+        creditLabel.text = [NSString stringWithFormat:@"Outgoing %lu", (unsigned long)i];
+        [cell layoutSubviews]; [cell layoutIfNeeded]; [cell layoutSubviews];
+    }
+    creditLabel.text = @"Ed Sheeran"; [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK(rowRequests.count == before + 8 && ![limit.hero valueForKey:@"player"]);
+    searches = rowSearches;
+    Page still = makePage(solidDarkCover());
+    [still.hero playMotionForArtist:@"Artist" album:@"Known Still"]; headerResult(nil);
+    cell = mountTrack(still, rows);
+    [cell layoutSubviews]; [cell layoutIfNeeded];
+    HARNESS_CHECK(![still.hero valueForKey:@"player"] && rowSearches == searches);
+    puts("album motion: header hit, one owned row after miss, both arrival orders and stale reply passed");
+}
+
 void SGRAlbumTestPoster(NSURL *file, void (^done)(UIImage *)) {
+    // Each real showMotion: asks for its clip's poster when adaptive cover is on.
+    if (shownClips) { [shownClips addObject:file]; return; }
     if (!stillTest()) { SGMotionPoster(file, done); return; }
     [posters addObject:[done copy]];
 }
@@ -489,9 +681,85 @@ static void checkDarkPortrait(void) {
 }
 #endif
 
+// Spotify's header rebuilt, through the page's own header pass (AlbumHeader.x's applyHeader): the cover element gone for
+// one pass, then back with a replacement artwork view still under the lookup's 80pt on that pass. A picture landing in
+// the retired view after either is not the hero's; the replacement's is once it has its size and its picture, on passes
+// of its own that reach neither the header nor the page.
+static void checkRebuiltUndersized(void) {
+    UIView *page = [[_TtC28CreativeWorkPlatform_PageKit24CreativeWorkTemplateView alloc] initWithFrame:CGRectMake(0, 0, kWidth, 874)];
+    page.accessibilityIdentifier = @"CreativeWorkPlatform.CreativeWorkTemplateView";
+    UIView *header = [[UIView alloc] initWithFrame:CGRectMake(0, 0, kWidth, 486)];
+    header.accessibilityIdentifier = @"CreativeWorkPlatform.Components.UI.CreativeWorkHeader";
+    [page addSubview:header];
+    UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(16, 334, 300, 25)];
+    title.text = @"Hurry Up Tomorrow";
+    title.accessibilityIdentifier = @"CreativeWorkPlatform.Components.UI.TitleRow";
+    [header addSubview:title];
+    UIView *element = [[UIView alloc] initWithFrame:CGRectMake((kWidth - 248) / 2, 78, 248, 248)];
+    element.accessibilityIdentifier = @"CreativeWorkPlatform.Components.UI.ArtWorkElement.WithCoverArt";
+    [header addSubview:element];
+    UIImageView *retired = [[UIImageView alloc] initWithFrame:element.bounds];
+    retired.image = solidDarkCover();
+    [element addSubview:retired];
+    [page layoutIfNeeded];
+    UIView *hero = nil;
+    for (UIView *sub in header.subviews) {
+        if ([NSStringFromClass(sub.class) isEqualToString:@"SGRAlbumHero"]) hero = sub;
+    }
+    HARNESS_CHECK(hero);
+    UIImageView *picture = [hero valueForKey:@"picture"];
+    HARNESS_CHECK(picture.image == retired.image);
+
+    // The element gone for one of the header's passes.
+    [element removeFromSuperview];
+    [page setNeedsLayout];
+    [page layoutIfNeeded];
+    UIImage *shown = picture.image;
+    retired.image = solidLightCover();
+    if (picture.image != shown) HARNESS_FAIL(@"a picture landing in the artwork view of a cover element gone for a pass replaced the hero's");
+
+    // Back, rebuilt, its artwork view undersized on the header's pass.
+    [retired removeFromSuperview];
+    [header addSubview:element];
+    UIImageView *replacement = [[UIImageView alloc] initWithFrame:CGRectMake(0, 0, 40, 40)];
+    [element addSubview:replacement];
+    [page setNeedsLayout];
+    [page layoutIfNeeded];
+    retired.image = solidRedCover();
+    if (picture.image != shown) HARNESS_FAIL(@"a picture landing in the retired artwork view replaced the hero's");
+
+    // Sized and filled on its own passes.
+    replacement.frame = element.bounds;
+    [replacement layoutIfNeeded];
+    replacement.image = colourfulCover();
+    if (picture.image != replacement.image)
+        HARNESS_FAIL(@"the replacement artwork view, sized and filled after the header's pass, did not reach the hero");
+    replacement.image = flatSleeve(0.10, 0.20, 0.85, 0.6);
+    HARNESS_CHECK(picture.image == replacement.image);
+    [page setNeedsLayout];
+    [page layoutIfNeeded];
+    HARNESS_CHECK(picture.image == replacement.image);
+    NSLog(@"[harness] PASS rebuilt header: the retired artwork view's late pictures ignored, with the cover element gone for a "
+          "pass and back undersized; the replacement followed once sized and filled on its own passes");
+}
+
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         NSString *mode = argc > 1 ? @(argv[1]) : @"";
+        if ([mode isEqual:@"rebuilt"]) {
+            Page p = makePage(solidDarkCover());
+            UIImageView *current = [[UIImageView alloc] initWithFrame:p.source.frame];
+            current.image = colourfulCover();
+            [p.hero followCover:current];
+            UIImageView *picture = [p.hero valueForKey:@"picture"];
+            HARNESS_CHECK(picture.image == current.image);
+            current.image = solidRedCover();
+            HARNESS_CHECK(picture.image == current.image);
+            p.source.image = solidLightCover();
+            if (picture.image != current.image) HARNESS_FAIL(@"Retired header cover replaced the hero");
+            checkRebuiltUndersized();
+            return 0;
+        }
         if ([mode isEqualToString:@"off"]) {
             HARNESS_CHECK(argc > 2);
             Page p = makePage(colourfulCover());
@@ -511,6 +779,13 @@ int main(int argc, char *argv[]) {
         }
 #if __has_include("Redesigned/Kit/SGRCoverRead.h")
         if ([mode isEqualToString:@"still-swap"]) { checkStillOwnership(); return 0; }
+        if ([mode isEqualToString:@"motion-row"]) { checkMotionRow(); return 0; }
+        if ([mode isEqual:@"motion-identifiers"]) {
+            checkMotionIdentifiers(NO, NO);
+            checkMotionIdentifiers(YES, YES);
+            checkMotionIdentifiers(YES, NO);
+            return 0;
+        }
         if ([mode isEqualToString:@"cache-reuse"]) { checkRenderCacheReuse(); return 0; }
         if ([mode isEqualToString:@"on"]) {
             // Sharp from and to, as shares of the cover's side: any picture that is not solid between 60% and 90%; a
@@ -566,4 +841,6 @@ int main(int argc, char *argv[]) {
 // Before every %ctor, so the redesign's gate reads on.
 __attribute__((constructor(101))) static void harnessDefaults(void) {
     [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"spotifyglass.redesign"];
+    // The picture-aware cover is the Full screen layout's, which an album no longer has unset.
+    [NSUserDefaults.standardUserDefaults setBool:YES forKey:@"spotifyglass.redesign.album.fullCover"];
 }

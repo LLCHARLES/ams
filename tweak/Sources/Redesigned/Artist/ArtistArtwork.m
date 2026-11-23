@@ -4,6 +4,8 @@
 #import "Shared/AnimatedArtwork/SGMotionCatalog.h"
 #import "Shared/AnimatedArtwork/SGMotionClip.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRMotionBudget.h"
+#import "Redesigned/Player/Player.h"
 #import "ArtistArtwork.h"
 
 NSArray<NSString *> *SGRArtistReleaseTitles(UIView *root) {
@@ -111,9 +113,11 @@ NSArray<NSString *> *SGRArtistReleaseTitles(UIView *root) {
 @end
 
 static void *kArtistReady = &kArtistReady;
+static char kScrollContext;
 @implementation SGRArtistMotionView {
     NSURL *_file; // retains the store's lease while the player uses it
     AVQueuePlayer *_player;
+    NSHashTable *_motionScrolls;
     AVPlayerLooper *_looper;
     AVPlayerLayer *_video;
 }
@@ -122,13 +126,17 @@ static void *kArtistReady = &kArtistReady;
     self.userInteractionEnabled = NO;
     self.accessibilityElementsHidden = YES;
     self.clipsToBounds = YES;
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePlayback)
+        name:SGRPlayerVisibilityDidChangeNotification object:nil];
     for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-        NSProcessInfoPowerStateDidChangeNotification, UIAccessibilityReduceMotionStatusDidChangeNotification,
+        NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+        UIAccessibilityReduceMotionStatusDidChangeNotification,
         UIAccessibilityVideoAutoplayStatusDidChangeNotification])
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateSoon) name:name object:nil];
     return self;
 }
 - (void)dealloc {
+    SGRBindViewportScrolls(nil, _motionScrolls, self, &kScrollContext);
     [NSNotificationCenter.defaultCenter removeObserver:self];
     [_video removeObserver:self forKeyPath:@"readyForDisplay" context:kArtistReady];
     [_player pause];
@@ -142,7 +150,12 @@ static void *kArtistReady = &kArtistReady;
     _looper = nil;
     _player = nil;
     _file = file;
-    if (!file) return;
+    if (!file) {
+        SGRObserveVisibility(self, nil);
+        SGRBindViewportScrolls(nil, _motionScrolls, self, &kScrollContext);
+        _motionScrolls = nil;
+        return;
+    }
     _player = [AVQueuePlayer new];
     _player.muted = YES;
     _player.preventsDisplaySleepDuringVideoPlayback = NO;
@@ -154,9 +167,15 @@ static void *kArtistReady = &kArtistReady;
     _video.opacity = 0;
     [self.layer addSublayer:_video];
     [_video addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial context:kArtistReady];
-    [self updatePlayback];
+    if (!_motionScrolls) {
+        _motionScrolls = [NSHashTable weakObjectsHashTable];
+        __weak SGRArtistMotionView *weakSelf = self;
+        SGRObserveVisibility(self, ^{ [weakSelf motionHierarchyChanged]; });
+    }
+    [self motionHierarchyChanged];
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (context == &kScrollContext) { [self updatePlayback]; return; }
     if (context != kArtistReady) {
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
         return;
@@ -183,13 +202,16 @@ static void *kArtistReady = &kArtistReady;
     dispatch_async(dispatch_get_main_queue(), ^{ [self updatePlayback]; });
 }
 - (void)updatePlayback {
-    BOOL may = SGMotionHeaderMayPlay(self.window != nil,
+    if (!_player) return;
+    BOOL may = SGMotionHeaderMayPlay(SGRViewInViewport(self, SGRSettledPlayerRect(self.window)),
         UIApplication.sharedApplication.applicationState == UIApplicationStateActive,
-        SGRReduceMotion(), NSProcessInfo.processInfo.lowPowerModeEnabled, UIAccessibilityIsVideoAutoplayEnabled());
-    if (may) [_player play]; else [_player pause];
+        SGRReduceMotion(), SGRMotionHeldForPowerOrHeat(), UIAccessibilityIsVideoAutoplayEnabled());
+    if (may != (_player.rate != 0)) {
+        if (may) [_player play]; else [_player pause];
+    }
 }
-- (void)didMoveToWindow {
-    [super didMoveToWindow];
+- (void)motionHierarchyChanged {
+    SGRBindViewportScrolls(self, _motionScrolls, self, &kScrollContext);
     [self updatePlayback];
 }
 - (void)layoutSubviews {
@@ -198,5 +220,6 @@ static void *kArtistReady = &kArtistReady;
     [CATransaction setDisableActions:YES];
     _video.frame = self.bounds;
     [CATransaction commit];
+    [self updatePlayback];
 }
 @end

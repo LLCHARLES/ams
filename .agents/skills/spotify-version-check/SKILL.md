@@ -1,9 +1,9 @@
 ---
 name: spotify-version-check
 description: >
-  Check Vitrine against a new Spotify version: sweep every class, selector and ivar the tweak hooks or calls
+  Check Retrine against a new Spotify version: sweep every class, selector and ivar the tweak hooks or calls
   against the new build's class dump, and read a Spotify method's body from the binary when a selector is gone.
-  Use when Vitrine moves to or adds a Spotify version, when a feature works on one version and not another, or
+  Use when Retrine moves to or adds a Spotify version, when a feature works on one version and not another, or
   when a selector or class the tweak needs has disappeared.
 ---
 
@@ -46,7 +46,7 @@ is not in the dump. Check it on the phone, or read the class's ivar list with `o
 ## Reading a method in the binary
 
 When a selector is gone, read what the old version's method did. It is often a thin wrapper around one the new
-version still has. Use Vitrine's own decrypted base IPAs in `ipa/` only. Never open upstream builds or the
+version still has. Use Retrine's own decrypted base IPAs in `ipa/` only. Never open upstream builds or the
 Eevee+Chroma IPAs; the clean-room rule (`clean-room-describer`) still holds.
 
 1. Unzip the binary outside the repo (`$CLAUDE_JOB_DIR/tmp` in a background job, else `$TMPDIR`). The
@@ -91,5 +91,5 @@ selector takes an object. Build the argument the old wrapper built.
 ## After the sweep
 
 - A fix for one version keeps the old version's path first where it still exists, so a supported version runs
-  the code it ran before (`AGENTS.md`: 9.1.78 is the version Vitrine is made for).
+  the code it ran before (`AGENTS.md`: 9.1.78 is the version Retrine is made for).
 - Check each fix on the phone with `phone-check`, and say which versions were run and which were not.

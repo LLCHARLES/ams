@@ -2,7 +2,9 @@
 #import <OSLog/OSLog.h>
 #import <sys/utsname.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "Shared/AdBlock/AdBlock.h"
+#import "Shared/SponsorBlock/SponsorBlock.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Settings/SGPageStyle.h"
 #import "About.h"
@@ -13,7 +15,7 @@
 // here. What is left out belongs to this install rather than to its user's choices.
 static BOOL isSetting(NSString *key) {
     if (![key hasPrefix:@"spotifyglass."]) return NO;
-    if (SGPrivatePreferenceKey(key)) return NO;
+    if (SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer] || [key isEqual:@"spotifyglass.wireguard"]) return NO;
     for (NSString *local in @[@"spotifyglass.adblock.counts", @"spotifyglass.privacy.counts", @"spotifyglass.update.",
                               @"spotifyglass.signing.", @"spotifyglass.onboarding.", @"spotifyglass.navbar.stock",
                               @"spotifyglass.redesign.navbar.stock", @"spotifyglass.automix.saved",
@@ -37,15 +39,19 @@ static UIAlertController *showAlert(UIViewController *presenter, NSString *title
     return alert;
 }
 
-void SGExportSettings(void) {
+static NSDictionary *exportSettings(NSDictionary *stored) {
     NSMutableDictionary *settings = [NSMutableDictionary dictionary];
-    [storedDefaults() enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
+    [stored enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
         if (isSetting(key) && [NSJSONSerialization isValidJSONObject:@[value]]) settings[key] = value;
     }];
+    return settings;
+}
+
+void SGExportSettings(void) {
     NSDictionary *file = @{
         @"mod": @(SG_VERSION),
         @"spotify": [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
-        @"settings": settings,
+        @"settings": exportSettings(storedDefaults()),
     };
     NSData *data = [NSJSONSerialization dataWithJSONObject:file options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
     NSURL *url = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"spotifyglass-settings.json"]];
@@ -61,7 +67,7 @@ static NSMutableString *diagnosticMetadata(void) {
     NSMutableString *text = [NSMutableString string];
     struct utsname machine;
     uname(&machine);
-    [text appendFormat:@"Vitrine %s, Spotify %@, iOS %@, %s\n", SG_VERSION,
+    [text appendFormat:@"Retrine %s, Spotify %@, iOS %@, %s\n", SG_VERSION,
         [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown",
         UIDevice.currentDevice.systemVersion, machine.machine];
     [text appendFormat:@"look %@, hide ads %d, hide upsells %d, spoof premium %d, EeveeSpotify %d\n\n",
@@ -108,8 +114,8 @@ static NSError *writeDiagnostics(NSMutableString *text, NSURL *url) {
         for (NSUInteger i = 0; i < lines.count; i++)
             [text appendFormat:@"%@%@", i ? @"\n" : @"", lines[(oldest + i) % lines.count]];
         if (!lines.count) [text appendFormat:@"(none: %@)", error.localizedDescription ?: @"the log is empty"];
-        NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-        NSString *config = [NSString stringWithContentsOfURL:[caches URLByAppendingPathComponent:@"Vitrine/live-config.txt"]
+        NSURL *caches = SGDataRoot(NSCachesDirectory);
+        NSString *config = [NSString stringWithContentsOfURL:[caches URLByAppendingPathComponent:@"live-config.txt"]
                                                     encoding:NSUTF8StringEncoding error:nil];
         [text appendFormat:@"\n\n== config Spotify's server last sent\n%@", config ?: @"(none yet: Spoof Premium is off, or no fetch so far)\n"];
         NSError *writeError = nil;
@@ -131,7 +137,7 @@ void SGExportDiagnosticsToURL(NSURL *url, void (^completion)(NSError *error)) {
 NSURL *SGWriteDiagnosticsFile(void) {
     __block NSMutableString *text;
     dispatch_sync(dispatch_get_main_queue(), ^{ text = diagnosticMetadata(); });
-    NSURL *url = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"vitrine-diagnostics.txt"]];
+    NSURL *url = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"retrine-diagnostics.txt"]];
     __block NSError *error;
     dispatch_sync(diagnosticWriter(), ^{ error = writeDiagnostics(text, url); });
     return error ? nil : url;
@@ -150,7 +156,7 @@ void SGShareDiagnostics(UIViewController *presenter) {
     if (exporting || !SGDiagnosticsCanPresentFrom(presenter)) return;
     exporting = YES;
     __weak UIViewController *weakPresenter = presenter;
-    NSURL *url = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"vitrine-diagnostics.txt"]];
+    NSURL *url = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"retrine-diagnostics.txt"]];
     SGExportDiagnosticsToURL(url, ^(NSError *error) {
         exporting = NO;
         UIViewController *owner = weakPresenter;
@@ -207,10 +213,8 @@ static NSDictionary *fromChroma(NSDictionary *settings) {
     return ours;
 }
 
-static void importSettings(NSDictionary *settings) {
-    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+static void importSettings(NSDictionary *settings, NSUserDefaults *store, NSDictionary *stored) {
     settings = fromChroma(settings);
-    NSDictionary *stored = storedDefaults();
     for (NSString *key in stored) {
         if (isSetting(key)) [store removeObjectForKey:key];
     }
@@ -225,7 +229,6 @@ static void importSettings(NSDictionary *settings) {
         else skipped++;
     }
     SGLog(@"import: set %lu keys, skipped %lu", (unsigned long)(settings.count - skipped), (unsigned long)skipped);
-    SGRestartSpotify();
 }
 
 @interface SGSettingsPicker : NSObject <UIDocumentPickerDelegate>
@@ -280,7 +283,8 @@ static NSDictionary *readSettingsFile(NSURL *url) {
         message = [NSString stringWithFormat:SGL(@"settings.mod.backup.import_confirm.alert.message", @"Your settings are replaced by the file's, exported from version %@. Anything it does not have goes back to its default, and Spotify restarts."), mod];
         confirm = [UIAlertAction actionWithTitle:SGL(@"settings.mod.backup.action.import_and_restart", @"Import and restart") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             [self finish];
-            importSettings(file[@"settings"]);
+            importSettings(file[@"settings"], NSUserDefaults.standardUserDefaults, storedDefaults());
+            SGRestartSpotify();
         }];
     } else {
         title = SGL(@"settings.mod.backup.invalid_file.alert.title", @"Not a settings file");

@@ -1,9 +1,14 @@
 #import <Foundation/Foundation.h>
 #import "Shared/SpotifyMetadata/SGSpotifyMetadata.h"
+#import "Shared/SpotifyMetadata/SGSpotifyAlbumIdentity.h"
 
 // Identity/codec functions are Foundation-only, exercised with independent wire fixtures.
-NSString *SGRAlbumMetadataPath(NSString *albumURI);
 NSArray<NSString *> *SGRAlbumMetadataTracks(NSData *json);
+@interface SGRAlbumTrackIndex : NSObject
++ (instancetype)fromMetadata:(NSData *)json;
+@property (nonatomic, copy, readonly) NSArray<NSString *> *tracks;
+- (NSNumber *)numberForURI:(NSString *)uri title:(NSString *)title;
+@end
 NSDictionary<NSString *, NSNumber *> *SGRAlbumCountsInReply(NSData *data, NSArray<NSString *> *tracks);
 NSString *SGRAlbumTrackURIFromMenuIdentifier(NSString *identifier);
 
@@ -17,6 +22,7 @@ typedef void (^SGRAlbumCountsReply)(NSDictionary<NSString *, NSNumber *> *counts
 @interface SGRAlbumCountsStore : NSObject
 - (instancetype)initWithCacheURL:(NSURL *)url transport:(SGRAlbumCountsTransport)transport;
 - (void)loadAlbum:(NSString *)albumURI completion:(SGRAlbumCountsReply)done;
+- (void)loadTrackIndex:(NSString *)uri completion:(void (^)(SGRAlbumTrackIndex *index))done;
 @end
 SGRAlbumCountsStore *SGRAlbumSpotifyCountsStore(void);
 

@@ -38,6 +38,10 @@ UIViewController *SGTopController(void) {
     [root.view addSubview:button];
     self.window.rootViewController = root;
     [self.window makeKeyAndVisible];
+    if ([NSUserDefaults.standardUserDefaults boolForKey:@"cardCheck"]) {
+        extern void SGCheckSingCard(UIView *);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ SGCheckSingCard(root.view); });
+    }
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"panel"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
             [button performSelector:@selector(showPanel)];

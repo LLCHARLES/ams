@@ -31,6 +31,7 @@
 #import "Shared/AudioEffects/SGDSPCurveView.h"
 #import "Settings/SGModPage.h"
 #import "../harness-fail.h"
+#import "../timer-lifecycle.h"
 
 void SGHarnessSeedLibrary(SGDSPFileKind kind);
 void SGHarnessRunSheet(UIWindow *window, NSString *scenario);
@@ -67,6 +68,12 @@ static void findViews(UIView *root, Class kind, NSMutableArray *found) {
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
+    if ([args containsObject:@"background-check"]) {
+        SGHarnessCheckPageBackground(SGDSPSettingsPage());
+        SGHarnessCheckPageBackground(SGDSPLibraryPage(SGDSPFileLiveprog));
+        puts("PASS effects and library refresh stop in background and resume only when visible");
+        exit(0);
+    }
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     if (![args containsObject:@"keep"]) {
         for (NSString *key in store.dictionaryRepresentation.allKeys) {

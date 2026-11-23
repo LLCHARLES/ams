@@ -7,9 +7,16 @@
 // within a song does not change the state's track. Never the quality the user asked for or the highest available.
 // Lossless files of the mod's own (Shared/Lossless) are not claimed: the badge says what Spotify streams.
 //
-// Each look calls SGAudioQualityPlaceBadge from its DurationElementUnit's layout (Redesigned/Player/PlayerControls.x,
-// Native/Player/Player.x). The badge is a subview of the unit's view, so the unit's alpha, transforms and hiding
-// carry over, and it takes no part in Spotify's layout, so the times and the slider stay where they are.
+// Each look places it from its DurationElementUnit's layout (Native/Player/Player.x through SGAudioQualityPlaceBadge,
+// Redesigned/Player/PlayerControls.x through SGAudioQualityPlaceRedesignedBadge). The badge is a subview of the unit's
+// view, so the unit's alpha, transforms and hiding carry over, and it takes no part in Spotify's layout, so the times
+// and the slider stay where they are.
+//
+// The two looks word and place it differently. The native look's: Spotify's names of the tiers, a glyph before the
+// lossless ones only, centered on the times' middle, and details of rows (tier, sample rates, resampled, source). The
+// redesign's, as the Music app draws its own: a waveform before every tier, the Music app's words ("High Quality",
+// SGAudioTierBadgeName), its text on the times' baseline, and details as one summary (SGAudioTierRateText,
+// SGAudioTierSummary, SGAudioTierFootnote) under the glyph and the tier.
 #import <UIKit/UIKit.h>
 #import "AudioQualityRules.h"
 
@@ -23,6 +30,10 @@ void SGAudioQualitySettingChanged(void);
 // it does not fit between them. Returns at once while the switch is off; nothing is added to a unit while there is
 // nothing to show.
 void SGAudioQualityPlaceBadge(UIView *unitView);
+// The same for the redesign's badge, whose text stands on the times' baseline, and which an iPad shows in landscape
+// too. `timesDrop` is how far the redesign lowers the times at rest by a translation of theirs, which the badge
+// follows; a scrub's further drop it does not.
+void SGAudioQualityPlaceRedesignedBadge(UIView *unitView, CGFloat timesDrop);
 // The badge in `unitView` while it draws (shown, and neither it nor any view above it hidden or faded out), else nil:
 // a tap there is the badge's, not a seek.
 UIView *SGAudioQualityShownBadge(UIView *unitView);

@@ -274,7 +274,7 @@ static void refreshPaint(void) {
     if (source) track(self);
 }
 - (void)addAnimation:(CAAnimation *)animation forKey:(NSString *)key {
-    // This is Spotify/Vitrine submitting a new animation, never a repaint of an installed one.
+    // This is Spotify/Retrine submitting a new animation, never a repaint of an installed one.
     if (animationOwned(animation))
         animation = preparedAnimation(animation, objc_getAssociatedObject(self, &layerOverrideKey));
     %orig(animation,key);

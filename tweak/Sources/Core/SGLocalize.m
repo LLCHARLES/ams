@@ -1,10 +1,10 @@
 #import "SGLocalize.h"
 
-static NSString *const kBundleName = @"Vitrine.bundle";
+static NSString *const kBundleName = @"Retrine.bundle";
 
 static NSArray<NSBundle *> *resourceBundles(void) {
     NSMutableArray<NSString *> *paths = [NSMutableArray array];
-    NSString *inApp = [NSBundle.mainBundle pathForResource:@"Vitrine" ofType:@"bundle"];
+    NSString *inApp = [NSBundle.mainBundle pathForResource:kBundleName ofType:nil];
     if (inApp) [paths addObject:inApp];
     [paths addObject:[@"/var/jb/Library/Application Support" stringByAppendingPathComponent:kBundleName]];
     [paths addObject:[@"/Library/Application Support" stringByAppendingPathComponent:kBundleName]];

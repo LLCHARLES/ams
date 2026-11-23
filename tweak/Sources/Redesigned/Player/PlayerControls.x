@@ -27,8 +27,10 @@
 #import "Shared/Haptics/Haptics.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/Player/AudioQuality.h"
+#import "Shared/SponsorBlock/SponsorBlock.h"
 #import "Player.h"
 #import "PlayerMix.h"
+#import "Shared/AutoMix/AutoMixPreview.h"
 
 static const CGFloat kSkipGlyphSize = 32, kPlayGlyphSize = 44;
 // The platter the Music app fades in behind a pressed transport glyph (SGRPress.h), about twice the glyph.
@@ -110,31 +112,35 @@ static BOOL isHiddenButton(UIView *view) {
         || (sg_hideRepeat && [identifier isEqualToString:kRepeatID]);
 }
 
+static BOOL isShuffleOrRepeat(UIView *view) {
+    NSString *identifier = view.accessibilityIdentifier;
+    return [identifier isEqualToString:kShuffleID] || [identifier isEqualToString:kRepeatID];
+}
+
 // Spotify also swaps in a new button a moment after the controls lay out (seen for repeat on 9.1.90: the instance
 // found leaves the window 40 ms later and another arrives at alpha 1), with no layout pass after it. The new one is
-// caught as it arrives, and the controls are asked to lay out again, so previous and next are placed for the row as it
-// is now (spreadSkips). The class is an Encore button's, taken from the first one found (`class`, not a KVO class
-// it may be observed through), since its name carries a build hash. It is the class of every Encore button, the
-// playlist, album and artist headers' shuffle among them, so only one inside the player's controls goes; any other
-// pays a window check and an identifier compare as it moves.
+// caught as it arrives, hidden if its switch says so, and the controls are asked to lay out again, so previous and
+// next are placed for the row as it is now (spreadSkips): a shown one ends the spread its empty end allowed. The class
+// is an Encore button's, taken from the first shuffle or repeat found (`class`, not a KVO class it may be observed
+// through), since its name carries a build hash. It is the class of every Encore button, the playlist, album and
+// artist headers' shuffle among them, so only one inside the player's controls counts; any other pays a window check
+// and an identifier compare as it moves.
 %group SGRPlayerButtonArrival
 %hook SGRPlayerButton
 - (void)didMoveToWindow {
     %orig;
     UIView *view = (UIView *)self;
     UIView *host = sg_buttonsHost;
-    if (!view.window || !isHiddenButton(view) || !host || ![view isDescendantOfView:host]) return;
-    SGRSuppress(view);
+    if (!view.window || !isShuffleOrRepeat(view) || !host || ![view isDescendantOfView:host]) return;
+    if (isHiddenButton(view)) SGRSuppress(view);
     [host setNeedsLayout];
 }
 %end
 %end
 
-static void suppressButton(UIView *button) {
-    if (!button) return;
-    SGRSuppress(button);
+static void watchArrivals(UIView *button) {
     static BOOL hooked;
-    if (hooked) return;
+    if (!button || hooked) return;
     hooked = YES;
     %init(SGRPlayerButtonArrival, SGRPlayerButton = button.class);
 }
@@ -156,27 +162,32 @@ static BOOL emptyEnd(UIView *end, UIView *hiddenButton) {
 }
 
 // Each is looked for only in its own end of the row, so a row without it (a podcast's) costs a walk of one
-// element, not the unit. YES when both are switched on and both ends of the row are empty (emptyEnd).
-static BOOL hideShuffleAndRepeat(UIView *host, UIStackView *row) {
+// element, not the unit; one switched off is hidden. YES when both ends of the row are empty (emptyEnd): both
+// switched off, or Spotify built the row without them (a Free account's).
+static BOOL shuffleAndRepeatGone(UIView *host, UIStackView *row) {
     sg_buttonsHost = host;
     NSArray<UIView *> *arranged = row.arrangedSubviews;
     UIView *first = arranged.firstObject, *last = arranged.lastObject;
-    UIView *shuffle = sg_hideShuffle ? SGRFindByIdentifier(first, kShuffleID, &kShuffleKey) : nil;
-    UIView *repeat = sg_hideRepeat ? SGRFindByIdentifier(last, kRepeatID, &kRepeatKey) : nil;
-    suppressButton(shuffle);
-    suppressButton(repeat);
-    return sg_hideShuffle && sg_hideRepeat && first != last && emptyEnd(first, shuffle) && emptyEnd(last, repeat);
+    UIView *shuffle = SGRFindByIdentifier(first, kShuffleID, &kShuffleKey);
+    UIView *repeat = SGRFindByIdentifier(last, kRepeatID, &kRepeatKey);
+    watchArrivals(shuffle ?: repeat);
+    if (!sg_hideShuffle) shuffle = nil;
+    if (!sg_hideRepeat) repeat = nil;
+    if (shuffle) SGRSuppress(shuffle);
+    if (repeat) SGRSuppress(repeat);
+    return first != last && emptyEnd(first, shuffle) && emptyEnd(last, repeat);
 }
 
-#pragma mark - previous and next, with shuffle and repeat both hidden
+#pragma mark - previous and next, with shuffle and repeat gone
 
 // The Music app's three transport glyphs stand well apart; Spotify's previous and next stay next to play with the
-// empty slots of shuffle and repeat outside them. With both slots empty, each moves out until its center is
-// kSpreadReachMax (or a third of the row, whichever is less) from play's, less where that would take either past the
-// row's edge; one already farther out stays. Play keeps its place and every button its size. A translation on the
-// row's slot, set in the unit's own layout pass: the stack places its slots by center and bounds, which a transform
-// leaves alone, so Spotify's layout stays underneath and identity puts it back exactly. In landscape, with only one
-// of the two hidden, or on a row without them (a podcast's), the slots are Spotify's.
+// empty slots of shuffle and repeat outside them. With both slots empty, each moves out until its center is a third of
+// the room between the player's margins (SGRPlayerSideMargin) from play's, kSpreadReachMax at most, less where that
+// would take either past the row's edge; one already farther out stays. Play keeps its place and every button its
+// size. A translation on the row's slot, set in the unit's own layout pass: the stack places its slots by center and
+// bounds, which a transform leaves alone, so Spotify's layout stays underneath and identity puts it back exactly. In
+// landscape, with either shown, or on a row whose ends hold other controls (a podcast's 15 s skips), the slots are
+// Spotify's.
 // The emptied ends stay where the stack put them, and next's moves under repeat's (the last of the row is on top):
 // an empty view that takes touches swallows them, so the ends take none while the two are spread (quietEnds).
 static const CGFloat kSpreadReachMax = 140;
@@ -231,21 +242,22 @@ static void quietEnds(UIStackView *row, BOOL quiet) {
     }
 }
 
-static void spreadSkips(UIView *host, UIStackView *row, BOOL bothHidden) {
+static void spreadSkips(UIView *host, UIStackView *row, BOOL endsEmpty) {
     UIView *play = slotOf(row, SGRFindByIdentifier(host, @"SPTNowPlayingPlayButton", &kPlayKey));
     UIView *previous = slotOf(row, SGRFindByIdentifier(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey));
     UIView *next = slotOf(row, SGRFindByIdentifier(host, @"SPTNowPlayingNextTrackButton", &kNextKey));
     // An iPhone in landscape is compact in height.
     BOOL portrait = row.traitCollection.verticalSizeClass != UIUserInterfaceSizeClassCompact;
     CGFloat previousShift = 0, nextShift = 0;
-    BOOL spread = bothHidden && portrait && play && previous && next && previous != play && next != play && previous != next;
+    BOOL spread = endsEmpty && portrait && play && previous && next && previous != play && next != play && previous != next;
     if (spread) {
         CGFloat width = row.bounds.size.width, playX = play.center.x;
         // From play's center to the farthest a button's center can go on its side with the button still in the row.
         CGFloat (^room)(UIView *) = ^CGFloat(UIView *slot) {
             return (slot.center.x < playX ? playX : width - playX) - slot.bounds.size.width / 2;
         };
-        CGFloat reach = MIN(MIN(width / 3, kSpreadReachMax), MIN(room(previous), room(next)));
+        CGFloat inside = MIN(width, host.bounds.size.width - 2 * SGRPlayerSideMargin);
+        CGFloat reach = MIN(MIN(inside / 3, kSpreadReachMax), MIN(room(previous), room(next)));
         CGFloat (^outward)(UIView *) = ^CGFloat(UIView *slot) {
             CGFloat offset = slot.center.x - playX;
             CGFloat more = MAX(0, reach - fabs(offset));
@@ -264,7 +276,7 @@ static void spreadSkips(UIView *host, UIStackView *row, BOOL bothHidden) {
     quietEnds(row, spread);
     if (previousShift || nextShift) {
         static dispatch_once_t once;
-        dispatch_once(&once, ^{ SGLog(@"redesign player: shuffle and repeat hidden, previous and next moved %.1f and %.1fpt out in a %.0fpt row", previousShift, nextShift, row.bounds.size.width); });
+        dispatch_once(&once, ^{ SGLog(@"redesign player: shuffle and repeat gone, previous and next moved %.1f and %.1fpt out in a %.0fpt row", previousShift, nextShift, row.bounds.size.width); });
     }
 }
 
@@ -362,8 +374,9 @@ void SGRPlayerPlayGlyphIn(UIView *host) {
     skipGlyph(host, @"SPTNowPlayingPreviousTrackButton", &kPreviousKey, @"backward.fill", SGRPressNudgeBack);
     skipGlyph(host, @"SPTNowPlayingNextTrackButton", &kNextKey, @"forward.fill", SGRPressNudgeForward);
     SGRPlayerPlayGlyphIn(host);
-    BOOL bothHidden = hideShuffleAndRepeat(host, row);
-    if (row) spreadSkips(host, row, bothHidden);
+    BOOL endsEmpty = shuffleAndRepeatGone(host, row);
+    if (row) spreadSkips(host, row, endsEmpty);
+    SGRPlayerFitSpeedLabel(host);
 }
 %end
 
@@ -376,6 +389,7 @@ static void updateSeek(SPTPlayerState *state);
 
 - (void)playerStateDidReport:(SPTPlayerState *)state {
     updateSeek(state);
+    SGRProgressPlaybackChanged(state.duration, state.playbackSpeed);
 }
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
@@ -433,7 +447,7 @@ static const NSTimeInterval kSeekLongest = 0.5;
 static const NSInteger kSeekNear = 1500;
 static const NSTimeInterval kSeekHold = 2, kSeekCheck = 1;
 
-static char kSliderKey, kSeekTapKey, kTakeTimeKey, kRemainingTimeKey;
+static char kSliderKey, kSeekTapKey, kTakeTimeKey, kRemainingTimeKey, kStepKey;
 static __weak UISlider *sg_seekSlider;
 static NSInteger sg_seekTarget;
 static CFTimeInterval sg_seekHeldUntil;
@@ -446,7 +460,9 @@ static atomic_uint_fast64_t sg_seekGeneration;
 static void cancelSeek(void) {
     atomic_fetch_add(&sg_seekGeneration, 1);
     sg_seekHeldUntil = 0;
+    UISlider *slider = sg_seekSlider;
     sg_seekSlider = nil;
+    if (slider) SGRProgressRailChanged(slider, slider.isTracking);
     sg_seekTrack = nil;
 }
 
@@ -528,6 +544,8 @@ static void seekTo(UISlider *slider, CGFloat share) {
         SGKaraokeSeek(ms);
         return;
     }
+    // The value-changed target reads this exact seek, even within the last playback pixel.
+    objc_setAssociatedObject(slider, &kStepKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [slider setValue:slider.minimumValue + share * (slider.maximumValue - slider.minimumValue) animated:NO];
     sg_seekSlider = slider;
     sg_seekTarget = ms;
@@ -535,6 +553,7 @@ static void seekTo(UISlider *slider, CGFloat share) {
     sg_seekTrack = track;
     sg_seekHeldUntil = CACurrentMediaTime() + kSeekHold;
     sg_seekBeganAt = CFAbsoluteTimeGetCurrent();
+    SGRProgressRailChanged(slider, YES);
     uint64_t generation = atomic_load(&sg_seekGeneration);
     sg_sendingSeekEvents = YES;
     [slider sendActionsForControlEvents:UIControlEventTouchDown];
@@ -632,11 +651,14 @@ static void watchSlider(UIView *host) {
 
 #pragma mark - scrubbing
 
-// While a finger scrubs, the Music app's bar grows thicker and the times under it turn white and step down
-// with it, and all of it goes back when the finger lifts. The track grows through the slider's own track
-// rect, about its middle, so the thumb and the place a tap seeks to stay where they were; only a real drag
+// While a finger scrubs, the Music app's bar grows thicker, its fill turns whole white, and the times under it turn
+// white and step down with it, and all of it goes back when the finger lifts. The track grows through the slider's
+// own track rect, about its middle, so the thumb and the place a tap seeks to stay where they were; only a real drag
 // does it, never the drag a tap to seek plays to the slider (seekTo sends events, it does not track).
-static const CGFloat kScrubTrackGrow = 1.75, kScrubTimeDrop = 3;
+static const CGFloat kScrubTimeDrop = 3;
+// The Music app keeps its time row clear of the bar: the times, and the audio quality badge between them, stand this
+// much lower than Spotify lays them out, by a translation of theirs, so Spotify's layout stays underneath.
+static const CGFloat kTimesDrop = 8;
 static const NSUInteger kScrubUnitReach = 6;
 static char kScrubTakeKey, kScrubTakeLabelKey, kScrubRemainingKey, kScrubRemainingLabelKey, kScrubColorKey;
 static __weak UISlider *sg_scrubSlider;
@@ -669,6 +691,201 @@ static void brighten(UIView *view, BOOL on, BOOL animated) {
         animations:^{ label.textColor = to; } completion:nil];
 }
 
+// The times' translation: lowered at rest, a little more while a finger scrubs (not under Reduce Motion).
+static CGAffineTransform timesDrop(BOOL scrubbing) {
+    return CGAffineTransformMakeTranslation(0, kTimesDrop + (scrubbing && !SGRReduceMotion() ? kScrubTimeDrop : 0));
+}
+
+#pragma mark - the bar's colors
+
+// The Music app's bars are translucent (PlayerVolume.m takes the same colors): the fill a light white the background
+// shows through, the track dimmer, both more opaque under Increase Contrast; a scrub lights the fill whole.
+static const CGFloat kBarFillAlpha = 0.6, kBarTrackAlpha = 0.2, kBarFillContrastAlpha = 0.85, kBarTrackContrastAlpha = 0.35;
+
+UIColor *SGRPlayerBarFill(BOOL lit) {
+    return [UIColor colorWithWhite:1 alpha:lit ? 1 : SGRIncreaseContrast() ? kBarFillContrastAlpha : kBarFillAlpha];
+}
+
+UIColor *SGRPlayerBarTrack(void) {
+    return [UIColor colorWithWhite:1 alpha:SGRIncreaseContrast() ? kBarTrackContrastAlpha : kBarTrackAlpha];
+}
+
+// How much a finger dragging a bar thickens its track; the stretched middle the caps leave a track image.
+static const CGFloat kBarDragGrow = 1.75, kBarStretch = 1;
+
+UIImage *SGRPlayerBarImage(UIColor *color, CGFloat height) {
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(height, height)];
+    UIImage *drawn = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [color setFill];
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, height, height) cornerRadius:height / 2] fill];
+    }];
+    CGFloat cap = floor((height - kBarStretch) / 2);
+    return [drawn resizableImageWithCapInsets:UIEdgeInsetsMake(0, cap, 0, cap)];
+}
+
+CGFloat SGRPlayerBarDragHeight(CGFloat height) {
+    return round(height * kBarDragGrow);
+}
+
+static char kBarKey, kBarMinKey, kBarMaxKey, kHeldKey;
+static char kLayoutKey;
+static BOOL sg_mixProgress;
+static NSUInteger sg_mixRevision = 1;
+@interface SGRSliderLayout : NSObject {
+@public
+    BOOL colored, contrast;
+    NSUInteger mixRevision, idleRevision;
+}
+@end
+@implementation SGRSliderLayout
+@end
+
+static void invalidateColor(UISlider *slider) {
+    SGRSliderLayout *layout = objc_getAssociatedObject(slider, &kLayoutKey);
+    if (layout) {
+        layout->colored = NO;
+        layout->idleRevision = 0;
+    }
+}
+static CGFloat sg_scrubHeight;
+
+// The sibling escapes the slider's highlighted opacity. Only the two native track images give
+// way: PlayerMix's bands are still behind the translucent rail, in their original slider.
+@interface SGRHeldBar : UIView
+@property (nonatomic, strong) UIView *rail;
+@property (nonatomic, strong) CALayer *fill, *remaining;
+@property (nonatomic, strong) NSHashTable<UIImageView *> *tracks;
+@property (nonatomic) CGFloat restHeight, heldHeight;
+@property (nonatomic) NSUInteger generation;
+@end
+@implementation SGRHeldBar
+@end
+
+static void updateHeldBar(UISlider *slider) {
+    SGRHeldBar *bar = objc_getAssociatedObject(slider, &kHeldKey);
+    if (!bar) return;
+    CGRect rect = [slider trackRectForBounds:slider.bounds];
+    BOOL rtl = thumbCentre(slider, slider.minimumValue) > thumbCentre(slider, slider.maximumValue);
+    CGFloat range = slider.maximumValue - slider.minimumValue;
+    CGFloat share = range > 0 ? (slider.value - slider.minimumValue) / range : 0;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    rect = [slider convertRect:rect toView:slider.superview];
+    bar.frame = CGRectMake(rect.origin.x, CGRectGetMidY(rect)-bar.heldHeight/2, rect.size.width, bar.heldHeight);
+    CGFloat width = rect.size.width * share, remaining = rect.size.width-width;
+    bar.fill.frame = CGRectMake(rtl ? remaining : 0, 0, width, bar.heldHeight);
+    bar.remaining.frame = CGRectMake(rtl ? 0 : width, 0, remaining, bar.heldHeight);
+    [CATransaction commit];
+}
+
+static void hideTrackImages(UISlider *slider, SGRHeldBar *bar) {
+    UIImage *min = slider.currentMinimumTrackImage, *max = slider.currentMaximumTrackImage;
+    SGForEachView(slider, ^(UIView *v) {
+        if (![v isKindOfClass:UIImageView.class] || v.hidden) return;
+        UIImageView *image = (UIImageView *)v;
+        // UIKit clips each full-width track in a separate container on iOS 26/27. Match the
+        // assigned image as well for sliders that fit it directly into the played segment.
+        if (!(image.image && (image.image == min || image.image == max)) &&
+            !(v.superview.clipsToBounds && [v.superview.superview isKindOfClass:NSClassFromString(@"_UISlideriOSVisualElement")])) return;
+        [bar.tracks addObject:image];
+        image.hidden = YES;
+    });
+}
+
+static void removeHeldBar(UISlider *slider) {
+    SGRHeldBar *bar = objc_getAssociatedObject(slider, &kHeldKey);
+    if (!bar) return;
+    for (UIImageView *image in bar.tracks) image.hidden = NO;
+    [bar removeFromSuperview];
+    objc_setAssociatedObject(slider, &kHeldKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void setHeldBar(UISlider *slider, BOOL on) {
+    SGRHeldBar *bar = objc_getAssociatedObject(slider, &kHeldKey);
+    if (!bar) {
+        if (!on) return;
+        bar = [SGRHeldBar new];
+        bar.userInteractionEnabled = NO;
+        bar.accessibilityElementsHidden = YES;
+        bar.tracks = [NSHashTable weakObjectsHashTable];
+        bar.restHeight = [slider maximumTrackImageForState:UIControlStateNormal].size.height ?: SGRPlayerBarHeight;
+        bar.heldHeight = sg_scrubHeight;
+        bar.rail = [UIView new];
+        bar.rail.clipsToBounds = YES;
+        bar.rail.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+        [bar addSubview:bar.rail];
+        bar.fill = [CALayer layer];
+        bar.fill.backgroundColor = SGRPlayerBarFill(YES).CGColor;
+        bar.remaining = [CALayer layer];
+        bar.remaining.backgroundColor = SGRPlayerBarTrack().CGColor;
+        [bar.rail.layer addSublayer:bar.fill];
+        [bar.rail.layer addSublayer:bar.remaining];
+        [slider.superview insertSubview:bar aboveSubview:slider];
+        objc_setAssociatedObject(slider, &kHeldKey, bar, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        updateHeldBar(slider);
+        bar.rail.frame = CGRectInset(bar.bounds, 0, (bar.heldHeight-bar.restHeight)/2);
+        bar.rail.layer.cornerRadius = bar.restHeight/2;
+        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFill(NO).CGColor);
+        hideTrackImages(slider, bar);
+    }
+    NSUInteger generation = ++bar.generation;
+    void (^geometry)(void) = ^{
+        CGFloat height = on ? bar.heldHeight : bar.restHeight;
+        bar.rail.frame = CGRectInset(bar.bounds, 0, (bar.heldHeight-height)/2);
+        bar.rail.layer.cornerRadius = height/2;
+        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFill(on).CGColor);
+    };
+    SGRAnimateLayout(bar, ^{
+        // The transition snapshots the rail. Don't also interpolate its bounds during the dissolve.
+        if (SGRReduceMotion()) [UIView performWithoutAnimation:geometry];
+        else geometry();
+    }, ^(BOOL finished) {
+        if (!on && generation == bar.generation && bar == objc_getAssociatedObject(slider, &kHeldKey))
+            removeHeldBar(slider);
+    });
+}
+
+// What a track of the bar shows: Spotify's image (`spotify`), the one drawn from it (`drawn`) and its color.
+@interface SGRBarTrack : NSObject
+@property (nonatomic, strong) UIImage *spotify, *drawn;
+@property (nonatomic, strong) UIColor *color;
+@end
+@implementation SGRBarTrack
+@end
+
+// Spotify draws its bar with track images (01.txt:1907, 7x7 each); a new image of Spotify's is drawn again in the
+// bar's color, and one already drawn only when the color changes. A bar with no image takes the color as its tint.
+static void colorTrack(UISlider *slider, BOOL minimum, UIColor *color) {
+    const void *key = minimum ? &kBarMinKey : &kBarMaxKey;
+    UIControlState state = UIControlStateNormal;
+    UIImage *shown = minimum ? [slider minimumTrackImageForState:state] : [slider maximumTrackImageForState:state];
+    SGRBarTrack *track = objc_getAssociatedObject(slider, key);
+    if (!shown) {
+        UIColor *tint = minimum ? slider.minimumTrackTintColor : slider.maximumTrackTintColor;
+        if ([tint isEqual:color]) return;
+        if (minimum) slider.minimumTrackTintColor = color;
+        else slider.maximumTrackTintColor = color;
+        return;
+    }
+    if (!track) {
+        track = [SGRBarTrack new];
+        objc_setAssociatedObject(slider, key, track, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (shown == track.drawn && [track.color isEqual:color]) return;
+    if (shown != track.drawn) track.spotify = shown;
+    track.color = color;
+    UIImage *image = SGRPlayerBarImage(color, track.spotify.size.height);
+    if (minimum) [slider setMinimumTrackImage:image forState:state];
+    else [slider setMaximumTrackImage:image forState:state];
+    track.drawn = minimum ? [slider minimumTrackImageForState:state] : [slider maximumTrackImageForState:state];
+}
+
+static void colorBar(UISlider *slider) {
+    if (slider == sg_scrubSlider || !objc_getAssociatedObject(slider, &kBarKey)) return;
+    colorTrack(slider, YES, SGRPlayerBarFill(NO));
+    colorTrack(slider, NO, SGRPlayerBarTrack());
+}
+
 static void brightenTimes(UIView *unit, BOOL on, BOOL animated) {
     brighten(SGRFindByIdentifier(unit, @"now-playing-time-take-label-internal", &kScrubTakeLabelKey), on, animated);
     brighten(SGRFindByIdentifier(unit, @"now-playing-time-remaning-label-internal", &kScrubRemainingLabelKey), on, animated);
@@ -676,22 +893,25 @@ static void brightenTimes(UIView *unit, BOOL on, BOOL animated) {
 
 static void scrubLook(UISlider *slider, BOOL on) {
     if (on) {
+        if (sg_scrubSlider && sg_scrubSlider != slider) scrubLook(sg_scrubSlider, NO);
         sg_scrubSlider = slider;
     } else {
         if (sg_scrubSlider != slider) return;
         sg_scrubSlider = nil;
     }
-    // The new track rect is laid out on the layout spring; under Reduce Motion the slider crossfades instead.
+    if (!on || objc_getAssociatedObject(slider, &kBarKey)) setHeldBar(slider, on);
+    invalidateColor(slider);
     SGRAnimateLayout(slider, ^{
         [slider setNeedsLayout];
         [slider layoutIfNeeded];
     }, nil);
+    colorBar(slider);
     UIView *unit = timesAround(slider);
     if (!unit) return;
     brightenTimes(unit, on, YES);
     UIView *take = SGRFindByIdentifier(unit, @"now-playing-time-take-label", &kScrubTakeKey);
     UIView *remaining = SGRFindByIdentifier(unit, @"now-playing-time-remaning-label", &kScrubRemainingKey);
-    CGAffineTransform drop = on && !SGRReduceMotion() ? CGAffineTransformMakeTranslation(0, kScrubTimeDrop) : CGAffineTransformIdentity;
+    CGAffineTransform drop = timesDrop(on);
     SGRAnimate(SGRMotionPress, ^{
         take.transform = drop;
         remaining.transform = drop;
@@ -708,7 +928,78 @@ static void keepScrubLook(UIView *host) {
     if (unit) brightenTimes(unit, YES, NO);
 }
 
+// Spotify sets its progress bars on every frame it plays, the player's and the bar's over the tabs alike. A bar
+// moves a pixel in about a fifth of a second, so nearly all of those set a place that draws the same pixels, and
+// each one still lays the slider out and commits, which redraws the glass around it at the display's rate for as
+// long as music plays. A set that lands on the pixel the bar is drawn at is dropped; the next pixel is taken.
+@interface SGRBarStep : NSObject {
+@public
+    float minimum, maximum;
+    CGFloat width, scale;
+}
+@end
+@implementation SGRBarStep
+@end
+
+static BOOL sameBarPixel(UISlider *slider, float value) {
+    CGFloat width = slider.bounds.size.width;
+    float minimum = slider.minimumValue, maximum = slider.maximumValue;
+    CGFloat scale = slider.window.screen.scale;
+    SGRBarStep *step = objc_getAssociatedObject(slider, &kStepKey);
+    if (!(scale > 0 && width > 0 && maximum > minimum && isfinite(value))) {
+        if (step) step->width = 0;
+        return NO;
+    }
+    if (step && step->width == width && step->scale == scale && step->minimum == minimum && step->maximum == maximum) {
+        // Compare with the actual control, not a cached request: UIKit can move it during a scrub.
+        double drawn = slider.value;
+        if (value <= minimum || value >= maximum) return drawn == value;
+        double pixels = width * scale / ((double)maximum - minimum);
+        return lround((drawn - minimum) * pixels) == lround(((double)value - minimum) * pixels);
+    }
+    if (!step) {
+        step = [SGRBarStep new];
+        objc_setAssociatedObject(slider, &kStepKey, step, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    step->scale = scale;
+    step->minimum = minimum;
+    step->maximum = maximum;
+    step->width = width;
+    return NO;
+}
+
 %hook _TtCO17NowPlaying_ECMKit11ProgressBar6Slider
+- (void)setMinimumTrackImage:(UIImage *)image forState:(UIControlState)state {
+    %orig;
+    invalidateColor((UISlider *)self);
+}
+- (void)setMaximumTrackImage:(UIImage *)image forState:(UIControlState)state {
+    %orig;
+    invalidateColor((UISlider *)self);
+}
+- (void)setMinimumTrackTintColor:(UIColor *)color {
+    %orig;
+    invalidateColor((UISlider *)self);
+}
+- (void)setMaximumTrackTintColor:(UIColor *)color {
+    %orig;
+    invalidateColor((UISlider *)self);
+}
+- (void)setAccessibilityIdentifier:(NSString *)identifier {
+    %orig;
+    SGRSliderLayout *layout = objc_getAssociatedObject(self, &kLayoutKey);
+    if (layout) layout->idleRevision = layout->mixRevision = 0;
+}
+- (void)setValue:(float)value animated:(BOOL)animated {
+    if (SGRWritingProgress) SGRProgressSliderWrote((UISlider *)self);
+    UISlider *slider = (UISlider *)self;
+    if (animated || slider.isTracking) {
+        SGRBarStep *step = objc_getAssociatedObject(slider, &kStepKey);
+        if (step) step->width = 0;
+    } else if (sameBarPixel(slider, value)) return;
+    %orig;
+}
+
 - (BOOL)isTracking {
     return ((UISlider *)self == sg_seekSlider && seekHeld()) || %orig;
 }
@@ -716,56 +1007,133 @@ static void keepScrubLook(UIView *host) {
 - (CGRect)trackRectForBounds:(CGRect)bounds {
     CGRect track = %orig;
     if ((UISlider *)self != sg_scrubSlider || track.size.height <= 0) return track;
-    CGFloat height = round(track.size.height * kScrubTrackGrow);
+    CGFloat height = sg_scrubHeight;
     return CGRectMake(track.origin.x, CGRectGetMidY(track) - height / 2, track.size.width, height);
 }
 
 // PlayerScroll.x and Shared/Haptics/ControlHaptics.x hook the same tracking; all call through.
 - (BOOL)beginTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     cancelSeek();
+    UISlider *slider = (UISlider *)self;
+    // Spotify can select a taller image on touch down. Grow from the normal track, not from that image.
+    CGFloat rest = [slider maximumTrackImageForState:UIControlStateNormal].size.height ?: [slider trackRectForBounds:slider.bounds].size.height;
     BOOL tracking = %orig;
-    if (tracking) scrubLook((UISlider *)self, YES);
+    if (tracking) {
+        sg_scrubHeight = SGRPlayerBarDragHeight(rest);
+        SGRProgressRailChanged(slider, YES);
+        scrubLook(slider, YES);
+    }
     return tracking;
 }
 
 - (BOOL)continueTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
     BOOL tracking = %orig;
-    if ((UISlider *)self == sg_scrubSlider) keepScrubLook(nil);
+    if ((UISlider *)self == sg_scrubSlider) {
+        updateHeldBar((UISlider *)self);
+        keepScrubLook(nil);
+    }
     return tracking;
 }
 
 - (void)endTrackingWithTouch:(UITouch *)touch withEvent:(UIEvent *)event {
+    objc_setAssociatedObject(self, &kStepKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig;
     scrubLook((UISlider *)self, NO);
+    SGRProgressRailChanged((UISlider *)self, NO);
 }
 
 - (void)cancelTrackingWithEvent:(UIEvent *)event {
+    objc_setAssociatedObject(self, &kStepKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     %orig;
     scrubLook((UISlider *)self, NO);
+    SGRProgressRailChanged((UISlider *)self, NO);
 }
 
 - (void)didMoveToWindow {
     %orig;
-    if (!((UIView *)self).window) scrubLook((UISlider *)self, NO);
+    SGRProgressOutputMounted((UIView *)self);
+    objc_setAssociatedObject(self, &kStepKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!((UIView *)self).window) {
+        scrubLook((UISlider *)self, NO);
+        removeHeldBar((UISlider *)self);
+    }
 }
 
-// AutoMix's transition bands behind the knob (PlayerMix.x), on the player's own bar only.
-- (void)layoutSubviews {
+- (void)willMoveToSuperview:(UIView *)parent {
+    if (parent != ((UISlider *)self).superview) {
+        scrubLook((UISlider *)self, NO);
+        removeHeldBar((UISlider *)self);
+    }
     %orig;
+}
+
+// The player's bar in its translucent colors, before it lays its tracks out; AutoMix's transition bands behind the knob
+// (PlayerMix.x), on the player's own bar only.
+- (void)layoutSubviews {
     UISlider *slider = (UISlider *)self;
-    if ([slider.accessibilityIdentifier isEqualToString:kSliderID]) SGRPlayerMixSliderLaidOut(slider);
+    SGRSliderLayout *layout = objc_getAssociatedObject(self, &kLayoutKey);
+    if (!layout) {
+        layout = [SGRSliderLayout new];
+        objc_setAssociatedObject(self, &kLayoutKey, layout, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (layout->idleRevision != sg_mixRevision) {
+        BOOL contrast = SGRIncreaseContrast();
+        if (!layout->colored || layout->contrast != contrast) {
+            colorBar(slider);
+            layout->contrast = contrast;
+            layout->colored = slider != sg_scrubSlider;
+        }
+    }
+    %orig;
+    SGRProgressRailChanged(slider, slider.isTracking || slider == sg_scrubSlider);
+    // At rest neither track color nor a disabled band depends on the value
+    // or bounds. UIKit and the tracker still get every layout, including resizes.
+    if (layout->idleRevision == sg_mixRevision) return;
+    // Register once even when off. When enabled the band's owner also reads its
+    // private transition generation, which can change without the slider moving.
+    if (sg_mixProgress || layout->mixRevision != sg_mixRevision) {
+        if ([slider.accessibilityIdentifier isEqualToString:kSliderID]) SGRPlayerMixSliderLaidOut(slider);
+        layout->mixRevision = sg_mixRevision;
+    }
+    SGRHeldBar *bar = objc_getAssociatedObject(slider, &kHeldKey);
+    if (bar) {
+        updateHeldBar(slider);
+        hideTrackImages(slider, bar);
+    } else if (layout->colored && !sg_mixProgress) {
+        layout->idleRevision = sg_mixRevision;
+    }
 }
 %end
 
 // The ordinary player's duration unit and the AI DJ's (DJMDurationElementsUnit) hold the same progress bar and times.
+static char kDurationHostKey;
+
 static void durationLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
+    if (!objc_getAssociatedObject(host, &kDurationHostKey)) objc_setAssociatedObject(host, &kDurationHostKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // The bar's element, its times at its edges, inset to the player's margin.
+    UIView *bar = SGRFindByIdentifier(host, kSliderID, &kSliderKey);
+    // The bar the player shows (the mini player's has the same identifier and no times), drawn translucent.
+    if ([bar isKindOfClass:UISlider.class] && !objc_getAssociatedObject(bar, &kBarKey)) {
+        objc_setAssociatedObject(bar, &kBarKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        invalidateColor((UISlider *)bar);
+        [bar setNeedsLayout];
+    }
+    while (bar && bar.superview != host) bar = bar.superview;
+    if (bar) SGRPlayerHoldMargin(bar, 0);
     watchSlider(host);
     UILabel *taken = monospaced(host, @"now-playing-time-take-label-internal", &kTakeKey);
     monospaced(host, @"now-playing-time-remaning-label-internal", &kRemainingKey);
     keepScrubLook(host);
-    SGAudioQualityPlaceBadge(host);
+    // The times lowered, by a scrub's step more while one goes on here.
+    UISlider *scrubbed = sg_scrubSlider;
+    CGAffineTransform drop = timesDrop(scrubbed && [scrubbed isDescendantOfView:host]);
+    for (UIView *time in @[SGRFindByIdentifier(host, @"now-playing-time-take-label", &kTakeTimeKey) ?: NSNull.null,
+                           SGRFindByIdentifier(host, @"now-playing-time-remaning-label", &kRemainingTimeKey) ?: NSNull.null]) {
+        if ([time isKindOfClass:UIView.class] && !CGAffineTransformEqualToTransform(time.transform, drop)) time.transform = drop;
+    }
+    SGAudioQualityPlaceRedesignedBadge(host, kTimesDrop);
     // Whether Spotify's font has digits of one width shows in the descriptor's feature settings.
     if (!taken) return;
     static dispatch_once_t once;
@@ -779,6 +1147,89 @@ static void durationLaidOut(UIViewController *unit) {
 }
 %end
 
+// On a change of text size the unit is laid out before its times take their new size, and is not laid out again
+// (9.2.0 simulator, 2026-11-18): the elapsed time's own layout places the badge on its baseline again.
+%hook SPTEncoreLabel
+- (void)layoutSubviews {
+    %orig;
+    UIView *time = (UIView *)self;
+    if (![time.accessibilityIdentifier isEqualToString:@"now-playing-time-take-label"]) return;
+    for (UIView *view = time.superview; view; view = view.superview) {
+        if (!objc_getAssociatedObject(view, &kDurationHostKey)) continue;
+        SGAudioQualityPlaceRedesignedBadge(view, kTimesDrop);
+        return;
+    }
+}
+%end
+
+#pragma mark - SponsorBlock marks
+
+// SponsorBlock's segments on the bar (Shared/SponsorBlock/SponsorBlockMarkers.m), installed only with the progress
+// bar switch on. Without an episode bar they lie under the translucent rail as AutoMix's bands do (PlayerMix.x), the
+// played part's light white over them as over the background, and take the track's height when a scrub thickens it
+// (trackRectForBounds: above).
+static const double kSponsorBlockMarksOpacity = 0.8;
+
+%group SGRSponsorBlockMarks
+%hook _TtCO17NowPlaying_ECMKit11ProgressBar6Slider
+- (void)layoutSubviews {
+    %orig;
+    SGSponsorBlockMarksLaidOut((UISlider *)self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    if (((UIView *)self).window) SGSponsorBlockMarksShown((UISlider *)self, kSponsorBlockMarksOpacity);
+}
+%end
+%end
+
+%ctor {
+    if (!SGRedesignedUI() || !SGSponsorBlockMarkersEnabled() || !NSClassFromString(@"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider")) return;
+    %init(SGRSponsorBlockMarks);
+}
+
+#pragma mark - Podcast buffering
+
+static Class sg_episodeSlider, sg_episodeAudio;
+
+%group SGRBufferingHooks
+%hook SGRSliderBufferingView
+- (void)setFrame:(CGRect)frame {
+    UIView *band = (UIView *)self;
+    UIView *slider = band.superview;
+    if ([slider isKindOfClass:sg_episodeSlider]) {
+        // Spotify follows UIKit's track rect, but the chapters draw in a sibling below it.
+        for (UIView *audio in slider.subviews) {
+            if (![audio isKindOfClass:sg_episodeAudio]) continue;
+            CGRect track = audio.frame;
+            BOOL rtl = slider.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+            CGFloat left = CGRectGetMinX(frame), right = CGRectGetMaxX(frame);
+            if (rtl) left = MIN(right, MAX(left, CGRectGetMinX(track)));
+            else right = MAX(left, MIN(right, CGRectGetMaxX(track)));
+            frame = CGRectMake(left, track.origin.y, right - left, track.size.height);
+            band.layer.maskedCorners = rtl ? kCALayerMinXMinYCorner | kCALayerMinXMaxYCorner
+                                           : kCALayerMaxXMinYCorner | kCALayerMaxXMaxYCorner;
+            band.layer.cornerRadius = audio.layer.cornerRadius;
+            band.clipsToBounds = YES;
+            break;
+        }
+    }
+    %orig(frame);
+}
+%end
+%end
+
+%ctor {
+    if (!SGRedesignedUI()) return;
+    sg_episodeSlider = NSClassFromString(@"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider");
+    sg_episodeAudio = NSClassFromString(@"_TtCO17NowPlaying_ECMKit11ProgressBar9AudioView");
+    Class band = NSClassFromString(@"NowPlaying_ECMKit.SliderBufferingAnimationView");
+    if (band && sg_episodeSlider && sg_episodeAudio) { %init(SGRBufferingHooks, SGRSliderBufferingView = band); }
+}
+
+#pragma mark - Duration hooks
+
 // The DJ unit is another class, hooked only when the build has it (see %ctor).
 %group SGRDJControlsDurationHooks
 %hook SGRDJControlsDurationUnit
@@ -791,6 +1242,14 @@ static void durationLaidOut(UIViewController *unit) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    sg_mixProgress = SGFlag(SGKeyAutoMixShowProgress, NO);
+    [NSNotificationCenter.defaultCenter addObserverForName:UIAccessibilityDarkerSystemColorsStatusDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        sg_mixRevision++;
+    }];
+    [NSNotificationCenter.defaultCenter addObserverForName:SGAutoMixPlayerOptionsDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        sg_mixProgress = SGFlag(SGKeyAutoMixShowProgress, NO);
+        sg_mixRevision++;
+    }];
     %init;
     sg_hideShuffle = SGHidden(SGRKeyPlayerHideShuffle);
     sg_hideRepeat = SGHidden(SGRKeyPlayerHideRepeat);

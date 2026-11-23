@@ -1,4 +1,5 @@
 #import "TrackMenu.h"
+#import "NativeAdmission.h"
 #import "TrackDownload.h"
 #import "Localization.h"
 #import <objc/runtime.h>
@@ -98,6 +99,7 @@ static NSArray *actionsForTrack(id uri, id title, id actions) {
 }
 
 void SAPInstallTrackMenu(void) {
+    if(!SAPRuntimeProfileAdmitted())return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         Protocol *protocol = NSProtocolFromString(@"SPTContextMenuAction");

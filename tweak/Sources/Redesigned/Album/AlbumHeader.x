@@ -18,8 +18,8 @@
 // Spotify's stacks meant answering every pass of theirs, and the element framework measured the title for
 // its own font. So Spotify's whole column is concealed and the Kit's view is drawn over the header in its
 // place, reading its text off Spotify's concealed labels -- so it is in the app's language and follows
-// whatever Spotify shows -- and drawing and firing Spotify's own controls. The header keeps its height, its
-// fade as the page scrolls and its place in the stack.
+// whatever Spotify shows -- and drawing and firing Spotify's own controls. The header keeps its height and its
+// place in the stack; Spotify's fade of it as the page scrolls is held off, the info clipped under the bar instead.
 //
 // Play and shuffle are not in the header. The album page floats them over the page, pinned to the top
 // trailing corner outside the scroll (01.txt:1431, :1436): they are concealed where they are, and the row
@@ -28,6 +28,8 @@
 #import <CoreImage/CoreImage.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRMotionBudget.h"
+#import "Redesigned/Player/Player.h"
 #import "Redesigned/Kit/SGRCoverRead.h"
 #import "Redesigned/Kit/SGRCoverViewer.h"
 #import "Redesigned/Kit/SGRHeroVeil.h"
@@ -37,12 +39,18 @@
 #import "AlbumNotes.h"
 #import "SGRCoverBeside.h"
 
+@interface SGAlbumQueuePage : NSObject
++ (NSString *)albumURI:(id)controller;
+@end
+
 // A header whose text begins nearer the top than this is one mid load, not one to measure the hero from;
 // and an artwork view narrower than this is a placeholder glyph rather than the cover.
 static const CGFloat kMinHero = 120, kMinCover = 80;
 // The square cover's corners with Full bleed covers off: Spotify's own (its ImageViewHolder, r=4), so the album's
 // square is the playlist's, which is Spotify's square left in place.
 static const CGFloat kSquareRadius = 4;
+// The room between the pinned chrome's bottom and the top of a square drawn smaller to clear it, in points.
+static const CGFloat kChromeGapPoints = 8;
 
 // The picture-aware cover (SGRKeyAlbumAdaptiveCover, with the Full screen cover). The cover is read (Kit/SGRCoverRead.h)
 // and stays sharp, itself, down to kSharpRise above the hero's bottom unless the read moves that; from there down a
@@ -402,12 +410,21 @@ static SGRCoverRender *renderCover(UIImage *cover, SGRCoverDrawing d) {
 @property (nonatomic, readonly) UIImageView *picture;
 @property (nonatomic, copy) UIColor *fieldColor;
 // Where Spotify lays its cover square out, in the hero's coordinates. With Full bleed covers off the picture is
-// drawn there instead, on the field with neither gradient, until an animated cover fills the hero over it.
+// drawn there instead (smaller where the pinned chrome covers it, -sgr_card), on the field with neither gradient,
+// until an animated cover fills the hero over it.
 @property (nonatomic) CGRect square;
+// The header's width when the square was taken.
+@property (nonatomic) CGFloat squareWidth;
+// The page's pinned ⋯ and download (the glass over the top trailing corner) in the hero's coordinates with the page at
+// rest, CGRectNull while neither is pinned to the page. Where it covers the square, the square is drawn smaller under
+// it (-sgr_card).
+@property (nonatomic) CGRect chrome;
 @property (nonatomic) CGRect besideFrame;
 // The cover in Spotify's artwork view, and every cover it puts there afterward: the hero keeps itself
 // right, rather than being handed a picture on each of the header's passes and staying empty between them.
 - (void)followCover:(UIImageView *)source;
+// The artwork view in Spotify's cover element followed, or, while none in it is at the lookup's size, waited for.
+- (void)followCoverIn:(UIView *)element;
 // Apple Music's animated cover over the picture, where the album has one. The same album again is a no-op.
 - (void)playMotionForArtist:(NSString *)artist album:(NSString *)album;
 // The square's shadow, copied off whichever layer under Spotify's concealed cover casts one (its ShadowContainer),
@@ -421,11 +438,15 @@ static SGRCoverRender *renderCover(UIImage *cover, SGRCoverDrawing d) {
     CAGradientLayer *_dissolve;
     CALayer *_shadow;   // under the square, which clips and so cannot cast its own
     __weak UIImageView *_cover;
+    __weak UIView *_awaited;   // the cover element whose image views wait for the artwork (-followCoverIn:)
     UIView *_extension;   // iOS 26's UIBackgroundExtensionView around the picture, nil before it
     NSString *_motionAlbum;
+    __weak UIView *_motionPage;
+    NSString *_motionRelease;
     NSUInteger _motionGeneration;
     AVPlayerLayer *_motion;
     AVQueuePlayer *_player;
+    NSHashTable *_motionScrolls;
     AVPlayerLooper *_looper;
     // The picture-aware cover, on with the Full screen cover only; none of the below is used otherwise.
     BOOL _adaptive;
@@ -441,9 +462,11 @@ static SGRCoverRender *renderCover(UIImage *cover, SGRCoverDrawing d) {
 }
 
 static void *kReadyContext = &kReadyContext;
+static char kScrollContext;
 
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
+    _chrome = CGRectNull;
     self.clipsToBounds = YES;
     self.accessibilityTraits = UIAccessibilityTraitButton | UIAccessibilityTraitImage;
     self.accessibilityLabel = SGL(@"settings.album.cover_viewer.cover", @"Album cover");
@@ -486,9 +509,11 @@ static void *kReadyContext = &kReadyContext;
     self.fieldColor = SGRNeutralField();
     // The color is read off the main thread, so it can land after the last layout pass of the page.
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(sgr_updateMotion) name:SGRPlayerVisibilityDidChangeNotification object:nil];
     [center addObserver:self selector:@selector(sgr_fieldColorDidChange) name:SGRFieldColorDidChangeNotification object:nil];
     for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-                                      NSProcessInfoPowerStateDidChangeNotification, UIAccessibilityReduceMotionStatusDidChangeNotification,
+                                      NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+                                      UIAccessibilityReduceMotionStatusDidChangeNotification,
                                       UIAccessibilityVideoAutoplayStatusDidChangeNotification]) {
         [center addObserver:self selector:@selector(sgr_updateMotionSoon) name:name object:nil];
     }
@@ -580,13 +605,22 @@ static void *kReadyContext = &kReadyContext;
 - (void)setSquare:(CGRect)square {
     if (CGRectEqualToRect(_square, square)) return;
     _square = square;
-    // A path, so the shadow is drawn from it rather than from an offscreen pass over the layer every frame.
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    _shadow.bounds = (CGRect){CGPointZero, square.size};
-    _shadow.shadowPath = [UIBezierPath bezierPathWithRoundedRect:_shadow.bounds cornerRadius:kSquareRadius].CGPath;
-    [CATransaction commit];
     [self setNeedsLayout];
+}
+
+- (void)setChrome:(CGRect)chrome {
+    if (CGRectEqualToRect(_chrome, chrome)) return;
+    _chrome = chrome;
+    [self setNeedsLayout];
+}
+
+// The square as drawn, and everything that follows it (its shadow, the veil on its picture): Spotify's square, or, where
+// the pinned chrome covers it, the square under the chrome on the same vertical axis, its bottom edge where Spotify's
+// is and its top kChromeGapPoints under the chrome's bottom.
+- (CGRect)sgr_card {
+    if (CGRectIsEmpty(CGRectIntersection(_square, _chrome))) return _square;
+    CGFloat top = CGRectGetMaxY(_chrome) + kChromeGapPoints, side = CGRectGetMaxY(_square) - top;
+    return CGRectMake(CGRectGetMidX(_square) - side / 2, top, side, side);
 }
 
 - (void)layoutSubviews {
@@ -595,7 +629,7 @@ static void *kReadyContext = &kReadyContext;
     self.stretchesContent = bleeds;
     self.dissolves = bleeds;
     [super layoutSubviews];
-    CGRect bounds = self.restBounds;
+    CGRect bounds = self.restBounds, card = [self sgr_card];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [_veil artWillLayOut];
@@ -609,23 +643,26 @@ static void *kReadyContext = &kReadyContext;
     } else {
         // Stays square under an animated cover too: the clip covers the whole hero, so nothing moves under its fade.
         UIView *holder = _extension ?: _picture;
-        holder.frame = _square;
+        holder.frame = card;
         holder.layer.cornerRadius = kSquareRadius;
         holder.layer.cornerCurve = kCACornerCurveContinuous;
         holder.clipsToBounds = YES;
         if (_extension) _picture.frame = _extension.bounds;
         _shadow.hidden = bleeds;
-        self.scrim.hidden = !bleeds;
     }
-    _shadow.frame = CGRectOffset(_square, 0, self.stretch);
+    self.scrim.hidden = !bleeds;
+    // A path, so the shadow is drawn from it rather than from an offscreen pass over the layer every frame.
+    if (!CGSizeEqualToSize(_shadow.bounds.size, card.size))
+        _shadow.shadowPath = [UIBezierPath bezierPathWithRoundedRect:(CGRect){CGPointZero, card.size} cornerRadius:kSquareRadius].CGPath;
+    _shadow.frame = CGRectOffset(card, 0, self.stretch);
     _motion.frame = bounds;
+    [self sgr_updateMotion];
     if (_adaptive) {
         [self sgr_placeRender];
         [self sgr_fitDissolve];
     }
     if (beside) {
         self.content.layer.mask = nil;
-        self.scrim.hidden = YES;
         _shadow.hidden = YES;
         _render.hidden = YES;
     } else {
@@ -845,7 +882,17 @@ static void *kReadyContext = &kReadyContext;
 
 - (void)playMotionForArtist:(NSString *)artist album:(NSString *)album {
     NSString *key = artist.length && album.length ? [NSString stringWithFormat:@"%@\n%@", artist, album] : nil;
-    if (_motionAlbum == key || [key isEqualToString:_motionAlbum]) return;
+    UIView *page = SGRAlbumPageOf(self);
+    NSString *release = SGRFindByIdentifier(self.superview, @"Components.UI.ContextMenuButton-*", &kMoreKey).accessibilityIdentifier;
+    SGRAlbumMotionHeader(page, self, key, release);
+    BOOL changedRelease = release.length && _motionRelease.length && ![_motionRelease isEqual:release];
+    if (_motionPage == page && !changedRelease && (_motionAlbum == key || [key isEqualToString:_motionAlbum])) {
+        if (release) _motionRelease = [release copy];
+        return;
+    }
+    SGRAlbumWaitForMotionRow(_motionPage, NO, nil);
+    _motionPage = page;
+    _motionRelease = [release copy];
     NSUInteger generation = ++_motionGeneration;
     _motionAlbum = [key copy];
     // Stop owning A immediately, not only when B supplies a replacement clip.
@@ -854,11 +901,53 @@ static void *kReadyContext = &kReadyContext;
     // The player's size: at the screen's full width a square cover ran to the 1920 stream, tens of MB.
     CGFloat pixels = SGMotionPixels();
     __weak SGRAlbumHero *weakSelf = self;
+    __weak UIView *weakPage = page;
+    NSString *albumURI = nil;
+    for (UIResponder *r = page.nextResponder; r && !albumURI; r = r.nextResponder)
+        if ([r isKindOfClass:UIViewController.class]) albumURI = [NSClassFromString(@"SGAlbumQueuePage") albumURI:r];
     // Tall, as the Music app's album page: the hero runs past the title, taller than wide, and a square clip
     // filled into it lost its sides. An album with only a square clip gets that one.
-    SGMotionAlbumCover(artist, album, pixels, ^(NSURL *file) {
+    SGMotionPageAlbumCover(artist, album, pixels, ^(NSURL *file, BOOL identified) {
         SGRAlbumHero *hero = weakSelf;
-        if (hero && file && hero->_motionGeneration == generation) [hero showMotion:file];
+        UIView *owner = weakPage;
+        if (!hero || hero->_motionGeneration != generation || SGRAlbumPageOf(hero) != owner) return;
+        if (file) { [hero showMotion:file]; return; }
+        if (identified || !SGMotionAppleMusicOn()) return;
+        // The rows and the identifiers may both answer; the first clip stays, so a second does not restart it.
+        __block BOOL shown = NO;
+        void (^show)(NSURL *) = ^(NSURL *clip) {
+            SGRAlbumHero *target = weakSelf;
+            if (shown || !clip || !target || target->_motionGeneration != generation || SGRAlbumPageOf(target) != weakPage) return;
+            shown = YES;
+            [target showMotion:clip];
+        };
+        void (^tryIdentifiers)(void) = ^{
+            if (!albumURI) return;
+            SGMotionPageIdentifierCover(albumURI, album, pixels, show);
+        };
+        if (!SGRAlbumMotionRowsAllowed(owner)) { tryIdentifiers(); return; }
+        BOOL (^stillCurrent)(void) = ^BOOL {
+            SGRAlbumHero *current = weakSelf;
+            return current && current->_motionGeneration == generation && SGRAlbumPageOf(current) == weakPage &&
+                   SGRAlbumMotionRowsAllowed(weakPage);
+        };
+        BOOL (^startRows)(NSString *, NSString *) = ^BOOL(NSString *credit, NSString *song) {
+            if (!stillCurrent()) return YES;
+            SGMotionAlbumRowMatcher(artist, album, pixels, ^(SGMotionRowMatch match) {
+                if (!stillCurrent()) return;
+                // Read rows again from the settled list, not strings captured before the search.
+                SGRAlbumWaitForMotionRow(weakPage, YES, match);
+                // A row may never match (a credit Spotify shows in another script than Apple Music, say "아이유" for
+                // "IU"), and when the rows are done is never known: the identifiers are asked alongside them.
+                if (match) tryIdentifiers();
+            }, ^(NSURL *clip) {
+                if (clip && stillCurrent()) show(clip);
+                else if (!clip && stillCurrent()) tryIdentifiers();
+            });
+            return YES;
+        };
+        if (albumURI) startRows(nil, nil);
+        else SGRAlbumWaitForMotionRow(owner, NO, startRows);
     });
 }
 
@@ -882,12 +971,20 @@ static void *kReadyContext = &kReadyContext;
     [self.content.layer addSublayer:_motion];
     [self sgr_fitVeil];
     [_motion addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial context:kReadyContext];
-    [self sgr_updateMotion];
+    _motionScrolls = [NSHashTable weakObjectsHashTable];
+    __weak SGRAlbumHero *weakSelf = self;
+    SGRObserveVisibility(self, ^{ [weakSelf sgr_motionHierarchyChanged]; });
+    [self sgr_motionHierarchyChanged];
     if (_adaptive) [self sgr_readStill:file];
     SGLog(@"redesign album: animated cover %@", file.lastPathComponent);
 }
 
 - (void)sgr_dropMotion {
+    if (_motionScrolls) {
+        SGRObserveVisibility(self, nil);
+        SGRBindViewportScrolls(nil, _motionScrolls, self, &kScrollContext);
+        _motionScrolls = nil;
+    }
     [_player pause];
     [_looper disableLooping];
     _looper = nil;
@@ -907,6 +1004,7 @@ static void *kReadyContext = &kReadyContext;
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (context == &kScrollContext) { [self sgr_updateMotion]; return; }
     if (context != kReadyContext) {
         [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
         return;
@@ -949,15 +1047,17 @@ static void *kReadyContext = &kReadyContext;
 // Video Previews on; otherwise it holds its frame. Off screen it stops: an album page left on the
 // navigation stack would otherwise keep decoding.
 - (void)sgr_updateMotion {
+    if (!_player) return;
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    BOOL may = SGMotionHeaderMayPlay(self.window != nil, front, SGRReduceMotion(),
-                                   NSProcessInfo.processInfo.lowPowerModeEnabled, UIAccessibilityIsVideoAutoplayEnabled());
-    if (may) [_player play];
-    else [_player pause];
+    BOOL may = SGMotionHeaderMayPlay(SGRViewInViewport(self, SGRSettledPlayerRect(self.window)), front, SGRReduceMotion(),
+                                   SGRMotionHeldForPowerOrHeat(), UIAccessibilityIsVideoAutoplayEnabled());
+    if (may != (_player.rate != 0)) {
+        if (may) [_player play]; else [_player pause];
+    }
 }
 
-- (void)didMoveToWindow {
-    [super didMoveToWindow];
+- (void)sgr_motionHierarchyChanged {
+    SGRBindViewportScrolls(self, _motionScrolls, self, &kScrollContext);
     [self sgr_updateMotion];
 }
 
@@ -981,7 +1081,12 @@ static void *kReadyContext = &kReadyContext;
 }
 
 - (void)followCover:(UIImageView *)source {
-    if (!source) return;
+    // Spotify's cover holds no artwork view of the lookup's size: the one followed is not its cover any more (a rebuilt
+    // header's replacement can still be undersized here), and a picture landing in it later is not the album's.
+    if (!source) {
+        _cover = nil;
+        return;
+    }
     [self takeCover:source late:NO];
     if (_cover == source) return;
     _cover = source;
@@ -989,10 +1094,39 @@ static void *kReadyContext = &kReadyContext;
     SGRObserveImage(source, ^(UIImageView *view) { [weakSelf takeCover:view late:YES]; });
 }
 
+// A rebuilt header's replacement artwork view can be under the lookup's size on the header's pass and get its size and
+// its picture on passes of its own, which reach neither the header nor the page. Until one is followed, every image
+// view in the element looks again when it gets a picture and, where its layout can be watched, when it is laid out at
+// the lookup's size; the walk is made once per element waited on, and a pass under the size costs one comparison.
+- (void)followCoverIn:(UIView *)element {
+    UIImageView *artwork = SGRHeaderArtworkIn(element);
+    [self followCover:artwork];
+    if (artwork) {
+        _awaited = nil;
+        return;
+    }
+    if (!element || element == _awaited) return;
+    _awaited = element;
+    __weak SGRAlbumHero *weakSelf = self;
+    __weak UIView *weakElement = element;
+    void (^look)(UIView *) = ^(UIView *view) {
+        SGRAlbumHero *hero = weakSelf;
+        UIView *root = weakElement;
+        if (!hero || !root || hero->_cover || view.bounds.size.width < kMinCover) return;
+        [hero followCoverIn:root];
+    };
+    SGForEachView(element, ^(UIView *v) {
+        if (![v isKindOfClass:UIImageView.class]) return;
+        SGRObserveImage((UIImageView *)v, ^(UIImageView *view) { look(view); });
+        SGRObserveLayout(v, look);
+    });
+}
+
 // `late` is a cover that arrived after the header had laid out -- an album opened for the first time, whose
 // artwork is still being fetched while the page is already on screen. The log line says once that the watch,
 // and not one of the header's passes, is what filled the hero.
 - (void)takeCover:(UIImageView *)source late:(BOOL)late {
+    if (late && source != _cover) return;
     UIImage *image = source.image;
     if (!image || source.bounds.size.width < kMinCover || _picture.image == image) return;
     _picture.image = image;
@@ -1036,14 +1170,23 @@ static void applyHero(UIView *header, UIView *cover, CGFloat bottom) {
     hero.fieldColor = SGRAlbumFieldColor(header);
     // Spotify's square at full size, in the header's coordinates, which are the hero's: grow-only like the height,
     // so the square stays put while the header fades and collapses. Its bottom too, since the cover can reach its
-    // full size before the header's top inset is in.
+    // full size before the header's top inset is in. A header of another width (an iPad window resized) has Spotify
+    // lay its square out anew: the one kept is dropped and the square taken again from there. Spotify can centre it
+    // in the new width a pass later, so one of the same size and height moved sideways is taken too: a scroll never
+    // moves the square sideways.
     if (!SGRPageFullCover(SGRKeyAlbumFullCover)) {
-        CGRect square = [cover convertRect:cover.bounds toView:header];
-        if (square.size.width >= kMinCover && (square.size.width > hero.square.size.width + 0.5
-                                               || CGRectGetMaxY(square) > CGRectGetMaxY(hero.square) + 0.5)) hero.square = square;
+        CGRect square = [cover convertRect:cover.bounds toView:header], kept = hero.square;
+        CGFloat width = header.bounds.size.width;
+        BOOL sideways = fabs(square.size.width - kept.size.width) <= 0.5 && fabs(square.size.height - kept.size.height) <= 0.5
+            && fabs(CGRectGetMinY(square) - CGRectGetMinY(kept)) <= 0.5 && fabs(CGRectGetMinX(square) - CGRectGetMinX(kept)) > 0.5;
+        if (square.size.width >= kMinCover && (fabs(width - hero.squareWidth) > 0.5 || sideways || square.size.width > kept.size.width + 0.5
+                                               || CGRectGetMaxY(square) > CGRectGetMaxY(kept) + 0.5)) {
+            hero.square = square;
+            hero.squareWidth = width;
+        }
         [hero takeShadowFrom:cover];
     }
-    [hero followCover:SGRHeaderArtworkIn(cover)];
+    [hero followCoverIn:cover];
     SGRConcealView(cover);
 }
 
@@ -1259,6 +1402,22 @@ static void applyWash(UIView *page) {
     }
 }
 
+// The ⋯ and download pinned to the page, in the header's coordinates with the page at rest: they stay where
+// they are while the header scrolls under them, so the scroll is taken back out, read from the scroll owner the hero
+// reads its pull from. CGRectNull while neither is shown on the page (Cover beside puts them in the header's info).
+static CGRect pinnedChrome(UIView *header, UIView *page) {
+    static const void *const keys[] = {&kPinnedMoreKey, &kPinnedDownloadKey};
+    CGRect chrome = CGRectNull;
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++) {
+        UIView *button = objc_getAssociatedObject(page, keys[i]);
+        if (button.superview == page && !button.hidden) chrome = CGRectUnion(chrome, button.frame);
+    }
+    if (CGRectIsNull(chrome)) return chrome;
+    UIScrollView *scroll = SGRStretchHeroScrollAbove(header);
+    CGFloat scrolled = scroll ? scroll.contentOffset.y + scroll.adjustedContentInset.top : 0;
+    return CGRectOffset([page convertRect:chrome toView:header], 0, -scrolled);
+}
+
 static void applyHeader(UIView *header, UIView *page) {
     if (!SGRFindByIdentifier(header, @"CreativeWorkPlatform.Components.UI.TitleRow", &kTitleKey)) return;
     SGRAlbumHoldPage(page);
@@ -1276,7 +1435,7 @@ static void applyHeader(UIView *header, UIView *page) {
     CGFloat top = cover ? CGRectGetMinY([cover convertRect:cover.bounds toView:header]) : 0;
     available.origin.y = top;
     available.size.height -= top + SGRHeaderInfoBottom;
-    CGRect beside = [info sgr_coverBesideIn:header available:cover ? available : CGRectZero
+    CGRect beside = [info sgr_coverBesideIn:header available:cover ? available : CGRectZero fitHeight:NO
         direction:page.effectiveUserInterfaceLayoutDirection
         stackedParent:header stackedFrame:header.bounds
         more:objc_getAssociatedObject(page, &kPinnedMoreKey) download:objc_getAssociatedObject(page, &kPinnedDownloadKey)
@@ -1284,15 +1443,23 @@ static void applyHeader(UIView *header, UIView *page) {
     SGRAlbumHero *existingHero = objc_getAssociatedObject(header, &kHeroKey);
     existingHero.besideFrame = beside;
     CGFloat bottom = rest - SGRHeaderInfoBottom - [info contentHeightForWidth:header.bounds.size.width] + SGRHeaderInfoTitleRise;
+    // A pass without Spotify's cover element (the header rebuilding) leaves the hero following no artwork view: the
+    // one it followed is retired with the element.
     if (cover) applyHero(header, cover, bottom);
+    else [existingHero followCover:nil];
     SGRAlbumHero *hero = objc_getAssociatedObject(header, &kHeroKey);
     hero.besideFrame = beside;
+    hero.chrome = pinnedChrome(header, page);
     header.accessibilityElements = info.sgr_coverBeside ? @[hero, info] : nil;
-    // The header scrolls with the page's scroll view, the hero and the info with it.
+    // The header scrolls with the page's scroll view, the hero and the info with it. Spotify fades its header
+    // element as the page scrolls; over the Music app's layout that left the title, the artist and the row faint
+    // under the bar, so the element stays solid and the info is clipped under the bar instead.
+    UIScrollView *scroll = SGRStretchHeroScrollAbove(header);
+    SGRKeepOpaque(header.superview);
+    [info clipUnderTopBarFollowing:scroll];
     SGRHeroVeil *veil = hero.veil;
     if (veil) {
-        veil.info = info;
-        [veil followScroll:SGRStretchHeroScrollAbove(header)];
+        [veil followScroll:scroll];
         [veil update];
     }
     [hero playMotionForArtist:artist album:album];

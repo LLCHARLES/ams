@@ -296,7 +296,7 @@ int main(void) {
         CHECK(!ask(@"0123456789abcdefghij-_") && !ask(@"short") && sg_sent == 0);
         CHECK(ask(@"0123456789abcdefghijkA") && sg_sent == 1);
         CHECK([sg_headers[@"Authorization"] isEqualToString:@"Bearer sl_pk_harness_key"] && [sg_headers[@"Accept"] isEqualToString:@"application/json"]
-              && [sg_headers[@"User-Agent"] hasPrefix:@"Vitrine/"]);
+              && [sg_headers[@"User-Agent"] hasPrefix:@"Retrine/"]);
         CHECK(ask(@"0123456789abcdefghijkA") && sg_sent == 1);
         sg_reply = reply(404, @{});
         sg_body = nil;

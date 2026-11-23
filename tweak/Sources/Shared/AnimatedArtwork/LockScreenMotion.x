@@ -14,6 +14,7 @@
 // lock screen widget's star (LockScreenStar.x) can swap the two without a restart. Moving artwork with
 // lyrics looks the track up too and hands its clip to LyricsArtwork.x, which draws the lines over it.
 #import <MediaPlayer/MediaPlayer.h>
+#import <stdatomic.h>
 #import "Core/SGCore.h"
 #import "AnimatedArtwork.h"
 #import "SGFluidClip.h"
@@ -38,7 +39,7 @@ static NSUInteger sg_coverRevision;
 static NSString *sg_coverPublishedID;
 static NSString *sg_picture;   // the picture the track names, for the cover's clip
 static NSUInteger sg_walk;   // presentation generation: track, choice and plain/lyrics ownership
-static SGLockArtwork sg_choice;
+static _Atomic(SGLockArtwork) sg_choice; // applied on main, sampled by defaults posters
 static dispatch_queue_t sg_queue;   // cuts clips and makes the cover's, one at a time
 static SGMotionFollower *sg_follower;
 // A source is fetched once. Only its presentation waits for MediaPlayer's capabilities/cover.
@@ -337,7 +338,7 @@ static void retryPresentation(void) {
 %ctor {
     if (@available(iOS 26.0, *)) {
         sg_choice = SGLockScreenArtwork();
-        sg_background = SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background");
+        if (sg_choice != SGLockArtworkOff) sg_background = SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background");
         sg_queue = dispatch_queue_create("spotifyglass.lockscreen.motion", DISPATCH_QUEUE_SERIAL);
         static SGLockMotionPresentation *presentationObserver;
         presentationObserver = [SGLockMotionPresentation new];
@@ -383,8 +384,10 @@ static void retryPresentation(void) {
         [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil
                                                     usingBlock:^(NSNotification *note) {
             SGPrefsChanged();
+            if (SGLockScreenArtwork() == SGLockArtworkOff && atomic_load(&sg_choice) == SGLockArtworkOff) return;
             dispatch_async(dispatch_get_main_queue(), ^{
                 SGLockArtwork choice = SGLockScreenArtwork();
+                if (choice == SGLockArtworkOff && sg_choice == SGLockArtworkOff) return;
                 SGLyricsBackgroundStyle background = SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background");
                 BOOL changed = ![SGLyricsBackgroundIdentity(background) isEqual:SGLyricsBackgroundIdentity(sg_background)];
                 sg_background = background;

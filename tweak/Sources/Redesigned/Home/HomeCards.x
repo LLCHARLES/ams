@@ -108,8 +108,6 @@ static void retextedUnder(UIView *label) {
     if (ours) SGRHomeProbeEnd(SGRHomeProbeLabelsMatched, began);
 }
 
-// The walk is 20 to 30 ns a call (measured 2026-10-12 against an isDescendantOfView: check on Home's list, which is
-// no cheaper and would miss a label that joins the window before its card does), so no cheaper gate is kept.
 static void relayoutButtonAround(UIView *label) {
     static Class backing;
     if (!backing) backing = NSClassFromString(@"_TtC19LegacyUI_ECMCoreKit31InteractableLayoutBackingButton");
@@ -123,6 +121,34 @@ static void relayoutButtonAround(UIView *label) {
 // The hooks the Home look and the shortcuts' glass need (SGRKeyHomeLook, SGRKeyHomeShortcutGlass): none of them install
 // while both are off.
 %group SGRHomeLook
+
+// A whole branch can move between cards (or out of Home) without any of its labels
+// changing superview. Propagate membership on those moves, not on every text write.
+static char kInHomeCard;
+static Class sg_backing;
+static void markCardBranch(UIView *view, BOOL inside) {
+    if ([view isKindOfClass:sg_backing]) {
+        NSString *identifier = view.accessibilityIdentifier;
+        inside = [identifier isEqualToString:@"Shortcut.Card.Home"] || [identifier isEqualToString:@"Components.UI.HomeCard"];
+    }
+    if ((objc_getAssociatedObject(view, &kInHomeCard) != nil) == inside) return;
+    objc_setAssociatedObject(view, &kInHomeCard, inside ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    for (UIView *child in view.subviews) markCardBranch(child, inside);
+}
+
+%hook UIView
+- (void)didMoveToSuperview {
+    %orig;
+    markCardBranch(self, objc_getAssociatedObject(self.superview, &kInHomeCard) != nil);
+}
+%end
+
+%hook _TtC19LegacyUI_ECMCoreKit31InteractableLayoutBackingButton
+- (void)setAccessibilityIdentifier:(NSString *)identifier {
+    %orig;
+    markCardBranch((UIView *)self, NO);
+}
+%end
 
 // The tile's playing indicator comes and goes with what plays, on its own, without the tile laying out: shown or
 // hidden, the tile's pass is asked for again, and HomeTiles.m moves it to the trailing edge or lets the title have
@@ -158,11 +184,11 @@ static void relayoutButtonAround(UIView *label) {
 %hook UILabel
 - (void)setText:(NSString *)text {
     %orig;
-    retextedUnder((UIView *)self);
+    if (objc_getAssociatedObject(self, &kInHomeCard)) retextedUnder((UIView *)self);
 }
 - (void)setAttributedText:(NSAttributedString *)text {
     %orig;
-    retextedUnder((UIView *)self);
+    if (objc_getAssociatedObject(self, &kInHomeCard)) retextedUnder((UIView *)self);
 }
 %end
 
@@ -176,6 +202,7 @@ static void relayoutButtonAround(UIView *label) {
         @"_TtC30Discovery_MediumDensityCardKit9DJMDCView",
     ]);
     if (!SGRHomeLook() && !SGRHomeShortcutGlass()) return;
+    sg_backing = NSClassFromString(@"_TtC19LegacyUI_ECMCoreKit31InteractableLayoutBackingButton");
     %init(SGRHomeLook);
     SGRequireClasses(@[@"_TtC11Home_ECMKit36ShortcutCardHomePlayingIndicatorView", @"SPTEncoreLabel"]);
 }

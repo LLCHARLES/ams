@@ -1,7 +1,7 @@
 // The voice model on the phone (Sing.h): the one Voice model chooses (SGKeySingModel), the full separator-ane.mlmodelc
 // or the light separator-light.mlmodelc, each the five files of a compiled model, downloaded one by one from the
 // Hugging Face repo's folder of that name, each kept only once its size and SHA-256 are the ones pinned here, then
-// moved together into Application Support/Vitrine/Sing/<folder>, which backups leave out (210 or 31 MB that can be
+// moved together into Application Support/Retrine/Sing/<folder>, which backups leave out (210 or 31 MB that can be
 // downloaded again). Each model has its own staging folder, resume data and paused bytes, so either can be on the
 // iPhone, downloaded or removed without the other. A dropped connection carries on from where it stopped, three times
 // per file, and a stopped download keeps the file it was in the middle of (NSURLSession's resume data, kept beside the
@@ -17,10 +17,12 @@
 // Threading: main thread, but for SGSingRemoveOldModel; the session's delegate runs on a queue of its own and hands
 // back to the main thread.
 #import "Core/SGFileHash.h"
+#import "Core/SGDataRoot.h"
 #import <stdatomic.h>
 #import "Core/SGCore.h"
 #import "Sing.h"
 
+// Published upstream repository name, independent of the local data folder.
 static NSString *const kRepo = @"https://huggingface.co/My-Name-Is-Jeff/vitrine-sing/resolve/main/";
 static const int kRetries = 3;
 // Room the download leaves on the disk besides itself.
@@ -92,8 +94,7 @@ static long long totalBytes(const SGSingModelFiles *model) {
 }
 
 static NSURL *singFolder(void) {
-    NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    return [[support URLByAppendingPathComponent:@"Vitrine" isDirectory:YES] URLByAppendingPathComponent:@"Sing" isDirectory:YES];
+    return [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Sing" isDirectory:YES];
 }
 
 static NSURL *modelFolder(const SGSingModelFiles *model) {
@@ -402,6 +403,7 @@ NSURL *SGSingModelURL(void) {
     static const SGSingModelFiles *knownModel;
     const SGSingModelFiles *model = chosen();
     if (knownGeneration != sg_modelGeneration || knownModel != model) {
+        if (!singFolder()) return nil;
         knownGeneration = sg_modelGeneration;
         knownModel = model;
         known = complete(model);
@@ -472,7 +474,7 @@ static long long bytesToCome(void) {
 }
 
 void SGSingDownloadModel(void) {
-    if (sg_downloader || hasModel()) return;
+    if (sg_downloader || !singFolder() || hasModel()) return;
     // The volume Application Support is on, which the staging folder's parent may not exist on yet.
     NSURL *support = singFolder().URLByDeletingLastPathComponent.URLByDeletingLastPathComponent;
     NSNumber *free = [support resourceValuesForKeys:@[NSURLVolumeAvailableCapacityForImportantUsageKey] error:nil][NSURLVolumeAvailableCapacityForImportantUsageKey];
@@ -560,6 +562,7 @@ static NSArray<NSURL *> *oldLeftovers(void) {
 // Everything of `model` in Sing/: the compiled model, its download's folder and resume data and a FLEX build's copy,
 // and for the full model the old one it replaced, with what that one's download left.
 static NSArray<NSURL *> *filesOf(const SGSingModelFiles *model) {
+    if (!singFolder()) return @[];
     NSMutableArray<NSURL *> *urls = [NSMutableArray arrayWithObjects:modelFolder(model), stagingFolder(model), devFolder(model), nil];
     for (int i = 0; i < kFileCount; i++) [urls addObject:resumeFile(model, i)];
     if (model == &kModels[SGSingModelFull]) {
@@ -574,6 +577,7 @@ static const SGSingModelFiles *unchosen(void) {
 }
 
 static void removeModel(const SGSingModelFiles *model) {
+    if (!singFolder()) return;
     sg_removals[model - kModels]++;
     long long freed = 0;
     removeAll(filesOf(model), &freed);
@@ -603,6 +607,7 @@ void SGSingDeleteOtherModel(void) {
 }
 
 void SGSingRemoveOldModel(void) {
+    if (!singFolder()) return;
     // The bytes a stopped download kept were the old model's.
     const SGSingModelFiles *full = &kModels[SGSingModelFull];
     long long freed = 0;

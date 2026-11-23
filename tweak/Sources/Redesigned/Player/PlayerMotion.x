@@ -1,7 +1,7 @@
 // Player redesign: Animated artwork, the track's Canvas or Apple Music's animated cover behind the player,
 // the way the Music app draws it. The clip runs edge to edge from the top, sharp to near its foot, where
-// it dissolves into the color of its last rows, drawn on down to the bottom of the field, so it ends in
-// its own color rather than on the Fluid field. A blur comes in from the seam (from above the controls for a
+// it dissolves into the colors of its last rows, a few of them from side to side, drawn on down to the bottom of
+// the field, so it ends in its own colors rather than on the Fluid field. A blur comes in from the seam (from above the controls for a
 // Canvas as tall as the screen) and lies under the controls; behind the lyrics the whole clip is blurred.
 // The player's square cover goes while a clip plays, so a track without one keeps its cover over Fluid
 // (PlayerField.x keeps the field Fluid for this choice). The player's ⋯ menu switches between Animated
@@ -9,19 +9,23 @@
 //
 // The clip is a subview of the field, not of the background plane: the plane's layout brings the field to
 // the front on every pass, and a sibling would end up under it. Each of the field's layout passes attaches
-// it (SGRPlayerMotionFieldLaidOut), so a clip that came in before the player first opened, or a field
-// Spotify built again, gets it.
+// it (SGRPlayerMotionFieldLaidOut), including a field Spotify built again.
+// Only the visible, active player requests clips; its current and ahead tickets are released when it leaves.
 //
 // The clip holds still when the moving field does (SGRField.m): out of a window, with the app not in front,
-// while the player opens or closes, and while the song is paused. Under Reduce Motion and in Low Power Mode
-// no clip plays at all: the cover stays over Fluid, as for a track without one, until both are off again.
+// while the player opens or closes, and while the song is paused. Under Reduce Motion, Low Power Mode or
+// serious heat the clip goes away: the cover stays over Fluid until the clip can be looked up again.
 // While a clip is showing, the Fluid field under it is held still too, and once the clip has faded in it is
 // hidden (the field's covered): the field's color is what shows above the clip on the pull that dismisses.
 //
 // The clip is dimmed by how bright it is (SGRPlayerClipDim): three of its frames are measured as it comes in,
 // so a white Canvas is drawn darker than a black one and the white text over it keeps its contrast. The dim
-// lies only where text does, a band under the header and from above the title down, as the Music app's does:
-// over the whole clip it took up to four fifths of its light (issue #101). Behind the lyrics it covers the clip.
+// lies only where text does, a band at the top and from above the title down, as the Music app's does:
+// over the whole clip it took up to four fifths of its light (issue #101). The band is whole over the status bar,
+// and over the header too while it shows something to read (where it plays from, Spotify's arrow, the AI DJ's
+// buttons); a header with only the grabber leaves the clip's top to fade in right under the status bar (issue #39).
+// Below the title a second black, on top of the dim, deepens toward the bottom of the screen as the Music app's
+// player does, so the text there is never on anything lighter than the dim alone. Behind the lyrics it covers the clip.
 //
 // A track that changes while the player cannot be seen (out of a window, or with the app not in front, which a
 // locked phone's player is while it stays in its window) takes the last clip away at once, without a fade, so
@@ -55,7 +59,7 @@
 // sides, with a scrim of its own under the status bar and the header's controls (kStillScrimTop). The cover is the Kit's for the playing track (SGRNowPlayingArtwork), nothing fetched for it, and only one at
 // least kStillLeastPixels wide: a smaller one (the now playing bar's) leaves the ordinary cover until a larger one is
 // published, which then comes in. It is held off where a clip would be (not Animated, Spotify's video, Reduce Motion,
-// Low Power Mode), a clip found later replaces it, and a skip lets it go as it does a clip.
+// Low Power Mode or serious heat), a clip found later replaces it, and a skip lets it go as it does a clip.
 //
 // With the Visualizer without a clip on (SGRKeyPlayerAnimatedVisualiser, off until switched on, and off while the
 // full-screen cover is on), the same walk's finding no clip puts the Visualizer on the field in the cover's place
@@ -64,16 +68,22 @@
 #import <AVFoundation/AVFoundation.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRMotionBudget.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SGLastTrack.h"
 #import "Shared/Player/SpeedPitch.h"
 #import "Player.h"
+#import "PlayerLyricLine.h"
 
 // Where the clip starts dissolving into its foot, as a share of its height.
 static const CGFloat kFootFrom = 0.9;
-// The share of the poster's height, at its bottom, whose mean color the foot is.
+// The share of the poster's height, at its bottom, whose colors the foot is.
 static const CGFloat kFootRows = 0.03;
+// The foot's colors from side to side: that many means of the last rows, each over its share of the width, laid
+// between by a gradient. A few, so the foot keeps the clip's left and right without columns: a row's own pixels
+// stretched on down read as vertical streaks (issue #40).
+static const size_t kFootSamples = 4;
 // A clip this much taller than wide is a Canvas (9:16), drawn to the window's full height and centered, cut at its
 // sides. Apple Music's tall cover (3:4) keeps its own height from the top, whole, as the Music app draws it
 // (issues #40 and #57: drawn to the window's height it lost two fifths of its width).
@@ -95,9 +105,12 @@ static const CGFloat kStillLeastAspect = 4.0 / 3, kStillLeastPixels = 300;
 static const CGFloat kStillScrimTop = 0.45, kStillScrimBelowSafeTop = 76;
 // The dim's floor and ceiling, and what the lyrics add to it.
 static const CGFloat kDimLeast = 0.10, kDimMost = 0.80, kDimLyrics = 0.15;
-// The dim's band at the top, under the status bar and the header: whole down to this share of the screen, so
-// the header's text gets all of it, then gone over kDimFade points.
+// The dim's band at the top: whole over the status bar, and down to this share of the screen while the header
+// shows something to read, so its text gets all of it, then gone over kDimFade points.
 static const CGFloat kDimTop = 0.14, kDimFade = 48;
+// The black over the dim at the bottom of the screen, from none where the dim is whole above the title: the Music
+// app's player darkens toward its foot (issue #39).
+static const CGFloat kDeepenBottom = 0.35;
 // The frames measured for the dim besides the poster, in seconds into the clip (one past its end is skipped).
 static const double kMeasuredAt[] = {1, 2};
 // Behind the lyrics the clip itself is blurred, a plain Gaussian blur with no material's gray tint over it
@@ -221,9 +234,9 @@ CGFloat SGRPlayerImageBrightEnd(CGImageRef image) {
     return brightEnd(luminances);
 }
 
-// The mean color of the poster's last rows (kFootRows): drawn 16 pixels wide and averaged. A row's own colors
-// stretched on down read as vertical streaks (issue #40).
-static UIColor *footColor(CGImageRef poster) {
+// The foot's colors from left to right (kFootSamples), each the mean of its share of the poster's last rows
+// (kFootRows), drawn 16 pixels wide.
+static NSArray *footColors(CGImageRef poster) {
     enum { kWide = 16 };
     size_t height = CGImageGetHeight(poster), rows = MAX(1, (size_t)(height * kFootRows));
     CGImageRef strip = CGImageCreateWithImageInRect(poster, CGRectMake(0, height - rows, CGImageGetWidth(poster), rows));
@@ -235,11 +248,17 @@ static UIColor *footColor(CGImageRef poster) {
     CGContextDrawImage(context, CGRectMake(0, 0, kWide, 1), strip);
     CGContextRelease(context);
     CGImageRelease(strip);
-    CGFloat sum[3] = {0};
-    for (int i = 0; i < kWide; i++) {
-        for (int c = 0; c < 3; c++) sum[c] += pixels[i * 4 + c];
+    const size_t per = kWide / kFootSamples;
+    NSMutableArray *colors = [NSMutableArray arrayWithCapacity:kFootSamples];
+    for (size_t s = 0; s < kFootSamples; s++) {
+        CGFloat sum[3] = {0};
+        for (size_t i = s * per; i < (s + 1) * per; i++) {
+            for (int c = 0; c < 3; c++) sum[c] += pixels[i * 4 + c];
+        }
+        [colors addObject:(__bridge id)[UIColor colorWithRed:sum[0] / (per * 255.0) green:sum[1] / (per * 255.0)
+                                                       blue:sum[2] / (per * 255.0) alpha:1].CGColor];
     }
-    return [UIColor colorWithRed:sum[0] / (kWide * 255.0) green:sum[1] / (kWide * 255.0) blue:sum[2] / (kWide * 255.0) alpha:1];
+    return colors;
 }
 
 @interface SGRPlayerMotionView : UIView <SGPlayerStateObserver>
@@ -273,8 +292,9 @@ static UIColor *footColor(CGImageRef poster) {
     CALayer *_still;    // the poster, with the video drawn over it
     AVPlayerLayer *_clip;
     CAGradientLayer *_clipMask, *_seamMask;
-    CALayer *_foot;   // the color of the poster's last rows, from the seam down
+    CAGradientLayer *_foot;   // the colors of the poster's last rows, from side to side, from the seam down
     CAGradientLayer *_dim;   // black over the clip's top and from above the title down, as dark as the clip is bright
+    CAGradientLayer *_deepen;   // more black over the dim, from where it is whole down to the bottom of the screen
     CAGradientLayer *_scrim;   // a still's only: black from the top fading out under the header's controls
     NSMutableData *_luminances;   // of the frames measured so far
     BOOL _lyricsUp;
@@ -306,7 +326,12 @@ static UIBlurEffect *blurEffect(void) {
     self.accessibilityElementsHidden = YES;
     _picture = [[UIView alloc] initWithFrame:frame];
     [self addSubview:_picture];
-    _foot = [CALayer layer];
+    _foot = [CAGradientLayer layer];
+    _foot.startPoint = CGPointMake(0, 0.5);
+    _foot.endPoint = CGPointMake(1, 0.5);
+    NSMutableArray *footAt = [NSMutableArray arrayWithCapacity:kFootSamples];
+    for (size_t s = 0; s < kFootSamples; s++) [footAt addObject:@((s + 0.5) / kFootSamples)];
+    _foot.locations = footAt;
     [_picture.layer addSublayer:_foot];
     // An AVPlayerLayer draws nothing until its first frame is decoded, so the poster, the clip's first
     // frame and where the looper starts, is the contents of the layer the video draws in: there is a
@@ -326,6 +351,10 @@ static UIBlurEffect *blurEffect(void) {
     _dim.colors = dimColors(NO);
     _dim.opacity = kDimLeast;
     [_picture.layer addSublayer:_dim];
+    _deepen = [CAGradientLayer layer];
+    _deepen.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
+    _deepen.opacity = kDeepenBottom;
+    [_picture.layer addSublayer:_deepen];
     _scrim = [CAGradientLayer layer];
     _scrim.colors = @[(id)UIColor.blackColor.CGColor, (id)UIColor.clearColor.CGColor];
     _scrim.hidden = YES;
@@ -342,7 +371,8 @@ static UIBlurEffect *blurEffect(void) {
 
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-                                      NSProcessInfoPowerStateDidChangeNotification, UIAccessibilityReduceMotionStatusDidChangeNotification]) {
+                                      NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+                                      UIAccessibilityReduceMotionStatusDidChangeNotification]) {
         [center addObserver:self selector:@selector(updateMotionSoon) name:name object:nil];
     }
     [center addObserver:self selector:@selector(updateDim) name:UIAccessibilityDarkerSystemColorsStatusDidChangeNotification object:nil];
@@ -409,12 +439,20 @@ static UIBlurEffect *blurEffect(void) {
     _clipMask.frame = _still.bounds;
     _foot.frame = CGRectMake(0, seam, width, MAX(0, total - seam));
     _dim.frame = bounds;
+    _deepen.frame = bounds;
     // The window's safe area: this view's own, on the field in the player's list, reads none.
-    _scrim.frame = CGRectMake(0, 0, width, self.window.safeAreaInsets.top + kStillScrimBelowSafeTop);
+    CGFloat safeTop = self.window.safeAreaInsets.top;
+    _scrim.frame = CGRectMake(0, 0, width, safeTop + kStillScrimBelowSafeTop);
     NSNumber *(^at)(CGFloat) = ^NSNumber *(CGFloat y) { return @(MIN(1, y / total)); };
     // Whole again by where the seam's blur starts, so over the title and the controls below it.
-    CGFloat topEnd = MIN(screen * kDimTop, blurFrom), rampFrom = MAX(topEnd, blurFrom - kBlurRamp);
-    _dim.locations = @[@0, at(topEnd), at(MIN(topEnd + kDimFade, rampFrom)), at(rampFrom), at(blurFrom)];
+    CGRect line = SGRPlayerVisibleClipLineIn(self);
+    CGFloat dimFrom = CGRectIsNull(line) ? blurFrom : MIN(blurFrom, MAX(0, CGRectGetMinY(line)));
+    // The band at the top reaches as far as there is something to read: the status bar, and the header while it
+    // shows more than the grabber.
+    CGFloat bandEnd = SGRPlayerHeaderShowsIn(self) ? screen * kDimTop : safeTop;
+    CGFloat topEnd = MIN(bandEnd, dimFrom), rampFrom = MAX(topEnd, dimFrom - kBlurRamp);
+    _dim.locations = @[@0, at(topEnd), at(MIN(topEnd + kDimFade, rampFrom)), at(rampFrom), at(dimFrom)];
+    _deepen.locations = @[at(dimFrom), at(screen)];
     _seamMask.frame = bounds;
     _seamMask.locations = @[at(blurFrom), at(blurFrom + kBlurRamp)];
     [CATransaction commit];
@@ -423,7 +461,7 @@ static UIBlurEffect *blurEffect(void) {
 // The picture under the video, or the whole of a still, and the share of the width the view draws it tall.
 - (void)takePicture:(UIImage *)picture aspect:(CGFloat)aspect {
     _aspect = aspect;
-    _foot.backgroundColor = footColor(picture.CGImage).CGColor;
+    _foot.colors = footColors(picture.CGImage);
     _still.contents = (__bridge id)picture.CGImage;
     [self setNeedsLayout];
 }
@@ -443,7 +481,7 @@ static UIBlurEffect *blurEffect(void) {
     if (_inCover) {
         // The cover's own picture: nothing over it to keep readable, and nothing under it to fade into.
         _still.mask = nil;
-        _foot.hidden = _dim.hidden = _seamBlur.hidden = YES;
+        _foot.hidden = _dim.hidden = _deepen.hidden = _seamBlur.hidden = YES;
         return;
     }
     [self measure:file poster:poster];
@@ -695,7 +733,7 @@ static UIBlurEffect *blurEffect(void) {
 // the recovery it would have had.
 - (BOOL)mayPlay {
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    return self.window && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion() && !NSProcessInfo.processInfo.lowPowerModeEnabled
+    return self.window && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion() && !SGRMotionHeldForPowerOrHeat()
         && !SGPlayerState().isPaused;
 }
 
@@ -762,7 +800,7 @@ static void layOut(void) {
     CGRect frame = CGRectMake(0, 0, size.width, MAX(size.height, screen) + field.bleed.bottom);
     if (!CGRectEqualToRect(sg_motion.frame, frame)) sg_motion.frame = frame;
     sg_motion.screenHeight = screen;
-    // A field Spotify built again, or the first one after a clip that came in before it, is covered too.
+    // A field Spotify built again is covered too.
     field.covered = sg_covering;
 }
 
@@ -852,15 +890,15 @@ void SGRPlayerMotionFieldLaidOut(void) {
 
 static void attachCoverClip(void);
 
-// A clip that came in before the player opened finds no cover to hide at the field's first pass, the covers
+// A clip that came in while the player opened can find no cover to hide at the field's first pass, the covers
 // laying out after it (issue #19: the cover over the clip after a relaunch), so each cover's layout asks too.
 void SGRPlayerMotionCoverLaidOut(void) {
     setCoverShown(coverWanted(), NO);
     attachCoverClip();
 }
 
-// The square clip goes into the cover on screen when it has none to be in: it came in while the player was
-// closed, or Spotify built the covers again. A cover it is in that is still in a window keeps it, so a swipe
+// The square clip goes into the cover on screen when it has none to be in: Spotify is still laying out
+// the covers, or built them again. A cover it is in that is still in a window keeps it, so a swipe
 // that shows the next cover a moment does not carry the clip over to it.
 static void attachCoverClip(void) {
     SGRPlayerMotionView *clip = sg_coverClip;
@@ -878,6 +916,10 @@ static void attachCoverClip(void) {
 BOOL SGRPlayerMotionShowing(void) {
     return sg_motion != nil;
 }
+
+void SGRPlayerMotionLineMoved(void) { [sg_motion setNeedsLayout]; }
+
+void SGRPlayerMotionHeaderChanged(void) { [sg_motion setNeedsLayout]; }
 
 // The card's one clip and the file it plays: a tap on another background choice takes the view off the card
 // and the next tap puts it back, so the same file is not made a playing looper a second time.
@@ -947,7 +989,7 @@ UIView *SGRPlayerMotionPreview(void (^arrived)(void)) {
     sg_previewLooking = YES;
     NSUInteger generation = sg_previewGeneration;
     SGLog(@"redesign player: the Player page looks up the clip of %@%@", track, shown.current ? @"" : @", the last played");
-    sg_previewTicket = SGMotionRequestClip(track, shown.canvasURL, shown.artist, shown.album, SGMotionPixels(),
+    sg_previewTicket = SGMotionRequestSongClip(track, shown.canvasURL, shown.artist, shown.album, shown.title, SGMotionPixels(),
                     ^(NSURL *file, NSString *source) {
         if (generation != sg_previewGeneration) return;
         // Nothing found is not kept: the page asks again the next time it shows Animated.
@@ -975,6 +1017,11 @@ UIView *SGRPlayerMotionPreview(void (^arrived)(void)) {
 }
 
 static SGMotionFollower *sg_follower;
+static BOOL sg_inactive;
+
+static BOOL consumerVisible(void) {
+    return !sg_inactive && UIApplication.sharedApplication.applicationState == UIApplicationStateActive && SGRPlayerIsVisible();
+}
 
 // Spotify's units that are showing its music video, held weakly: one that goes without saying so lets go.
 static NSHashTable *sg_videos;
@@ -983,9 +1030,9 @@ static BOOL videoShowing(void) {
     return sg_videos.allObjects.count > 0;
 }
 
-// Reduce Motion asks for no looping clip, and Low Power Mode for no video decoding behind the player.
+// Reduce Motion asks for no looping clip; low power or serious heat spares the video decoding.
 static BOOL motionAllowed(void) {
-    return !SGRReduceMotion() && !NSProcessInfo.processInfo.lowPowerModeEnabled;
+    return !SGRReduceMotion() && !SGRMotionHeldForPowerOrHeat();
 }
 
 // What a clip, or the cover's still, is shown under: Animated chosen, Spotify's video not showing, motion allowed.
@@ -1000,9 +1047,10 @@ static BOOL seen(UIView *view) {
 }
 
 // The clip fades out over the cover coming back where the player is seen, and goes at once where not.
-static void clear(BOOL animated) {
+static void clearForReplacement(BOOL animated, BOOL fieldClipFollows) {
     SGRPlayerMotionView *old = sg_motion, *inCover = sg_coverClip;
     sg_motion = nil;
+    if (old && !fieldClipFollows) SGRPlayerLyricClipChanged();
     sg_coverClip = nil;
     sg_shown = nil;
     sg_stillOf = nil;
@@ -1022,6 +1070,8 @@ static void clear(BOOL animated) {
     if (animated) [old disappear:^{ [old removeFromSuperview]; }];
     else [old removeFromSuperview];
 }
+
+static void clear(BOOL animated) { clearForReplacement(animated, NO); }
 
 static void showInCover(NSString *track, NSURL *file, UIImage *poster) {
     SGRPlayerMotionView *clip = [[SGRPlayerMotionView alloc] initWithFrame:CGRectZero];
@@ -1055,6 +1105,7 @@ static void showBehind(NSString *track, NSString *name, void (^draw)(SGRPlayerMo
         clear(YES);
     };
     draw(motion);
+    SGRPlayerLyricClipChanged();
     layOut();
     SGRPlayerHoldField();
     [motion setBlurred:SGRPlayerLyricsOpen() animated:NO];
@@ -1066,13 +1117,14 @@ static void showBehind(NSString *track, NSString *name, void (^draw)(SGRPlayerMo
 }
 
 static void show(NSString *track, NSURL *file) {
-    if (!file || ![track isEqualToString:sg_track]) return;
+    if (!consumerVisible() || !file || ![track isEqualToString:sg_track]) return;
     NSUInteger begun = sg_begun;
     SGMotionPoster(file, ^(UIImage *poster) {
         // A walk begun while the poster was read (switched off, Spotify's video) has the say.
-        if (!poster || poster.size.width <= 0 || begun != sg_begun) return;
-        clear(YES);
-        if (poster.size.height / poster.size.width <= kSquareAspect) {
+        if (!consumerVisible() || !poster || poster.size.width <= 0 || begun != sg_begun) return;
+        BOOL square = poster.size.height / poster.size.width <= kSquareAspect;
+        clearForReplacement(YES, !square);
+        if (square) {
             showInCover(track, file, poster);
             return;
         }
@@ -1091,7 +1143,7 @@ BOOL SGRPlayerStillOn(void) {
 // the Kit has is this track's own and at least kStillLeastPixels wide; YES while this track's still shows. The same
 // picture again changes nothing, and another picture of the track is drawn in place.
 static BOOL showStill(void) {
-    if (!SGRPlayerStillOn() || ![sg_noClip isEqualToString:sg_track] || !clipWanted()) return NO;
+    if (!consumerVisible() || !SGRPlayerStillOn() || ![sg_noClip isEqualToString:sg_track] || !clipWanted()) return NO;
     NSString *uri = nil, *identity = nil;
     UIImage *picture = SGRNowPlayingArtwork(&uri, &identity);
     BOOL showing = sg_stillOf && [sg_shown isEqualToString:sg_track];
@@ -1103,7 +1155,7 @@ static BOOL showStill(void) {
         }
         return YES;
     }
-    clear(YES);
+    clearForReplacement(YES, YES);
     showBehind(sg_track, @"the cover's still", ^(SGRPlayerMotionView *motion) { [motion showStill:picture]; });
     sg_stillOf = identity;
     SGLog(@"redesign player: no clip for %@, its cover as the still, %.0f px wide", sg_track, picture.size.width * picture.scale);
@@ -1158,7 +1210,7 @@ static void videoSurface(id unit, BOOL attached) {
 
 // A skip on screen leaves the last clip a moment for the next one's to cross over, and the same track
 // walked again (its Canvas came late) keeps its clip until the new one does. Otherwise the clip goes: at
-// once where it cannot be seen, with a fade for Spotify's video, under Reduce Motion or Low Power Mode, and
+// once where it cannot be seen, with a fade for Spotify's video, under Reduce Motion, Low Power Mode or serious heat, and
 // when the background is not Animated.
 static BOOL beginTrack(NSString *track) {
     sg_track = track;
@@ -1167,7 +1219,7 @@ static BOOL beginTrack(NSString *track) {
     sg_noClip = nil;
     // The Visualizer standing in for the last track's missing clip goes with the lookup this walk starts.
     SGRPlayerVisualiserUpdate();
-    BOOL wanted = clipWanted();
+    BOOL wanted = consumerVisible() && clipWanted();
     if (wanted && [track isEqualToString:sg_shown]) return YES;
     // The clip on screen is another track's: it waits kHandOver for the next one to cross over it, but its
     // recovery stops here, at once, so a failure during the handover is not played again behind the next track.
@@ -1257,15 +1309,16 @@ void SGPlayerMenuSetAnimatedArtwork(BOOL on) {
     if (background < SGRPlayerBackgroundFluid) return;
     sg_videos = [NSHashTable weakObjectsHashTable];
     // Here rather than on the clip's view, which is gone while they hold it off: the track is walked again
-    // as either changes. The power state is reported off the main thread, which must not wait for main
+    // as these conditions change. Power and thermal state can be reported off the main thread, which must not wait for main
     // (AGENTS.md), so the observer takes it where it is posted and hops.
     __block BOOL allowed = motionAllowed();
-    for (NSNotificationName name in @[NSProcessInfoPowerStateDidChangeNotification, UIAccessibilityReduceMotionStatusDidChangeNotification]) {
+    for (NSNotificationName name in @[NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+                                      UIAccessibilityReduceMotionStatusDidChangeNotification]) {
         [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (motionAllowed() == allowed) return;
                 allowed = !allowed;
-                SGLog(@"redesign player: animated artwork %@", allowed ? @"allowed again, the clip looked up" : @"held off by Reduce Motion or Low Power Mode, Fluid shows");
+                SGLog(@"redesign player: animated artwork %@", allowed ? @"allowed again, the clip looked up" : @"held off by Reduce Motion, Low Power Mode or serious heat, Fluid shows");
                 [sg_follower restart];
             });
         }];
@@ -1276,6 +1329,7 @@ void SGPlayerMenuSetAnimatedArtwork(BOOL on) {
     sg_follower = [[SGMotionFollower alloc] initWithBegin:^BOOL(NSString *uri, SPTPlayerState *state) {
         return beginTrack(uri);
     } found:^(NSString *uri, NSURL *file) {
+        if (!consumerVisible()) return;
         if (file) {
             show(uri, file);
             return;
@@ -1284,6 +1338,17 @@ void SGPlayerMenuSetAnimatedArtwork(BOOL on) {
         if (!showStill()) clear(YES);
         SGRPlayerVisualiserUpdate();
     }];
+    for (NSNotificationName name in @[UIApplicationWillResignActiveNotification, UIApplicationDidBecomeActiveNotification,
+                                      SGRPlayerVisibilityDidChangeNotification]) {
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if ([note.name isEqualToString:UIApplicationWillResignActiveNotification]) sg_inactive = YES;
+            else if ([note.name isEqualToString:UIApplicationDidBecomeActiveNotification]) sg_inactive = NO;
+            // Invalidate posters as well as both tickets, including when no player state is available.
+            sg_begun++;
+            if (!consumerVisible()) clear(NO);
+            [sg_follower restart];
+        }];
+    }
     // A larger cover, or the track's own after the last one's, can make the still: the Kit posts on main.
     [NSNotificationCenter.defaultCenter addObserverForName:SGRNowPlayingArtworkDidChangeNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *note) { showStill(); }];

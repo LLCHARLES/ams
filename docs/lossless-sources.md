@@ -9,7 +9,7 @@ JavaScript in the app; use HTTP/JSON sources.
 The [HTTP addon compatibility follow-up](lossless-addons.md) covers the user-supplied Plex/Jellyfin,
 Telegram, Deezer, Unified and NullBeat candidates, Eclipse's optional ISRC contract, secret-bearing setup
 links, per-provider quotas and client-access restrictions. Read it alongside this design.
-The [Vitrine playback investigation](lossless-playback.md) adds binary evidence, the exact pre-Sing
+The [Retrine playback investigation](lossless-playback.md) adds binary evidence, the exact pre-Sing
 integration point and measured native decoder limits. Its [harness](../harness/lossless/README.md)
 proves local file decoding on one simulator runtime, not a working Spotify handoff.
 The [native prototype](lossless-prototype.md) adds an inactive pre-Sing source selector and bounded
@@ -20,9 +20,9 @@ Spotify anchoring, providers and automatic upgrades remain to be implemented and
 
 Source inspected at BitChord [`2c599a6`](https://github.com/kushagrasinghx/BitChord/tree/2c599a6cd7a195227a11dab5769f88da8fd08194)
 and Monochrome [`eb602ad`](https://github.com/monochrome-music/monochrome/tree/eb602ad4f8f74e0307f29906fc78a32f08a34f87).
-These are source observations, not measurements of a running app or proof that a provider serves Vitrine.
+These are source observations, not measurements of a running app or proof that a provider serves Retrine.
 
-| Mechanism | What runs on the client | Relevance to Vitrine |
+| Mechanism | What runs on the client | Relevance to Retrine |
 | --- | --- | --- |
 | BitChord JavaScript modules | Fetch a JSON index, download JavaScript, execute it in QuickJS | Do not embed this mechanism |
 | BitChord HTTP addons | Read JSON from manifest, search and stream endpoints | Recommended provider contract |
@@ -56,7 +56,7 @@ tracks background candidates. In
 avoids an active crossfade, then replaces the media item with a distinct rendition URI, seeks to the
 freshly read position, prepares playback and watches for failure. This is possible because BitChord
 owns its player. Its source comments acknowledge a playback break: the marketing description is not
-evidence of a gapless or sample-aligned transition, and its latency claims are not Vitrine measurements.
+evidence of a gapless or sample-aligned transition, and its latency claims are not Retrine measurements.
 
 Monochrome's current [`getStreamUrl`](https://github.com/monochrome-music/monochrome/blob/eb602ad4f8f74e0307f29906fc78a32f08a34f87/js/api.js)
 uses [`tracks-api.js`](https://github.com/monochrome-music/monochrome/blob/eb602ad4f8f74e0307f29906fc78a32f08a34f87/js/tracks-api.js)
@@ -72,11 +72,11 @@ also warns about restrictions on its hosted API. Its frontend being public does 
 third-party service contract. Prefer a user-configured addon or separately hosted adapter with supported
 backend access. No provider addresses, service credentials or executable modules should ship as defaults.
 BitChord's root license is GPL-3.0 and Monochrome's is Apache-2.0; preserve applicable notices if code is
-later reused. This research change copies neither implementation into Vitrine.
+later reused. This research change copies neither implementation into Retrine.
 
 ## Proposed HTTP compatibility scope
 
-The following is a proposed Vitrine subset, not a claim of complete BitChord compatibility:
+The following is a proposed Retrine subset, not a claim of complete BitChord compatibility:
 
 | Request | Response and handling |
 | --- | --- |
@@ -111,7 +111,7 @@ can read; Apple's [loading-media guidance](https://developer.apple.com/documenta
 documents that inspection. Actual decode, seek and handoff tests remain necessary for each container,
 transport and supported iOS version.
 
-## What Vitrine already has, and what is missing
+## What Retrine already has, and what is missing
 
 | Existing code | Can reuse | Does not establish |
 | --- | --- | --- |
@@ -182,7 +182,7 @@ permanent mute or two audible players. A skip or source removal invalidates all 
 - Separate Wi-Fi/cellular ceilings apply to lookup, prefetch and media requests, including retries and
   redirects. Recheck on path changes and before handoff. Cancel disallowed network work immediately;
   already buffered audio can finish without new requests while recovery is prepared. Unknown network
-  types use the stricter policy. These settings govern Vitrine's extra traffic; Spotify's own data-use
+  types use the stricter policy. These settings govern Retrine's extra traffic; Spotify's own data-use
   controls still govern its stream. Account for both streams when measuring usage.
 - A returned FLAC above a lossy ceiling is refused, not accepted because the source ignored `quality`.
   Do not compare unlike lossy codecs by bitrate alone or replace known native lossless with an unproven
@@ -207,7 +207,7 @@ requests and clear its credentials, pending work and cached answers. Do not rely
 checks to stop bandwidth use. Apply limits to artwork and media manifests/segments as well as API calls.
 
 BitChord caches manifests/searches for ten minutes and stream answers for five, with shared in-flight
-calls. For Vitrine, key by source identity/configuration, recording, rendition, requested quality and
+calls. For Retrine, key by source identity/configuration, recording, rendition, requested quality and
 policy; respect a provider's earlier expiry and single-use URLs. A signed URL is not a permanent
 track identity. Keep transport errors out of successful caches and evict expired/failed stream entries.
 Transient playback buffering must be bounded and must not become offline storage for a streaming-only

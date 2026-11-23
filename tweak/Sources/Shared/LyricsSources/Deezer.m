@@ -10,8 +10,10 @@ static NSString *sg_jwt;
 static NSUInteger sg_generation;
 static NSString *sg_arl;
 static BOOL sg_arlLoaded;
+static NSTimeInterval sg_authRefusedUntil;
 
 static NSDictionary *keyQuery(void) {
+    // Both lookup and reset must use the original Keychain service to reach existing credentials.
     return @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
              (__bridge id)kSecAttrService: @"Vitrine.Deezer", (__bridge id)kSecAttrAccount: @"arl"};
 }
@@ -31,8 +33,12 @@ static NSString *storedARL(SGLyricsRequestContext *context) {
     sg_arlLoaded = YES;
     if (status == errSecItemNotFound || !data) return nil;
     id value = CFBridgingRelease(data);
-    if (![value isKindOfClass:NSData.class] || [value length] > 4096) return nil;
-    sg_arl = [[NSString alloc] initWithData:value encoding:NSUTF8StringEncoding];
+    if ([value isKindOfClass:NSData.class] && [value length] <= 4096)
+        sg_arl = [[NSString alloc] initWithData:value encoding:NSUTF8StringEncoding];
+    if (!sg_arl) {
+        sg_arlLoaded = NO;
+        [context noteFailure:YES];
+    }
     return sg_arl;
 }
 
@@ -46,6 +52,7 @@ BOOL SGDeezerForgetKey(void) {
     sg_jwt = nil;
     sg_arl = nil;
     sg_arlLoaded = NO;
+    sg_authRefusedUntil = 0;
     sg_generation++;
     if (status != errSecSuccess && status != errSecItemNotFound) SGLog(@"deezer: the ARL could not be cleared (%d)", (int)status);
     return status == errSecSuccess || status == errSecItemNotFound;
@@ -75,6 +82,7 @@ static BOOL storeARL(NSString *arl) {
     sg_jwt = nil;
     sg_arl = nil;
     sg_arlLoaded = NO;
+    sg_authRefusedUntil = 0;
     sg_generation++;
     NSMutableArray *order = [SGLyricsOrder() mutableCopy];
     [order removeObject:@"deezer"];
@@ -159,7 +167,13 @@ static void token(SGLyricsRequestContext *context, NSString *arl, NSUInteger gen
     SGLyricsSourceRequestIn(context, [NSURL URLWithString:@"https://auth.deezer.com/login/arl?jo=p&rto=c&i=c"], @{@"Cookie": [@"arl=" stringByAppendingString:arl]}, NSData.data, ^(NSData *data, NSInteger status) {
         NSString *jwt = status == 200 ? SGLyricsString(SGLyricsField(json(data), @"jwt"), 16384) : nil;
         NSCharacterSet *safe = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."];
-        if (!jwt.length || [jwt rangeOfCharacterFromSet:safe.invertedSet].location != NSNotFound || generation != sg_generation) { done(nil); return; }
+        if (!jwt.length || [jwt rangeOfCharacterFromSet:safe.invertedSet].location != NSNotFound || generation != sg_generation) {
+            [context noteFailure:YES];
+            if (generation == sg_generation && (status == 400 || status == 401 || status == 403))
+                sg_authRefusedUntil = NSProcessInfo.processInfo.systemUptime + SGLyricsCredentialPauseSeconds;
+            done(nil);
+            return;
+        }
         sg_jwt = jwt;
         done(jwt);
     });
@@ -172,7 +186,9 @@ static BOOL authError(id root, NSInteger status) {
     for (id error in errors) {
         NSString *code = SGLyricsString(SGLyricsField(SGLyricsField(error, @"extensions"), @"code"), 128);
         NSString *message = SGLyricsString(SGLyricsField(error, @"message"), 1024).lowercaseString;
+        NSString *type = SGLyricsString(SGLyricsField(error, @"type"), 128);
         if ([@[@"UNAUTHENTICATED", @"UNAUTHORIZED", @"FORBIDDEN", @"TOKEN_EXPIRED", @"INVALID_TOKEN"] containsObject:code ?: @""] ||
+            [type isEqual:@"JwtTokenMissingError"] ||
             [message containsString:@"unauthenticated"] || [message containsString:@"unauthorized"] ||
             ([message containsString:@"token"] && ([message containsString:@"expired"] || [message containsString:@"invalid"]))) return YES;
     }
@@ -187,12 +203,18 @@ static void lyrics(SGLyricsRequestContext *context, NSString *song, NSString *ar
             if (generation != sg_generation) { done(nil); return; }
             id root = json(data);
             if (authError(root, status)) {
+                [context noteFailure:YES];
                 if ([sg_jwt isEqualToString:jwt]) sg_jwt = nil;
                 if (!retried) { lyrics(context, song, arl, generation, YES, done); return; }
+                sg_authRefusedUntil = NSProcessInfo.processInfo.systemUptime + SGLyricsCredentialPauseSeconds;
                 done(nil);
                 return;
             }
             SGLyricsResult *result = status == 200 ? SGDeezerResult(root) : nil;
+            id errors = SGLyricsField(root, @"errors");
+            if (status == 200 && (![root isKindOfClass:NSDictionary.class] ||
+                SGLyricsField(SGLyricsField(root, @"data"), @"track") == NSNull.null ||
+                ([errors isKindOfClass:NSArray.class] && [errors count]))) [context noteFailure:YES];
             SGLog(@"deezer: %lu lines", (unsigned long)result.karaokeLines.count);
             done(result);
         });
@@ -203,7 +225,13 @@ static void lyrics(SGLyricsRequestContext *context, NSString *song, NSString *ar
 void SGDeezerAskWith(NSString *arl, SGLyricsQuery *query, void (^done)(SGLyricsResult *));
 void SGDeezerAskWith(NSString *arl, SGLyricsQuery *query, void (^done)(SGLyricsResult *)) {
     if (!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(), ^{ SGDeezerAskWith(arl, query, done); }); return; }
-    if (!safeARL(arl) || !SGLyricsMatchKey(query.title).length || !SGLyricsMatchKey(query.artist).length) { done(nil); return; }
+    if (!arl.length) { done(nil); return; }
+    if (!safeARL(arl) || NSProcessInfo.processInfo.systemUptime < sg_authRefusedUntil) {
+        [query.requestContext noteFailure:YES];
+        done(nil);
+        return;
+    }
+    if (!SGLyricsMatchKey(query.title).length || !SGLyricsMatchKey(query.artist).length) { done(nil); return; }
     NSUInteger generation = sg_generation;
     NSString *title = [query.title stringByReplacingOccurrencesOfString:@"\"" withString:@""];
     NSString *artist = [SGLyricsLeadArtist(query.artist) stringByReplacingOccurrencesOfString:@"\"" withString:@""];
@@ -211,6 +239,7 @@ void SGDeezerAskWith(NSString *arl, SGLyricsQuery *query, void (^done)(SGLyricsR
     SGLyricsSourceRequestIn(query.requestContext, url, nil, nil, ^(NSData *data, NSInteger status) {
         id root = status == 200 ? json(data) : nil;
         id list = SGLyricsField(root, @"data");
+        if (status == 200 && ![list isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
         if ([list isKindOfClass:NSArray.class] && ![list count])
             query.requestContext.emptyNameSearch = ^(SGLyricsQuery *again, void (^answer)(SGLyricsResult *)) { SGDeezerAskWith(arl, again, answer); };
         NSString *song = songFor(root, query);

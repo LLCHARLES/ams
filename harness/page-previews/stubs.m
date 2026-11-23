@@ -44,7 +44,7 @@ NSData *SGMotionCanvasAsk(NSString *uri) { UNREACHED; }
 NSString *SGMotionCanvasInReply(NSData *reply) { UNREACHED; }
 void SGMotionFile(NSURL *remote, void (^done)(NSURL *file)) { UNREACHED; }
 SGMotionTicket *SGMotionRequestFile(NSURL *remote, void (^done)(NSURL *file)) { UNREACHED; }
-SGMotionTicket *SGMotionRequestAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file)) { UNREACHED; }
+SGMotionTicket *SGMotionRequestSongCover(NSString *artist, NSString *album, NSString *song, NSString *albumURI, NSString *trackURI, CGFloat pixels, void (^done)(NSURL *file)) { UNREACHED; }
 void SGRAlbumNotesChanged(UIView *page) { UNREACHED; }
 UIView *SGRAlbumPageOf(UIView *view) { UNREACHED; }
 UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *cacheKey) { UNREACHED; }

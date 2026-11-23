@@ -8,7 +8,7 @@ rows open (an empty page of that name), feature values beside the chevrons (Off)
 
     THEOS=$HOME/theos ./build.sh
     xcrun simctl install <udid> build/ModSettingsHarness.app
-    xcrun simctl launch --console-pty <udid> com.vitrine.modsettingsharness redesign warning dump
+    xcrun simctl launch --console-pty <udid> com.retrine.modsettingsharness redesign warning dump
     xcrun simctl io <udid> screenshot shot.png
 
 Make a simulator of your own (`xcrun simctl create`) and address it by UDID. `main.m` lists the setup words
@@ -19,7 +19,7 @@ Make a simulator of your own (`xcrun simctl create`) and address it by UDID. `ma
 whose twelve rows show only while the switch is on, then a row that `later` lets come by itself. `layout` logs
 the scroll offset and each section's rows, heading and note heights; `top` scrolls back up.
 
-    xcrun simctl launch --console-pty <udid> com.vitrine.modsettingsharness gated layout toggle=0.0 layout later dump layout top toggle=0.0 layout
+    xcrun simctl launch --console-pty <udid> com.retrine.modsettingsharness gated layout toggle=0.0 layout later dump layout top toggle=0.0 layout
 
 2026-10-06, iPhone 17 Pro on iOS 27.0: with the switch off the gated section has 0 pt of heading and note; the
 switch brings it in with its 38 pt heading and 28 pt note and scrolls 362 pt, half the 724 pt of room; the
@@ -39,6 +39,12 @@ field up shows the table with the two stored places on it, a typed query shows i
 the recents back — the field is off UIKit's automatic rule, which would take the table away on an empty field. A
 closed field shows no results, and up again the recents are there. It logs `search controller passed` and exits 0,
 or logs the failures and exits 1.
+
+`search-destinations` runs after the scene connects (use `redesign search-destinations`), presents the real
+search controller, and selects Audio effects and All flags through its results table. Their stubs are `SGPage`,
+not `SGModPage`, matching the production destinations. It waits for navigation's completed transition and checks
+the destination and closed search field; a missing push fails after a bounded deadline. Run in English
+(`-AppleLanguages '(en)' -spotifyglass.language 1`) and Korean (`(ko)` and `2`).
 
 `needs` pushes the Lock screen page's artwork section as iOS 18 to 25 get it (the real
 `AnimatedArtworkSettings.m`'s `SGLockScreenArtworkNeedsRow`), and `tap=<section>.<row>` selects a row and logs the

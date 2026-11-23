@@ -238,7 +238,7 @@ static void runCoverChoices(void) {
             SGRPagePreview *card = show(^UIViewController *{
                 return isAlbum.boolValue ? SGRAlbumSettingsPage() : SGRPlaylistSettingsPage();
             });
-            UIView *art = identified(card, @"vitrine.preview.header.artwork");
+            UIView *art = identified(card, @"retrine.preview.header.artwork");
             BOOL full = isAlbum.boolValue ? album : playlist;
             if (!art || art.bounds.size.width <= 0) HARNESS_FAIL(@"missing cover preview");
             if (full && CGRectGetMinX(art.frame) != 0) HARNESS_FAIL(@"Full screen cover must reach both edges");
@@ -269,7 +269,7 @@ static void runCoverChoices(void) {
 
 #pragma mark - the mirror check
 
-static NSString *const kControlsID = @"vitrine.preview.header.controls", *const kBackID = @"vitrine.preview.back";
+static NSString *const kControlsID = @"retrine.preview.header.controls", *const kBackID = @"retrine.preview.back";
 // Drawn at this scale for the ink and the chevron's pixels.
 static const CGFloat kDrawScale = 3;
 // A label's text drawn right to left sits within this of the left to right one's mirror: the glyphs themselves are
@@ -450,6 +450,38 @@ static void runMirrors(void) {
 }
 
 static void runChecks(void) {
+    reset();
+    SGRPagePreview *details = show(^UIViewController *{ return SGRPlaylistSettingsPage(); });
+    UIView *controls = identified(details, @"retrine.preview.header.controls");
+    if (!controls) HARNESS_FAIL(@"missing playlist preview controls");
+    CGFloat full = CGRectGetMinY(controls.frame), headerHeight = controls.superview.bounds.size.height;
+    UIView *face = identified(details, @"retrine.preview.header.creatorPicture");
+    UIView *name = identified(details, @"retrine.preview.header.detail");
+    if (!face || face.hidden || !name || name.hidden) HARNESS_FAIL(@"missing preview creator or picture");
+    SGSetEnabled(SGRKeyPlaylistCreatorPicture, NO);
+    spin(0.5);
+    CGFloat noPicture = CGRectGetMinY(controls.frame);
+    if (!face.hidden || name.hidden || noPicture != full)
+        HARNESS_FAIL(@"hiding the picture must preserve the name and controls position");
+    writePNG(details, @"playlist-picture-off");
+    SGSetEnabled(SGRKeyPlaylistCreatorLine, NO);
+    SGSetEnabled(SGRKeyPlaylistCreatorPicture, YES);
+    spin(0.5);
+    CGFloat noLine = CGRectGetMinY(controls.frame);
+    if (noLine >= noPicture) HARNESS_FAIL(@"hiding creator and length left the controls in place");
+    writePNG(details, @"playlist-line-off");
+    SGSetEnabled(SGRKeyPlaylistCreatorLine, YES);
+    SGSetEnabled(SGRKeyPlaylistDescription, NO);
+    spin(0.5);
+    if (CGRectGetMinY(controls.frame) != full || controls.superview.bounds.size.height >= headerHeight)
+        HARNESS_FAIL(@"description must close below controls independently");
+    writePNG(details, @"playlist-description-off");
+    SGSetEnabled(SGRKeyPlaylistCreatorLine, NO);
+    SGSetEnabled(SGRKeyPlaylistCreatorPicture, NO);
+    spin(0.5);
+    if (CGRectGetMinY(controls.frame) != noLine || CGRectGetMaxY(controls.frame) != controls.superview.bounds.size.height)
+        HARNESS_FAIL(@"all off must leave no metadata space");
+    writePNG(details, @"playlist-all-off");
     runCoverChoices();
     runPage(@"playlist", ^UIViewController *{ return SGRPlaylistSettingsPage(); },
             @"Open cover on tap and Sort and Mix",

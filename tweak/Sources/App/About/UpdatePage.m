@@ -1,7 +1,7 @@
 // What the Updates row opens: where this build stands against GitHub's releases, and the changelog of
 // every release newer than it -- a section per release and heading, a row per line, each opening the
 // commit it came from. Everything here is read out of what the last check stored (Update.m), so the
-// page draws whatever is known the moment it opens and asks GitHub only if the six hours are up.
+// page draws whatever is known the moment it opens, even while a fresh check is in flight.
 // A check that lands rebuilds it where it stands, which is what makes Check now worth having: the
 // changelog of a release nobody had heard of a second ago fills the page in without leaving it.
 #import "Core/SGCore.h"
@@ -43,7 +43,6 @@ static NSString *longDate(NSString *published) {    // 18 September 2026
 @implementation SGUpdatePageController {
     NSArray<SGModSection *> *_groups;
     UIView *_intro;
-    NSTimer *_ticker;
 }
 
 - (instancetype)init {
@@ -57,30 +56,31 @@ static NSString *longDate(NSString *published) {    // 18 September 2026
 
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
-    [_ticker invalidate];
 }
 
 // The releases whose changelog this page shows: everything newer than the build, newest first.
-// Nothing newer means the build is the newest release, and its own notes are what there is to read.
+// With nothing newer, show the build's own notes only if the stored version matches it.
 static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     NSArray<SGUpdateRelease *> *releases = SGUpdateReleases();
     NSMutableArray<SGUpdateRelease *> *shown = [NSMutableArray array];
     for (SGUpdateRelease *release in releases) {
-        if (!SGUpdateIsNewer(release.version)) break;
+        if (!SGUpdateIsNewer(release.version)) {
+            if (!shown.count && !SGVersionIsNewer(@(SG_VERSION), release.version)) [shown addObject:release];
+            break;
+        }
         [shown addObject:release];
     }
-    if (!shown.count && releases.firstObject) [shown addObject:releases.firstObject];
     return shown;
 }
 
 - (NSString *)introText {
-    SGUpdateRelease *newest = SGUpdateNewestRelease();
+    SGUpdateRelease *newest = releasesToShow().firstObject;
     if (!newest) return SGUpdateChecked()
-        ? [NSString stringWithFormat:SGL(@"settings.mod.update.intro.up_to_date", @"This build is %s. GitHub has no newer release."), SG_VERSION]
+        ? [NSString stringWithFormat:SGL(@"settings.mod.update.intro.up_to_date", @"This build is %s. The last check found no newer release."), SG_VERSION]
         : [NSString stringWithFormat:SGL(@"settings.mod.update.intro.not_checked", @"This build is %s. Nothing has been asked of GitHub yet."), SG_VERSION];
     NSString *date = longDate(newest.date);
     NSString *when = date.length ? [SGL(@"settings.mod.update.came_out_on", @" came out on ") stringByAppendingString:date] : SGL(@"settings.mod.update.status.is_out", @" is out");
-    if (SGUpdateVersion())
+    if (SGUpdateIsNewer(newest.version))
         return [NSString stringWithFormat:SGL(@"settings.mod.update.intro.newer_available", @"%@%@, and this build is %s. Everything in between is below."),
                 newest.version, when, SG_VERSION];
     return [NSString stringWithFormat:SGL(@"settings.mod.update.intro.is_newest", @"This build, %s, is GitHub's newest release; it%@. What went into it is below."),
@@ -167,14 +167,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     [self.tableView reloadData];
     // Only the status reads out on the right, and only it moves on its own while the page is open;
     // it is written into the cell so that a reload never lands under a tap.
-    [_ticker invalidate];
-    _ticker = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(readStatus) userInfo:nil repeats:YES];
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-    [_ticker invalidate];
-    _ticker = nil;
+    self.refreshSelector = @selector(readStatus);
 }
 
 - (void)readStatus {
@@ -283,7 +276,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 @end
 
 UIViewController *SGUpdatePage(void) {
-    // Opening the page counts as asking, but the six hours still hold: Check now is the way past them.
+    // Opening the page respects this build's cached check; Check now bypasses it.
     SGCheckForUpdate(NO);
     return [SGUpdatePageController new];
 }

@@ -33,6 +33,6 @@ NSString *SGLocalMusicFailureMessage(NSError *error) {
     if ([error.domain isEqual:@"com.spotify.SPTPlayer"] &&
         ([reasons isKindOfClass:NSSet.class] || [reasons isKindOfClass:NSArray.class]) &&
         [reasons containsObject:@"mft_disallow"])
-        return SGL(@"settings.localmusic.free_limit", @"Spotify Free limits playing chosen songs. Spoof Premium in Vitrine Settings lifts this limit.");
+        return SGL(@"settings.localmusic.free_limit", @"Spotify Free limits playing chosen songs. Spoof Premium in Retrine Settings lifts this limit.");
     return SGL(@"settings.localmusic.failed", @"Spotify could not play this.");
 }

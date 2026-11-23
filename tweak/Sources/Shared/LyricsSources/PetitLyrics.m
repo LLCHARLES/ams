@@ -1,6 +1,6 @@
 // Request fields and base64/WSY schema from EeveeSpotifyReincarnated (GPL-3),
 // PetitLyricsRepository.swift at 0d9feaa. Unlike its synchronous adapter, this keeps
-// candidate matching and word clocks and uses Vitrine's bounded asynchronous transport.
+// candidate matching and word clocks and uses Retrine's bounded asynchronous transport.
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
 
@@ -139,8 +139,12 @@ static void fetch(SGLyricsRequestContext *context, NSArray *candidates, NSUInteg
     NSString *type = field(song, @"availableLyricsType");
     request(context, @{@"key_lyricsId": identifier, @"lyricsType": [type isEqual:@"2"] ? @"1" : type},
         ^id(NSArray *items) {
-            for (NSDictionary *item in items)
-                if ([field(item, @"lyricsId") isEqual:identifier]) return sheet(item);
+            for (NSDictionary *item in items) {
+                if (![field(item, @"lyricsId") isEqual:identifier]) continue;
+                SGLyricsResult *result = sheet(item);
+                if (field(item, @"lyricsData").length && !result) [context noteFailure:YES];
+                return result;
+            }
             return nil;
         }, ^(SGLyricsResult *result) {
             if (result || context.failed) done(result);

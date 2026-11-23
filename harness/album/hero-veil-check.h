@@ -148,15 +148,27 @@ static void veilRun(UIView *root, NSString *page, NSString *mode, BOOL zooms, BO
             NSLog(@"[harness] PASS %@ pull/release geometry: top anchored, bottom fixed, exact rest after repeated pulls", page);
         }
         if (!on) {
-            // Off: nothing of the veil, whatever the scroll.
+            // The album clips its text at the pinned bar independently of the artwork veil.
+            BOOL album = [page isEqualToString:@"album"];
+            UILabel *title = album ? veilTitle(info) : nil;
+            if (album) HARNESS_CHECK(title);
             for (NSNumber *d in @[@0, @190, @400, @-40]) {
                 place(d.doubleValue);
                 HARNESS_CHECK(!hero.layer.filters.count && !veilDim(hero));
                 HARNESS_CHECK(CGAffineTransformIsIdentity(art.affineTransform));
-                HARNESS_CHECK(!info.layer.mask);
+                if (album && [title convertPoint:CGPointZero toView:nil].y < veilBarLine(info)) {
+                    CALayer *mask = info.layer.mask;
+                    CGFloat line = [info convertPoint:CGPointMake(0, veilBarLine(info)) fromView:nil].y;
+                    if (![mask isKindOfClass:CAGradientLayer.class] || !veilNear(CGRectGetMinY(mask.frame), line))
+                        HARNESS_FAIL(@"at d=%@ expected the album header clip at %.2f, got %@", d, line, mask);
+                } else {
+                    HARNESS_CHECK(!info.layer.mask);
+                }
             }
             place(0);
-            NSLog(@"[harness] PASS %@ veil off: no blur, no dim, the picture unmoved and the header unclipped at d = 0, 190, 400 and pulled 40", page);
+            if (album) HARNESS_CHECK(!info.layer.mask);
+            NSLog(@"[harness] PASS %@ veil off: no blur, no dim, the picture unmoved and the header %@",
+                  page, album ? @"clipped only under the bar" : @"unclipped");
             exit(0);
         }
         // The blur's radius and the dim's alpha at the spec's distances, on the surface.

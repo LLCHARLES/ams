@@ -34,7 +34,7 @@ extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef ent
 static os_log_t sLog;
 static NSArray<NSString *> *sEntitled;
 static NSURL *(*sOrigContainerURL)(id, SEL, NSString *);
-static id (*sOrigInitWithSuiteName)(id, SEL, NSString *);
+static id (*sOrigInitWithSuiteName)(id __attribute__((ns_consumed)), SEL, NSString *) NS_RETURNS_RETAINED;
 
 static NSString *const kCredentialsGroupSuffix = @".com.spotify.client.extension-credentials";
 static NSArray<NSString *> *sKeychainEntitled;
@@ -82,7 +82,7 @@ static NSURL *SGContainerURL(id self, SEL _cmd, NSString *group) {
 
 // initWithSuiteName: is the public door every UserDefaults(suiteName:) goes through; the container
 // variant is what App Group suites resolve to inside Foundation, so it is handed the stand-in.
-static id SGInitWithSuiteName(NSUserDefaults *self, SEL _cmd, NSString *suite) {
+static id SGInitWithSuiteName(NSUserDefaults *self __attribute__((ns_consumed)), SEL _cmd, NSString *suite) NS_RETURNS_RETAINED {
   NSURL *url = RedirectedContainer(suite);
   if (url && [self respondsToSelector:@selector(_initWithSuiteName:container:)]) {
     os_log(sLog, "[spotifyglass] appgroups: %{public}@ -> %{public}@", suite, url.path);

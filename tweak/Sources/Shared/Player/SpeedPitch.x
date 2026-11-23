@@ -87,7 +87,9 @@ enum { kMaxOutputs = 8, kMaxWatchers = 4 };
 #pragma mark - shared between the threads
 
 static float sg_speed = 1, sg_semitones;     // main thread
+NSNotificationName const SGPlayerSpeedDidChangeNotification = @"spotifyglass.player.speedChanged";
 static atomic_uint sg_speedBits;             // sg_speed for SPTPlayerState, read on any thread
+static atomic_uint sg_semitoneBits;          // sg_semitones, for resetUnit() on whichever thread seeks
 
 typedef struct {
     atomic_uint_fast64_t rateBits;
@@ -1024,7 +1026,7 @@ static OSStatus stopOutput(AudioUnit unit) {
     Output *output = outputOf(unit);
     if (output && atomic_exchange(&output->running, false)) {
         updateChecking();
-        reselect(NO, @"its output stopped");
+        reselect(music() == output, @"its output stopped");
         SGLog(@"audio: output %p stopped (Spotify's side %.0f Hz); the processors are on %@", unit, rateOf(&output->client), describe(music()));
     }
     pthread_mutex_unlock(&sg_outputsLock);
@@ -1113,7 +1115,7 @@ static void report(void) {
 
 // Hands the render thread to the unit's other half, reset, when the speed, the pitch or Pitch follows speed
 // now call for it. That costs the unit's delay once (93 ms going to the stretch), the same as putting it in,
-// where rendering the other half as it was left would play what it held from last time.
+// where rendering the other half as it was left would play what it held from last time. Under sg_buildLock.
 static void switchIfAsked(SGTimePitch *unit) {
     if (!atomic_load(&sg_engaged) || !SGTimePitchSwitchPending(unit)) return;
     disengage();
@@ -1130,7 +1132,9 @@ static void apply(void) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kOffAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             if (thisChange != change || sg_speed != 1 || sg_semitones != 0 || !atomic_load(&sg_engaged)) return;
             report();
+            pthread_mutex_lock(&sg_buildLock);
             disengage();
+            pthread_mutex_unlock(&sg_buildLock);
         });
     }
     SGTimePitch *unit = unitForFormat();
@@ -1139,6 +1143,8 @@ static void apply(void) {
         if (!normal && logged++ < 3) SGLog(@"redesign speed: Spotify's output has not started, or is in a format the unit does not take; nothing to change yet");
         return;
     }
+    // A seek's resetUnit() may run on Spotify's own thread: the unit is reset and engaged by one side at a time.
+    pthread_mutex_lock(&sg_buildLock);
     SGTimePitchSetRate(unit, tapped() ? sg_speed : 1);
     SGTimePitchSetSemitones(unit, sg_semitones);
     if (!normal && !atomic_load(&sg_engaged)) {
@@ -1147,6 +1153,7 @@ static void apply(void) {
         atomic_store(&sg_engaged, true);
     }
     switchIfAsked(unit);
+    pthread_mutex_unlock(&sg_buildLock);
 }
 
 // A speed or pitch chosen before the output started, or kept across a new format or another output, applies
@@ -1236,7 +1243,7 @@ static void resetUnit(void) {
     if (unit) {
         disengage();
         SGTimePitchReset(unit);
-        if (sg_speed != 1 || sg_semitones != 0) atomic_store(&sg_engaged, true);
+        if (loadFloat(&sg_speedBits) != 1 || loadFloat(&sg_semitoneBits) != 0) atomic_store(&sg_engaged, true);
     }
     pthread_mutex_unlock(&sg_buildLock);
 }
@@ -1260,12 +1267,14 @@ void SGSetPlayerSpeed(double speed) {
         sg_clock = (typeof(sg_clock)){.on = YES, .position = position - lead, .played = playedSeconds(), .lead = held};
         sg_clockTrack = trackOf(state);
     }
-    if ((float)speed != sg_speed) sg_speedChangedAt = CFAbsoluteTimeGetCurrent();
+    BOOL changed = (float)speed != sg_speed;
+    if (changed) sg_speedChangedAt = CFAbsoluteTimeGetCurrent();
     os_unfair_lock_unlock(&sg_clockLock);
     sg_speed = (float)speed;
     storeFloat(&sg_speedBits, sg_speed);
     apply();
     SGSpeedPitchSongValuesChanged(@"speed");
+    if (changed) [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerSpeedDidChangeNotification object:nil];
 }
 
 float SGPlayerPitch(void) {
@@ -1275,6 +1284,7 @@ float SGPlayerPitch(void) {
 void SGSetPlayerPitch(float semitones) {
     if (!sg_reachable && !tapped()) return;
     sg_semitones = semitones;
+    storeFloat(&sg_semitoneBits, semitones);
     apply();
     SGSpeedPitchSongValuesChanged(@"pitch");
 }
@@ -1306,6 +1316,11 @@ void SGPlayerSetGain(float gain) {
 AudioUnit SGPlayerMusicOutput(void) {
     Output *output = music();
     return output ? atomic_load(&output->unit) : NULL;
+}
+
+BOOL SGPlayerMusicOutputRunning(void) {
+    Output *output = music();
+    return output && atomic_load(&output->running);
 }
 
 BOOL SGPlayerMusicClientFormat(AudioStreamBasicDescription *format) {
@@ -1434,16 +1449,23 @@ BOOL SGPlayerWatchMusicOutput(SGPlayerOutputWatcher watcher) {
     sg_correcting = NO;
     sg_spotifyPosition = position;
     if (position < 0) return position;
-    NSString *track = trackOf(self);
     double played = playedSeconds();
     CFAbsoluteTime stamp = self.timestamp.timeIntervalSinceReferenceDate;
     // Spotify's own, from the position it counted: Sing's positionAsOfTimestamp has its lead taken off, which
     // turning Sing on or off would show as a seek.
     double speed = self.isPaused ? 0 : self.playbackSpeed, asOf = position - (CFAbsoluteTimeGetCurrent() - stamp) * speed;
-    // Read before the lock, as Sing's readers may come back through this hook.
-    BOOL counting = sg_clock.on || sg_clock.armed;
-    double lead = counting ? leadOfState(self) : 0, held = counting ? heldLeadNow() : 0;
+    NSString *track = nil;
+    double lead = 0, held = 0;
     os_unfair_lock_lock(&sg_clockLock);
+    // Keep the lock on the idle path: a newly started clock must never see an unread track.
+    // Only the active path needs Spotify and Sing's readers, which may reenter this hook.
+    if (sg_clock.on || sg_clock.armed) {
+        os_unfair_lock_unlock(&sg_clockLock);
+        track = trackOf(self);
+        lead = leadOfState(self);
+        held = heldLeadNow();
+        os_unfair_lock_lock(&sg_clockLock);
+    }
     BOOL seeked = NO;
     if (stamp > sg_lastReport.stamp) {
         if (sg_lastReport.stamp > sg_speedChangedAt) seeked = fabs(asOf - (sg_lastReport.asOf + (stamp - sg_lastReport.stamp) * sg_lastReport.speed)) > kSeekGap;

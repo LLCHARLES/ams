@@ -21,7 +21,7 @@ static const NSTimeInterval SGLinkResolutionTimeoutSeconds = 5;
     NSURL *target = SGIsSpotifyHTTPSURL(request.URL) ? SGPublicSpotifyURLFromText(request.URL.absoluteString) : nil;
     if (!target) {
         completion(nil);
-        [self finish:nil error:[NSError errorWithDomain:@"VitrineLinks" code:NSURLErrorUnsupportedURL userInfo:nil]];
+        [self finish:nil error:[NSError errorWithDomain:@"RetrineLinks" code:NSURLErrorUnsupportedURL userInfo:nil]];
     } else if (SGSpotifyURLNeedsResolution(target)) {
         NSMutableURLRequest *next = [request mutableCopy];
         next.HTTPMethod = @"HEAD";
@@ -34,7 +34,7 @@ static const NSTimeInterval SGLinkResolutionTimeoutSeconds = 5;
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
         didReceiveResponse:(NSURLResponse *)response completionHandler:(void (^)(NSURLSessionResponseDisposition))completion {
     completion(NSURLSessionResponseCancel);
-    [self finish:nil error:[NSError errorWithDomain:@"VitrineLinks" code:NSURLErrorBadServerResponse userInfo:nil]];
+    [self finish:nil error:[NSError errorWithDomain:@"RetrineLinks" code:NSURLErrorBadServerResponse userInfo:nil]];
 }
 - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
     [self finish:nil error:error];
@@ -44,7 +44,7 @@ static const NSTimeInterval SGLinkResolutionTimeoutSeconds = 5;
 
 id<SGLinkCancellation> SGResolveSpotifyPublicLink(NSURL *url, SGLinkResolved completion) {
     if (!SGSpotifyURLNeedsResolution(url)) {
-        completion(nil, [NSError errorWithDomain:@"VitrineLinks" code:NSURLErrorUnsupportedURL userInfo:nil]);
+        completion(nil, [NSError errorWithDomain:@"RetrineLinks" code:NSURLErrorUnsupportedURL userInfo:nil]);
         return nil;
     }
     NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;

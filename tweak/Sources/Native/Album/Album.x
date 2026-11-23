@@ -9,6 +9,7 @@
 // Below the tracks every row is an Element_List cell, sectioned the way Artist/Artist.x describes: a
 // heading cell (SectionHeadingHome), the carousel or card, a 16pt spacer. The copyright closes the
 // page right after the last section, so it counts as a heading of its own and stays.
+// More by, Merch and You might also like have confirmed Korean headings too.
 #import "Core/SGCore.h"
 #import "Album.h"
 #import "Native/Declutter/Declutter.h"
@@ -102,6 +103,10 @@ static const SGNativeSectionRule sections[] = {
     {@"Concerts", SGHideAlbumConcerts, NO},
     {@"Merch", SGHideAlbumMerch, NO},
     {@"You might also like", SGHideAlbumYouMightLike, NO},
+    {@"의 곡 더 보기", SGHideAlbumMoreBy, NO, YES},
+    {@"콘서트", SGHideAlbumConcerts, NO},
+    {@"굿즈", SGHideAlbumMerch, NO},
+    {@"이건 어떠세요", SGHideAlbumYouMightLike, NO},
 };
 
 enum { kSections = sizeof(sections) / sizeof(sections[0]) };

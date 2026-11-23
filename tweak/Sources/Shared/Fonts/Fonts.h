@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 
 #define SGKeyAppFont @"spotifyglass.font"
-// The imported family: its files' names in Application Support/Vitrine/Font, and the family name read from them.
+// The imported family: its files' names in Application Support/Retrine/Font, and the family name read from them.
 // SGKeyAppFontFile is the single file of an import from before families, moved to the list on first use.
 #define SGKeyAppFontFiles @"spotifyglass.font.files"
 #define SGKeyAppFontName @"spotifyglass.font.name"
@@ -24,7 +24,12 @@ typedef NS_ENUM(NSInteger, SGAppFont) {
     SGAppFontLibrary,   // a free family downloaded from FontLibrary.h's catalog, named by SGKeyAppFontLibrary
 };
 
+// The stored choice; with none, Spotify's font in the native look and San Francisco in the redesign (SGRedesignedUI).
+// A font that goes away (FontImport.m, FontLibrary.m) removes the stored choice, so that default applies again.
 SGAppFont SGAppFontChosen(void);
+// The font the app draws in for this launch (Fonts.x reads the choice once): the choice, or Spotify's when a family it
+// names was not there. Text the mod sets in the system font is drawn in it, except when this is Spotify's.
+SGAppFont SGAppFontDrawn(void);
 NSArray<NSString *> *SGAppFontNames(void);   // the five built in, by SGAppFont
 NSArray<NSString *> *SGAppFontFamilies(void);   // More fonts: the families this iPhone has of a fixed few
 // Main-thread async font choices: raw enum/family/library values, including absence. Completion may

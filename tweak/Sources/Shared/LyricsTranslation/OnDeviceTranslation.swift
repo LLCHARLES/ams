@@ -152,7 +152,7 @@ public final class SGOnDeviceTranslation: NSObject {
                 }
                 if await LanguageAvailability().status(from: source, to: target) != .installed {
                     // An internal result code, localized by the manual caller; never matched against English UI text.
-                    return finish(done, nil, "vitrine.translation.languagesMissing")
+                    return finish(done, nil, "retrine.translation.languagesMissing")
                 }
             case .installed:
                 break

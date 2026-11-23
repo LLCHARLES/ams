@@ -1,7 +1,7 @@
 // The scroll veil over a page's hero, the picture across the top of the album, playlist and artist pages
 // (Album/AlbumHeader.x, Playlist/PlaylistHeader.x, Artist/ArtistHeader.x): as the page scrolls up the picture blurs
 // and dims into the page's color and moves up slower than the page, and pulled down past the top it zooms. With it
-// the page's SGRHeaderInfo is clipped under the top bar (-[SGRHeaderInfo clipUnderTopBar]). Off unless switched on
+// the page clips its SGRHeaderInfo under the top bar (-[SGRHeaderInfo clipUnderTopBarFollowing:]). Off unless switched on
 // (SGRKeyHeroScrollVeil, read at launch); off, a hero makes no veil and draws as it always has.
 //
 // How far the page has scrolled, d, is measured rather than read off one scroll view: the hero's own upward
@@ -15,8 +15,6 @@
 // Ownership: the hero that makes it; it keeps weak references to the hero, the scroll view and the info.
 // Threading: main thread only.
 #import <UIKit/UIKit.h>
-
-@class SGRHeaderInfo;
 
 #define SGRKeyHeroScrollVeil @"spotifyglass.redesign.hero.scrollVeil"
 BOOL SGRHeroScrollVeilOn(void);
@@ -49,8 +47,6 @@ UIScrollView *SGRHeroVeilScrollAbove(UIView *view);
 // The page's color, the one its field shows and the hero dissolves into, drawn under the dim's alpha: a new one
 // keeps the alpha it has.
 @property (nonatomic, copy) UIColor *color;
-// The header info to clip under the top bar on every step.
-@property (nonatomic, weak) SGRHeaderInfo *info;
 // For a hero that stretches with a pull itself (the playlist's grows with its plane): no zoom on top of it.
 @property (nonatomic) BOOL stretchesItself;
 // The view the blur and the dim are drawn on, the hero unless set: a square cover (the album's own square, the

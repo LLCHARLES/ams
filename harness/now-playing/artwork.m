@@ -73,7 +73,7 @@ static NSUInteger coverLoads;
     return [self harnessURLsForDirectory:directory inDomains:domains];
 }
 - (BOOL)harnessRemoveItemAtURL:(NSURL *)url error:(NSError **)error {
-    BOOL lyrics = [url.path isEqual:[cacheRoot.path stringByAppendingPathComponent:@"Vitrine/Lyrics"]];
+    BOOL lyrics = [url.path isEqual:[cacheRoot.path stringByAppendingPathComponent:@"Retrine/Lyrics"]];
     BOOL hold = NO;
     if (lyrics) {
         @synchronized (cacheRoot) {
@@ -99,7 +99,7 @@ static void alreadyPlaying(void);
 __attribute__((constructor)) static void artworkBoundary(void) {
     coverRequests = [NSMutableDictionary dictionary];
     [NSURLProtocol registerClass:CoverProtocol.class];
-    char *path = strdup([[NSTemporaryDirectory() stringByAppendingPathComponent:@"vitrine-artwork.XXXXXX"] fileSystemRepresentation]);
+    char *path = strdup([[NSTemporaryDirectory() stringByAppendingPathComponent:@"retrine-artwork.XXXXXX"] fileSystemRepresentation]);
     if (!mkdtemp(path)) { perror("mkdtemp artwork cache"); exit(1); }
     cacheRoot = [NSURL fileURLWithPath:@(path) isDirectory:YES];
     free(path);
@@ -142,11 +142,26 @@ static NSUInteger preparations(void) {
     @synchronized (cacheRoot) { return backgroundPreparations; }
 }
 
-SGLockArtwork SGLockScreenArtwork(void) { return choice; }
+// Pause the defaults poster after it sampled Off, or after its work was handed to main.
+static _Thread_local BOOL stalePoster;
+static BOOL readOnPoster;
+static dispatch_semaphore_t sampledMode, resumePoster;
+SGLockArtwork SGLockScreenArtwork(void) {
+    if (stalePoster) {
+        if (!readOnPoster) {
+            readOnPoster = YES;
+            dispatch_semaphore_signal(sampledMode);
+            dispatch_semaphore_wait(resumePoster, DISPATCH_TIME_FOREVER);
+        }
+        return SGLockArtworkOff; // this writer's sample before the main-queue enable
+    }
+    return choice;
+}
 CGFloat SGMotionPixels(void) { return 32; }
 NSString *SGURIString(id uri) { return [uri isKindOfClass:NSString.class] ? uri : [uri absoluteString]; }
 SPTPlayerState *SGPlayerState(void) { return state; }
 NSInteger SGKaraokePositionMs(void) { return position; }
+void harnessPosition(NSInteger value) { position = value; }
 void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) {
     if (!observers) observers = [NSHashTable weakObjectsHashTable];
     [observers addObject:observer];
@@ -162,10 +177,14 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
     done(sourceFile, sourceFile ? @"canvas" : nil);
 }
 // The follower's ticketed lookup: the stub source answers at once, so the ticket has nothing to cancel.
-SGMotionTicket *SGMotionRequestClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album,
+SGMotionTicket *SGMotionRequestSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
                                    CGFloat pixels, void (^done)(NSURL *, NSString *)) {
     SGMotionClipFor(uri, canvas, artist, album, pixels, done);
     return [SGMotionTicket new];
+}
+SGMotionTicket *SGMotionRequestAlbumSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
+                                           NSString *albumURI, CGFloat pixels, void (^done)(NSURL *, NSString *)) {
+    return SGMotionRequestSongClip(uri, canvas, artist, album, song, pixels, done);
 }
 // Shared/Player/PlayerState.x's first future track, other than the one playing.
 SPTPlayerTrack *SGPlayerUpNextIn(SPTPlayerState *state) {
@@ -255,12 +274,12 @@ static void recordClip(NSURL *file, NSString *line, NSString *translation) {
 }
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout) {
+                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
     recordClip(file, line, translation);
     return writeFrame(file, backdrop);
 }
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout) {
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
     recordClip(file, line, translation);
     return writeFrame(file, blue.CGImage);
 }
@@ -386,6 +405,83 @@ static void background(NSDictionary *values) {
 
 #include "publication-check.inc"
 
+NSNotificationName const SGPlayerSpeedDidChangeNotification = @"spotifyglass.player.speedChanged";
+int64_t harnessArtDelay;
+int64_t harnessArtDue;
+__weak dispatch_source_t harnessArmedArt;
+CFAbsoluteTime harnessExtrasNow;
+static _Thread_local BOOL countingPoster;
+static NSUInteger posterHandoffs;
+void HarnessArtDispatch(dispatch_queue_t queue, dispatch_block_t block) {
+    if (countingPoster && queue == dispatch_get_main_queue()) posterHandoffs++;
+    dispatch_async(queue, block);
+}
+extern int64_t harnessRowDelay;
+extern BOOL harnessPlaying;
+extern double harnessRate;
+static void playerDeadlines(void) {
+    harnessPlaying = YES;
+    // Artwork also wakes at the current line's sung end and 4 s before the next.
+    track(@"clock-report", SGLockArtworkLyrics, nil, @[lineOf(@"first", 0, 24000), lineOf(@"second", 24000, 40000)]);
+    harnessExtrasNow = 1000;
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = @{MPMediaItemPropertyTitle:@"Song",
+        MPMediaItemPropertyArtist:@"Artist", MPNowPlayingInfoPropertyElapsedPlaybackTime:@0, MPNowPlayingInfoPropertyPlaybackRate:@1};
+    harnessRate = 2;
+    [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerSpeedDidChangeNotification object:nil];
+    if (getenv("LSL")) check(harnessRowDelay == (int64_t)(12.0005 * NSEC_PER_SEC), @"speed alone halves the row deadline");
+    check(harnessArtDelay == (int64_t)(10.0005 * NSEC_PER_SEC), @"speed alone halves the artwork deadline");
+    harnessExtrasNow += 2;
+    position = 4000;
+    SGNowPlayingSetExtras(@"late-cover", @{@"late": @YES}, @"Song");
+    NSDictionary *resent = harnessSystem();
+    check([resent[@"late"] boolValue] && [resent[MPNowPlayingInfoPropertyPlaybackRate] doubleValue] == 2 &&
+          [resent[MPNowPlayingInfoPropertyElapsedPlaybackTime] doubleValue] == 4,
+          @"metadata resend after two seconds at 2x publishes position four and rate two");
+    if (getenv("LSL")) check(harnessRowDelay == (int64_t)(10.0005 * NSEC_PER_SEC),
+                              @"resent metadata preserves the row deadline at wall second twelve");
+    check(harnessArmedArt && !dispatch_source_testcancel(harnessArmedArt) &&
+          harnessArtDue - (int64_t)(harnessExtrasNow * NSEC_PER_SEC) == (int64_t)(8.0005 * NSEC_PER_SEC),
+          @"the artwork's armed 2x one-shot has eight seconds left after the resend");
+    SGNowPlayingSetExtras(@"late-cover", nil, nil);
+    harnessExtrasNow = 0;
+    position = 0;
+    reportOnly(); // settle the rate, so the next report changes only position
+    position = 250; // position-only report; smaller than the old artwork drift threshold
+    reportOnly();
+    if (getenv("LSL")) check(harnessRowDelay == (int64_t)(11.8755 * NSEC_PER_SEC), @"player-first seek advances the row deadline");
+    check(harnessArtDelay == (int64_t)(9.8755 * NSEC_PER_SEC), @"player-first seek advances the artwork deadline");
+    position = 25000;
+    reportOnly();
+    if (getenv("LSL")) check([harnessSystem()[MPMediaItemPropertyArtist] isEqual:@"second"], @"seek publishes the new row before MediaPlayer reports it");
+    harnessRate = 1;
+    harnessPlaying = NO;
+    position = 0;
+    choose(SGLockArtworkOff);
+}
+
+static void interleavedMode(void) {
+    track(@"interleaved", SGLockArtworkOff, nil, @[lineOf(@"first", 0, 20000)]);
+    nativeInfo(nil);
+    sampledMode = dispatch_semaphore_create(0);
+    resumePoster = dispatch_semaphore_create(0);
+    dispatch_group_t posted = dispatch_group_create();
+    dispatch_group_async(posted, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        stalePoster = YES;
+        [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+        stalePoster = NO;
+        dispatch_semaphore_signal(sampledMode);
+    });
+    check(dispatch_semaphore_wait(sampledMode, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0, @"background defaults poster reached the handoff");
+    choose(SGLockArtworkLyrics);
+    check(artwork() != nil, @"main applied the new artwork while the old defaults notification was pending");
+    dispatch_semaphore_signal(resumePoster);
+    dispatch_group_wait(posted, DISPATCH_TIME_FOREVER);
+    check(readOnPoster, @"the background writer sampled Off before main enabled artwork");
+    runFor(.03);
+    choose(SGLockArtworkOff);
+    check(artwork() == nil, @"final Off clears the applied artwork despite an interleaved background write");
+}
+
 void artworkChecks(void) {
     red = image(UIColor.redColor);
     blue = image(UIColor.blueColor);
@@ -398,6 +494,27 @@ void artworkChecks(void) {
     finishPoster();
     check([video(artwork()) isEqual:sourceFile], @"the already-playing track supplies the lock-screen video");
     choose(SGLockArtworkOff);
+    // A defaults write while both presenters remain off must not enumerate preferences.
+    Method dictionary = class_getInstanceMethod(NSUserDefaults.standardUserDefaults.class, @selector(dictionaryRepresentation));
+    IMP original = method_getImplementation(dictionary);
+    __block NSUInteger snapshots = 0;
+    IMP counted = imp_implementationWithBlock(^NSDictionary *(id store) {
+        snapshots++;
+        return ((id (*)(id, SEL))original)(store, @selector(dictionaryRepresentation));
+    });
+    method_setImplementation(dictionary, counted);
+    dispatch_group_t idleWrite = dispatch_group_create();
+    dispatch_group_async(idleWrite, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        countingPoster = YES;
+        [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+        countingPoster = NO;
+    });
+    dispatch_group_wait(idleWrite, DISPATCH_TIME_FOREVER);
+    check(posterHandoffs == 0, @"Off-to-Off background write queues no artwork work on main");
+    runFor(.03);
+    method_setImplementation(dictionary, original);
+    imp_removeBlock(counted);
+    check(!snapshots, @"unrelated defaults change with artwork Off reads no defaults dictionary");
     UIImage *safe = image([UIColor colorWithRed:24 / 255. green:24 / 255. blue:27 / 255. alpha:1]);
     background(@{@"darkness": @0});
     runFor(.2);
@@ -1010,4 +1127,6 @@ void artworkChecks(void) {
         check(!cleanupGateTimedOut, @"held cleanup is explicitly released without a timeout");
     }
     choose(SGLockArtworkOff);
+    interleavedMode();
+    playerDeadlines();
 }

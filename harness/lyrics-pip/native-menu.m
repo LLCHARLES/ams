@@ -74,7 +74,7 @@ static void songControlTests(void) {
         [globals removeObjectForKey:key];
     }
     NSString *priorTrack = SGTestTrackURI();
-    NSString *suite = [@"dev.vitrine.pip-song-controls." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSString *suite = [@"dev.retrine.pip-song-controls." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
     menuSongOwner = [[SGSpeedPitchSongs alloc] initWithDefaults:defaults];
     playSong(@"spotify:track:gesture-a");

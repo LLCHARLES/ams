@@ -2,7 +2,9 @@
 # One per line, either the text alone (allowed anywhere) or a source file under tweak/Sources, a tab, then the text.
 GitHub
 Spotify
-Vitrine
+Retrine
+App/About/Licenses.m	Vitrine
+App/About/Licenses.m	spoti.pw
 WDL
 EeveeSpotify
 AutoEq

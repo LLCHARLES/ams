@@ -1,14 +1,88 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"net"
 	"net/netip"
+	"reflect"
 	"testing"
 	"time"
 )
 
 func mustAddrPort(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
+
+type rebindDevice struct{ failed bool }
+
+func (d *rebindDevice) BindUpdate() error {
+	if d.failed {
+		return errors.New("fixture UDP bind unavailable")
+	}
+	return nil
+}
+func (*rebindDevice) Close()                  {}
+func (*rebindDevice) IpcGet() (string, error) { return "", nil }
+
+func TestStructuralRecoveryIsNotDestinationRecovery(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	device := &rebindDevice{failed: true}
+	var events []int
+	e := &Engine{dev: device, listener: listener, port: listener.Addr().(*net.TCPAddr).Port,
+		clients: map[net.Conn]struct{}{}, pendingAuth: make(chan struct{}, maxUnauthenticatedClients),
+		dialTimeout: time.Second, stateChanged: func(event int) { events = append(events, event) }}
+	defer e.Close()
+	e.setUnavailable(listenerUnavailable, false)
+	if e.Rebind() == nil {
+		t.Fatal("UDP rebind failure was lost")
+	}
+	// A repaired listener cannot clear the independent failed UDP bind.
+	e.relisten(listener)
+	if _, err := e.dial("127.0.0.1", 80); err == nil {
+		t.Fatal("special destination unexpectedly dialed")
+	}
+	device.failed = false
+	if err := e.Rebind(); err != nil {
+		t.Fatal(err)
+	}
+	e.Close()
+	if !reflect.DeepEqual(events, []int{1, 2, 3, 1, 0}) {
+		t.Fatalf("readiness and informational event sequence: %v", events)
+	}
+}
+
+func TestListenerRecoveryReportsStateChanges(t *testing.T) {
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := make(chan int, 4)
+	e := &Engine{listener: listener, port: listener.Addr().(*net.TCPAddr).Port,
+		clients: map[net.Conn]struct{}{}, pendingAuth: make(chan struct{}, maxUnauthenticatedClients),
+		stateChanged: func(state int) { events <- state }}
+	done := make(chan struct{})
+	go func() { e.acceptLoop(listener); close(done) }()
+	defer func() {
+		e.stopped.Store(true)
+		e.mu.Lock()
+		e.listener.Close()
+		e.mu.Unlock()
+		<-done
+	}()
+	listener.Close()
+	for _, want := range []int{2, 1} {
+		select {
+		case got := <-events:
+			if got != want {
+				t.Fatalf("listener event %d, want %d", got, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("listener recovery failed to report its state")
+		}
+	}
+}
 
 // No WireGuard peer is synthesized here. Real tunnel acceptance uses the user's
 // Proton profile through harness/wireguard/run_macos.py.

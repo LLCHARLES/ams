@@ -4,7 +4,7 @@
 // actions, one every 0.9 s from 1 s in; screenshot after.
 //
 //     THEOS=$HOME/theos ./build.sh && xcrun simctl install <udid> build/ModSettingsHarness.app
-//     xcrun simctl launch <udid> com.vitrine.modsettingsharness [setup...] [action...]
+//     xcrun simctl launch <udid> com.retrine.modsettingsharness [setup...] [action...]
 //
 // Setup: redesign (Redesigned UI stored on), warning (a red environment row at the top), keep (the stored
 // look stays; otherwise it is cleared first).
@@ -24,6 +24,7 @@
 #import "Settings/SGPageStyle.h"
 #import <CoreText/SFNTLayoutTypes.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/Flags/Flags.h"
 #import "App/About/About.h"
 #import "../harness-fail.h"
 
@@ -138,26 +139,83 @@ static NSUInteger searchPlacesChecks(void) {
     SGModPage *page = (SGModPage *)nav.topViewController;
     [page loadViewIfNeeded];
     SGSettingsIndex *index = [SGSettingsIndex new];
-    [index startWithRoot:page];
-    while (index.running) [index step];
-    // Every page row of the main page is remembered: each has a name of its own, or (a switch) a key.
-    NSArray<SGSettingsHit *> *hits = [index hitsForQuery:@"appearance"];
-    check(hits.count > 0 && hits.firstObject.place != nil, @"the main page's rows have places");
-    BOOL titled = NO;
-    for (SGSettingsHit *hit in [index hitsForQuery:@"player"]) {
-        if (hit.place.count == 1 && [hit.place.firstObject isEqual:hit.title]) titled = YES;
+    // Search the visible language, but keep the stored place independent of it. Reindex the same open
+    // page after a look switch, as live search does when settings change.
+    BOOL savedLook = SGRedesignedUIStored();
+    for (NSNumber *look in @[@NO, @YES]) {
+        SGSetEnabled(SGKeyRedesign, look.boolValue);
+        [index startWithRoot:page];
+        while (index.running) [index step];
+        NSArray<SGSettingsHit *> *hits = [index hitsForQuery:SGL(@"settings.main.appearance.title", @"Appearance")];
+        check(hits.count > 0 && hits.firstObject.place != nil, @"the main page's rows have places");
+        BOOL titled = NO;
+        for (SGSettingsHit *hit in [index hitsForQuery:SGL(@"settings.main.player.title", @"Player")]) {
+            if (hit.place.count == 1 && [hit.place.firstObject isEqual:hit.title]) titled = YES;
+        }
+        check(!titled, @"no place is a row's title");
+        NSArray *place = look.boolValue ? @[@"page.appearance.redesigned"] : @[@"page.appearance.native"];
+        check([hits.firstObject.place isEqualToArray:place], @"the Appearance row's place names the stored look");
     }
-    check(!titled, @"no place is a row's title");
-    // The Appearance row's place says which look it is: the same row under each look is two places.
-    SGSettingsHit *appearance = [index hitsForQuery:@"appearance"].firstObject;
-    NSString *suffix = SGRedesignedUIStored() ? @"redesigned" : @"native";
-    check([appearance.place.firstObject hasSuffix:suffix], @"the Appearance row's place names the stored look");
+    SGSetEnabled(SGKeyRedesign, savedLook);
     window.hidden = YES;
     fprintf(stderr, "[harness] search places checks: %lu failure(s)\n", (unsigned long)failures);
     return failures;
 }
 
 BOOL SGHarnessWarning;
+
+@interface SGSearchDestinationCheck : NSObject <UISearchControllerDelegate, UINavigationControllerDelegate>
+@property (nonatomic, strong) UINavigationController *nav;
+@property (nonatomic, strong) SGModPage *root;
+@property (nonatomic) NSUInteger destination;
+@property (nonatomic, weak) id<UISearchControllerDelegate> resultsDelegate;
+@end
+
+@implementation SGSearchDestinationCheck
+- (void)start {
+    self.root = (SGModPage *)self.nav.topViewController;
+    self.nav.delegate = self;
+    SGSearchForgetRecents();
+    [self search];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        HARNESS_FAIL(@"search did not finish opening destination %lu", (unsigned long)self.destination);
+    });
+}
+- (void)search {
+    UISearchController *search = SGSettingsSearchField(self.root);
+    if (search.delegate != self) self.resultsDelegate = search.delegate;
+    search.delegate = self;
+    search.searchBar.text = self.destination == 0
+        ? SGL(@"settings.main.audio_effects.title", @"Audio effects")
+        : SGL(@"settings.main.all_flags.title", @"All flags");
+    search.active = YES;
+}
+- (void)didPresentSearchController:(UISearchController *)search {
+    [search.searchResultsUpdater updateSearchResultsForSearchController:search];
+    UITableView *table = ((UITableViewController *)search.searchResultsController).tableView;
+    HARNESS_CHECK([table.dataSource tableView:table numberOfRowsInSection:1] > 0);
+    [table.delegate tableView:table didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+}
+- (void)didDismissSearchController:(UISearchController *)search {
+    if ([self.resultsDelegate respondsToSelector:_cmd]) [self.resultsDelegate didDismissSearchController:search];
+}
+- (void)navigationController:(UINavigationController *)nav didShowViewController:(UIViewController *)page animated:(BOOL)animated {
+    if (page == self.root) {
+        [self search];
+        return;
+    }
+    NSString *expected = self.destination == 0 ? @"Audio effects" : @"All flags";
+    if (![page.title isEqualToString:expected]) HARNESS_FAIL(@"expected %@, opened %@", expected, page.title);
+    HARNESS_CHECK(![page isKindOfClass:SGModPage.class]);
+    HARNESS_CHECK(!SGSettingsSearchField(self.root).active);
+    if (++self.destination == 2) {
+        SGSearchForgetRecents();
+        NSLog(@"[harness] search destinations PASS");
+        exit(0);
+    }
+    [nav popToViewController:self.root animated:YES];
+}
+@end
 
 static void refactorChecks(void) {
     // The Mod page keeps its action's symbol when row decoration is shared with Settings.
@@ -170,11 +228,31 @@ static void refactorChecks(void) {
     }
     HARNESS_CHECK([reset.symbol isEqualToString:@"trash"]);
 
+    extern NSURL *SGHarnessStorageURI;
+    NSUInteger storage = [about.sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
+        return [section.rows.firstObject.key isEqualToString:SGKeyShowCacheLimit];
+    }];
+    HARNESS_CHECK(storage != NSNotFound);
+    SGModSection *group = about.sections[storage];
+    HARNESS_CHECK(group.rows.count == 2 && group.rows.firstObject.defaultOn && group.footer.length);
+    UITableView *table = about.tableView;
+    table.frame = CGRectMake(0, 0, 375, 667);
+    NSIndexPath *firstRow = [NSIndexPath indexPathForRow:0 inSection:storage];
+    NSIndexPath *action = [NSIndexPath indexPathForRow:1 inSection:storage];
+    [table reloadData];
+    [table scrollToRowAtIndexPath:firstRow atScrollPosition:UITableViewScrollPositionTop animated:NO];
+    [table layoutIfNeeded];
+    UITableViewCell *toggleCell = [table cellForRowAtIndexPath:firstRow], *actionCell = [table cellForRowAtIndexPath:action];
+    HARNESS_CHECK(toggleCell && actionCell && CGRectGetMaxY(toggleCell.frame) <= CGRectGetMinY(actionCell.frame));
+    HARNESS_CHECK(CGRectGetMaxY(actionCell.frame) <= CGRectGetMinY([table rectForFooterInSection:storage]));
+    [table.delegate tableView:table didSelectRowAtIndexPath:action];
+    HARNESS_CHECK([SGHarnessStorageURI.absoluteString isEqualToString:@"spotify:config:storage"]);
+
     // A navigation controller reached through the source's parents includes itself in the search.
     UIViewController *home = [UIViewController new];
     UINavigationController *root = [[UINavigationController alloc] initWithRootViewController:home];
     SGOpenModSettings(home.view);
-    HARNESS_CHECK([root.topViewController.title isEqualToString:@"Vitrine"]);
+    HARNESS_CHECK([root.topViewController.title isEqualToString:@"Retrine"]);
 
     // A deeper stack in the first child's subtree wins over a shallower later sibling.
     UIViewController *container = [UIViewController new], *wrapper = [UIViewController new];
@@ -187,7 +265,7 @@ static void refactorChecks(void) {
     [container addChildViewController:later];
     [later didMoveToParentViewController:container];
     SGOpenModSettings(container.view);
-    HARNESS_CHECK([first.topViewController.title isEqualToString:@"Vitrine"]);
+    HARNESS_CHECK([first.topViewController.title isEqualToString:@"Retrine"]);
     NSLog(@"[harness] refactor checks PASS");
 }
 
@@ -288,6 +366,11 @@ static void pageStyleChecks(void) {
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"background-check"]) {
+        extern void SGCheckSettingsBackground(void);
+        SGCheckSettingsBackground();
+        exit(0);
+    }
     if ([NSProcessInfo.processInfo.arguments containsObject:@"page-style-check"]) {
         pageStyleChecks();
         exit(0);
@@ -365,6 +448,12 @@ static void pageStyleChecks(void) {
 }
 
 - (void)run:(NSString *)action {
+    if ([action isEqualToString:@"search-destinations"]) {
+        SGSearchDestinationCheck *check = [SGSearchDestinationCheck new];
+        check.nav = self.nav;
+        [check start];
+        return;
+    }
     if ([action isEqualToString:@"prompt-check"]) {
         extern void SGCheckTranslationPromptUI(UINavigationController *);
         SGCheckTranslationPromptUI(self.nav);

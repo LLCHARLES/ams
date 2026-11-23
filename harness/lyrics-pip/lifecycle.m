@@ -4,6 +4,10 @@
 #import "../../tweak/Sources/Shared/LyricsPiP/LyricsPiP.m"
 
 static BOOL paused = YES, loading;
+static BOOL loadFailed;
+static NSString *retriedTrack;
+BOOL SGLyricsLoadFailed(NSString *track) { return loadFailed; }
+void SGLyricsRetry(NSString *track) { retriedTrack = track; }
 static NSInteger requestedSeek;
 static NSArray<SGKaraokeLine *> *testLines;
 static NSUInteger translationReads, pronunciationReads;
@@ -88,13 +92,20 @@ NSInteger SGInt(NSString *key, NSInteger fallback) { return fallback; }
 BOOL SGRedesignedUI(void) { return NO; }
 
 static NSUInteger alerts;
+static UIAlertAction *lyricsRetry;
+static UIAlertController *retryAlert;
 @interface TestPresenter : UIViewController
 @end
 @implementation TestPresenter
 - (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated completion:(void (^)(void))completion {
     if ([controller isKindOfClass:UIAlertController.class]) {
         UIAlertController *alert = (id)controller;
-        SGTestAssert([alert.message isEqual:@"Enable Picture in Picture lyrics in Vitrine settings → Lyrics, then restart Spotify."],
+        if ([alert.title isEqual:@"Couldn't load lyrics · Retry"]) {
+            retryAlert = alert;
+            lyricsRetry = alert.actions.firstObject;
+            return;
+        }
+        SGTestAssert([alert.message isEqual:@"Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify."],
             @"disabled tap gives exact activation and restart guidance");
         alerts++;
     }
@@ -205,6 +216,25 @@ void SGTestLifecycle(void) {
     SGTestAssert(pip.starts == 1 && engine.starting && !engine.active, @"readiness starts only once after first frame");
     SGTestAssert([SGLyricsPiPMenuTitle() isEqual:@"Close lyrics Picture in Picture"], @"starting action is cancel/close");
     SGTestAssert([engine.shown[2] isEqual:credit], @"provider maker/uploader credit is never filtered");
+    testLines = nil;
+    loadFailed = YES;
+    [engine refresh];
+    SGTestAssert(SGTestPump(^BOOL { return [engine.shown[0] isEqual:@"Couldn't load lyrics · Retry"]; }),
+        @"PiP renders failure distinctly from healthy absence");
+    engine.window = (id)window;
+    engine.restoreCredit = YES;
+    [engine showRestoredCredit];
+    SGTestAssert(lyricsRetry != nil, @"restoring failed PiP offers retry");
+    void (^retry)(UIAlertAction *) = [lyricsRetry valueForKey:@"handler"];
+    SGTestAssert(retry != nil, @"retry action exposes a runnable handler");
+    if (retry) retry(lyricsRetry);
+    SGTestAssert([retriedTrack isEqual:@"A"], @"PiP retry uses the shared keeper for the displayed track");
+    lyricsRetry = nil;
+    retryAlert = nil;
+    loadFailed = NO;
+    [engine refresh];
+    SGTestAssert(SGTestPump(^BOOL { return [engine.shown[0] isEqual:@"No lyrics available"]; }),
+        @"PiP returns to genuine absence after a healthy miss");
     NSUInteger frames = engine.testLayer.frames;
     for (int i = 0; i < 20; i++) [engine refresh];
     SGTestAssert(engine.testLayer.frames == frames, @"unchanged content and background do not repeat frames");

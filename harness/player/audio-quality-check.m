@@ -49,6 +49,22 @@ int main(void) {
             check([shown(YES, YES, song, level.longLongValue) isEqualToString:levels[level]],
                   [NSString stringWithFormat:@"bitrateLevel %@ shows %@", level, levels[level]]);
         }
+        // The redesign's words and details, the Music app's way; Very high is Spotify's lossy 320 kbps, not lossless.
+        NSDictionary<NSNumber *, NSArray<NSString *> *> *redesign = @{
+            @1: @[@"Low Quality", @"About 24 kbps"], @2: @[@"Normal Quality", @"About 96 kbps"], @3: @[@"High Quality", @"About 160 kbps"],
+            @4: @[@"Highest Quality", @"About 320 kbps"], @5: @[@"Lossless", @"16-bit/44.1 kHz"], @6: @[@"Lossless 24-bit", @"24-bit/44.1 kHz"],
+        };
+        for (NSNumber *level in redesign) {
+            SGAudioTier tier = SGAudioTierForBitrateLevel(level.longLongValue);
+            check([SGAudioTierBadgeName(tier) isEqualToString:redesign[level][0]] && [SGAudioTierRateText(tier, 0) isEqualToString:redesign[level][1]]
+                  && SGAudioTierSummary(tier).length > 0,
+                  [NSString stringWithFormat:@"bitrateLevel %@ reads %@, %@, with a sentence (got %@, %@)", level, redesign[level][0], redesign[level][1],
+                   SGAudioTierBadgeName(tier), SGAudioTierRateText(tier, 0)]);
+        }
+        check([SGAudioTierRateText(SGAudioTierLossless24, 48000) isEqualToString:@"24-bit/48 kHz"], @"a lossless rate reported is the one read");
+        check([SGAudioTierFootnote(SGAudioTierVeryHigh) isEqualToString:@"Playing now · Spotify Very high"], @"the footnote names Spotify's own tier");
+        check(!SGAudioTierBadgeName(SGAudioTierNone) && !SGAudioTierRateText(SGAudioTierNone, 44100) && !SGAudioTierSummary(SGAudioTierNone)
+              && !SGAudioTierFootnote(SGAudioTierNone), @"no tier has no words");
         check(SGAudioTierIsLossless(SGAudioTierForBitrateLevel(5)) && SGAudioTierIsLossless(SGAudioTierForBitrateLevel(6))
               && !SGAudioTierIsLossless(SGAudioTierForBitrateLevel(4)), @"only hifi and hifi_24 draw the lossless glyph");
         check([shown(NO, YES, song, 6) isEqualToString:@"nothing"], @"the switch off shows nothing");

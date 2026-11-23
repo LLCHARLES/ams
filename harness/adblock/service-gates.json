@@ -10,6 +10,7 @@
   "_TtC20NativeAds_LoggerImpl26NativeAdsLoggerServiceImpl": "ads",
   "_TtC32AdsEmbedded_EmbeddedCTACardsImpl23EmbeddedCTACardsService": "ads",
   "_TtC28AdsPlatform_AdsBaseSwiftImpl23AdsBaseSwiftServiceImpl": "ads",
+  "_TtC23AdsPlatform_AdsBaseImpl18AdsBaseServiceImpl": "ads",
   "_TtC46Betamax_AudioAdPictureInPictureCoordinatorImpl41AudioAdPictureInPictureCoordinatorService": "ads",
   "_TtC28AdsStandalone_RewardedAdImpl32RewardedAdFetchControllerService": "ads",
   "_TtC29AdsStandalone_AdOnAppOpenImpl22AdOnAppOpenServiceImpl": "ads",

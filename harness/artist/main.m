@@ -8,7 +8,9 @@
 // names: `none` at once, or in `late` a second in; Following, as saved, after the tap made at 2.5 s.
 #import <UIKit/UIKit.h>
 #import "../harness-fail.h"
+#import "../album/motion-visibility.h"
 #import "../album/hero-veil-check.h"
+#import "Redesigned/Kit/SGRHeaderInfo.h"
 
 #pragma mark - Spotify's classes, by name
 
@@ -322,6 +324,82 @@ static void verifyPlay(UIView *root) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ exit(0); });
 }
 
+#pragma mark - the name
+
+static void verifyCentred(NSString *what, UIView *view, CGFloat width) {
+    if (fabs(CGRectGetMidX(view.frame) - width / 2) > 0.5)
+        HARNESS_FAIL(@"%@ at %@, not centred on the page %.0fpt across", what, NSStringFromCGRect(view.frame), width);
+}
+
+static void verifyCentredText(NSString *what, UILabel *label, CGFloat width) {
+    if (label.textAlignment != NSTextAlignmentCenter) HARNESS_FAIL(@"%@ aligned %ld, not centred", what, (long)label.textAlignment);
+    verifyCentred(what, label, width);
+}
+
+// `verify-title`: the artist's name the Music app's way on iOS 26 -- Large Title bold (capped at Extra Large), centred on
+// the page, the listeners line centred under it, both clear of the row under them; a name too long for a line wraps
+// centred, in two lines at most; a logo standing for the name is centred in its place, the listeners line still centred
+// under it. The same right to left (-AppleTextDirection YES -NSForceRightToLeftWritingDirection YES on the launch line,
+// which `rtl` asserts the page took). HARNESS_ARTIST names the artist. "[harness] SHOT artist-title" comes before the
+// checks, 1.5 s ahead of them, for title-check.py's screenshot; then a PASS line and exit 0, or a FAIL and exit 1.
+static void verifyTitle(UIView *root, BOOL rtl) {
+    UIView *header = veilFind(root, @"_TtC35CreativeWorkPlatform_ImageHeaderKit15ImageHeaderView");
+    [header setNeedsLayout];
+    [header layoutIfNeeded];
+    SGRHeaderInfo *info = (SGRHeaderInfo *)veilFind(root, @"SGRHeaderInfo");
+    [info layoutIfNeeded];
+    NSLog(@"[harness] SHOT artist-title");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [info layoutIfNeeded];
+        UILabel *title = [info valueForKey:@"_title"], *listeners = [info valueForKey:@"_length"];
+        UIView *play = [info valueForKey:@"play"], *shuffle = [info valueForKey:@"shuffle"], *follow = [info valueForKey:@"trailing"];
+        NSString *name = NSProcessInfo.processInfo.environment[@"HARNESS_ARTIST"] ?: @"Shawn Mendes";
+        CGFloat width = info.bounds.size.width;
+        HARNESS_CHECK(info && play && shuffle && follow);
+        HARNESS_CHECK([title.text isEqualToString:name] && !title.hidden && !listeners.hidden);
+        HARNESS_CHECK((info.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) == rtl);
+
+        UIContentSizeCategory now = UIApplication.sharedApplication.preferredContentSizeCategory;
+        UIContentSizeCategory capped = UIContentSizeCategoryCompareToCategory(now, UIContentSizeCategoryExtraLarge) == NSOrderedDescending
+            ? UIContentSizeCategoryExtraLarge : now;
+        CGFloat large = [UIFont preferredFontForTextStyle:UIFontTextStyleLargeTitle
+                            compatibleWithTraitCollection:[UITraitCollection traitCollectionWithPreferredContentSizeCategory:capped]].pointSize;
+        CGFloat weight = [[title.font.fontDescriptor objectForKey:UIFontDescriptorTraitsAttribute][UIFontWeightTrait] doubleValue];
+        if (fabs(title.font.pointSize - large) > 0.01 || weight < UIFontWeightBold - 0.01)
+            HARNESS_FAIL(@"the name is %.1fpt weight %.2f, not Large Title bold at %@ (%.1fpt)", title.font.pointSize, weight, capped, large);
+
+        verifyCentredText(@"the name", title, width);
+        verifyCentredText(@"the listeners line", listeners, width);
+        // Wrapped, not cut, up to its two lines; a name one line can't hold takes more than one.
+        CGFloat needed = ceil([title sizeThatFits:CGSizeMake(title.bounds.size.width, CGFLOAT_MAX)].height);
+        if (title.bounds.size.height < needed - 0.5) HARNESS_FAIL(@"the name is %.1fpt high, its lines %.1fpt", title.bounds.size.height, needed);
+        BOOL wraps = [title.text sizeWithAttributes:@{NSFontAttributeName: title.font}].width > title.bounds.size.width;
+        HARNESS_CHECK(title.numberOfLines == 2 && wraps == (title.bounds.size.height > title.font.lineHeight * 1.5));
+        CGFloat row = MIN(CGRectGetMinY(play.frame), MIN(CGRectGetMinY(shuffle.frame), CGRectGetMinY(follow.frame)));
+        HARNESS_CHECK(CGRectGetMaxY(title.frame) <= CGRectGetMinY(listeners.frame) + 0.5);
+        if (CGRectGetMaxY(listeners.frame) > row + 0.5)
+            HARNESS_FAIL(@"the listeners line ends at %.1f, inside the row from %.1f", CGRectGetMaxY(listeners.frame), row);
+        CGRect named = title.frame;
+
+        // A logo arriving for the name: in the name's place, centred, the listeners line still centred under it.
+        UIImage *logo = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(600, 200)] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [UIColor.whiteColor setFill];
+            [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 600, 200) cornerRadius:40] fill];
+        }];
+        [info showTitleImage:logo];
+        [info layoutIfNeeded];
+        UIView *picture = [info valueForKey:@"_logo"];
+        HARNESS_CHECK(!picture.hidden && picture.frame.size.width > 0 && picture.frame.size.width < width);
+        verifyCentred(@"the logo", picture, width);
+        verifyCentredText(@"the listeners line under the logo", listeners, width);
+        HARNESS_CHECK(CGRectGetMaxY(picture.frame) <= CGRectGetMinY(listeners.frame) + 0.5);
+        NSLog(@"[harness] PASS artist title%@ \"%@\": %@ centred (%@), logo %@ centred, listeners %@ under it", rtl ? @" rtl" : @"", name,
+              NSStringFromCGRect(named), wraps ? @"wrapped" : @"one line", NSStringFromCGRect(picture.frame),
+              NSStringFromCGRect(listeners.frame));
+        exit(0);
+    });
+}
+
 #pragma mark - the page
 
 @interface SGRHarnessDelegate : UIResponder <UIApplicationDelegate>
@@ -609,8 +687,13 @@ static void verifyPlay(UIView *root) {
               pinned ? NSStringFromCGRect(pinned.frame) : @"MISSING", pinned.alpha);
     });
     UIView *rootView = root.view;
+    motionVisibilityCheck(rootView, YES);
     if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-play"])
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ verifyPlay(rootView); });
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-title"]) {
+        BOOL rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ verifyTitle(rootView, rtl); });
+    }
     // `veil` / `veil-off` (../album/hero-veil-check.h): the page scrolled by its own scroll view, the header's container
     // in it.
     NSString *veil = veilMode();

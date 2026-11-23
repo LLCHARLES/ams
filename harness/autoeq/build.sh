@@ -10,5 +10,5 @@ mkdir -p "$(dirname "$OUT")"
 xcrun clang -fobjc-arc -O0 -g -Wall -Werror -target arm64-apple-macos13.0 -I shim -I "$SRC" -I "$FX" \
     check.m "$FX"/AudioEffectsPresets.m "$FX"/AutoEq.m "$FX"/AudioEffectsSettings.m "$FX"/AudioEffectsFiles.m \
     "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLocalize.m \
-    -framework Foundation -o "$OUT"
+    -framework Foundation "$SRC/Core/SGDataRoot.m" -o "$OUT"
 echo "built $OUT"

@@ -4,7 +4,7 @@
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-genius.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-genius.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -iframework "$(xcrun --sdk macosx --show-sdk-path)/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -g -Wall -I"$SRC" -DSG_VERSION=\"0.0.0\" \
     "$HERE/check.m" "$SRC/Shared/LyricsSources/Genius.m" "$SRC/Shared/LyricsSources/LrcLib.m" "$SRC/Shared/LyricsSources/Lyricsfile.m" "$SRC/Shared/LyricsSources/SongMatch.m" "$SRC/Shared/LyricsSources/QQMusic.m" "$SRC/Shared/Lyrics/KaraokeTiming.m" "$SRC/Shared/AdBlock/Protobuf.m" \

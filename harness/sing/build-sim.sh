@@ -20,7 +20,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios18.0-simulator -fobjc-ar
     "$SING/SGSingModel.m" "$SING/SGSingLoader.m" "$SING/SGSingSeparator.m" "$SING/SGSingEngine.m" "$SING/SGSingCommands.m" "$SRC/Shared/AudioEffects/SGDSPReverb.m" "$SRC/Core/SGFileHash.m" \
     "$SRC/Core/SGRebind.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGFlagForce.m" "$SRC/Core/SGLocalize.m" \
     -framework UIKit -framework QuartzCore -framework MediaPlayer -framework AudioToolbox -framework AVFoundation -framework Accelerate -framework CoreML -framework Foundation \
-    -o "$OUT/SingHarness.app/SingHarness"
+    "$SRC/Core/SGDataRoot.m" -o "$OUT/SingHarness.app/SingHarness"
 if [ -n "$VOICE" ]; then cp "$VOICE" "$OUT/SingHarness.app/voice.aiff"; fi
 cat > "$OUT/SingHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

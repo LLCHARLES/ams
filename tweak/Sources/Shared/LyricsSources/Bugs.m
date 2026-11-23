@@ -63,6 +63,7 @@ static void lyrics(SGLyricsRequestContext *context, NSString *song, BOOL timed, 
     NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"https://music.bugs.co.kr/player/lyrics/%@/%@", timed ? @"T" : @"N", song]];
     SGLyricsSourceRequestIn(context, url, nil, nil, ^(NSData *data, NSInteger status) {
         id root = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (status == 200 && !root) [context noteFailure:YES];
         SGLyricsResult *result = SGBugsResult(root, timed);
         if (!result && timed) { lyrics(context, song, NO, done); return; }
         SGLog(@"bugs: %lu lines", (unsigned long)result.karaokeLines.count);
@@ -77,6 +78,7 @@ SGLyricsAsk SGBugsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *)) 
     SGLyricsSourceRequestIn(query.requestContext, url, nil, nil, ^(NSData *data, NSInteger status) {
         id root = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
         id list = SGLyricsField(root, @"list");
+        if (status == 200 && ![list isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
         if ([list isKindOfClass:NSArray.class] && ![list count])
             query.requestContext.emptyNameSearch = SGBugsAsk;
         NSString *song = songFor(root, query);

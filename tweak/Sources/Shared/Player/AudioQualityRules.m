@@ -45,6 +45,57 @@ NSString *SGAudioTierName(SGAudioTier tier) {
     return nil;
 }
 
+NSString *SGAudioTierBadgeName(SGAudioTier tier) {
+    switch (tier) {
+        case SGAudioTierNone: return nil;
+        case SGAudioTierLow: return SGL(@"player.audio_quality.badge.low", @"Low Quality");
+        case SGAudioTierNormal: return SGL(@"player.audio_quality.badge.normal", @"Normal Quality");
+        case SGAudioTierHigh: return SGL(@"player.audio_quality.badge.high", @"High Quality");
+        case SGAudioTierVeryHigh: return SGL(@"player.audio_quality.badge.very_high", @"Highest Quality");
+        case SGAudioTierLossless: case SGAudioTierLossless24: return SGAudioTierName(tier);
+    }
+    return nil;
+}
+
+// Spotify's published rates for its lossy tiers (support.spotify.com, Audio quality), and its lossless sample rate.
+static const long kLowKbps = 24, kNormalKbps = 96, kHighKbps = 160, kVeryHighKbps = 320;
+static const long long kLosslessHz = 44100;
+static const long kLosslessBits = 16, kLossless24Bits = 24;
+
+NSString *SGAudioTierRateText(SGAudioTier tier, long long playingHz) {
+    long kbps = 0, bits = 0;
+    switch (tier) {
+        case SGAudioTierNone: return nil;
+        case SGAudioTierLow: kbps = kLowKbps; break;
+        case SGAudioTierNormal: kbps = kNormalKbps; break;
+        case SGAudioTierHigh: kbps = kHighKbps; break;
+        case SGAudioTierVeryHigh: kbps = kVeryHighKbps; break;
+        case SGAudioTierLossless: bits = kLosslessBits; break;
+        case SGAudioTierLossless24: bits = kLossless24Bits; break;
+    }
+    if (kbps) return [NSString stringWithFormat:SGL(@"player.audio_quality.about_kbps", @"About %ld kbps"), kbps];
+    NSString *rate = SGAudioSampleRateText(playingHz > 0 ? playingHz : kLosslessHz);
+    return [NSString stringWithFormat:SGL(@"player.audio_quality.bits_rate", @"%ld-bit/%@"), bits, rate];
+}
+
+NSString *SGAudioTierSummary(SGAudioTier tier) {
+    switch (tier) {
+        case SGAudioTierNone: return nil;
+        case SGAudioTierLow: return SGL(@"player.audio_quality.summary.low", @"The lightest stream, made to save data.");
+        case SGAudioTierNormal: return SGL(@"player.audio_quality.summary.normal", @"A balance of sound and data for everyday listening.");
+        case SGAudioTierHigh: return SGL(@"player.audio_quality.summary.high", @"A higher bitrate that brings out more of the detail.");
+        case SGAudioTierVeryHigh: return SGL(@"player.audio_quality.summary.very_high", @"Spotify's best compressed sound, with nearly all of the detail kept.");
+        case SGAudioTierLossless: return SGL(@"player.audio_quality.summary.lossless", @"CD quality, with nothing lost to compression.");
+        case SGAudioTierLossless24: return SGL(@"player.audio_quality.summary.lossless_24", @"24-bit studio sound, with nothing lost to compression.");
+    }
+    return nil;
+}
+
+NSString *SGAudioTierFootnote(SGAudioTier tier) {
+    NSString *name = SGAudioTierName(tier);
+    return name ? [NSString stringWithFormat:SGL(@"player.audio_quality.footnote", @"Playing now · Spotify %@"), name] : nil;
+}
+
 NSString *SGAudioSourceName(SGAudioSource source) {
     switch (source) {
         case SGAudioSourceUnknown: return nil;

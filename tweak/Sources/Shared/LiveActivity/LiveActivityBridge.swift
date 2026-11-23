@@ -64,6 +64,7 @@ public final class SGLiveActivityBridge: NSObject {
         var sentAt: Date?
         // Changes taken to send so far, so a second try can tell another sender has gone since.
         var taken = 0
+        var resend: Task<Bool, Never>?
     }
 
     private static let kStuckAfter: TimeInterval = 5
@@ -72,6 +73,8 @@ public final class SGLiveActivityBridge: NSObject {
 
     private static func queue(_ change: Change) {
         let start = pending.withLock { pending in
+            pending.resend?.cancel()
+            pending.resend = nil
             if case .update(let id, _, _) = change, case .update(let waiting, _, _)? = pending.changes.last, waiting == id {
                 pending.changes.removeLast()
             }
@@ -123,18 +126,25 @@ public final class SGLiveActivityBridge: NSObject {
 
     // iOS grants the background task asynchronously, so a change sent just after it begins can still be refused
     // without a word (4 of 53 updates on the phone, each fine a second later). True once a second has gone by with
-    // nothing newer queued and no other sender at work; checked in steps, so a newer change is not held up.
+    // nothing newer queued and no other sender at work. A new change cancels the one sleep immediately.
     private static func quietForASecond(since taken: Int) async -> Bool {
-        for _ in 0..<10 {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-            let quiet = pending.withLock { pending -> Bool in
-                guard pending.changes.isEmpty, pending.taken == taken else { return false }
-                pending.sentAt = Date()
-                return true
+        let resend = pending.withLock { pending -> Task<Bool, Never>? in
+            guard pending.changes.isEmpty, pending.taken == taken else { return nil }
+            let task = Task {
+                do { try await Task.sleep(nanoseconds: 1_000_000_000) }
+                catch { return false }
+                return !Task.isCancelled
             }
-            if !quiet { return false }
+            pending.resend = task
+            return task
         }
-        return true
+        guard let resend, await resend.value else { return false }
+        return pending.withLock { pending in
+            guard pending.changes.isEmpty, pending.taken == taken else { return false }
+            pending.resend = nil
+            pending.sentAt = Date()
+            return true
+        }
     }
 
     // The last state sent, to tell which updates are worth the second copy.

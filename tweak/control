@@ -1,7 +1,10 @@
-Package: com.vitrine.tweak
-Name: Vitrine
+Package: com.retrine.tweak
+Name: Retrine
+Conflicts: com.vitrine.tweak
+Replaces: com.vitrine.tweak
+Provides: com.vitrine.tweak
 Architecture: iphoneos-arm
 Description: Liquid Glass for the Spotify iOS app
-Maintainer: Vitrine
-Author: Vitrine
+Maintainer: Retrine
+Author: Retrine
 Section: Tweaks

@@ -1,0 +1,90 @@
+{
+  "id": "eevee-spotify-9.2.0-pixie-1.4",
+  "spotify_version": "9.2.0",
+  "spotify_build": "920002054",
+  "uuid": "b49e75781d8635d38bb57daf68fed8a8",
+  "shared_uuid": "30bac55f8361373aad607f0535395641",
+  "pixie_version": "1.4",
+  "primary": true,
+  "minimum_ios": "15.0",
+  "preferred_address": "0x100000000",
+  "provenance": {
+    "repository": "EeveeSpotifyReincarnated",
+    "commit": "0d9feaa9008e53b06382c61fffcb5cfcfceb2981",
+    "license": "GPL-3.0",
+    "scope": "NativeDownloads target, export patching and 1.4 companion runtime layout.",
+    "runtime_layout": {
+      "basis": "Adopt the shipped Eevee 9.2.0 layout at 0d9feaa9008e53b06382c61fffcb5cfcfceb2981; no new local device capture.",
+      "device_fix_commit": "5f7b82e4de89121d1cd1dd6e224b67ad2c9cce52",
+      "device_fix": "Commit records downloads refused with old quota fields and fixes 0x2b8..0x2d8 to 0x2c0..0x2e0 using manager_field_shift=8.",
+      "upstream_fields": {
+        "wrapper_and_vtable": "NativeDownloads/src/Spotify/NativeOfflineAdapter.m:204-215; wrapper+8, manager+0, first vtable method+0.",
+        "quota_and_reservations": "NativeDownloads/src/Spotify/NativeOfflineAdapter.m:237-241; block 0x2b0+8, current_tracks 0x2b8, current_episodes 0x2bc, music_limit 0x2c0, music_duration_seconds 0x2c8, episode_limit 0x2d0, episode_duration_seconds 0x2d8, abp_duration_seconds 0x2e0.",
+        "queue": "NativeDownloads/src/Spotify/NativeOfflineAdapter.m:252-260; unshifted base 0x220: online 0x221, connection_allows_offlining 0x222, track_license_expired 0x224, episode_license_expired 0x225, disk_full 0x229, sync_level 0x238, allow_spotify_tracks 0x23c, token_flag 0x248.",
+        "provider": "NativeDownloads/src/Spotify/NativeOfflineAdapter.m:546-547; unshifted manager+0x290, provider vtable+0, request slot+0x10 (test-only lookup).",
+        "shift": "NativeDownloads/src/Generated/TargetProfile.h:12; SAP_TARGET_MANAGER_FIELD_SHIFT=8.",
+        "trace": "NativeDownloads/src/Diagnostics/NativeKeyTrace.m:98-106; wrapper+8 and descriptor+4; NativeDownloads/src/Generated/ExportSites.h:4 gives owner descriptor+0x120."
+      },
+      "local_static_proof": "NativeDownloads/tests/profiles.py:test_complete_caves_branches_and_abi pins clean IPA setter bytes: LDR at 0x1022d7cb8 -> +0x2c8, 0x1022d7cbc -> +0x2c0, 0x1022d7ccc -> +0x2d8, 0x1022d7cdc -> +0x2d0, 0x1022d7cec -> +0x2e0. NativeDownloads/tests/target_foundation.py:test_concurrent_headers_and_compiled_manager_shift exercises generated block offset 696 (0x2b8). Reservation/queue/ownership evidence is the pinned upstream layout, not setter disassembly.",
+      "comparison": "Generated 9.2.0 quota, wrapper, queue and provider offsets and every nativeState subfield equal the pinned upstream source; no offset changes required."
+    }
+  },
+  "runtime": "runtime-1.2.json",
+  "admission": {
+    "enabled": true,
+    "reservation_counters_verified": true,
+    "runtime_layout_verified": true,
+    "jailbreak": false
+  },
+  "native": {
+    "setter": "0x1022d7c88",
+    "setter_cave": "0x100023f00",
+    "setter_original": "e6031eaa9c5a6895fe0306aafd7b11a9",
+    "manager_vtable": "0x10d9c3c08",
+    "window": "0x106140930",
+    "call_site": "0x10614093c",
+    "window_original": "e4e30191e5c30091e00317aa2200805220013fd6a18301d1",
+    "provider": "0x100dc8438",
+    "provider_head": "ff0306d1fc6f12a9fa6713a9f85f14a9f65715a9f44f16a9fd7b17a9fdc30591f50305aaf40300aafc0308aa08404239",
+    "mapping": "0x100dc849c",
+    "mapping_original": "f60301aa5f080071480080520815881a5f00007113159f1a",
+    "selector_cave": "0x10d11f600",
+    "dlsym_stub": "0x10a7bc268",
+    "dlsym_stub_head": "b09c01d010d644f900021fd6",
+    "render_callback": "0x10665852c",
+    "manager_field_shift": 8,
+    "provider_context_register": 28
+  },
+  "trace_points": [
+    {"name":"Request","address":"0x10614093c","cave":"0x100023700","original":"02008052","kind":0},
+    {"name":"Success","address":"0x106ae0060","cave":"0x100023900","original":"ff4301d1f44f03a9fd7b04a9fd030191","kind":1},
+    {"name":"Failure","address":"0x10635feb8","cave":"0x100023b00","original":"ff4301d1f44f03a9fd7b04a9fd030191","kind":2}
+  ],
+  "export": {
+    "cave_base": "0x10001e000",
+    "cave_stride": 512,
+    "points": {
+      "CacheKey":{"address":"0x10559a704","original":"ff0301d1fd7b03a9fdc30091e20308aa","kind":0},
+      "StreamKey":{"address":"0x10985aad8","original":"ff0302d1f65705a9f44f06a9fd7b07a9","kind":1,"cave":"0x10d11f000"},
+      "CacheCipher":{"address":"0x101a51d8c","original":"f657bda9f44f01a9fd7b02a9fd830091","kind":2},
+      "CacheCipherApple":{"address":"0x1027929f4","original":"fa67bba9f85f01a9f65702a9f44f03a9","kind":3},
+      "MediaKeyPath":{"address":"0x1061407a4","original":"ff4305d1fc6f0fa9fa6710a9f85f11a9","kind":4},
+      "MediaKeyBlob":{"address":"0x10774139c","original":"f657bda9f44f01a9fd7b02a9fd830091","kind":5},
+      "MediaContext":{"address":"0x10503253c","original":"a15e4039","kind":6},
+      "MediaRecord":{"address":"0x10774142c","original":"fd7b42a9","kind":7},
+      "UnsealedMediaKey":{"address":"0x1059344f4","original":"e003803d","kind":10}
+    },
+    "windows": {
+      "layout0":{"address":"0x106ae0070","bytes":"130040f92000c03de003803d20c0c03ce0c3803c688640f8000540f9ff2300b9e103009178b88394"},
+      "layout1":{"address":"0x108bce298","bytes":"600e40f9689240f9090040f9290940f90111009120013fd6"},
+      "layout2":{"address":"0x10a75e9b8","bytes":"150040f9e00315aa130442f8"},
+      "layout3":{"address":"0x10a75eb0c","bytes":"a0220091614202919be05517"},
+      "cache_storage_owner":{"address":"0x10a5c828c","bytes":"e2b30291e02340f9e1031caae6f55c96e81740f9000140f9d5f3029473f40294000340f9d2f3029470f40294e02301914923079634008052b4831638e0230191a16302d122008052ea1cea96e0230191e1b3029182028052e61cea96e023019161e20a91e4203797"},
+      "unseal_guard":{"address":"0x1059344ec","bytes":"a36c3595c04af83ce003803d"},
+      "unseal_caller":{"address":"0x1077413fc","bytes":"000540f9080040f9081540f921510091e20313aa00013fd6"},
+      "share_wrapper_guard":{"address":"0x100659c6c","bytes":"e00314aab7f2da95010080d2f40318aa6d0f7e94"},
+      "share_constructor_guard":{"address":"0x1025dda90","bytes":"e00314aae20313aae30316aa0bb25c95"},
+      "cache_key_body":{"address":"0x10559a714","bytes":"08c842b9e81300b908e00a910001c03de003803d2000c03de043813c"}
+    }
+  }
+}

@@ -35,6 +35,16 @@ BOOL SGAudioTierIsLossless(SGAudioTier tier);
 // Spotify's own names (HiFi_DevicePickerIntegrationImpl's sLosslessStreamingQualityLabel,
 // sLossless24StreamingQualityLabel, sVeryHighStreamingQualityLabel and on), nil for None.
 NSString *SGAudioTierName(SGAudioTier tier);
+// The redesign's badge words, the Music app's way: "High Quality", and Very high "Highest Quality" (Spotify's lossy
+// 320 kbps, not lossless); the lossless tiers keep their names. nil for None.
+NSString *SGAudioTierBadgeName(SGAudioTier tier);
+// The redesign's details. The rate: "About 160 kbps" at Spotify's published rate for a lossy tier, a lossless one's bit
+// depth over `playingHz` (44.1 kHz, Spotify's lossless rate, while it is not reported); nil for None.
+NSString *SGAudioTierRateText(SGAudioTier tier, long long playingHz);
+// What the tier is, in a sentence; nil for None.
+NSString *SGAudioTierSummary(SGAudioTier tier);
+// The footnote under it: the song playing and Spotify's own name of the tier; nil for None.
+NSString *SGAudioTierFootnote(SGAudioTier tier);
 // nil for Unknown.
 NSString *SGAudioSourceName(SGAudioSource source);
 // "44.1 kHz"; nil for a rate that is not positive.

@@ -28,6 +28,8 @@ double SGPlayerSpeed(void);
 // Whether speed can apply: Spotify's output was taken over when it wired it.
 BOOL SGPlayerSpeedAllowed(void);
 void SGSetPlayerSpeed(double speed);
+// Main thread, after an admitted effective speed change (manual or per-song restore).
+FOUNDATION_EXPORT NSNotificationName const SGPlayerSpeedDidChangeNotification;
 // Semitones Spotify's output is moved by, 0 when it is not.
 float SGPlayerPitch(void);
 void SGSetPlayerPitch(float semitones);
@@ -93,6 +95,8 @@ void SGPlayerInvalidateSource(void);
 // Haptics), NULL until Spotify connects or starts one. Any thread; the render thread compares it with a render
 // notify's unit to process the music's output alone.
 AudioUnit SGPlayerMusicOutput(void);
+// Control-side snapshot; a connected but stopped output is not running.
+BOOL SGPlayerMusicOutputRunning(void);
 // Shared processors, including post-render notifies, must hold this admission
 // for their entire access to render-owned state. False means pass through.
 // Nonblocking, no allocation; End only after a successful Begin. No nesting.
@@ -112,7 +116,7 @@ void SGPlayerSetOutputControl(BOOL on, double gainDB, double thresholdDB, double
 // in. NO when there is no such output. Not on the render thread.
 BOOL SGPlayerMusicClientFormat(AudioStreamBasicDescription *format);
 // `watcher` is called with the music's output each time it changes (NULL when there is none any more), Spotify
-// starts it again, or a format of it changes: the time to read its format, add a render notify to it and start
+// starts or stops it, or a format of it changes: the time to read its format, add a render notify to it and start
 // over what was held. Called on Spotify's audio thread or a queue of Shared/Player's, under a lock a dispose
 // waits for, so the unit stays alive through the call; it must not wait on the main thread. NO when
 // Spotify's output cannot be reached at all. Register from a %ctor; up to four.

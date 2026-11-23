@@ -45,7 +45,7 @@ static void countIs(NSUInteger expected, NSString *title) {
 
 int main(void) {
     @autoreleasepool {
-        char directory[] = "/tmp/vitrine-album-plays.XXXXXX";
+        char directory[] = "/tmp/retrine-album-plays.XXXXXX";
         HARNESS_CHECK(mkdtemp(directory) != NULL);
         NSString *root = [NSString stringWithUTF8String:directory];
         history = [[SGPlayLog alloc] initWithPath:[root stringByAppendingPathComponent:@"plays.tsv"]];

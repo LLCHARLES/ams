@@ -455,6 +455,7 @@ static void runAtSpeed(CALayer *layer, float speed) {
 }
 - (void)finish {
     if (!self.link) return;
+    [NSNotificationCenter.defaultCenter removeObserver:self name:UIApplicationWillResignActiveNotification object:nil];
     static NSUInteger logged;
     if (logged++ < 3) SGLog(@"player morph: let go after %.2f s still, %@", CACurrentMediaTime() - self.settledSince, self.still >= 3 ? @"settled" : @"given up");
     [self.link invalidate];
@@ -514,6 +515,8 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
         follower.sped = YES;
     }
     follower.link = [CADisplayLink displayLinkWithTarget:follower selector:@selector(tick:)];
+    [NSNotificationCenter.defaultCenter addObserver:follower selector:@selector(finish)
+                                               name:UIApplicationWillResignActiveNotification object:nil];
     follower.link.preferredFrameRateRange = CAFrameRateRangeMake(80, 120, 120);
     [follower.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     objc_setAssociatedObject(transition, &kFollowerKey, follower, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

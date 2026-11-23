@@ -14,6 +14,7 @@ BOOL SGRHomeLook(void) { return NO; }
 UIFont *SGCategoryCappedFont(UIFontTextStyle style, UIFontWeight weight, UIContentSizeCategory largest) { return [UIFont systemFontOfSize:17 weight:weight]; }
 UIView *SGRGlassCapsuleInside(UIView *control, const void *key, CGSize size, BOOL prominent) { return nil; }
 void SGRShowGlass(UIView *shape, BOOL shown) {}
+void SGRGlassBacks(UIView *shape, UIControl *control) {}
 void SGRHardTopEdge(UIScrollView *scrollView) {}
 UIControl *SGRHomeTopPicksShowAll(NSString **title) { return nil; }
 CFTimeInterval SGRHomeProbeBegin(void) { return 0; }

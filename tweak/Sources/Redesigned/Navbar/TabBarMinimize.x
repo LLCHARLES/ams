@@ -13,7 +13,8 @@
 #import "Shared/Player/PlayerEvents.h"
 
 static Class sg_containerClass;
-static __weak UIScrollView *sg_page, *sg_other;
+static __weak UIScrollView *sg_page;
+static char kInContainer;
 static SGRMinimizeTrack sg_track;
 static BOOL sg_waitForTouch;
 
@@ -23,13 +24,9 @@ static BOOL inContainer(UIView *view) {
 }
 
 static void scrolled(UIScrollView *scrollView) {
-    if ((!scrollView.isTracking && !scrollView.isDecelerating) || scrollView == sg_other) return;
+    if (!scrollView.isTracking && !scrollView.isDecelerating) return;
     CGFloat offset = scrollView.contentOffset.y;
     if (scrollView != sg_page) {
-        if (!inContainer(scrollView)) {
-            sg_other = scrollView;
-            return;
-        }
         sg_page = scrollView;
         sg_track = (SGRMinimizeTrack){offset, SGRTabBarMinimized()};
     }
@@ -48,9 +45,30 @@ static void scrolled(UIScrollView *scrollView) {
 }
 
 %hook UIScrollView
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    BOOL begin = %orig;
+    // A wrapper may have changed page without changing our window or superview.
+    if (begin && recognizer == self.panGestureRecognizer)
+        objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return begin;
+}
+- (void)didMoveToSuperview {
+    %orig;
+    objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+- (void)didMoveToWindow {
+    %orig;
+    objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 - (void)setContentOffset:(CGPoint)offset {
     %orig;
-    scrolled(self);
+    NSNumber *inside = objc_getAssociatedObject(self, &kInContainer);
+    // A wrapper can join the tab page mid-fling, without another pan to clear its cached NO.
+    if (!inside || (!inside.boolValue && self.isDecelerating)) {
+        inside = inContainer(self) ? @YES : @NO;
+        objc_setAssociatedObject(self, &kInContainer, inside, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (inside.boolValue) scrolled(self);
 }
 %end
 

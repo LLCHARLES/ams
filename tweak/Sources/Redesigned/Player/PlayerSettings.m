@@ -1,9 +1,9 @@
 // The redesign's Player page in Mod Settings (App/Pages.m opens it in place of the native look's).
 //
-// It leads with a miniature of the whole player, pinned over the rows: the header (the close and ⋯ glyphs, in glass
-// circles while Header glass is on, the album the song is from between them), the background chosen on the page edge
-// to edge, the cover, the title and the artist (gliding when too long) with the add button (a star with Star add
-// button), Switch to video over them unless it is hidden, the progress with the time played and the time left, and the
+// It leads with a miniature of the whole player, pinned over the rows: the header (the album the song is from, as the
+// player's header has only its grabber otherwise), the background chosen on the page edge to edge, the cover, the
+// title and the artist (gliding when too long) with the ⋯ beside them, Switch to video over them unless it is hidden,
+// the translucent progress with the time played and the time left, and the
 // transport row with shuffle and repeat left out as their chips say, previous and next spread apart when both are, as
 // in the player (PlayerControls.x). The progress is where the track was when the page appeared. With no track, the
 // card shows the last one played (Shared/Player/SGLastTrack.h), its cover fetched and its Canvas looked up as the
@@ -16,14 +16,14 @@
 // clip looked up for the card while it is on screen, Fluid until it comes in and for a track with none, as in the
 // player; the clip crosses over the field as it arrives, its poster first while its video decodes. And for Visualizer
 // the hills over Fluid held still (SGRPlayerVisualiserPreview), moving with the song. It moves under the field's own
-// conditions (in a window, Spotify in front, Reduce Motion and Low Power Mode off). Another track shown reads the
+// conditions (in a window, Spotify in front, Reduce Motion and Low Power Mode off, below serious heat). Another track shown reads the
 // background again, and an answer that comes for the one before is dropped. The card works only while the page is on
 // screen: away, its clip and hills are taken off and nothing it asked for is shown when it comes.
 //
 // Under Animated a tap on the card, or on its Without a clip button, shows the song as it would be without a clip,
 // what Song without a clip picks (the cover art over Fluid, the full-screen cover, or the Visualizer), and a tap again
 // shows it as it is; picking a choice there shows it too. It is the card's alone: nothing is asked of the player, and
-// another background ends it. Under Low Power Mode or Reduce Motion it is the cover art, as the player shows then.
+// another background ends it. Under Low Power Mode, serious heat or Reduce Motion it is the cover art, as the player shows then.
 //
 // Under the card a segmented control picks the background, all five of them: the names are one word each, each segment
 // as wide as its name, so they fit side by side at an iPhone's width, and every choice stays one tap away with the
@@ -42,6 +42,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRMotionBudget.h"
 #import "Redesigned/Kit/SGRFluid.h"
 #import "Redesigned/Kit/SGRFluidGPU.h"
 #import "Redesigned/Kit/SGRRefinements.h"
@@ -63,12 +64,13 @@ static const CGFloat kPinnedGap = 8;     // the page's color above and below the
 static const CGFloat kCardRadius = 26;   // continuous, the radius of the page's own cards and then some
 // Inside the card: its side padding, the room over the header row and under the transport row.
 static const CGFloat kCardPadding = 16, kCardTop = 12, kCardBottom = 10;
-static const CGFloat kHeaderRow = 32, kHeaderCircle = 30, kHeaderGlyph = 14;
+// The header row, and the room either side of its middle (the album's name, the demo's button).
+static const CGFloat kHeaderRow = 32, kHeaderSide = 38;
 static const CGFloat kCompactCover = 64;   // the cover beside the title, compact
 // Between the two the cover waits at its compact size above the words while they move beside it: from this expansion
 // down to the next one.
 static const CGFloat kCoverParkedAbove = 0.6, kCoverParkedBelow = 0.4;
-static const CGFloat kAddGlyph = 22, kAddSlot = 30;
+static const CGFloat kMoreGlyph = 18, kMoreSlot = 30;
 static const CGFloat kTransportRow = 44, kSkipGlyph = 22, kPlayGlyph = 30, kSideGlyph = 17;
 static const CGFloat kProgressLine = 4;
 // The cover's foot under the full-screen cover, darkened for the words over it.
@@ -141,9 +143,9 @@ static void pickNoClip(SGRNoClip choice) {
     SGRPlayerReconcileFallbackSwitches();
 }
 
-// Reduce Motion and Low Power Mode keep the cover art, whatever the choice (PlayerMotion.x, motionAllowed).
+// Reduce Motion, Low Power Mode or serious heat keeps the cover art, whatever the choice (PlayerMotion.x, motionAllowed).
 static BOOL noClipMotionAllowed(void) {
-    return !SGRReduceMotion() && !NSProcessInfo.processInfo.lowPowerModeEnabled;
+    return !SGRReduceMotion() && !SGRMotionHeldForPowerOrHeat();
 }
 
 #pragma mark - the card
@@ -178,8 +180,6 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
                       round(mix(a.size.width, b.size.width, t)), round(mix(a.size.height, b.size.height, t)));
 }
 
-static char kCloseGlassKey, kMoreGlassKey;
-
 @interface SGRPlayerPreview : UIView <SGPlayerStateObserver>
 // The height the compact layout needs at the card's text size.
 @property (nonatomic, readonly) CGFloat minimumHeight;
@@ -201,8 +201,6 @@ static char kCloseGlassKey, kMoreGlassKey;
     UIView *_motion, *_visualiser, *_backdrop;
     UIImageView *_still;          // the full-screen cover, the demo's
     CAGradientLayer *_stillDim;
-    UIView *_close, *_more;
-    UIImageView *_closeGlyph, *_moreGlyph;
     UILabel *_context;
     UIButton *_demoButton;
     UIImageView *_cover;
@@ -210,7 +208,8 @@ static char kCloseGlassKey, kMoreGlassKey;
     UIImageView *_chipGlyph;
     UILabel *_chipLabel;
     SGMarqueeLabel *_title, *_artist;
-    UIImageView *_add;
+    UIImageView *_more, *_star;   // the star add button, before the ⋯, while Star add button is on
+    BOOL _starAdd;
     UIView *_progress, *_progressFill;
     UILabel *_elapsed, *_remaining;
     UIImageView *_shuffle, *_previous, *_play, *_next, *_repeat;
@@ -220,7 +219,7 @@ static char kCloseGlassKey, kMoreGlassKey;
     CGFloat _chipWidth, _chipHeight, _titleHeight, _artistHeight, _timeHeight;
     CGFloat _position;
     BOOL _paused, _active, _demo;
-    BOOL _glass, _star, _hideShuffle, _hideRepeat, _hideVideo;
+    BOOL _hideShuffle, _hideRepeat, _hideVideo;
     NSString *_track;      // the shown track
     NSString *_artworkOf;  // the last track whose cover the card asked for
     // Advanced as another track is shown and as the card goes off screen: an answer for an older one is dropped.
@@ -258,20 +257,10 @@ static char kCloseGlassKey, kMoreGlassKey;
     [_still.layer addSublayer:_stillDim];
     [_canvas addSubview:_still];
 
-    // The header: the close and ⋯ glyphs, glass behind them while Header glass is on, the album between them. Made at
-    // their size, so the glass made in them is at their middle.
-    CGRect circle = CGRectMake(0, 0, kHeaderCircle, kHeaderCircle);
-    _close = [[UIView alloc] initWithFrame:circle];
-    _closeGlyph = glyphView(@"chevron.down", kHeaderGlyph, UIImageSymbolWeightSemibold);
-    [_close addSubview:_closeGlyph];
-    _more = [[UIView alloc] initWithFrame:circle];
-    _moreGlyph = glyphView(@"ellipsis", kHeaderGlyph, UIImageSymbolWeightSemibold);
-    [_more addSubview:_moreGlyph];
+    // The header: the album the song is from.
     _context = [UILabel new];
     _context.textColor = SGRSecondary();
     _context.textAlignment = NSTextAlignmentCenter;
-    [_canvas addSubview:_close];
-    [_canvas addSubview:_more];
     [_canvas addSubview:_context];
 
     _cover = [UIImageView new];
@@ -297,17 +286,19 @@ static char kCloseGlassKey, kMoreGlassKey;
     _title.textColor = SGRPrimary();
     _artist = [SGMarqueeLabel new];
     _artist.textColor = SGRSecondary();
-    _add = glyphView(@"plus.circle", kAddGlyph, UIImageSymbolWeightRegular);
+    _more = glyphView(@"ellipsis", kMoreGlyph, UIImageSymbolWeightSemibold);
+    _star = glyphView(@"star", kMoreGlyph, UIImageSymbolWeightSemibold);
     [_canvas addSubview:_title];
     [_canvas addSubview:_artist];
-    [_canvas addSubview:_add];
+    [_canvas addSubview:_more];
+    [_canvas addSubview:_star];
 
     // The player's slider as it is drawn at rest: a track, and in it a fill up to where the song is.
     _progress = [UIView new];
-    _progress.backgroundColor = [UIColor colorWithWhite:1 alpha:0.2];
+    _progress.backgroundColor = SGRPlayerBarTrack();
     _progress.clipsToBounds = YES;
     _progressFill = [UIView new];
-    _progressFill.backgroundColor = SGRPrimary();
+    _progressFill.backgroundColor = SGRPlayerBarFill(NO);
     [_progress addSubview:_progressFill];
     _elapsed = [UILabel new];
     _remaining = [UILabel new];
@@ -363,13 +354,14 @@ static char kCloseGlassKey, kMoreGlassKey;
     }
     __weak SGRPlayerPreview *weakSelf = self;
     void (^background)(NSNotification *) = ^(NSNotification *note) {
-        // The power state is posted off the main thread, which must not wait for main (AGENTS.md).
+        // Power and thermal changes can be posted off the main thread, which must not wait for main (AGENTS.md).
         dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf reloadBackgroundAnimated:YES]; });
     };
     _observers = @[
         [center addObserverForName:SGRNowPlayingArtworkDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) { [weakSelf artworkChanged]; }],
         [center addObserverForName:SGRVisualiserStyleDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) { [weakSelf updateAccessibilityValue]; }],
         [center addObserverForName:NSProcessInfoPowerStateDidChangeNotification object:nil queue:nil usingBlock:background],
+        [center addObserverForName:NSProcessInfoThermalStateDidChangeNotification object:nil queue:nil usingBlock:background],
         [center addObserverForName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil queue:nil usingBlock:background],
     ];
     [self reloadLook];
@@ -440,19 +432,16 @@ static char kCloseGlassKey, kMoreGlassKey;
 }
 
 - (void)reloadLook {
-    _glass = SGEnabled(SGRKeyPlayerHeaderGlass);
-    _context.alpha = SGHidden(SGRKeyPlayerHideContext) ? 0 : 1;
-    _context.accessibilityElementsHidden = SGHidden(SGRKeyPlayerHideContext);
-    _star = SGHidden(SGRKeyPlayerStarAdd);
+    _context.alpha = SGEnabled(SGRKeyPlayerHideContext) ? 0 : 1;
+    _context.accessibilityElementsHidden = SGEnabled(SGRKeyPlayerHideContext);
     _hideShuffle = SGHidden(SGRKeyPlayerHideShuffle);
     _hideRepeat = SGHidden(SGRKeyPlayerHideRepeat);
-    _hideVideo = SGHidden(SGKeyHideVideoSwitch);
-    SGRShowGlass(SGRGlassInside(_close, &kCloseGlassKey, kHeaderCircle), _glass);
-    SGRShowGlass(SGRGlassInside(_more, &kMoreGlassKey, kHeaderCircle), _glass);
-    setGlyph(_add, _star ? @"star" : @"plus.circle");
+    _hideVideo = SGVideoSwitchHiddenForLook(YES);
     _shuffle.alpha = _hideShuffle ? 0 : 1;
     _repeat.alpha = _hideRepeat ? 0 : 1;
     _chip.hidden = _hideVideo;
+    _starAdd = SGHidden(SGRKeyPlayerStarAdd);
+    _star.hidden = !_starAdd;
     [self setNeedsLayout];
 }
 
@@ -639,12 +628,7 @@ static char kCloseGlassKey, kMoreGlassKey;
     [CATransaction commit];
 
     // The header.
-    CGFloat circleY = kCardTop + (kHeaderRow - kHeaderCircle) / 2;
-    _close.frame = CGRectMake(p, circleY, kHeaderCircle, kHeaderCircle);
-    _more.frame = CGRectMake(w - p - kHeaderCircle, circleY, kHeaderCircle, kHeaderCircle);
-    _closeGlyph.center = CGPointMake(kHeaderCircle / 2, kHeaderCircle / 2);
-    _moreGlyph.center = _closeGlyph.center;
-    CGFloat middleX = CGRectGetMaxX(_close.frame) + 8, middleWidth = MAX(0, CGRectGetMinX(_more.frame) - 8 - middleX);
+    CGFloat middleX = p + kHeaderSide, middleWidth = MAX(0, w - 2 * middleX);
     _context.frame = CGRectMake(middleX, kCardTop, middleWidth, kHeaderRow);
     CGSize demo = _demoSize;
     demo = CGSizeMake(MIN(middleWidth, ceil(demo.width)), MIN(kHeaderRow, ceil(demo.height)));
@@ -676,7 +660,9 @@ static char kCloseGlassKey, kMoreGlassKey;
     CGFloat chipWidth = _chipWidth;
 
     // Expanded: the words across under the cover, which is as large a square as fits between them and the header.
-    CGFloat textWidth = inner - kAddSlot - 8;
+    // The words end before the ⋯, and before the star too while it stands in front of the ⋯.
+    CGFloat trailing = kMoreSlot * (_starAdd ? 2 : 1) + 8;
+    CGFloat textWidth = inner - trailing;
     CGRect bigArtist = CGRectMake(p, textBottom - artistHeight, textWidth, artistHeight);
     CGRect bigTitle = CGRectMake(p, CGRectGetMinY(bigArtist) - titleHeight, textWidth, titleHeight);
     CGRect bigChip = CGRectMake(p, CGRectGetMinY(bigTitle) - chipGap - chipHeight, MIN(chipWidth, textWidth), chipHeight);
@@ -687,7 +673,7 @@ static char kCloseGlassKey, kMoreGlassKey;
     // Compact: the cover beside the words, the two centered on each other.
     CGFloat rowHeight = MAX(kCompactCover, textHeight), rowTop = textBottom - rowHeight;
     CGRect smallCover = CGRectMake(p, rowTop + round((rowHeight - kCompactCover) / 2), kCompactCover, kCompactCover);
-    CGFloat textX = CGRectGetMaxX(smallCover) + 12, smallWidth = MAX(0, w - p - kAddSlot - 8 - textX);
+    CGFloat textX = CGRectGetMaxX(smallCover) + 12, smallWidth = MAX(0, w - p - trailing - textX);
     CGFloat textTop = rowTop + round((rowHeight - textHeight) / 2);
     CGRect smallChip = CGRectMake(textX, textTop, MIN(chipWidth, smallWidth), chipHeight);
     CGRect smallTitle = CGRectMake(textX, textTop + chipHeight + chipGap, smallWidth, titleHeight);
@@ -716,7 +702,8 @@ static char kCloseGlassKey, kMoreGlassKey;
     _chipLabel.frame = CGRectMake(labelX, 0, MAX(0, _chip.bounds.size.width - labelX - 8), chipHeight);
     _title.frame = mixRect(smallTitle, bigTitle, words);
     _artist.frame = mixRect(smallArtist, bigArtist, words);
-    _add.center = CGPointMake(w - p - kAddSlot / 2, round((CGRectGetMinY(_title.frame) + CGRectGetMaxY(_artist.frame)) / 2));
+    _more.center = CGPointMake(w - p - kMoreSlot / 2, round((CGRectGetMinY(_title.frame) + CGRectGetMaxY(_artist.frame)) / 2));
+    _star.center = CGPointMake(_more.center.x - kMoreSlot, _more.center.y);
 }
 
 - (CGFloat)minimumHeight {
@@ -776,7 +763,10 @@ static NSArray<NSString *> *buttonNames(void) {
 
 - (void)readKeys {
     NSArray<NSString *> *keys = buttonKeys();
-    for (UIButton *chip in _chips) [self paint:chip selected:!SGHidden(keys[(NSUInteger)chip.tag])];
+    for (UIButton *chip in _chips) {
+        NSString *key = keys[(NSUInteger)chip.tag];
+        [self paint:chip selected:!([key isEqual:SGKeyHideVideoSwitch] ? SGVideoSwitchHiddenForLook(YES) : SGHidden(key))];
+    }
     [self setNeedsLayout];
 }
 
@@ -1130,6 +1120,7 @@ SGModRow *SGRLyricsHideRow(void) {
 }
 
 UIViewController *SGRPlayerSettingsPage(NSArray *more) {
+    NSArray *lineSizes = @[SGL(@"settings.player.lyric_line.size_19", @"19 pt"), SGL(@"settings.player.lyric_line.size_17", @"17 pt")];
     SGRPlayerPreview *preview = [[SGRPlayerPreview alloc] initWithFrame:CGRectMake(0, 0, 320, kPreviewCompactHeight)];
     __block __weak SGRPlayerPage *weakPlayerPage;
     UISegmentedControl *backgrounds = [[UISegmentedControl alloc] initWithItems:SGRPlayerBackgroundNames()];
@@ -1137,7 +1128,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     backgrounds.accessibilityLabel = SGL(@"settings.player.background.a11y", @"Background");
     backgrounds.apportionsSegmentWidthsByContent = YES;
 
-    SGModRow *lowData = SGOptionRow(SGL(@"settings.player.motion_low_data.title", @"Download in Low Data Mode"), SGL(@"settings.player.motion_low_data.subtitle", @"Up to about 7 MB a song. Applies to animated artwork throughout Vitrine."), SGKeyMotionLowData);
+    SGModRow *lowData = SGOptionRow(SGL(@"settings.player.motion_low_data.title", @"Download in Low Data Mode"), SGL(@"settings.player.motion_low_data.subtitle", @"Up to about 7 MB a song. Applies to animated artwork throughout Retrine."), SGKeyMotionLowData);
     lowData.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated; };
     SGModRow *sources = SGMotionSourcesRow();
     sources.visible = lowData.visible;
@@ -1211,13 +1202,14 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     };
     // The header's glass and the footer's glyphs, followed by the open player at once.
     SGModRow *headerGlass = SGWithNew(SGSwitchRow(SGL(@"settings.player.header_glass.title", @"Header glass"),
-                                                  SGL(@"settings.player.header_glass.subtitle", @"Glass circles behind the close and ⋯ buttons at the top of the player."),
+                                                  SGL(@"settings.player.header_glass.subtitle", @"Glass circles behind the close and ⋯ buttons at the top of the AI DJ's player. The player itself has only a grabber there."),
                                                   SGRKeyPlayerHeaderGlass), @"playerHeaderGlass");
     SGModRow *musicIcons = SGWithNew(SGSwitchRow(SGL(@"settings.player.music_icons.title", @"Music app icons"),
                                                  SGL(@"settings.player.music_icons.subtitle", @"The Music app's lyrics, AirPlay and queue icons under the controls, and the AI DJ's button as a waveform, in place of Spotify's."),
                                                  SGRKeyPlayerMusicIcons), @"playerMusicIcons");
     musicIcons.changed = ^(BOOL on) { SGRPlayerLookChanged(); };
-    SGModRow *hideContext = SGOptionRow(SGL(@"settings.player.hide_context.title", @"Hide where it plays from"),
+    // On until switched off, as the Music app's header has only the grabber over the cover.
+    SGModRow *hideContext = SGSwitchRow(SGL(@"settings.player.hide_context.title", @"Hide where it plays from"),
                                       SGL(@"settings.player.hide_context.subtitle", @"Hide the artist, album or playlist name at the top of the player."),
                                       SGRKeyPlayerHideContext);
     hideContext.changed = ^(BOOL on) {
@@ -1230,7 +1222,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
         [weakPlayerPage.preview reloadLook];
     };
     SGModRow *starAdd = SGWithNew(SGOptionRow(SGL(@"settings.player.star_add.title", @"Star add button"),
-                                              SGL(@"settings.player.star_add.subtitle", @"The add button as a star, filled in the accent once the song is saved. In the player it takes the place of Plain checkmark."),
+                                              SGL(@"settings.player.star_add.subtitle", @"The player's add button as a star beside the song title, next to the ⋯: outlined until the song is saved, filled in the accent once it is. The ⋯ menu then leaves out its add item."),
                                               SGRKeyPlayerStarAdd), @"playerStarAdd");
     starAdd.changed = ^(BOOL on) { [weakPlayerPage.preview reloadLook]; };
     // iPad turns Spotify's own player.
@@ -1249,9 +1241,12 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
                                    @"background still. Animated and Visualizer use these where they show Fluid.")),
         SGNotedSection(SGL(@"settings.player.controls.header", @"Controls"), @[headerGlass, hideContext, SGSwitchRow(SGL(@"settings.player.volume.title", @"Volume"), nil, SGRKeyPlayerVolume),
                                       SGOptionRow(SGL(@"settings.player.follows_cover.title", @"Follow the cover"), nil, SGRKeyPlayerFollowsCover),
-                                      SGWithNew(SGSwitchRow(SGL(@"settings.player.lyric_line.title", @"Lyrics Line"),
+                                      SGWithNew(SGOptionRow(SGL(@"settings.player.lyric_line.title", @"Lyrics Line"),
                                                   SGL(@"settings.player.lyric_line.subtitle", @"The line being sung, under the cover. Tap it to open the lyrics."),
                                                   SGRKeyPlayerLyricLine), @"playerLyricLine"),
+                                      SGMenuRow(SGL(@"settings.player.lyric_line.size", @"Size"), lineSizes,
+                                                ^NSString *{ return lineSizes[SGRPlayerLineSmall() ? 1 : 0]; },
+                                                ^(NSInteger i) { SGRSetPlayerLineSmall(i == 1); }),
                                       SGWithNew(SGSwitchRow(SGL(@"settings.player.rolling_digits.title", @"Rolling time digits"),
                                                   SGL(@"settings.player.rolling_digits.subtitle", @"The digits that change under the progress bar roll into place."),
                                                   SGRKeyPlayerRollingDigits), @"playerRollingDigits"),

@@ -82,7 +82,7 @@ void SGLyricsPiPToggle(UIView *from) {
             return;
         }
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.lyrics.pip.title", @"Picture in Picture lyrics")
-            message:SGL(@"settings.lyrics.pip.disabled", @"Enable Picture in Picture lyrics in Vitrine settings → Lyrics, then restart Spotify.")
+            message:SGL(@"settings.lyrics.pip.disabled", @"Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify.")
             preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleDefault handler:nil]];
         SGPresentDark(alert);
@@ -432,7 +432,10 @@ void SGLyricsPiPToggle(UIView *from) {
     NSString *current = nil, *next = nil;
     SGLyricsPiPTextKind kind = SGLyricsPiPTextFor(lines, SGKaraokePositionMs() - SGKaraokeDelayMs(), &current, &next);
     if (kind == SGLyricsPiPTextNoLyrics) {
-        current = SGL(@"settings.lyrics.pip.no_lyrics", @"No lyrics available");
+        BOOL failed = SGLyricsLoadFailed(track);
+        current = failed ? SGL(@"settings.lyrics.load_failed", @"Couldn't load lyrics · Retry")
+            : SGL(@"settings.lyrics.pip.no_lyrics", @"No lyrics available");
+        if (failed) next = SGL(@"settings.lyrics.pip.open_retry", @"Open Spotify to retry");
     } else if (kind == SGLyricsPiPTextInstrumental) {
         current = SGL(@"settings.lyrics.pip.instrumental", @"Instrumental");
     } else if (kind == SGLyricsPiPTextUntimed) {
@@ -551,6 +554,16 @@ void SGLyricsPiPToggle(UIView *from) {
     NSString *credit = track.length ? SGLyricsCreditFor(track) : nil;
     NSArray<SGLyricsLink *> *links = SGLyricsCreditLinks(credit);
     _restoreCredit = NO;
+    if (SGLyricsLoadFailed(track)) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:
+            SGL(@"settings.lyrics.load_failed", @"Couldn't load lyrics · Retry") message:nil preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.lyrics.retry", @"Retry")
+            style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGLyricsRetry(track); }]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+        SGPresentDark(alert);
+        [presenter presentViewController:alert animated:YES completion:nil];
+        return;
+    }
     if (!links.count) return;
     // Return to Spotify first; never launch an uploader's URL merely because PiP was restored.
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:credit message:nil preferredStyle:UIAlertControllerStyleAlert];

@@ -110,9 +110,9 @@ static void settle(void) {
 }
 @end
 static NSArray *sample(BOOL pronunciation, BOOL translation) {
-    return @[@"별빛을 따라 걸어요", @"A new day is on its way", @"Sample lyrics · Vitrine",
+    return @[@"별빛을 따라 걸어요", @"A new day is on its way", @"Sample lyrics · Retrine",
         pronunciation ? @"Byeolbicheul ttara georeoyo" : @"", translation ? @"We walk beneath the stars" : @"",
-        @"A song for the night", @"Vitrine"];
+        @"A song for the night", @"Retrine"];
 }
 static BOOL shows(UIImageView *preview, NSArray *content) {
     NSData *got = pixels(preview.image);

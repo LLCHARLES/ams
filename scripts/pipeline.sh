@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Builds the spotifyglass tweak and injects it (plus FLEX) into a decrypted Spotify IPA.
 #
-#   scripts/pipeline.sh <decrypted.ipa> [-o out.ipa] [--no-flex] [--pixie] [--install] [--name N] [--icon P.png] [--keep-watch] [--no-plugins]
-#   (or: make build / make install)
+#   scripts/pipeline.sh <decrypted.ipa> [-o out.ipa] [--no-flex] [--require-pixie|--no-pixie] [--install] [--name N] [--icon P.png] [--keep-watch] [--no-plugins]
+#   Pixie is included by default; omit it with --no-pixie (make: PIXIE=0).
+#   Pixie는 기본으로 포함됩니다. 제외하려면 --no-pixie (make: PIXIE=0)를 쓰세요.
 #
 # --keep-watch keeps Spotify's Apple Watch app, untested. Only its arm64 build is decrypted in an IPA dumped on an
 # iPhone (the arm64_32 one older Watches run stays encrypted and is taken out), so it can only run on a Watch from
@@ -16,7 +17,7 @@
 #
 # The IPA is yours to supply: drop a decrypted Spotify .ipa in ipa/ and the Makefile finds it.
 #
-# Needs: Theos in $THEOS (default ~/theos), an iPhoneOS 26+ SDK from the selected Xcode or in $THEOS/sdks,
+# Needs: Theos in $THEOS (default ~/theos), an iPhoneOS 26+ SDK from the selected Xcode (or in $THEOS/sdks without Pixie),
 # gmake, ldid, dpkg-deb (brew) and cyan (uv tool install "cyan @ git+https://github.com/asdfzxcvbn/pyzule-rw").
 set -euo pipefail
 export WIREGUARD="${WIREGUARD-1}"
@@ -33,18 +34,19 @@ FLEX_DEB="$ROOT/vendor/com.hopeless.autoflex_0.0.1_iphoneos-arm.deb"
 # reads that App ID out of the profile and can do it safely.
 BUNDLE_ID="${BUNDLE_ID:-}"
 
-IN="" OUT="" WITH_FLEX=1 INSTALL=0 NAME="" ICON="" KEEP_WATCH="" PIXIE=0 NO_PLUGINS=0
+IN="" OUT="" WITH_FLEX=1 INSTALL=0 NAME="" ICON="" KEEP_WATCH="" PIXIE="${PIXIE:-1}" NO_PLUGINS=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -o) OUT="$2"; shift 2 ;;
     --name) NAME="$2"; shift 2 ;;
     --icon) ICON="$2"; shift 2 ;;
     --no-flex) WITH_FLEX=0; shift ;;
-    --pixie) PIXIE=1; shift ;;
+    --pixie|--require-pixie) PIXIE=1; shift ;;
+    --no-pixie) PIXIE=0; shift ;;
     --install) INSTALL=1; shift ;;
     --keep-watch) KEEP_WATCH=1; shift ;;
     --no-plugins) NO_PLUGINS=1; shift ;;
-    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
+    -h|--help) sed -n '1d; /^#/!q; p' "$0"; exit 0 ;;
     *) IN="$1"; shift ;;
   esac
 done
@@ -52,9 +54,13 @@ done
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 1; }
 
 # Fail closed before flag generation, tweak compilation or any output mutation.
-# This accepts the original decrypted IPA; the overlay later requires Vitrine too.
+# This accepts the original decrypted IPA; the overlay later requires Retrine too.
+MOD_VERSION="$(cat "$ROOT/version.txt" 2>/dev/null || true)"
+: "${MOD_VERSION:=0.0.0}"
 if [ "$PIXIE" = 1 ]; then
-  python3 -B "$ROOT/NativeDownloads/tools/build_vitrine_9190.py" "$IN" --check-input ${OUT:+--output "$OUT"}
+  PIXIE_NAME="$(python3 -B "$ROOT/NativeDownloads/tools/build_retrine_9190.py" "$IN" --check-input --artifact-name "$MOD_VERSION" ${OUT:+--output "$OUT"})"
+else
+  python3 -B "$ROOT/NativeDownloads/tools/build_retrine_9190.py" "$IN" --check-clean ${OUT:+--output "$OUT"}
 fi
 if [ "$WIREGUARD" = 1 ]; then
   command -v go >/dev/null 2>&1 || { echo "WIREGUARD=1 requires Go; install the toolchain from WireGuard/go.mod" >&2; exit 1; }
@@ -84,19 +90,15 @@ rm -f "$ROOT/out/.info.plist"
 # The name carries the mod's version, not Spotify's: it is the one the About page shows and the one
 # worth telling builds apart by. version.txt is read the way tweak/Makefile reads it, so a build from
 # a fork left behind by a release is named for the version it really is.
-MOD_VERSION="$(cat "$ROOT/version.txt" 2>/dev/null || true)"
-: "${MOD_VERSION:=0.0.0}"
-PIXIE_SUFFIX=""
-[ "$PIXIE" = 1 ] && PIXIE_SUFFIX="-pixie"
-OUT="${OUT:-$ROOT/out/vitrine-$MOD_VERSION$PIXIE_SUFFIX.ipa}"
-echo "==> Vitrine $MOD_VERSION on Spotify $SPOTIFY_VERSION -> $OUT"
+OUT="${OUT:-$ROOT/out/${PIXIE_NAME:-retrine-$MOD_VERSION.ipa}}"
+echo "==> Retrine $MOD_VERSION on Spotify $SPOTIFY_VERSION -> $OUT"
 
 if [ "$PIXIE" = 1 ]; then
   python3 -B - "$ROOT/NativeDownloads/tools" "$IN" "$OUT" <<'PY'
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
-from build_vitrine_9190 import require_separate_output
+from build_retrine_9190 import require_separate_output
 require_separate_output(Path(sys.argv[2]).resolve(), Path(sys.argv[3]).resolve())
 PY
   # Keep the last complete output intact even if cyan or a later overlay fails.
@@ -104,7 +106,7 @@ PY
   mkdir -p "$(dirname "$FINAL_OUT")"
   PIXIE_WORK="$(mktemp -d "$(dirname "$FINAL_OUT")/.pixie-build.XXXXXX")"
   trap 'rm -rf "$PIXIE_WORK"' EXIT
-  OUT="$PIXIE_WORK/vitrine-base.ipa"
+  OUT="$PIXIE_WORK/retrine-base.ipa"
 fi
 
 # The flag table is generated rather than committed, so it always matches the IPA being built: again whenever
@@ -134,17 +136,17 @@ FILES=("$TWEAK_DEB")
 
 # Source-built Live Activity and share-sheet action extensions.
 if [ "$NO_PLUGINS" = 1 ]; then
-  echo "==> --no-plugins: not building Live Activity or Open in Vitrine extensions"
+  echo "==> --no-plugins: not building Live Activity or Open in Retrine extensions"
 elif xcrun --sdk iphoneos --find swiftc >/dev/null 2>&1; then
   EXT_DIR="$ROOT/out/extension"
   unzip -p "$IN" "${APP_DIR}Info.plist" > "$ROOT/out/.info.plist"
   # Built again only when what it is made from changed: its sources, the host's Info.plist or Xcode.
   EXT_STAMP="$( { cat "$ROOT/scripts/build-extension.sh" "$ROOT"/extension/LiveActivity/* \
-    "$ROOT"/extension/OpenInVitrine/*.{m,plist} "$ROOT"/extension/OpenInVitrine/*.lproj/*.strings \
+    "$ROOT"/extension/OpenInRetrine/*.{m,plist} "$ROOT"/extension/OpenInRetrine/*.lproj/*.strings \
     "$ROOT"/tweak/Sources/Shared/Navigation/LinkURL.{h,m} \
     "$ROOT"/tweak/Sources/Shared/LiveActivity/*.swift "$ROOT/out/.info.plist"; xcodebuild -version; } | shasum | cut -d' ' -f1)"
   if [ "$(cat "$EXT_DIR/.stamp" 2>/dev/null)" = "$EXT_STAMP" ] && [ -d "$EXT_DIR/SpotifyGlassLiveActivity.appex" ] \
-     && [ -d "$EXT_DIR/OpenInVitrine.appex" ] \
+     && [ -d "$EXT_DIR/OpenInRetrine.appex" ] \
      && [ -e "$EXT_DIR/app/Metadata.appintents" ]; then
     echo "==> SpotifyGlassLiveActivity.appex is up to date"
   else
@@ -153,9 +155,9 @@ elif xcrun --sdk iphoneos --find swiftc >/dev/null 2>&1; then
     echo "$EXT_STAMP" > "$EXT_DIR/.stamp"
   fi
   rm -f "$ROOT/out/.info.plist"
-  FILES+=("$EXT_DIR/SpotifyGlassLiveActivity.appex" "$EXT_DIR/OpenInVitrine.appex")
+  FILES+=("$EXT_DIR/SpotifyGlassLiveActivity.appex" "$EXT_DIR/OpenInRetrine.appex")
 else
-  echo "==> no Xcode selected: building without the Live Activity and Open in Vitrine extensions"
+  echo "==> no Xcode selected: building without the Live Activity and Open in Retrine extensions"
 fi
 
 # Spotify's widget reads what the app writes through App Group suites the re-signed IPA is not entitled
@@ -181,8 +183,9 @@ with open(sys.argv[1], 'rb') as f:
 with open(sys.argv[2], 'rb') as f:
     overlay = plistlib.load(f)
 types = list(host.get('CFBundleURLTypes', []))
-if not any('vitrine' in item.get('CFBundleURLSchemes', []) for item in types):
-    types.append({'CFBundleURLName': 'vitrine', 'CFBundleURLSchemes': ['vitrine']})
+for scheme in ('vitrine', 'retrine'):
+    if not any(scheme in item.get('CFBundleURLSchemes', []) for item in types):
+        types.append({'CFBundleURLName': scheme, 'CFBundleURLSchemes': [scheme]})
 overlay['CFBundleURLTypes'] = types
 with open(sys.argv[2], 'wb') as f:
     plistlib.dump(overlay, f)
@@ -277,7 +280,7 @@ fi
 
 if [ "$PIXIE" = 1 ]; then
   echo "==> adding the guarded Pixie companion"
-  python3 -B "$ROOT/NativeDownloads/tools/build_vitrine_9190.py" "$OUT" --output "$FINAL_OUT"
+  python3 -B "$ROOT/NativeDownloads/tools/build_retrine_9190.py" "$OUT" --output "$FINAL_OUT"
   OUT="$FINAL_OUT"
   rm -rf "$PIXIE_WORK"
   trap - EXIT

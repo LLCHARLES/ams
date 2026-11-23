@@ -1,7 +1,7 @@
 ---
 name: phone-check
 description: >
-  Install a Vitrine build on the paired iPhone and check it there: relaunch, drive it with the phone driver,
+  Install a Retrine build on the paired iPhone and check it there: relaunch, drive it with the phone driver,
   take screenshots, read the view tree and stream the log. Use whenever a change has to be seen or measured
   on the phone, or the user reports something on the phone that needs evidence.
 ---
@@ -51,7 +51,7 @@ needs `PHONE_HOST` and the token the app logs at launch, which it reads from the
   in the redesign's menu.
 - `state` failing with "Connection reset" while the app runs means the phone is locked or Spotify is not in
   front; it is not a broken build.
-- Read a setting before a test changes it and put it back after: Vitrine prefs, the tab layout, shuffle (three
+- Read a setting before a test changes it and put it back after: Retrine prefs, the tab layout, shuffle (three
   states on a playlist page), repeat, saved songs, Spotify's lyrics switch.
 
 ## Simulator

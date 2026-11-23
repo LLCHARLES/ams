@@ -21,9 +21,11 @@ static const float kMinMatch = 0.8f;        // normalized correlation below this
 #pragma mark - capture (render thread writes while armed)
 
 static float *sg_cap;
-static uint32_t sg_capLength;
+static _Atomic uint32_t sg_capLength;
 static _Atomic uint32_t sg_capFill;
 static _Atomic int sg_capState;
+// Render calls inside capture(): record() changes the length and fill only once none is.
+static atomic_uint sg_capturing;
 static uint64_t sg_capStart, sg_capEpoch, sg_capNext;
 static AudioUnit sg_capUnit;
 static double sg_capRate;
@@ -31,14 +33,15 @@ static double sg_capRate;
 static void capture(AudioUnit output, uint64_t epoch, double sourceFrame, double rate, UInt32 frames, AudioBufferList *data) {
     if (atomic_load(&sg_capState) != kArmed) return;
     const float *l = data->mBuffers[0].mData, *r = data->mBuffers[1].mData;
-    uint32_t fill = atomic_load(&sg_capFill);
+    uint32_t fill = atomic_load(&sg_capFill), length = atomic_load(&sg_capLength);
     if (fill && ((uint64_t)sourceFrame != sg_capNext || epoch != sg_capEpoch || output != sg_capUnit)) fill = 0;
+    if (fill >= length) return;
     if (!fill) { sg_capStart = (uint64_t)sourceFrame; sg_capEpoch = epoch; sg_capUnit = output; sg_capRate = rate; }
-    UInt32 n = MIN(frames, sg_capLength - fill);
+    UInt32 n = MIN(frames, length - fill);
     for (UInt32 i = 0; i < n; i++) sg_cap[fill + i] = 0.5f * (l[i] + r[i]);
     sg_capNext = (uint64_t)sourceFrame + frames;
     atomic_store(&sg_capFill, fill + n);
-    if (fill + n == sg_capLength) atomic_store(&sg_capState, kFull);
+    if (fill + n == length) atomic_store(&sg_capState, kFull);
 }
 
 #pragma mark - the ring (static, never freed: a render call never reads freed memory)
@@ -75,7 +78,9 @@ static _Atomic uint64_t sg_replaced;
 static void selector(AudioUnit output, uint64_t epoch, double sourceFrame, double rate, UInt32 frames, AudioBufferList *data) {
     if (data->mNumberBuffers != 2 || !data->mBuffers[0].mData || !data->mBuffers[1].mData
         || data->mBuffers[0].mDataByteSize < frames * sizeof(float) || data->mBuffers[1].mDataByteSize < frames * sizeof(float)) return;
+    atomic_fetch_add(&sg_capturing, 1);
     capture(output, epoch, sourceFrame, rate, frames, data);
+    atomic_fetch_sub(&sg_capturing, 1);
     atomic_fetch_add(&sg_readers, 1);
     if (atomic_load(&sg_live) && epoch == sg_playEpoch && epoch == SGPlayerSourceEpoch() && output == sg_playUnit
         && rate == sg_playRate && sourceFrame >= sg_playSource) {
@@ -148,6 +153,7 @@ static UInt32 readAt(Reader *reader, uint64_t at, UInt32 count, float *l, float 
 // Mono of file frames [from, from + count), silence outside the file. The caller frees it.
 static float *readMono(Reader *reader, int64_t from, uint32_t count) {
     float *mono = calloc(count, sizeof(float)), *l = malloc(kChunk * sizeof(float)), *r = malloc(kChunk * sizeof(float));
+    if (!mono || !l || !r) { free(mono); free(l); free(r); return NULL; }
     int64_t at = MAX(from, 0);
     BOOL seek = YES;
     while (at < from + count && (uint64_t)at < reader->frames) {
@@ -189,6 +195,7 @@ static BOOL load(NSString *path, double rate, NSString **error) {
     sg_coarseCount = sg_reader.frames / kCoarse;
     sg_coarse = calloc(sg_coarseCount + 1, sizeof(float));
     float *l = malloc(kChunk * sizeof(float)), *r = malloc(kChunk * sizeof(float));
+    if (!sg_coarse || !l || !r) { free(l); free(r); drop(); *error = @"not enough memory for the file"; return NO; }
     float sum = 0;
     uint64_t at = 0;
     BOOL seek = YES;
@@ -231,6 +238,7 @@ static uint64_t refine(int64_t from, int64_t to, float *score, float *gain) {
     float *window = readMono(&sg_reader, from, span);
     uint64_t best = from;
     *score = -2;
+    if (!window) return best;
     for (int64_t lag = from; lag <= to; lag++) {
         float s = match(sg_cap, window + (lag - from), sg_capLength, NULL);
         if (s > *score) { *score = s; best = lag; }
@@ -245,13 +253,13 @@ static uint64_t search(uint64_t from, uint64_t to, float *score, float *gain) {
     uint64_t lo = from / kCoarse, hi = MIN(to / kCoarse, sg_coarseCount);
     vDSP_Length capN = sg_capLength / kCoarse;
     if (hi <= lo || hi - lo <= capN) { *score = 0; return 0; }
-    float *cap = malloc(capN * sizeof(float));
+    float *cap = malloc(capN * sizeof(float)), *corr = malloc((hi - lo - capN + 1) * sizeof(float));
+    if (!cap || !corr) { free(cap); free(corr); *score = 0; return 0; }
     float filter[kCoarse], one = 1.0f / kCoarse;
     vDSP_vfill(&one, filter, 1, kCoarse);
     vDSP_desamp(sg_cap, kCoarse, filter, cap, capN, kCoarse);
     const float *file = sg_coarse + lo;
     vDSP_Length fileN = hi - lo, lags = fileN - capN + 1;
-    float *corr = malloc(lags * sizeof(float));
     vDSP_conv(file, 1, cap, 1, corr, 1, lags, capN);
     double running = 0;
     for (vDSP_Length i = 0; i < capN; i++) running += (double)file[i] * file[i];
@@ -271,9 +279,12 @@ static uint64_t search(uint64_t from, uint64_t to, float *score, float *gain) {
 static BOOL record(double seconds, NSString **error) {
     static float *storage;
     if (!storage) storage = malloc((size_t)(kAnchorSeconds * 96000) * sizeof(float));
-    sg_cap = storage;
+    if (!storage) { *error = @"not enough memory to record"; return NO; }
     atomic_store(&sg_capState, kIdle);
-    sg_capLength = (uint32_t)(MIN(seconds, kAnchorSeconds) * MIN(sg_capRate > 0 ? sg_capRate : 44100, 96000));
+    // A render call that saw the last recording armed (one that timed out) would carry its fill into this one.
+    while (atomic_load(&sg_capturing)) usleep(100);
+    sg_cap = storage;
+    sg_capLength =(uint32_t)(MIN(seconds, kAnchorSeconds) * MIN(sg_capRate > 0 ? sg_capRate : 44100, 96000));
     atomic_store(&sg_capFill, 0);
     atomic_store(&sg_capState, kArmed);
     for (int i = 0; i < (int)(seconds * 20) + 60 && atomic_load(&sg_capState) != kFull; i++) usleep(50000);
@@ -285,16 +296,17 @@ static BOOL record(double seconds, NSString **error) {
 
 #pragma mark - the writer
 
-// Fills the ring from where the render thread reads until the generation changes or the file ends.
-static void fill(NSString *path, double rate, uint64_t from, uint64_t generation) {
+// Fills the ring from where the render thread reads until the generation changes or the file ends. `l` and `r`
+// are kChunk frames each, made by anchor() before it called the anchor good, and freed here.
+static void fill(NSString *path, double rate, uint64_t from, uint64_t generation, float *l, float *r) {
     Reader reader = {0};
     NSString *error;
     if (!openReader(&reader, path, rate, &error)) {
         SGLog(@"lossless: the writer could not open the file: %@", error);
+        free(l); free(r);
         atomic_fetch_sub(&sg_writers, 1);
         return;
     }
-    float *l = malloc(kChunk * sizeof(float)), *r = malloc(kChunk * sizeof(float));
     uint64_t end = from;
     BOOL seek = YES;
     while (atomic_load(&sg_generation) == generation) {
@@ -352,12 +364,16 @@ static NSDictionary *anchor(NSString *path, double hint, NSString **error) {
         to = (uint64_t)((hint + kHintWindow + kAnchorSeconds) * rate);
         if (from + sg_capLength >= sg_reader.frames) { *error = @"Spotify plays past the end of the file"; return nil; }
     }
-    float score, gain;
+    float score, gain = 0;
     uint64_t lag = search(from, to, &score, &gain);
     double took = CFAbsoluteTimeGetCurrent() - start;
     SGLog(@"lossless: match %.4f at file %.3f s (hint %.1f s), gain %.3f, search %.2f s", score, lag / rate, hint, gain, took);
     if (score < kMinMatch) { *error = [NSString stringWithFormat:@"no match (%.3f)", score]; return nil; }
     if (sg_capEpoch != SGPlayerSourceEpoch()) { *error = @"the source changed while matching"; return nil; }
+    // The writer's buffers, before the anchor is called good: a writer that could not start would leave it live
+    // and empty, Spotify's sound playing and no new anchor asked for until the source changes.
+    float *l = malloc(kChunk * sizeof(float)), *r = malloc(kChunk * sizeof(float));
+    if (!l || !r) { free(l); free(r); *error = @"not enough memory for the writer"; return nil; }
 
     uint32_t bits;
     memcpy(&bits, &gain, sizeof bits);
@@ -375,7 +391,7 @@ static NSDictionary *anchor(NSString *path, double hint, NSString **error) {
     uint64_t generation = atomic_load(&sg_generation);
     atomic_fetch_add(&sg_writers, 1);
     // Its own thread: it runs for the rest of the song, which would hold a shared queue's thread that long.
-    NSThread *writer = [[NSThread alloc] initWithBlock:^{ fill(path, rate, now, generation); }];
+    NSThread *writer = [[NSThread alloc] initWithBlock:^{ fill(path, rate, now, generation, l, r); }];
     writer.qualityOfService = NSQualityOfServiceUserInitiated;
     writer.name = @"spotifyglass.lossless.writer";
     [writer start];

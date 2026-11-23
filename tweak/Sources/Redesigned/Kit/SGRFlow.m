@@ -27,6 +27,13 @@ static const CFTimeInterval kRecolor = 1.2;
 static const CGFloat kBaseShade = 0.55;
 // The shade over everything: clear down to this share of the height, then this much black at the bottom.
 static const CGFloat kShadeFrom = 0.45, kShadeBottom = 0.35;
+// How often the discs are moved, and the pixels to a point the field is drawn at before it is stretched to the screen.
+// Played by the render server the field was drawn again, across the whole screen and at its full resolution, on every
+// frame anything else asked for: 21% of an iPhone 13 Pro's GPU with the player open and 34% under the lyrics page at
+// 120 Hz, against 1.4% held still. A disc's edge is some 180 pt wide and passes at about 20 pt a second, so a step this
+// long changes a pixel by a level or two of 255, and half a pixel to a point is far finer than anything in it.
+static const NSTimeInterval kStepsPerSecond = 15;
+static const CGFloat kDrawScale = 0.5;
 
 static NSDictionary *noActions(void) {
     static NSDictionary *none;
@@ -56,6 +63,7 @@ static NSArray *discColors(UIColor *color) {
     CGSize _laidOutFor;
     // Seconds of drift so far, and since when it has been running.
     CFTimeInterval _elapsed, _since;
+    NSTimer *_steps;   // moves the discs while it drifts
     BOOL _moving;
     UIColor *_baseColor;
 }
@@ -63,6 +71,8 @@ static NSArray *discColors(UIColor *color) {
 - (instancetype)init {
     if (!(self = [super init])) return nil;
     self.actions = noActions();
+    self.shouldRasterize = YES;
+    self.rasterizationScale = kDrawScale;
     _base = [CALayer layer];
     _base.actions = noActions();
     [self addSublayer:_base];
@@ -121,21 +131,11 @@ static NSArray *discColors(UIColor *color) {
     return CGPointMake(size.width * kDisc[i].x, size.height * kDisc[i].y);
 }
 
-// The disc's loop: an ellipse about its resting place, passing through it at the start.
-- (CGPathRef)newLoopOf:(int)i {
-    CGSize size = self.bounds.size;
-    CGPoint rest = [self restOf:i];
-    CGFloat rx = size.width * kDisc[i].driftX, ry = size.height * kDisc[i].driftY;
-    CGMutablePathRef path = CGPathCreateMutable();
-    // Round about a center one radius to the side, so the loop starts and ends at the resting place.
-    CGPathAddArc(path, NULL, 0, 0, 1, M_PI, M_PI + (kDisc[i].clockwise ? -2 : 2) * M_PI, kDisc[i].clockwise);
-    CGAffineTransform place = CGAffineTransformMake(rx, 0, 0, ry, rest.x + rx, rest.y);
-    CGPathRef loop = CGPathCreateCopyByTransformingPath(path, &place);
-    CGPathRelease(path);
-    return loop;
-}
-
 #pragma mark - moving
+
+- (void)dealloc {
+    [_steps invalidate];
+}
 
 - (void)setMoving:(BOOL)moving {
     if (moving == _moving) return;
@@ -145,49 +145,43 @@ static NSArray *discColors(UIColor *color) {
 }
 
 - (void)start {
-    if (self.bounds.size.width < 1) return;
+    if (self.bounds.size.width < 1 || _steps) return;
     _since = CACurrentMediaTime();
-    CAFrameRateRange rate = CAFrameRateRangeMake(15, 60, 30);
-    for (int i = 0; i < kDiscs; i++) {
-        CAGradientLayer *disc = _discs[i];
-        CGPathRef loop = [self newLoopOf:i];
-        CAKeyframeAnimation *drift = [CAKeyframeAnimation animationWithKeyPath:@"position"];
-        drift.path = loop;
-        CGPathRelease(loop);
-        drift.calculationMode = kCAAnimationPaced;
-        drift.duration = kDisc[i].loop;
-        drift.repeatCount = HUGE_VALF;
-        drift.timeOffset = fmod(_elapsed, kDisc[i].loop);
-        drift.preferredFrameRateRange = rate;
-        [disc addAnimation:drift forKey:@"drift"];
-
-        CABasicAnimation *breath = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
-        breath.fromValue = @(kBreathSmall);
-        breath.toValue = @(kBreathLarge);
-        breath.duration = kDisc[i].breath;
-        breath.autoreverses = YES;
-        breath.repeatCount = HUGE_VALF;
-        breath.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-        breath.timeOffset = fmod(_elapsed, 2 * kDisc[i].breath);
-        breath.preferredFrameRateRange = rate;
-        [disc addAnimation:breath forKey:@"breath"];
-    }
+    __weak SGRFlowLayer *weakSelf = self;
+    _steps = [NSTimer timerWithTimeInterval:1 / kStepsPerSecond repeats:YES block:^(NSTimer *timer) { [weakSelf step]; }];
+    _steps.tolerance = 0.2 / kStepsPerSecond;
+    // Common modes: the lyrics page scrolls over it.
+    [NSRunLoop.mainRunLoop addTimer:_steps forMode:NSRunLoopCommonModes];
+    [self step];
 }
 
-// Every disc held where it is drawn now, so starting again carries on from the same picture.
+// Every disc where the drift so far puts it: on its loop, an ellipse round a center one radius to the side of its
+// resting place, so it starts and ends there, and at its breath's size, eased at both ends of each breath.
+- (void)step {
+    CGSize size = self.bounds.size;
+    CFTimeInterval seconds = _elapsed + (_since > 0 ? CACurrentMediaTime() - _since : 0);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (int i = 0; i < kDiscs; i++) {
+        CGPoint rest = [self restOf:i];
+        CGFloat rx = size.width * kDisc[i].driftX, ry = size.height * kDisc[i].driftY;
+        double angle = M_PI + (kDisc[i].clockwise ? -2 : 2) * M_PI * fmod(seconds, kDisc[i].loop) / kDisc[i].loop;
+        _discs[i].position = CGPointMake(rest.x + rx + rx * cos(angle), rest.y + ry * sin(angle));
+        double breath = fmod(seconds, 2 * kDisc[i].breath) / kDisc[i].breath;
+        if (breath > 1) breath = 2 - breath;
+        breath = breath * breath * (3 - 2 * breath);
+        CGFloat scale = kBreathSmall + (kBreathLarge - kBreathSmall) * breath;
+        _discs[i].transform = CATransform3DMakeScale(scale, scale, 1);
+    }
+    [CATransaction commit];
+}
+
+// Every disc stays where the last step put it, so starting again carries on from the same picture.
 - (void)stop {
     if (_since > 0) _elapsed += CACurrentMediaTime() - _since;
     _since = 0;
-    for (int i = 0; i < kDiscs; i++) {
-        CAGradientLayer *disc = _discs[i];
-        CALayer *shown = disc.presentationLayer;
-        if (shown) {
-            disc.position = shown.position;
-            disc.transform = shown.transform;
-        }
-        [disc removeAnimationForKey:@"drift"];
-        [disc removeAnimationForKey:@"breath"];
-    }
+    [_steps invalidate];
+    _steps = nil;
 }
 
 #pragma mark - colors

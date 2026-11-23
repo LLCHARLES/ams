@@ -97,6 +97,7 @@ SGLyricsAsk SGGeniusAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
     }
     SGLyricsGetJSONIn(query.requestContext, SGLyricsURL(SGGeniusSearchURL, SGGeniusSearchQuery(query.title, query.artist)), nil, ^(id root) {
         id response = SGLyricsField(root, @"response"), sections = SGLyricsField(response, @"sections");
+        if (root && ![sections isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
         BOOL empty = [sections isKindOfClass:NSArray.class];
         for (id section in empty ? sections : @[]) {
             id hits = SGLyricsField(section, @"hits");
@@ -113,6 +114,7 @@ SGLyricsAsk SGGeniusAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
         SGLyricsGetTextIn(query.requestContext, embed, ^(NSString *js) {
             NSArray<NSString *> *rows = SGGeniusEmbedRows(js);
             if (!rows) {
+                if (js) [query.requestContext noteFailure:YES];
                 SGLog(@"genius: %@ by %@ is song %@, no lines in its embed", query.title, query.artist, song);
                 done(nil);
                 return;

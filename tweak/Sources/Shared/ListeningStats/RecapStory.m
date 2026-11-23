@@ -4,7 +4,7 @@
 // unless VoiceOver runs. Reduce Motion cross-fades the cards. Share draws the card shown, alone, at 9:16.
 //
 // From 1 January, for SGRecapAnnouncementDays days, the year just ended is announced once if it has a recap: by
-// the Recap row (In Vitrine Settings, the default) or by one prompt after launch (When Spotify opens).
+// the Recap row (In Retrine Settings, the default) or by one prompt after launch (When Spotify opens).
 // Recaps are added up off main from the log's snapshot and kept for their year and the log's state.
 #import <QuartzCore/QuartzCore.h>
 #import "Core/SGCore.h"
@@ -21,7 +21,7 @@ static const CGFloat kShareAspect = 16.0 / 9.0, kDismissDistance = 120, kDismiss
 static dispatch_queue_t recapQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ queue = dispatch_queue_create("vitrine.stats.recap", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0)); });
+    dispatch_once(&once, ^{ queue = dispatch_queue_create("retrine.stats.recap", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0)); });
     return queue;
 }
 
@@ -396,7 +396,7 @@ static UIColor *cardTint(NSUInteger index) {
     CADisplayLink *_link;
     CFTimeInterval _last;
     NSTimeInterval _elapsed;
-    BOOL _holding, _dragging, _sharing;
+    BOOL _holding, _dragging, _sharing, _visible, _inactive;
     NSURL *_shareDirectory;   // the picture the share sheet holds, removed when the sheet or the story goes
 }
 
@@ -486,8 +486,10 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
     for (UIGestureRecognizer *recognizer in @[tap, hold, _dismissPan]) [_host addGestureRecognizer:recognizer];
 
     [self showCard:0 direction:0];
-    for (NSNotificationName name in @[UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplicationWillResignActiveNotification, UIApplicationDidBecomeActiveNotification])
-        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(resetClock) name:name object:nil];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(resetClock) name:UIAccessibilityVoiceOverStatusDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(resignActive) name:UIApplicationWillResignActiveNotification object:nil];
+    [center addObserver:self selector:@selector(becomeActive) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
 - (void)dealloc {
@@ -510,17 +512,21 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
 
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
+    _visible = YES;
     if (!_link) {
         SGStoryTicker *ticker = [SGStoryTicker new];
         ticker.story = self;
         _link = [CADisplayLink displayLinkWithTarget:ticker selector:@selector(tick:)];
         [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
     }
+    [self resetClock];
     UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, _card.firstElement);
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
     [super viewWillDisappear:animated];
+    _visible = NO;
+    [self resetClock];
     if (self.isBeingDismissed) {
         [_link invalidate];
         _link = nil;
@@ -539,6 +545,17 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
 
 - (void)resetClock {
     _last = 0;
+    _link.paused = !_visible || _inactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
+}
+
+- (void)resignActive {
+    _inactive = YES;
+    [self resetClock];
+}
+
+- (void)becomeActive {
+    _inactive = NO;
+    [self resetClock];
 }
 
 - (void)tick:(CADisplayLink *)link {
@@ -686,7 +703,7 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
     card.insetsLayoutMarginsFromSafeArea = NO;
     card.layoutMargins = UIEdgeInsetsMake(size.height * 0.12, 28, 64, 28);
     UILabel *mark = [UILabel new];
-    mark.text = [NSString stringWithFormat:SGL(@"settings.stats.recap.share.mark", @"Vitrine · %@ Recap"), SGRecapYearTitle(_recap.year, NSCalendar.currentCalendar)];
+    mark.text = [NSString stringWithFormat:SGL(@"settings.stats.recap.share.mark", @"Retrine · %@ Recap"), SGRecapYearTitle(_recap.year, NSCalendar.currentCalendar)];
     mark.font = cardFont(12, 12, YES, YES);
     mark.textColor = [UIColor colorWithWhite:1 alpha:0.7];
     [mark sizeToFit];
@@ -698,7 +715,7 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
     UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:size format:format] imageWithActions:^(UIGraphicsImageRendererContext *context) {
         [card.layer renderInContext:context.CGContext];
     }];
-    NSString *name = [NSString stringWithFormat:@"Vitrine-Recap-%@-%lu.png", SGRecapYearTitle(_recap.year, NSCalendar.currentCalendar), (unsigned long)index + 1];
+    NSString *name = [NSString stringWithFormat:@"Retrine-Recap-%@-%lu.png", SGRecapYearTitle(_recap.year, NSCalendar.currentCalendar), (unsigned long)index + 1];
     __weak SGRecapStoryController *weakSelf = self;
     dispatch_async(recapQueue(), ^{
         NSURL *directory = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES] URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
@@ -880,7 +897,7 @@ UIViewController *SGRecapYearsPage(void (^importHistory)(void)) {
     SGModSection *years = SGNotedSection(nil, @[SGStatRow(SGL(@"settings.stats.status.loading", @"Loading…"), nil)],
         [NSString stringWithFormat:SGL(@"settings.stats.recap.years.footer", @"A year has a recap once it has %lu days with plays. Recaps are made on this phone from your listening history; sharing a card shares only that picture."),
          (unsigned long)SGRecapActiveDaysNeeded]);
-    NSArray<NSString *> *choices = @[SGL(@"settings.stats.recap.announce.launch", @"When Spotify opens"), SGL(@"settings.stats.recap.announce.settings", @"In Vitrine Settings"),
+    NSArray<NSString *> *choices = @[SGL(@"settings.stats.recap.announce.launch", @"When Spotify opens"), SGL(@"settings.stats.recap.announce.settings", @"In Retrine Settings"),
                                      SGL(@"settings.stats.recap.announce.off", @"Off")];
     SGModRow *announce = SGMenuRow(SGL(@"settings.stats.recap.announce.title", @"Announce new recaps"), choices,
         ^NSString *{ return choices[(NSUInteger)announcement()]; },
@@ -915,7 +932,7 @@ static void promptWhenClear(SGRecap *recap, NSInteger tries) {
     }
     NSString *year = SGRecapYearTitle(recap.year, calendar);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:SGL(@"settings.stats.recap.prompt.title", @"Your %@ Recap is ready"), year]
-        message:[NSString stringWithFormat:SGL(@"settings.stats.recap.prompt.message", @"%@ of music on %@. Play it now, or later from Listening stats in Vitrine Settings."),
+        message:[NSString stringWithFormat:SGL(@"settings.stats.recap.prompt.message", @"%@ of music on %@. Play it now, or later from Listening stats in Retrine Settings."),
                  SGStatsDuration(recap.ms), SGStatsDays(recap.activeDays)]
         preferredStyle:UIAlertControllerStyleAlert];
     // Either answer announces the year.

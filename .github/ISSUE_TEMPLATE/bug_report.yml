@@ -1,94 +1,94 @@
-name: Bug report
-description: Something broken, missing or misplaced
+name: 버그 제보 / Bug report
+description: 고장 났거나, 빠졌거나, 잘못 배치된 것 / Something broken, missing or misplaced
 title: "[Bug] "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        Reports without the details below can't be reproduced and get closed.
-        Both versions are in Spotify → Settings → **Mod Settings → Mod**.
+        아래 정보가 없으면 재현할 수 없어 이슈가 닫힙니다. 두 버전 모두 Spotify → 설정 → **모드 설정 → 모드**에 있습니다.
+        Reports without the details below can't be reproduced and get closed. Both versions are in Spotify → Settings → **Mod Settings → Mod**.
   - type: checkboxes
     id: checks
     attributes:
-      label: Before you file
+      label: 작성 전 확인 / Before you file
       options:
-        - label: I searched the open and closed issues and this isn't reported yet.
+        - label: 열린 이슈와 닫힌 이슈를 검색했고, 아직 제보되지 않았습니다. / I searched the open and closed issues and this isn't reported yet.
           required: true
-        - label: I'm on the newest release (Mod Settings → Mod → Updates).
+        - label: 최신 릴리스를 사용 중입니다 (모드 설정 → 모드 → 업데이트). / I'm on the newest release (Mod Settings → Mod → Updates).
           required: true
   - type: input
     id: mod-version
     attributes:
-      label: Mod version
-      description: Mod Settings → Mod → Version
-      placeholder: "0.18.0"
+      label: 모드 버전 / Mod version
+      description: 모드 설정 → 모드 → 버전 / Mod Settings → Mod → Version
+      placeholder: "1.0.0-beta.34"
     validations:
       required: true
   - type: input
     id: spotify-version
     attributes:
-      label: Spotify version
-      description: Mod Settings → Mod → Spotify. The mod is built for 9.1.78; other versions may break.
-      placeholder: "9.1.78"
+      label: Spotify 버전 / Spotify version
+      description: 모드 설정 → 모드 → Spotify. 지원 버전은 9.1.78, 9.1.88, 9.1.90, 9.2.0이며 다른 버전은 동작이 깨질 수 있습니다. / Mod Settings → Mod → Spotify. Supported versions are 9.1.78, 9.1.88, 9.1.90 and 9.2.0; others may break.
+      placeholder: "9.2.0"
     validations:
       required: true
   - type: input
     id: device
     attributes:
-      label: Device and iOS version
-      placeholder: "iPhone 16 Pro, iOS 26.0"
+      label: 기기와 OS 버전 / Device and iOS version
+      placeholder: "iPhone 16 Pro, iOS 26.0 / iPad Air (M2), iPadOS 26.0"
     validations:
       required: true
   - type: dropdown
     id: look
     attributes:
-      label: Look
-      description: The switch at the top of Mod Settings.
+      label: 화면 / Look
+      description: 모드 설정 맨 위의 재설계 UI 스위치 / The Redesigned UI switch at the top of Mod Settings
       options:
-        - Redesign
-        - Spotify's own look
+        - 재설계 / Redesign
+        - Spotify 기본 화면 / Spotify's own look
     validations:
       required: true
   - type: dropdown
     id: signer
     attributes:
-      label: Installed with
+      label: 설치 방법 / Installed with
       options:
         - AltStore / SideStore
         - Sideloadly
         - Feather
         - TrollStore
-        - Other
+        - 기타 / Other
     validations:
       required: true
   - type: textarea
     id: what
     attributes:
-      label: What happens, and what you expected
+      label: 무슨 일이 일어났고, 원래 어떻게 되어야 하나요? / What happens, and what you expected
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to reproduce
+      label: 재현 방법 / Steps to reproduce
       placeholder: |
-        1. Open Library
-        2. Tap a playlist
+        1. 보관함 열기 / Open Library
+        2. 플레이리스트 누르기 / Tap a playlist
         3. …
     validations:
       required: true
   - type: textarea
     id: media
     attributes:
-      label: Screenshots or screen recording
-      description: Drag files in here. For a crash, a crash log helps most (Settings → Privacy & Security → Analytics & Improvements → Analytics Data → Spotify-…).
+      label: 스크린샷 또는 화면 녹화 / Screenshots or screen recording
+      description: 파일을 여기로 끌어다 놓으세요. 강제 종료라면 크래시 로그가 가장 도움이 됩니다 (설정 → 개인정보 보호 및 보안 → 분석 및 향상 → 분석 데이터 → Spotify-…). / Drag files in here. For a crash, a crash log helps most (Settings → Privacy & Security → Analytics & Improvements → Analytics Data → Spotify-…).
     validations:
       required: false
   - type: textarea
     id: settings
     attributes:
-      label: Your settings (optional)
-      description: Mod Settings → Mod → Export settings, then attach the file. Makes switch-specific bugs much easier to find.
+      label: 내 설정 (선택) / Your settings (optional)
+      description: 모드 설정 → 모드 → 설정 내보내기로 만든 파일을 첨부하면 특정 스위치에서만 생기는 버그를 훨씬 쉽게 찾을 수 있습니다. / Mod Settings → Mod → Export settings, then attach the file. Makes switch-specific bugs much easier to find.
     validations:
       required: false

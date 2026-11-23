@@ -63,14 +63,18 @@ BOOL SGEnabled(NSString *key) { return SGFlag(key, YES); }
 - (NSString *)artistName { return @"Artist"; }
 @end
 
+BOOL harnessPlaying;
+double harnessRate = 1;
 @implementation SPTPlayerState {
 @public
     SPTPlayerTrack *_track;
 }
 - (SPTPlayerTrack *)track { return _track; }
-- (BOOL)isPaused { return YES; }
+- (BOOL)isPaused { return !harnessPlaying; }
+- (double)position { return SGKaraokePositionMs() / 1000.; }
+- (double)positionAsOfTimestamp { return self.position; }
 - (NSArray *)future { return nil; }
-- (double)playbackSpeed { return 1; }
+- (double)playbackSpeed { return harnessRate; }
 @end
 
 static NSUInteger skipRequests;
@@ -105,14 +109,18 @@ id SGKaraokePlayer(void) {
 NSString *SGKaraokePlayingTrack(void) { return sg_player.state.track.URI; }
 NSArray<SGKaraokeLine *> *SGKaraokeLinesForTrack(NSString *trackID) { return sg_lines; }
 void (^harnessLyricsRequested)(NSString *);
+void SGSpclientHeaders(void (^use)(NSDictionary *headers)) { use(@{}); }
+BOOL SGLyricsLoadFailed(NSString *track) { return NO; }
 void SGKaraokeRequestLyrics(NSString *trackID) {
     if (harnessLyricsRequested) harnessLyricsRequested(trackID);
 }
 NSNotificationName const SGKaraokeLinesKeptNotification = @"harness.karaokeLinesKept";
+NSNotificationName const SGLyricsOffsetsDidChangeNotification = @"harness.offsets";
 NSInteger SGKaraokeDelayMs(void) { return [NSUserDefaults.standardUserDefaults integerForKey:SGKeyLyricsDelay]; }
 // Only the translation check selects the translated artist row.
 static BOOL sg_showTranslation;
 NSInteger SGInt(NSString *key, NSInteger fallback) {
+    if ([key isEqual:SGKeyLiveActivityView]) return [NSUserDefaults.standardUserDefaults integerForKey:key];
     return [key isEqual:SGKeyLockScreenLyricsLine] && sg_showTranslation ? SGLockScreenLyricsLineTranslation : fallback;
 }
 NSString *harnessLanguage = @"en";
@@ -289,6 +297,39 @@ static void translation(void) {
     sg_showTranslation = NO;
 }
 
+// Exercise the production setter's actual dispatch deadline at exact Now Playing
+// positions; no wall-clock wait or simulated audio is needed.
+int64_t harnessRowDelay;
+static void rowDeadlines(void) {
+    NSArray *was = sg_lines;
+    SGKaraokeLine *line = lineOf(@"two", 0, 20000);
+    line.words = @[line.words.firstObject, lineOf(@"words", 2000, 20000).words.firstObject];
+    sg_lines = @[line, lineOf(@"later", 30000, 31000)];
+    MPNowPlayingInfoCenter *center = MPNowPlayingInfoCenter.defaultCenter;
+    center.nowPlayingInfo = spotifyInfo(@"Song", 0, 1);
+    check([sg_system[MPMediaItemPropertyArtist] isEqual:@"two words"] && harnessRowDelay == 24002 * NSEC_PER_MSEC,
+          @"one displayed piece sleeps past interior words until the long break");
+    center.nowPlayingInfo = spotifyInfo(@"Song", 25, 1);
+    check([sg_system[MPMediaItemPropertyArtist] isEqual:@"Artist"] && harnessRowDelay == (int64_t)(1.001 * NSEC_PER_SEC),
+          @"seek into a rest arms its exit, four seconds before the next lead");
+    line.words = @[lineOf(@"one sufficiently long phrase", 0, 2000).words.firstObject,
+                   lineOf(@"and another phrase", 2000, 20000).words.firstObject];
+    center.nowPlayingInfo = spotifyInfo(@"Song", 0, 1);
+    check([sg_system[MPMediaItemPropertyArtist] isEqual:@"one sufficiently long phrase"] &&
+          harnessRowDelay == (int64_t)(2.001 * NSEC_PER_SEC), @"a second displayed piece keeps its own word-start deadline");
+    center.nowPlayingInfo = spotifyInfo(@"Song", 2, 0);
+    check([sg_system[MPMediaItemPropertyArtist] isEqual:@"and another phrase"], @"paused seek selects the new piece");
+    sg_lines = nil;
+    harnessRowDelay = -1;
+    center.nowPlayingInfo = spotifyInfo(@"Song", 0, 1);
+    check(harnessRowDelay == -1, @"an outstanding lyric lookup needs no periodic clock");
+    sg_lines = @[line];
+    [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:nil];
+    check([sg_system[MPMediaItemPropertyArtist] isEqual:@"one sufficiently long phrase"], @"arriving lyrics replace the artist immediately");
+    sg_lines = was;
+    center.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
+}
+
 // Lock screen pronunciation: the artist row has room for one line, the larger of the lyrics' two, so the source's
 // pronunciation shows only where the order leads with it; a choice made while paused shows at once, and the
 // translation chosen for the row keeps its place.
@@ -416,6 +457,7 @@ int main(void) {
         songBlockOccurrence();
         if (lyrics) progressBar();
         if (lyrics) translation();
+        if (lyrics) rowDeadlines();
         if (lyrics) pronunciation();
         if (lyrics) pausedTrackDuringTick();
         if (lyrics) deletedTranslation();

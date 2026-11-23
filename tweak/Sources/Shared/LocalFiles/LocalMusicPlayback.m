@@ -119,7 +119,7 @@ BOOL SGLocalMusicCanPlaySongs(NSArray<SGLocalMusicSong *> *songs) {
     for (SGLocalMusicSong *song in songs) if (!song.playbackURI.length) return NO;
     return YES;
 }
-static NSError *unavailable(void) { return [NSError errorWithDomain:@"Vitrine.LocalMusic" code:1 userInfo:nil]; }
+static NSError *unavailable(void) { return [NSError errorWithDomain:@"Retrine.LocalMusic" code:1 userInfo:nil]; }
 @interface SGLocalMusicCommand : NSObject
 @property (nonatomic, strong) id<SGLocalMusicTask> task;
 @property (nonatomic, strong) SPTPlayerQueueWrapperImpl *wrapper;

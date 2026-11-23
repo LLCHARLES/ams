@@ -542,7 +542,7 @@ static void checkSettings(UINavigationController *nav) {
         HARNESS_FAIL(@"the rows read \"%@\" and \"%@\"", cut.title, accent.title);
 
     SGRPagePreview *card = cardIn(page.view);
-    UIView *controls = withIdentifier(card, @"vitrine.preview.header.controls");
+    UIView *controls = withIdentifier(card, @"retrine.preview.header.controls");
     if (!card || controls.subviews.count != 3) HARNESS_FAIL(@"no preview card or header controls");
     UIView *play = controls.subviews[1];
     UIImageView *glyph = nil;

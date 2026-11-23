@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ko-KR
+reviews:
+  profile: chill
+  poem: false
+  path_filters:
+    - "!vendor/**"
+  auto_review:
+    enabled: true
+    drafts: false
+    # Release Please and Dependabot PRs only bump versions; reviewing them is noise.
+    ignore_usernames:
+      - github-actions[bot]
+      - dependabot[bot]
+    ignore_title_keywords:
+      - "chore(main): release"
+chat:
+  auto_reply: true

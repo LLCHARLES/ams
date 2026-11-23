@@ -96,12 +96,14 @@ NSURL *SGPublicSpotifyURLFromText(NSString *text) {
     NSURLComponents *parts = [NSURLComponents componentsWithString:text];
     NSString *scheme = parts.scheme.lowercaseString;
     if ([scheme isEqualToString:@"https"]) return publicWebURL(text);
-    if (![@[@"spotify", @"vitrine"] containsObject:scheme]) return nil;
+    // Old shared links and current handoffs use the same parser.
+    BOOL handoff = [scheme isEqualToString:@"retrine"] || [scheme isEqualToString:@"vitrine"];
+    if (!handoff && ![scheme isEqualToString:@"spotify"]) return nil;
     NSString *rest = [text substringFromIndex:parts.scheme.length + 1];
     if (![rest hasPrefix:@"//"]) return publicPage([rest componentsSeparatedByString:@":"]);
     rest = [rest substringFromIndex:2];
-    // LaunchServices drops the empty-port colon in vitrine://https://… during handoff.
-    if ([scheme isEqualToString:@"vitrine"] && [rest.lowercaseString hasPrefix:@"https//"])
+    // LaunchServices drops the empty-port colon in retrine://https://… during handoff.
+    if (handoff && [rest.lowercaseString hasPrefix:@"https//"])
         return publicWebURL([@"https://" stringByAppendingString:[rest substringFromIndex:@"https//".length]]);
     BOOL eevee = [scheme isEqualToString:@"spotify"] && [rest hasPrefix:@"eevee/"];
     if (eevee) rest = [rest substringFromIndex:@"eevee/".length];
@@ -117,8 +119,8 @@ NSURL *SGSpotifyLinkInSharedText(NSString *text) {
     if (!bounded(text, SGMaximumSharedTextBytes)) return nil;
     NSURL *whole = SGPublicSpotifyURLFromText(text);
     if (whole) return whole;
-    // Match a complete scheme token, not an embedded HTTPS substring inside a rejected action URI.
-    NSRegularExpression *uris = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:https|spotify|vitrine):[^\\s<>\"']+"
+    // Include legacy handoffs, but not an embedded HTTPS substring inside a rejected action URI.
+    NSRegularExpression *uris = [NSRegularExpression regularExpressionWithPattern:@"\\b(?:https|spotify|retrine|vitrine):[^\\s<>\"']+"
                                                                          options:NSRegularExpressionCaseInsensitive error:NULL];
     for (NSTextCheckingResult *match in [uris matchesInString:text options:0 range:NSMakeRange(0, text.length)]) {
         NSURL *url = SGPublicSpotifyURLFromText([text substringWithRange:match.range]);
@@ -127,12 +129,12 @@ NSURL *SGSpotifyLinkInSharedText(NSString *text) {
     return nil;
 }
 
-NSURL *SGVitrineURLForSpotifyURL(NSURL *url) {
+NSURL *SGRetrineURLForSpotifyURL(NSURL *url) {
     NSURL *valid = SGPublicSpotifyURLFromText(url.absoluteString);
     NSString *handoff = nil;
     if ([valid.scheme isEqualToString:@"spotify"])
-        handoff = [@"vitrine:" stringByAppendingString:[valid.absoluteString substringFromIndex:@"spotify:".length]];
+        handoff = [@"retrine:" stringByAppendingString:[valid.absoluteString substringFromIndex:@"spotify:".length]];
     else if (SGIsSpotifyHTTPSURL(valid))
-        handoff = [@"vitrine://" stringByAppendingString:valid.absoluteString];
+        handoff = [@"retrine://" stringByAppendingString:valid.absoluteString];
     return bounded(handoff, SGMaximumInboundURLBytes) ? [NSURL URLWithString:handoff] : nil;
 }

@@ -13,8 +13,8 @@
 // Reading the lines is how Sing knows the page shows ("the lines" in its log are these two, not the lyrics' lines):
 // at As sung with Spatial voice off, where Sing otherwise rests, it separates the playing song while they are read,
 // so the lines move and the slider and the three stops are heard at once, and rests again a second after the last
-// read. The timer stops with the page off screen (popped, or covered by another page) and reads nothing while
-// Spotify is in the background. At any other level Sing separates whether the page shows or not. Every other gate
+// read. Neither the timer nor layout reads levels when the graph scrolls out, the page leaves its window,
+// or Spotify resigns active. At any other level Sing separates whether the page shows or not. Every other gate
 // (the switch, the model, the heat, memory, Runs on, the model kept a minute after resting) stays Sing.x's.
 //
 // Threading: main thread.
@@ -147,7 +147,7 @@ static CGFloat height(float rms) {
 }
 @end
 
-@interface SGSingCard : UIView
+@interface SGSingCard : UIView <SGPlayerStateObserver>
 @end
 
 @implementation SGSingCard {
@@ -161,6 +161,8 @@ static CGFloat height(float rms) {
     UISegmentedControl *_stops;
     SGSingSongElement *_song;
     NSTimer *_timer;
+    __weak UIScrollView *_viewport;
+    BOOL _inactive, _cardVisible, _graphVisible;
     float _drawnVocals[kHistory + 1], _drawnRest[kHistory + 1];   // the levels the lines show now
     BOOL _flat;
     int _ticks;
@@ -237,6 +239,12 @@ static CGFloat height(float rms) {
     _card.accessibilityElements = @[_song, _play, _column];
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(stateTapped:)];
     [_card addGestureRecognizer:tap];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(changed) name:SGSingChangedNotification object:nil];
+    [center addObserver:self selector:@selector(levelSettingChanged) name:NSUserDefaultsDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(activity:) name:UIApplicationWillResignActiveNotification object:nil];
+    [center addObserver:self selector:@selector(activity:) name:UIApplicationDidBecomeActiveNotification object:nil];
+    SGAddPlayerStateObserver(self);
     [self refresh];
     return self;
 }
@@ -267,27 +275,107 @@ static CGFloat height(float rms) {
     _graph.frame = CGRectMake(0, y + 8, inner - kInset - kColumn - 6, CGRectGetMinY(_play.frame) - y - 16);
     for (CAShapeLayer *line in @[_rest, _vocals]) line.frame = _graph.bounds;
     _graph.layer.mask.frame = _graph.bounds;
-    [self drawLines:NO];
+    _song.accessibilityFrameInContainerSpace = CGRectMake(0, 0, CGRectGetMinX(_column.frame), CGRectGetMinY(_play.frame));
+    BOOL wasVisible = _graphVisible;
+    [self updateVisibility];
+    if (wasVisible && _graphVisible) [self drawLines:NO];
 }
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
-    [_timer invalidate];
-    _timer = nil;
-    if (!self.window) return;
-    __weak typeof(self) weakSelf = self;
-    // In the common modes, so the lines go on while the page is scrolled.
-    _timer = [NSTimer timerWithTimeInterval:kPoll repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
-    [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
-    _track = nil;
+    [_viewport removeObserver:self forKeyPath:@"bounds"];
+    _viewport = nil;
+    if (self.window) {
+        for (UIView *v = self.superview; v; v = v.superview) {
+            if (![v isKindOfClass:UIScrollView.class]) continue;
+            _viewport = (UIScrollView *)v;
+            [_viewport addObserver:self forKeyPath:@"bounds" options:0 context:NULL];
+            break;
+        }
+    }
+    [self updateVisibility];
+}
+
+- (void)observeValueForKeyPath:(NSString *)key ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (object == _viewport) [self updateVisibility];
+    else [super observeValueForKeyPath:key ofObject:object change:change context:context];
+}
+
+- (void)activity:(NSNotification *)note {
+    _inactive = [note.name isEqual:UIApplicationWillResignActiveNotification];
+    [self updateVisibility];
+}
+
+- (BOOL)visible:(UIView *)view {
+    if (_inactive || !self.window || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
+    CGRect rect = view.bounds;
+    for (UIView *v = view; v; v = v.superview) {
+        if (v.hidden || v.alpha <= 0.01) return NO;
+        if (v.clipsToBounds || v == self.window) rect = CGRectIntersection(rect, v.bounds);
+        if (CGRectIsEmpty(rect)) return NO;
+        if (v.superview) rect = [v convertRect:rect toView:v.superview];
+    }
+    return YES;
+}
+
+- (void)updateVisibility {
+    BOOL card = [self visible:self], graph = card && [self visible:_graph];
+    if (card == _cardVisible && graph == _graphVisible) return;
+    BOOL refresh = card && !_cardVisible, draw = graph && !_graphVisible;
+    _cardVisible = card;
+    _graphVisible = graph;
+    if (refresh) { _track = nil; [self refresh]; }
+    if (draw) [self drawLines:NO];
+    [self scheduleGraph];
+}
+
+- (void)scheduleGraph {
+    // Waiting at As sung is woken by reading levels. Don't wait for Singing before the first read.
+    SPTPlayerState *player = SGPlayerState();
+    SGSingState state = SGSingCurrentState();
+    BOOL run = _graphVisible && player && !player.isPaused &&
+        (state == SGSingStatePreparing || state == SGSingStateWaiting || state == SGSingStateBuffering ||
+         state == SGSingStateSinging || state == SGSingStateBehind);
+    if (!run) { [_timer invalidate]; _timer = nil; }
+    else if (!_timer) {
+        __weak typeof(self) weakSelf = self;
+        _timer = [NSTimer timerWithTimeInterval:kPoll repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
+        [NSRunLoop.mainRunLoop addTimer:_timer forMode:NSRunLoopCommonModes];
+    }
+}
+
+- (void)changed {
+    if (!_cardVisible) return;
     [self refresh];
+    if (_graphVisible) [self drawLines:YES];
+    [self scheduleGraph];
+}
+
+- (void)playerStateDidChange:(SPTPlayerState *)state {
+    [self changed];
+}
+
+- (void)playerStateDidReport:(SPTPlayerState *)state {
+    if (!_cardVisible || !_shown.current) return;
+    // Spotify can fill in the words on the same track without a transport change.
+    if ([(_shown.title ?: @"") isEqual:(state.track.trackTitle ?: @"")] &&
+        [(_shown.artist ?: @"") isEqual:(state.track.artistName ?: @"")]) return;
+    _shown = nil;
+    [self refresh];
+}
+
+- (void)levelSettingChanged {
+    // A level set from the mic updates defaults, but need not change the engine's state.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self->_cardVisible && !self->_column.tracking && self->_column.level != SGSingLevel()) [self changed];
+    });
 }
 
 #pragma mark - what it shows
 
 - (void)refresh {
     SPTPlayerState *player = SGPlayerState();
-    // The track's words read again only when the player has another track (or none).
+    // Keep the snapshot until the track changes or a metadata report invalidates it.
     if (!_shown || player.track != _track) {
         _track = player.track;
         _shown = SGShownTrackNow();
@@ -326,14 +414,10 @@ static CGFloat height(float rms) {
     _song.accessibilityValue = [NSString stringWithFormat:SGL(@"settings.karaoke.card.song.a11y.value", @"Karaoke: %@. Vocals: %@"), SGSingStatusText(), SGSingLevelText(level)];
     _song.accessibilityHint = SGSingStatusDetail() ? SGL(@"settings.karaoke.card.song.a11y.hint", @"Double-tap for more about Karaoke's state.") : nil;
     _song.accessibilityTraits = SGSingStatusDetail() ? UIAccessibilityTraitButton : UIAccessibilityTraitStaticText;
-    _song.accessibilityFrameInContainerSpace = CGRectMake(0, 0, CGRectGetMinX(_column.frame), CGRectGetMinY(_play.frame));
 }
 
 - (void)tick {
-    // Spotify in the background plays on and so runs this timer: no reads then, so Sing rests as with the page gone.
-    if (UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) return;
-    // The words ten times a second, the lines at every read.
-    if (_ticks++ % 3 == 0) [self refresh];
+    _ticks++;
     [self drawLines:YES];
 }
 

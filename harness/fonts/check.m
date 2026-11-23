@@ -152,7 +152,7 @@ int main(void) { @autoreleasepool {
     install(@"gowundodum");
     install(@"dohyeon");
     NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    NSURL *importedFolder = [[support URLByAppendingPathComponent:@"Vitrine" isDirectory:YES] URLByAppendingPathComponent:@"Font" isDirectory:YES];
+    NSURL *importedFolder = [[support URLByAppendingPathComponent:@"Retrine" isDirectory:YES] URLByAppendingPathComponent:@"Font" isDirectory:YES];
     HARNESS_CHECK([NSFileManager.defaultManager createDirectoryAtURL:importedFolder withIntermediateDirectories:YES attributes:nil error:nil]);
     HARNESS_CHECK([NSFileManager.defaultManager createFileAtPath:[importedFolder URLByAppendingPathComponent:@"Harness.ttf"].path contents:nil attributes:nil]);
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;

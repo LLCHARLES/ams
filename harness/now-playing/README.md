@@ -37,7 +37,7 @@ The added checks exercise:
 - a paused lyric line acquiring its late cover under distinct preview and disk identities, including
   the prefetched next line, without reusing the coverless cached output
 
-Use `OUT=$(mktemp -d /tmp/vitrine-now-playing.XXXXXX) THEOS=$HOME/theos ./build.sh` to leave existing
+Use `OUT=$(mktemp -d /tmp/retrine-now-playing.XXXXXX) THEOS=$HOME/theos ./build.sh` to leave existing
 build artifacts untouched. The checks still run with artist-row lyrics both off and on.
 
 The shared background renderer is real; render/encode stand-ins still isolate lifecycle behavior.

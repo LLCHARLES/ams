@@ -15,9 +15,8 @@
 // The tracks themselves are the same cell class over RetrievalListStructuredData and are never touched here.
 //
 // A section comes back when its switch is off (AlbumSettings.m). Which one a cell is in is read the way the
-// native look's Album.x reads it: the nearest heading above it, by its title in English. Those are the only
-// names there are -- more by and you might also like are the same carousel of cards -- so in any other
-// language every section is the last switch's, the one for the sections no other switch names. With every
+// native look's Album.x reads it: the nearest heading above it, by its English or confirmed Korean title.
+// More by and You might also like are the same carousel of cards. Unrecognized headings follow the last switch. With every
 // switch on, which is how they come, nothing is read and the rule is the one above.
 //
 // A dropped cell is 0 tall, but what it holds keeps the height it measured at, hidden and cut off by the
@@ -87,12 +86,12 @@ static void settle(UICollectionViewCell *cell, CGFloat natural, CGFloat lead, CG
 
 #pragma mark - the switches
 
-static const struct { __unsafe_unretained NSString *title, *key; BOOL prefix; } kSections[] = {
-    {@"More by ", SGRKeyAlbumHideMoreBy, YES},
+static const struct { __unsafe_unretained NSString *title, *key; BOOL prefix; __unsafe_unretained NSString *korean; } kSections[] = {
+    {@"More by ", SGRKeyAlbumHideMoreBy, YES, @"의 곡 더 보기"},
     {@"Related Music Videos", SGRKeyAlbumHideVideos, NO},
-    {@"Concerts", SGRKeyAlbumHideConcerts, NO},
-    {@"Merch", SGRKeyAlbumHideMerch, NO},
-    {@"You might also like", SGRKeyAlbumHideYouMightLike, NO},
+    {@"Concerts", SGRKeyAlbumHideConcerts, NO, @"콘서트"},
+    {@"Merch", SGRKeyAlbumHideMerch, NO, @"굿즈"},
+    {@"You might also like", SGRKeyAlbumHideYouMightLike, NO, @"이건 어떠세요"},
 };
 static const NSInteger kOther = sizeof(kSections) / sizeof(kSections[0]);
 
@@ -119,6 +118,8 @@ static NSInteger sectionTitled(NSString *title) {
             ? [title.lowercaseString hasPrefix:wanted.lowercaseString]
             : [title caseInsensitiveCompare:wanted] == NSOrderedSame;
         if (match) return i;
+        NSString *korean = kSections[i].korean;
+        if (korean && (kSections[i].prefix ? [title hasSuffix:korean] : [title isEqual:korean])) return i;
     }
     return kOther;
 }

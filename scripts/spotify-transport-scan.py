@@ -132,7 +132,7 @@ def scan(path, require_version=None, wireguard_compatible=False):
                 if (wireguard_compatible or require_version) and not all(record["native_imports"].values()):
                     raise ValueError(f"Required native transport import missing from Spotify {version}")
             result["images"][name] = record
-        result["evidence"] = "Static class/selector/import presence only; runtime ABI, all Vitrine features and device playback must also be checked."
+        result["evidence"] = "Static class/selector/import presence only; runtime ABI, all Retrine features and device playback must also be checked."
         return result
 
 

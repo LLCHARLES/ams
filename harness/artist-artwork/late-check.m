@@ -1,4 +1,5 @@
 #import "../album-notes/catalog-boundary.h"
+#import "motion-view-stubs.h"
 #import "Redesigned/Artist/ArtistArtwork.h"
 #import "Shared/AnimatedArtwork/SGMotionClip.h"
 #import "Shared/AnimatedArtwork/SGMotionCatalog.h"

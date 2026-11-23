@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <unistd.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/AnimatedArtwork/SGMotionTicket.h"
 
@@ -52,6 +53,51 @@ static void writeFile(NSURL *file) {
         return [@"clip" writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
     }, ^(BOOL ok) { CHECK(ok); dispatch_async(dispatch_get_main_queue(), ^{ done = YES; }); });
     waitFor(^BOOL { return done; });
+}
+
+static void checkByteTrim(NSURL *pinned) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSMutableArray<NSURL *> *clips = [NSMutableArray arrayWithObject:pinned];
+    for (NSUInteger i = 1; i < 12; i++)
+        [clips addObject:SGMotionMadeFile([NSString stringWithFormat:@"byte-%lu", (unsigned long)i])];
+    NSURL *foreign = [pinned.URLByDeletingLastPathComponent URLByAppendingPathComponent:@"other.mp4"];
+    [clips addObject:foreign];
+    for (NSUInteger i = 0; i < clips.count; i++) {
+        NSURL *clip = clips[i];
+        if (i) CHECK([fm createFileAtPath:clip.path contents:nil attributes:nil]);
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:clip error:nil];
+        CHECK([handle truncateAtOffset:30000000 error:nil] && [handle closeAndReturnError:nil]);
+        CHECK([fm setAttributes:@{NSFileModificationDate:[NSDate dateWithTimeIntervalSince1970:i+1]}
+                   ofItemAtPath:clip.path error:nil]);
+    }
+    // Handoff of an existing (newest) clip triggers trim without adding any bytes.
+    writeFile(clips[11]);
+    watch = NO;
+    CHECK(![fm fileExistsAtPath:clips[1].path] && ![fm fileExistsAtPath:clips[2].path]);
+    CHECK([fm fileExistsAtPath:pinned.path]);
+    for (NSUInteger i = 3; i < clips.count; i++) CHECK([fm fileExistsAtPath:clips[i].path]);
+    for (NSURL *clip in [clips subarrayWithRange:NSMakeRange(3, clips.count - 3)]) CHECK([fm removeItemAtURL:clip error:nil]);
+    watch = YES;
+}
+
+// Seed a previous launch's cache directly. Nothing asks the store for a clip or releases a lease.
+static void checkIdleLaunchTrim(NSURL *folder) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    CHECK([fm createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSMutableArray<NSURL *> *clips = [NSMutableArray array];
+    for (unsigned i = 0; i < 11; i++) {
+        NSURL *clip = [folder URLByAppendingPathComponent:[NSString stringWithFormat:@"%040x.mp4", i]];
+        [clips addObject:clip];
+        CHECK([fm createFileAtPath:clip.path contents:nil attributes:nil]);
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:clip error:nil];
+        CHECK([handle truncateAtOffset:30000000 error:nil] && [handle closeAndReturnError:nil]);
+        CHECK([fm setAttributes:@{NSFileModificationDate:[NSDate dateWithTimeIntervalSince1970:i+1]}
+                   ofItemAtPath:clip.path error:nil]);
+    }
+    watch = YES;
+    waitFor(^BOOL { return access(clips.firstObject.fileSystemRepresentation, F_OK) == -1 && errno == ENOENT; });
+    watch = NO;
+    for (NSUInteger i = 1; i < clips.count; i++) CHECK([fm removeItemAtURL:clips[i] error:nil]);
 }
 
 // Controlled NSURLSession boundary: progress, cancellation, stale completion and retry.
@@ -251,8 +297,10 @@ int main(int argc, const char **argv) {
         CHECK(made.lastPathComponent.length == 44);
         watch = NO;
         CHECK(![NSFileManager.defaultManager fileExistsAtPath:root.path]);
+        checkIdleLaunchTrim(made.URLByDeletingLastPathComponent);
         watch = YES;
         writeFile(made);
+        @autoreleasepool { checkByteTrim(made); }
         for (NSUInteger i = 0; i < 41; i++) {
             @autoreleasepool { writeFile(SGMotionMadeFile([NSString stringWithFormat:@"clip-%lu", (unsigned long)i])); }
         }

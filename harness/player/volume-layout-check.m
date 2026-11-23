@@ -39,6 +39,7 @@ static BOOL SGRPlayerLyricsFadeView(UIView *view, BOOL fits) {
 @implementation PlaybackControlsElementsUnit
 @end
 
+#include "volume-margins-production.inc"
 #include "volume-placement-production.inc"
 #include "volume-layout-production.inc"
 
@@ -84,12 +85,96 @@ static BOOL checkPhone(CGSize size, CGFloat stackTop, BOOL expectsVolume) {
         }
         NSLog(@"PASS %@ real placement: volume %@, time and controls touchable", NSStringFromCGSize(size),
               expectsVolume ? @"shown without overlap" : @"omitted");
+        if (expectsVolume) {
+            // Spotify grows a bottom-pinned stack upwards to allocate a
+            // floating unit. Footer and play keep their size and screen Y;
+            // volume is *not* an arranged view.
+            CGFloat before = CGRectGetMidY([host convertRect:volume.bounds fromView:volume]);
+            [host layoutIfNeeded];
+            stack.frame = CGRectMake(0, stackTop-32, size.width, 272);
+            for (UIView *view in @[duration, controls.view, footer])
+                view.center = CGPointMake(view.center.x, view.center.y+32);
+            [host layoutIfNeeded];
+            CGFloat after = CGRectGetMidY([host convertRect:volume.bounds fromView:volume]);
+            if (fabs(after-before) > .01) {
+                NSLog(@"FAIL stack grew above the controls: volume moved %.0f pt", after-before);
+                return NO;
+            }
+        }
         return YES;
+}
+
+// A reused row already has its last frame when Spotify installs fresh side
+// pins. Layout of the new 12 pt pins follows the unit's first measurement.
+static BOOL checkReusedTitle(void) {
+    UIView *host = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 402, 64)];
+    UIView *row = [[UIView alloc] initWithFrame:CGRectMake(20, 0, 362, 64)];
+    row.translatesAutoresizingMaskIntoConstraints = NO;
+    [host addSubview:row];
+    NSLayoutConstraint *leading = [row.leadingAnchor constraintEqualToAnchor:host.leadingAnchor constant:12];
+    [NSLayoutConstraint activateConstraints:@[
+        leading,
+        [row.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:-12],
+        [row.topAnchor constraintEqualToAnchor:host.topAnchor],
+        [row.bottomAnchor constraintEqualToAnchor:host.bottomAnchor],
+    ]];
+    SGRPlayerHoldMargin(row, 12);
+    [host layoutIfNeeded];
+    SGRPlayerHoldMargin(row, 12);
+    [host layoutIfNeeded];
+    BOOL ok = CGRectGetMinX(row.frame) + 12 == 32 && CGRectGetMaxX(row.frame) == 382;
+    NSLog(@"%@ reused title starts at %.0f", ok ? @"PASS" : @"FAIL", CGRectGetMinX(row.frame)+12);
+    if (!ok) return NO;
+    // Issue #35: once inset, the row lays its title out 8 pt in for 12. That is the inset row's own layout, not
+    // Spotify's offset, so the row stays where the first reading put it.
+    SGRPlayerHoldMargin(row, 8);
+    [host setNeedsLayout];
+    [host layoutIfNeeded];
+    ok = CGRectGetMinX(row.frame) == 20 && CGRectGetMaxX(row.frame) == 382;
+    NSLog(@"%@ inset title row holds at %.0f", ok ? @"PASS" : @"FAIL", CGRectGetMinX(row.frame));
+    if (!ok) return NO;
+    // A row first read while it still held a video podcast's thumbnail (the title 60 pt in) is not inset, and is
+    // read again without it: only a reading that inset the row is kept.
+    UIView *late = [UIView new];
+    late.translatesAutoresizingMaskIntoConstraints = NO;
+    [host addSubview:late];
+    [NSLayoutConstraint activateConstraints:@[
+        [late.leadingAnchor constraintEqualToAnchor:host.leadingAnchor constant:12],
+        [late.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:-12],
+        [late.topAnchor constraintEqualToAnchor:host.topAnchor],
+        [late.bottomAnchor constraintEqualToAnchor:host.bottomAnchor],
+    ]];
+    [host layoutIfNeeded];
+    SGRPlayerHoldMargin(late, 60);
+    [host layoutIfNeeded];
+    BOOL native = CGRectGetMinX(late.frame) == 12;
+    SGRPlayerHoldMargin(late, 12);
+    [host setNeedsLayout];
+    [host layoutIfNeeded];
+    ok = native && CGRectGetMinX(late.frame) == 20 && CGRectGetMaxX(late.frame) == 382;
+    NSLog(@"%@ row read with a thumbnail, then without, starts at %.0f", ok ? @"PASS" : @"FAIL", CGRectGetMinX(late.frame));
+    [late removeFromSuperview];
+    if (!ok) return NO;
+    // UIKit can normalize a direct leadingMargin constraint into one on
+    // the unit's own guide. A sibling's margin is genuinely not that pin.
+    UIView *rail = [[UIView alloc] initWithFrame:host.bounds];
+    rail.layoutMargins = UIEdgeInsetsMake(0,12,0,12);
+    [host addSubview:rail];
+    leading.active = NO;
+    [NSLayoutConstraint constraintWithItem:row attribute:NSLayoutAttributeLeading relatedBy:NSLayoutRelationEqual
+                                   toItem:rail attribute:NSLayoutAttributeLeadingMargin multiplier:1 constant:0].active = YES;
+    // Still at the adjusted x=20; the replacement pin's native x is 12.
+    SGRPlayerHoldMargin(row, 12);
+    [host layoutIfNeeded];
+    ok = CGRectGetMinX(row.frame) + 12 == 32;
+    NSLog(@"%@ title re-pinned to leadingMargin starts at %.0f", ok ? @"PASS" : @"FAIL", CGRectGetMinX(row.frame)+12);
+    return ok;
 }
 
 int main(void) {
     @autoreleasepool {
       @try {
+        if (!checkReusedTitle()) return 1;
         if (!checkPhone(CGSizeMake(402, 874), 572, YES)) return 1;
         // The SE has no bottom safe-area inset; the same Spotify units end at its 667 pt screen edge.
         if (!checkPhone(CGSizeMake(375, 667), 427, NO)) return 1;

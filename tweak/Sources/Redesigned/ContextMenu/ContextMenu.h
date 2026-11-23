@@ -4,19 +4,20 @@
 //
 //     ContextMenu.x   the takeover: Spotify's sheet presented unseen, its rows read into a UIMenu shown from
 //                     the ⋯, a pick fired on the sheet, and the sheet itself as the fallback
+//     FireControl.m   a control of Spotify's fired from code as a tap would, and which tap events it has actions for
 //
 // Spotify's rows come from Swift item factories with nothing to read them from but the cells they fill, so
 // the sheet is still Spotify's and still made, unseen.
 //
-// The player's ⋯ is a pull-down button of the mod's: a button over Spotify's ⋯ takes its touches and opens
-// the menu on touch down, as UIKit opens any button's menu, so it waits on nothing of Spotify's. Share, Add to
-// playlist and Add to queue (Spotify's items 9, 19 and 11, or found by title) are a row of three at its top, as
-// the last sheet of this kind had them, then come the player's own items, then More, which holds the rest of
-// Spotify's rows: the last complete set stored, at once, or the system's loading row the first time, put right
-// in place as the live rows come. Once the menu is up, Spotify's ⋯ action is run from code; its sheet is
-// presented in a window of the mod's under the app's (the menu, a presentation of UIKit's from the player,
-// leaves no room for another there), read, and used to run a pick. A pick made before the live rows are in
-// waits up to 4 s for them, else the sheet is shown.
+// The player's ⋯ is a pull-down button of the mod's, beside the title as the Music app has it (PlayerMenu.m places
+// it), which opens the menu on touch down, as UIKit opens any button's menu, so it waits on nothing of Spotify's.
+// Share, Add to playlist and Add to queue (Spotify's items 9, 19 and 11, or found by title) are a row of three at
+// its top, as the last sheet of this kind had them, then the player's lead items (its title row's own buttons, but
+// those whose action Spotify's rows offer), then the rest of Spotify's rows, laid out in the menu itself: the last complete set stored, at once, or the
+// system's loading row the first time, put right in place as the live rows come. The player's own items follow.
+// Once the menu is up, Spotify's ⋯ action is run from code; its sheet is presented in a window of the mod's under
+// the app's (the menu, a presentation of UIKit's from the player, leaves no room for another there), read, and used
+// to run a pick. A pick made before the live rows are in waits up to 4 s for them, else the sheet is shown.
 //
 // A page's ⋯ is the other way round: its tap opens Spotify's sheet, presented without animation in a container
 // at alpha 0 from its first frame, and the menu opens over it from an invisible anchor button inside the ⋯, its
@@ -35,17 +36,30 @@
 // Threading: main thread only.
 #import <UIKit/UIKit.h>
 
-// Items of the mod's own for the menu `button` opens, built afresh every time it opens.
+// Items of the mod's own for the menu `button` opens, built afresh every time it opens. A lead item that does what
+// a row of Spotify's does has that row's identifier (its accessibility identifier, Spotify's item number) as its
+// UIAction identifier: the menu leaves it out while it shows that row enabled, the stored rows' until the live ones
+// are read, and puts it back if the live rows lack it, have it grayed out or do not come. A pick of the stored row
+// is that of any stored row: the live row of its title, or Spotify's sheet; never this item.
 typedef NSArray<UIMenuElement *> *(^SGRMenuItems)(void);
 // What the sheet the ⋯ opens now is for ("track", "episode"...). The menu remembers which quick items the last
 // sheet of each kind had, so the quick row is right before this sheet has its rows.
 typedef NSString *(^SGRMenuKind)(void);
 
-// Makes `button`, the player's ⋯ (a UIControl), open the system menu itself: the quick row, `items`, then More.
-// `kind` may be nil. Called on every layout of the ⋯'s row: it keeps the mod's button on top and over the whole
-// ⋯, and replaces `items` and `kind`. The pinned ⋯ of the entity pages needs no call: the Kit records its taps
+// The player's ⋯: a pull-down button of the mod's, one kept in `host`, that opens the system menu itself: the quick
+// row, `lead`, Spotify's rows, then `items`. `spotify` is Spotify's own ⋯ (a UIControl, shown or not), whose action
+// is run from code once the menu is up so its sheet can be read. The caller places the button and draws in it. Called
+// on every layout of the ⋯'s place, and whenever Spotify's ⋯ is laid out: it replaces `spotify`, `lead`, `items` and
+// `kind`, which may be nil. The pinned ⋯ of the entity pages needs no call: the Kit records its taps
 // (SGRPinnedMoreRecentButton).
-void SGRSystemMenuWatch(UIView *button, SGRMenuItems items, SGRMenuKind kind);
+UIButton *SGRSystemMenuButtonIn(UIView *host, UIView *spotify, SGRMenuItems lead, SGRMenuItems items, SGRMenuKind kind);
 
-// The mod's button over `button`, which takes the ⋯'s touches once SGRSystemMenuWatch has been called; nil before.
-UIControl *SGRSystemMenuFront(UIView *button);
+// A target of the mod's on a control of Spotify's that only watches its touches (PlayerHeader.x's press on the header
+// buttons, which listens for a touch up inside), so is no action of the control's.
+@protocol SGRControlWatcher
+@end
+// The events `control` has handlers for, SGRControlWatcher targets left out: which of them a tap fires.
+UIControlEvents SGRControlActionEvents(UIControl *control);
+// Fires a control as a tap on it would: its primary action's handlers if it has any, else its touch up inside ones,
+// else its accessibility activation. What it did, for the log.
+NSString *SGRFireControl(UIControl *control);

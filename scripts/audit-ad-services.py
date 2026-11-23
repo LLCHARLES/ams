@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit Vitrine's service hook coverage against decrypted Spotify 9.1.90."""
+"""Audit Retrine's service hook coverage against inspected decrypted Spotify IPAs."""
 import argparse
 import importlib.util
 import json
@@ -58,6 +58,13 @@ NO_LOAD = {
     "_TtC40Referrals_ReferralsUpsellCardElementImpl37ReferralsUpsellCardElementServiceImpl",
     "_TtC31ReinventFree_DownloadUpsellImpl21DownloadUpsellService",
     "_TtC35ReinventFree_PlayFullSongUpsellImpl29PlayFullSongUpsellServiceImpl",
+}
+
+# The renamed owner is present on 9.2.0, the Swift owner on 9.1.90.
+# The candidate/ABI checks still require the present owner to be covered.
+ADS_BASE_OWNERS = {
+    "_TtC28AdsPlatform_AdsBaseSwiftImpl23AdsBaseSwiftServiceImpl",
+    "_TtC23AdsPlatform_AdsBaseImpl18AdsBaseServiceImpl",
 }
 
 
@@ -125,15 +132,15 @@ def binary_classes(ipa):
         info = plistlib.loads(transport.bounded_member(
             archive, "Payload/Spotify.app/Info.plist", transport.MAX_PLIST_BYTES))
         version = info.get("CFBundleShortVersionString")
-        if version != "9.1.90" or info.get("CFBundleIdentifier") != "com.spotify.client":
-            raise ValueError("This audit requires the original Spotify 9.1.90 IPA")
+        if version not in ("9.1.90", "9.2.0") or info.get("CFBundleIdentifier") != "com.spotify.client":
+            raise ValueError("This audit requires the original Spotify 9.1.90 or 9.2.0 IPA")
         expected = transport.INSPECTED_UUIDS[version]
         if info.get("CFBundleVersion") != expected["build"]:
-            raise ValueError("Spotify build differs from the inspected 9.1.90 IPA")
+            raise ValueError(f"Spotify build differs from the inspected {version} IPA")
         for image in ("Spotify", "Frameworks/SpotifyShared.framework/SpotifyShared"):
             data = transport.bounded_member(archive, "Payload/Spotify.app/" + image, transport.MAX_IMAGE_BYTES)
             if transport.macho(data)["uuid"] != expected[image]:
-                raise ValueError(f"Spotify image differs from the inspected 9.1.90 IPA: {image}")
+                raise ValueError(f"Spotify image differs from the inspected {version} IPA: {image}")
             binary = Path(temp) / "image"
             binary.write_bytes(data)
             output = subprocess.run(["xcrun", "dyld_info", "-objc", str(binary)],
@@ -206,9 +213,10 @@ def audit(classes, hooked):
             errors.append(f"Uncovered intended service: {name}")
     for name, (selector, gate) in sorted(hooked.items()):
         if name not in classes:
-            errors.append(f"Hook class absent from 9.1.90: {name}")
+            if name not in ADS_BASE_OWNERS or not ADS_BASE_OWNERS.intersection(classes):
+                errors.append(f"Hook class absent from inspected IPA: {name}")
         elif selector not in selectors(classes, name) and not (name in NO_LOAD and selector == "load"):
-            errors.append(f"Hook selector absent from 9.1.90: {name} -{selector}")
+            errors.append(f"Hook selector absent from inspected IPA: {name} -{selector}")
         elif selector in selectors(classes, name) and not compatible(selector, selectors(classes, name)[selector]):
             errors.append(f"Incompatible or unproven hook ABI: {name} -{selector}: {selectors(classes, name)[selector]}")
     if not candidates:
@@ -231,7 +239,7 @@ def main():
         print(f"EXEMPT {reason}")
     for error in errors:
         print(f"FAIL {error}")
-    print(f"Spotify 9.1.90: {len(covered)} covered, {len(exempt)} exempt, {len(errors)} failures")
+    print(f"Spotify: {len(covered)} covered, {len(exempt)} exempt, {len(errors)} failures")
     return bool(errors)
 
 

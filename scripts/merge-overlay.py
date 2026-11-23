@@ -2,6 +2,7 @@
 """Merges plist/ overrides into the IPA's Info.plist.
 
 usage: merge-overlay.py <overlay.plist> <Info.plist from the IPA> <out.plist>
+       merge-overlay.py --apply <overlay.plist> <Info.plist to update>
        merge-overlay.py --self-test
 
 A key in plist/ replaces Spotify's own of that name, which is what every override except two wants.
@@ -110,12 +111,17 @@ def main(argv):
     if len(argv) != 3:
         print(__doc__.split('\n\n')[1], file=sys.stderr)
         return 2
-    with open(argv[0], 'rb') as f:
+    apply = argv[0] == '--apply'
+    overlay_path, app_path = argv[1:] if apply else argv[:2]
+    with open(overlay_path, 'rb') as f:
         overlay = plistlib.load(f)
-    with open(argv[1], 'rb') as f:
+    with open(app_path, 'rb') as f:
         app = plistlib.load(f)
+    result = merge(app, overlay)
+    if apply:
+        result = {**app, **result}
     with open(argv[2], 'wb') as f:
-        plistlib.dump(merge(app, overlay), f)
+        plistlib.dump(result, f)
     return 0
 
 

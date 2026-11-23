@@ -6,12 +6,19 @@
 #import "PlayerEvents.h"
 #import "PlayerState.h"
 
-// The Music app's badge: semibold caption type in a capsule, a glyph before Lossless.
+// The Music app's badge: semibold caption type in a capsule, a glyph before Lossless (before every tier in the redesign).
 static const CGFloat kFontSize = 11, kFontMax = 15, kPadX = 7, kPadY = 2, kGlyphGap = 3;
+// The redesign's, measured on the Music app's player (iOS 26, 3x): regular type in a rounded rectangle 18.3 pt tall
+// with 4.6 pt corners, lit by adding light to what is behind it: 17 of 255 for the fill, 107 more for the ink.
+// Increase Contrast draws it over the backdrop in the label colors instead, as the native look's.
+static const CGFloat kRedesignPadY = 2.6, kRedesignCornerShare = 0.25, kRedesignFillLight = 17 / 255.0, kRedesignInkLight = 107 / 255.0;
 // Kept clear between the badge and either time, and around the badge for a finger.
 static const CGFloat kTimeGap = 8, kTouchOutset = 4;
 static const NSTimeInterval kFade = 0.25;
 static const CGFloat kPanelWidth = 280, kPanelMargin = 16, kPanelRowGap = 10;
+// The redesign's summary: the glyph over the tier, its rate under it, then the sentence and the footnote.
+static const CGFloat kSummaryGlyphSize = 28, kSummaryMarginX = 20, kSummaryMarginY = 18;
+static const CGFloat kSummaryGlyphGap = 8, kSummaryRateGap = 2, kSummaryTextGap = 12, kSummaryFootGap = 10;
 
 // What the badge shows for the song playing, all zero while it shows nothing.
 typedef struct {
@@ -29,7 +36,7 @@ static NSString *sg_shownTrack;
 static NSHashTable<UIView *> *sg_units;
 static NSHashTable<UIView *> *sg_badges;
 static NSString *sg_loggedFacts;
-static char kBadgeKey, kTakeKey, kRemainingKey;
+static char kBadgeKey, kTakeKey, kRemainingKey, kTakeLabelKey;
 
 static void checkDetails(void);
 
@@ -141,7 +148,8 @@ static NSString *yesNo(BOOL yes) {
 @interface SGAudioQualityPanel : UIViewController
 @property (nonatomic, copy, readonly) NSString *track;
 @property (nonatomic, weak, readonly) UIView *badge;
-- (instancetype)initWithTrack:(NSString *)track badge:(UIView *)badge;
+// The redesign's summary rather than the native look's rows.
+- (instancetype)initWithTrack:(NSString *)track badge:(UIView *)badge redesigned:(BOOL)redesigned;
 - (void)showQuality:(SGQualityShown)shown;
 - (void)close;
 @end
@@ -151,13 +159,15 @@ static __weak SGAudioQualityPanel *sg_panel;
 @implementation SGAudioQualityPanel {
     SGQualityShown _shown;
     UIStackView *_stack;
+    BOOL _redesigned;
 }
 
-- (instancetype)initWithTrack:(NSString *)track badge:(UIView *)badge {
+- (instancetype)initWithTrack:(NSString *)track badge:(UIView *)badge redesigned:(BOOL)redesigned {
     if (!(self = [super initWithNibName:nil bundle:nil])) return nil;
     _track = [track copy];
     _badge = badge;
     _shown = sg_shown;
+    _redesigned = redesigned;
     return self;
 }
 
@@ -198,8 +208,12 @@ static __weak SGAudioQualityPanel *sg_panel;
 
 - (void)fill {
     for (UIView *row in _stack.arrangedSubviews) [row removeFromSuperview];
-    for (UIView *row in [self rows]) [_stack addArrangedSubview:row];
-    [_stack setCustomSpacing:kPanelRowGap + 4 afterView:_stack.arrangedSubviews.firstObject];
+    if (_redesigned) {
+        [self fillSummary];
+    } else {
+        for (UIView *row in [self rows]) [_stack addArrangedSubview:row];
+        [_stack setCustomSpacing:kPanelRowGap + 4 afterView:_stack.arrangedSubviews.firstObject];
+    }
     CGSize size = [_stack systemLayoutSizeFittingSize:CGSizeMake(kPanelWidth, 0)
                         withHorizontalFittingPriority:UILayoutPriorityRequired verticalFittingPriority:UILayoutPriorityFittingSizeLevel];
     self.preferredContentSize = CGSizeMake(kPanelWidth, ceil(size.height));
@@ -226,11 +240,46 @@ static __weak SGAudioQualityPanel *sg_panel;
     return rows;
 }
 
+static UILabel *summaryLabel(NSString *text, UIFontTextStyle style, UIFontWeight weight, UIColor *color) {
+    UILabel *label = [UILabel new];
+    label.text = text;
+    UIFont *base = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:style compatibleWithTraitCollection:
+        [UITraitCollection traitCollectionWithPreferredContentSizeCategory:UIContentSizeCategoryLarge]].pointSize weight:weight];
+    label.font = [[UIFontMetrics metricsForTextStyle:style] scaledFontForFont:base];
+    label.adjustsFontForContentSizeCategory = YES;
+    label.textColor = color;
+    label.textAlignment = NSTextAlignmentCenter;
+    label.numberOfLines = 0;
+    return label;
+}
+
+// The redesign's: the waveform over the tier's name, its rate, a sentence on what it is and a footnote, centered, in
+// the primary, secondary and tertiary label colors (vibrant over the popover's glass).
+- (void)fillSummary {
+    SGAudioTier tier = _shown.tier;
+    UIImageSymbolConfiguration *size = [UIImageSymbolConfiguration configurationWithPointSize:kSummaryGlyphSize weight:UIImageSymbolWeightMedium];
+    UIImageView *glyph = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"waveform" withConfiguration:size]];
+    glyph.tintColor = UIColor.labelColor;
+    glyph.contentMode = UIViewContentModeCenter;
+    glyph.isAccessibilityElement = NO;
+    UILabel *title = summaryLabel(SGAudioTierBadgeName(tier), UIFontTextStyleTitle3, UIFontWeightBold, UIColor.labelColor);
+    title.accessibilityTraits = UIAccessibilityTraitHeader;
+    UILabel *rate = summaryLabel(SGAudioTierRateText(tier, _shown.playingHz), UIFontTextStyleSubheadline, UIFontWeightMedium, UIColor.secondaryLabelColor);
+    UILabel *summary = summaryLabel(SGAudioTierSummary(tier), UIFontTextStyleSubheadline, UIFontWeightRegular, UIColor.secondaryLabelColor);
+    UILabel *footnote = summaryLabel(SGAudioTierFootnote(tier), UIFontTextStyleFootnote, UIFontWeightRegular, UIColor.tertiaryLabelColor);
+    for (UIView *view in @[glyph, title, rate, summary, footnote]) [_stack addArrangedSubview:view];
+    [_stack setCustomSpacing:kSummaryGlyphGap afterView:glyph];
+    [_stack setCustomSpacing:kSummaryRateGap afterView:title];
+    [_stack setCustomSpacing:kSummaryTextGap afterView:rate];
+    [_stack setCustomSpacing:kSummaryFootGap afterView:summary];
+}
+
 - (void)loadView {
     _stack = [UIStackView new];
     _stack.axis = UILayoutConstraintAxisVertical;
     _stack.spacing = kPanelRowGap;
-    _stack.layoutMargins = UIEdgeInsetsMake(kPanelMargin, kPanelMargin, kPanelMargin, kPanelMargin);
+    _stack.layoutMargins = _redesigned ? UIEdgeInsetsMake(kSummaryMarginY, kSummaryMarginX, kSummaryMarginY, kSummaryMarginX)
+                                       : UIEdgeInsetsMake(kPanelMargin, kPanelMargin, kPanelMargin, kPanelMargin);
     _stack.layoutMarginsRelativeArrangement = YES;
     _stack.backgroundColor = UIColor.clearColor;
     self.view = _stack;
@@ -263,6 +312,8 @@ static void checkDetails(void) {
 // Drawn rather than built of labels: a look that walks the time unit's labels (the native look's time font) leaves it be.
 @interface SGAudioQualityBadge : UIView
 @property (nonatomic) SGAudioTier tier;
+// The redesign's words and glyph (AudioQuality.h), set before the tier.
+@property (nonatomic) BOOL redesigned;
 // Placed, faded in and fitting between the times.
 @property (nonatomic) BOOL shown;
 @property (nonatomic, strong) SGAudioQualityTap *tap;
@@ -320,38 +371,76 @@ static void checkDetails(void) {
 - (void)setTier:(SGAudioTier)tier {
     if (tier == _tier) return;
     _tier = tier;
-    NSString *name = SGAudioTierName(tier);
+    NSString *name = self.text;
     self.accessibilityLabel = name ? [NSString stringWithFormat:SGL(@"player.audio_quality.accessibility", @"Audio quality, %@"), name] : nil;
     [self setNeedsDisplay];
 }
 
+- (NSString *)text {
+    return _redesigned ? SGAudioTierBadgeName(_tier) : SGAudioTierName(_tier);
+}
+
 - (UIFont *)font {
-    return [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:kFontSize weight:UIFontWeightSemibold]
+    UIFontWeight weight = _redesigned ? UIFontWeightRegular : UIFontWeightSemibold;
+    return [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:kFontSize weight:weight]
                                                                        maximumPointSize:kFontMax compatibleWithTraitCollection:self.traitCollection];
 }
 
+// The redesign's light added to the backdrop, unless Increase Contrast asks for the label colors' more opaque look.
+- (BOOL)lit {
+    return _redesigned && self.traitCollection.accessibilityContrast != UIAccessibilityContrastHigh;
+}
+
+- (void)setRedesigned:(BOOL)redesigned {
+    _redesigned = redesigned;
+    [self updateCompositing];
+}
+
+- (void)updateCompositing {
+    self.layer.compositingFilter = self.lit ? @"plusL" : nil;
+}
+
+// The redesign's before every tier, the native look's before the lossless ones only.
 - (UIImage *)glyphIn:(UIFont *)font {
-    if (!SGAudioTierIsLossless(_tier)) return nil;
+    if (_tier == SGAudioTierNone || (!_redesigned && !SGAudioTierIsLossless(_tier))) return nil;
     return [UIImage systemImageNamed:@"waveform" withConfiguration:[UIImageSymbolConfiguration configurationWithFont:font scale:UIImageSymbolScaleSmall]];
 }
 
 - (CGSize)sizeThatFits:(CGSize)size {
     UIFont *font = self.font;
     UIImage *glyph = [self glyphIn:font];
-    CGFloat text = [SGAudioTierName(_tier) ?: @"" sizeWithAttributes:@{NSFontAttributeName: font}].width;
+    CGFloat text = [self.text ?: @"" sizeWithAttributes:@{NSFontAttributeName: font}].width;
     CGFloat glyphWidth = glyph ? glyph.size.width + kGlyphGap : 0;
-    return CGSizeMake(ceil(2 * kPadX + glyphWidth + text), ceil(font.lineHeight + 2 * kPadY));
+    if (!_redesigned) return CGSizeMake(ceil(2 * kPadX + glyphWidth + text), ceil(font.lineHeight + 2 * kPadY));
+    // On the screen's pixels rather than whole points, which would add up to a point to the measured height.
+    CGFloat scale = MAX(self.traitCollection.displayScale, 1);
+    return CGSizeMake(ceil(2 * kPadX + glyphWidth + text), round((font.lineHeight + 2 * kRedesignPadY) * scale) / scale);
 }
 
 - (void)drawRect:(CGRect)rect {
     CGRect bounds = self.bounds;
     UITraitCollection *traits = self.traitCollection;
-    UIColor *ink = [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits];
-    [[UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits] setFill];
-    [[UIBezierPath bezierPathWithRoundedRect:bounds cornerRadius:bounds.size.height / 2] fill];
+    BOOL lit = self.lit;
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    UIColor *ink = lit ? [UIColor colorWithWhite:1 alpha:kRedesignInkLight] : [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits];
+    UIColor *fill = lit ? [UIColor colorWithWhite:1 alpha:kRedesignFillLight] : [UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits];
+    [fill setFill];
+    if (_redesigned) {
+        // Circular corners: the Music app's edge follows a circle's, not UIBezierPath's continuous curve.
+        CGFloat radius = bounds.size.height * kRedesignCornerShare;
+        CGPathRef shape = CGPathCreateWithRoundedRect(bounds, radius, radius, NULL);
+        CGContextAddPath(context, shape);
+        CGContextFillPath(context);
+        CGPathRelease(shape);
+    } else {
+        [[UIBezierPath bezierPathWithRoundedRect:bounds cornerRadius:bounds.size.height / 2] fill];
+    }
+    // The ink adds its light to the fill's, as the Music app's does over its own.
+    CGBlendMode inkBlend = lit ? kCGBlendModePlusLighter : kCGBlendModeNormal;
+    CGContextSetBlendMode(context, inkBlend);
 
     UIFont *font = self.font;
-    NSString *text = SGAudioTierName(_tier) ?: @"";
+    NSString *text = self.text ?: @"";
     NSDictionary *attributes = @{NSFontAttributeName: font, NSForegroundColorAttributeName: ink};
     CGSize textSize = [text sizeWithAttributes:attributes];
     UIImage *glyph = [self glyphIn:font];
@@ -361,7 +450,8 @@ static void checkDetails(void) {
     CGFloat glyphX = rightToLeft ? x + textSize.width + kGlyphGap : x, textX = rightToLeft ? x : x + glyphWidth;
     if (glyph) {
         CGRect glyphRect = CGRectMake(glyphX, CGRectGetMidY(bounds) - glyph.size.height / 2, glyph.size.width, glyph.size.height);
-        [[glyph imageWithTintColor:ink renderingMode:UIImageRenderingModeAlwaysOriginal] drawInRect:glyphRect];
+        [[glyph imageWithTintColor:ink renderingMode:UIImageRenderingModeAlwaysOriginal] drawInRect:glyphRect
+                                                                                          blendMode:inkBlend alpha:1];
     }
     [text drawAtPoint:CGPointMake(textX, CGRectGetMidY(bounds) - font.lineHeight / 2) withAttributes:attributes];
 }
@@ -372,6 +462,10 @@ static void checkDetails(void) {
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
     [super traitCollectionDidChange:previous];
+    if (previous.accessibilityContrast != self.traitCollection.accessibilityContrast) {
+        [self updateCompositing];
+        [self setNeedsDisplay];
+    }
     if (![previous.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]) {
         [self setNeedsDisplay];
         [self.superview setNeedsLayout];
@@ -380,7 +474,7 @@ static void checkDetails(void) {
 
 - (void)sg_open {
     if (!badgeShown(self) || sg_shown.tier == SGAudioTierNone || sg_panel) return;
-    SGAudioQualityPanel *panel = [[SGAudioQualityPanel alloc] initWithTrack:sg_shownTrack badge:self];
+    SGAudioQualityPanel *panel = [[SGAudioQualityPanel alloc] initWithTrack:sg_shownTrack badge:self redesigned:_redesigned];
     sg_panel = panel;
     SGPresentPopover(panel, self);
 }
@@ -416,7 +510,21 @@ static BOOL landscape(UIView *view) {
     return UIInterfaceOrientationIsLandscape(view.window.windowScene.interfaceOrientation);
 }
 
-void SGAudioQualityPlaceBadge(UIView *unit) {
+// Where `label`'s single line has its baseline, from the label's top. UILabel centers the line it lays out in its
+// bounds, and a line taller than its font (Encore's labels set a line height) has the room above the glyphs.
+static CGFloat baselineFromTop(UILabel *label) {
+    NSAttributedString *text = label.attributedText;
+    UIFont *font = text.length ? [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL] : nil;
+    if (![font isKindOfClass:UIFont.class]) font = label.font;
+    CGFloat line = [label textRectForBounds:label.bounds limitedToNumberOfLines:1].size.height;
+    return (label.bounds.size.height - line) / 2 + line + font.descender;
+}
+
+static CGFloat onPixels(CGFloat value, CGFloat scale) {
+    return round(value * scale) / scale;
+}
+
+static void placeBadge(UIView *unit, BOOL redesigned, CGFloat timesDrop) {
     // Off, nothing is looked up or remembered; SGAudioQualitySettingChanged hid the badges made before.
     if (!sg_on || !unit) return;
     if (!sg_units) sg_units = [NSHashTable weakObjectsHashTable];
@@ -428,6 +536,7 @@ void SGAudioQualityPlaceBadge(UIView *unit) {
     UIView *remaining = SGFindIdentifier(unit, @"now-playing-time-remaning-label", &kRemainingKey);
     if (!badge) {
         badge = [SGAudioQualityBadge new];
+        badge.redesigned = redesigned;
         badge.alpha = 0;
         objc_setAssociatedObject(unit, &kBadgeKey, badge, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         if (!sg_badges) sg_badges = [NSHashTable weakObjectsHashTable];
@@ -444,7 +553,10 @@ void SGAudioQualityPlaceBadge(UIView *unit) {
 
     BOOL wasShown = badge.alpha > 0;
     BOOL retitled = tier != SGAudioTierNone && tier != badge.tier;
-    BOOL shown = tier != SGAudioTierNone && !landscape(unit) && timeShown(take, unit) && timeShown(remaining, unit);
+    // The redesign's iPad player keeps this time row when it turns (PlayerLyrics.x's control column or the single
+    // one), so there its times and their room decide; the native look and a phone's landscape screens hide it.
+    BOOL rowTurns = redesigned && unit.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad;
+    BOOL shown = tier != SGAudioTierNone && (rowTurns || !landscape(unit)) && timeShown(take, unit) && timeShown(remaining, unit);
     if (shown) {
         CGRect a = untransformedIn(take, unit), b = untransformedIn(remaining, unit);
         CGRect leading = CGRectGetMidX(a) <= CGRectGetMidX(b) ? a : b, trailing = CGRectGetMidX(a) <= CGRectGetMidX(b) ? b : a;
@@ -464,8 +576,20 @@ void SGAudioQualityPlaceBadge(UIView *unit) {
         }
         CGSize size = badge.bounds.size;
         shown = size.width <= room;
-        // Edges on whole points, so the text stays crisp.
-        CGPoint origin = CGPointMake(round(middle - size.width / 2), round(CGRectGetMidY(a) - size.height / 2));
+        CGPoint origin;
+        UILabel *takeLabel = redesigned ? (UILabel *)SGFindIdentifier(unit, @"now-playing-time-take-label-internal", &kTakeLabelKey) : nil;
+        if ([takeLabel isKindOfClass:UILabel.class] && [takeLabel isDescendantOfView:take]) {
+            // The redesign's: the text's baseline on the elapsed time's, where the redesign has lowered the times, on
+            // the screen's pixels.
+            CGFloat scale = unit.window.screen.scale ?: UIScreen.mainScreen.scale;
+            CGFloat baseline = CGRectGetMinY(a) + [takeLabel convertPoint:CGPointZero toView:take].y + baselineFromTop(takeLabel) + timesDrop;
+            UIFont *font = badge.font;
+            CGFloat textBaseline = size.height / 2 - font.lineHeight / 2 + font.ascender;
+            origin = CGPointMake(onPixels(middle - size.width / 2, scale), onPixels(baseline - textBaseline, scale));
+        } else {
+            // Edges on whole points, so the text stays crisp.
+            origin = CGPointMake(round(middle - size.width / 2), round(CGRectGetMidY(a) + timesDrop - size.height / 2));
+        }
         badge.center = CGPointMake(origin.x + size.width / 2, origin.y + size.height / 2);
     }
     badge.shown = shown;
@@ -478,6 +602,14 @@ void SGAudioQualityPlaceBadge(UIView *unit) {
     }
     [UIView animateWithDuration:kFade delay:0 options:UIViewAnimationOptionAllowUserInteraction | UIViewAnimationOptionBeginFromCurrentState
                      animations:^{ badge.alpha = alpha; } completion:nil];
+}
+
+void SGAudioQualityPlaceBadge(UIView *unit) {
+    placeBadge(unit, NO, 0);
+}
+
+void SGAudioQualityPlaceRedesignedBadge(UIView *unit, CGFloat timesDrop) {
+    placeBadge(unit, YES, timesDrop);
 }
 
 UIView *SGAudioQualityShownBadge(UIView *unit) {

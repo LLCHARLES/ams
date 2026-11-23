@@ -54,8 +54,12 @@ static void tryLyrics(SGLyricsRequestContext *context, NSArray *candidates, NSUI
                                           @"accesskey": stringIn(candidate[@"accesskey"]), @"fmt": @"krc", @"charset": @"utf8"});
     SGLyricsGetJSONTransformIn(context, url, headers(), ^id(id root) {
         id status = [root isKindOfClass:NSDictionary.class] ? root[@"status"] : nil;
-        return [status respondsToSelector:@selector(integerValue)] && [status integerValue] == 200
-            ? SGKuGouLines(root[@"content"]) : nil;
+        if (root && ![status isEqual:@200] && ![status isEqual:@404]) [context noteFailure:YES];
+        if (![status isEqual:@200]) return nil;
+        id payload = root[@"content"];
+        NSArray *lines = SGKuGouLines(payload);
+        if (payload && payload != NSNull.null && ![payload isEqual:@""] && !lines) [context noteFailure:YES];
+        return lines;
     }, ^(NSArray<SGKaraokeLine *> *lines) {
         if (lines) {
             SGLog(@"kugou: lyrics %@ have %lu word timed lines", stringIn(candidate[@"id"]), (unsigned long)lines.count);
@@ -79,6 +83,8 @@ SGLyricsAsk SGKuGouAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *re
     if (ms > 0) search[@"duration"] = @(ms).stringValue;
     SGLyricsGetJSONTransformIn(query.requestContext, SGLyricsURL(kSearch, search), headers(), ^id(id root) {
         id candidates = [root isKindOfClass:NSDictionary.class] ? root[@"candidates"] : nil;
+        if (root && ![candidates isKindOfClass:NSArray.class] && ![SGLyricsField(root, @"status") isEqual:@404])
+            [query.requestContext noteFailure:YES];
         if ([candidates isKindOfClass:NSArray.class] && ![candidates count])
             query.requestContext.emptyNameSearch = SGKuGouAsk;
         NSMutableArray<NSDictionary *> *fitting = [NSMutableArray array];

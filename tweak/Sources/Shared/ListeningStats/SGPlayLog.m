@@ -49,7 +49,8 @@ static BOOL historyInteger(id value, int64_t *out) {
 
 static NSArray<SGPlay *> *localHistory(NSDictionary *root) {
     int64_t version;
-    if (![root[@"format"] isEqual:@"vitrine.listening-history"] ||
+    // Backups already exported under the old name keep exact-row import semantics.
+    if ((![root[@"format"] isEqual:@"retrine.listening-history"] && ![root[@"format"] isEqual:@"vitrine.listening-history"]) ||
         !historyInteger(root[@"version"], &version) || version != 1 ||
         ![root[@"plays"] isKindOfClass:NSArray.class] || [root[@"plays"] count] > SGHistoryPlayLimit) return nil;
     NSMutableArray *plays = [NSMutableArray array];
@@ -69,17 +70,17 @@ static NSArray<SGPlay *> *localHistory(NSDictionary *root) {
 
 NSData *SGHistoryJSON(NSArray<SGPlay *> *plays, NSError **error) {
     if (plays.count > SGHistoryPlayLimit) {
-        if (error) *error = [NSError errorWithDomain:@"VitrineHistory" code:1 userInfo:@{NSLocalizedDescriptionKey:
+        if (error) *error = [NSError errorWithDomain:@"RetrineHistory" code:1 userInfo:@{NSLocalizedDescriptionKey:
             SGL(@"settings.stats.error.export_play_limit", @"History exceeds the one-million-play export limit. Your history on this phone is unchanged.")}];
         return nil;
     }
     NSMutableArray *rows = [NSMutableArray arrayWithCapacity:plays.count];
     for (SGPlay *p in plays) [rows addObject:@{@"end": @(p.end), @"ms": @(p.ms), @"uri": p.uri ?: @"",
         @"title": p.title ?: @"", @"artist": p.artist ?: @"", @"album": p.album ?: @""}];
-    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"format": @"vitrine.listening-history", @"version": @1, @"plays": rows}
+    NSData *data = [NSJSONSerialization dataWithJSONObject:@{@"format": @"retrine.listening-history", @"version": @1, @"plays": rows}
                                                  options:0 error:error];
     if (data.length > SGHistoryFileLimit) {
-        if (error) *error = [NSError errorWithDomain:@"VitrineHistory" code:2 userInfo:@{NSLocalizedDescriptionKey:
+        if (error) *error = [NSError errorWithDomain:@"RetrineHistory" code:2 userInfo:@{NSLocalizedDescriptionKey:
             SGL(@"settings.stats.error.export_size_limit", @"History exceeds the 64 MiB JSON export limit. Your history on this phone is unchanged.")}];
         return nil;
     }

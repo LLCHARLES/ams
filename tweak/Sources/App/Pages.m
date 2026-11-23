@@ -14,7 +14,6 @@
 #import "Shared/LyricsMeanings/Meanings.h"
 #import "Shared/Player/PlayerSettings.h"
 #import "Shared/Player/AudioQuality.h"
-#import "Shared/SponsorBlock/SponsorBlock.h"
 #import "Shared/Sing/Sing.h"
 #import "Native/Appearance/Appearance.h"
 #import "Native/Navbar/Navbar.h"
@@ -33,7 +32,7 @@
 #import "Redesigned/Kit/SGRAccent.h"
 
 NSString *SGRedesignedUIInfoText(void) {
-    return SGL(@"settings.redesign.info", @"Redesigned uses Vitrine's Apple Music-inspired interface. Native keeps Spotify's interface. Appearance settings are separate for each look; shared features work in both. Switching requires a restart.");
+    return SGL(@"settings.redesign.info", @"Redesigned uses Retrine's Apple Music-inspired interface. Native keeps Spotify's interface. Appearance settings are separate for each look; shared features work in both. Switching requires a restart.");
 }
 
 // Below iOS 26 the redesign also needs SGKeyRedesignUntested (Core/SGUIMode.h): whoever calls this has
@@ -135,7 +134,7 @@ UIViewController *SGNavbarPage(void) {
     return SGRedesignedUIStored() ? SGRNavbarSettingsPage() : SGNavbarSettingsPage();
 }
 
-// One shelf for Vitrine's local and open libraries. AutoEq fetches its public index when Headphones opens,
+// One shelf for Retrine's local and open libraries. AutoEq fetches its public index when Headphones opens,
 // and a font still comes from Files. Nothing here depends on a private account or paid catalog.
 UIViewController *SGWorkshopPage(void) {
     NSMutableArray<SGModSection *> *sections = [NSMutableArray array];
@@ -162,8 +161,8 @@ UIViewController *SGWorkshopPage(void) {
     if (fonts.count) [sections addObject:SGSection(SGL(@"settings.workshop.type.header", @"Type"), fonts)];
 
     NSString *intro = SGRedesignedUIStored()
-        ? SGL(@"settings.workshop.intro.redesigned.v2", @"Built-in and open libraries Vitrine can use without an account. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.")
-        : SGL(@"settings.workshop.intro.native.v2", @"Built-in and open libraries Vitrine can use without an account. Visualizers appear here when Redesigned UI is selected. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.");
+        ? SGL(@"settings.workshop.intro.redesigned.v2", @"Built-in and open libraries Retrine can use without an account. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.")
+        : SGL(@"settings.workshop.intro.native.v2", @"Built-in and open libraries Retrine can use without an account. Visualizers appear here when Redesigned UI is selected. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.");
     SGModPage *page = [[SGModPage alloc] initWithTitle:SGL(@"settings.workshop.title", @"Libraries & presets") intro:intro sections:sections footer:nil];
     page.tiles = YES;
     return page;
@@ -207,7 +206,7 @@ static UIViewController *lyricsPage(void) {
         named(translation, @"lyrics.translation");
         [sections addObjectsFromArray:@[
             SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[SGRLyricsTextSizesRow(), SGLyricsWordTimingRow(), SGLyricsRomanisedRow(),
-                SGLyricsJapaneseReadingRow(), SGLyricsFuriganaRow(), SGRLyricsKeepAwakeRow(),
+                SGLyricsJapaneseReadingRow(), SGLyricsFuriganaRow(), SGRLyricsKeepAwakeRow(), SGRLyricsFullRateRow(),
                 SGOptionRow(SGL(@"settings.lyrics.break_labels.title", @"Name the breaks"), SGL(@"settings.lyrics.break_labels.subtitle", @"Intro, Interlude or Outro beside the dots"), SGRKeyLyricsBreakLabels),
                 SGSimplifyTitlesRow(),
                 SGRLyricsHideRow(),
@@ -246,7 +245,6 @@ UIViewController *SGPlayerSettingsPage(void) {
         SGWithTile(songs, @"hand.raised", UIColor.systemRedColor),
     ])];
     [sections addObject:SGSleepTimerSettingsSection()];
-    [sections addObject:SGSponsorBlockSettingsSection()];
     if (native) {
         [sections addObject:SGSection(nil, @[
             SGWithTile(named(SGPageRow(SGL(@"settings.player.now_playing_bar.title", @"Now playing bar"), ^UIViewController *{ return SGNowPlayingBarSettingsPage(); }), @"player.nowplayingbar"), @"rectangle.bottomthird.inset.filled", UIColor.systemPinkColor),
@@ -256,8 +254,9 @@ UIViewController *SGPlayerSettingsPage(void) {
     }
     // Switch to video is the same chip of Spotify's player under either look: a row here, and in the redesign one of the
     // Buttons chips with its Shuffle and Repeat (the native look's are in its Hide on the player section, with their own keys).
-    [sections addObject:native ? SGSection(nil, @[SGHideRow(SGL(@"settings.player.hide_video_switch.title", @"Switch to video"), SGL(@"settings.player.hide_video_switch.subtitle", @"The chip over the title of a song with a music video"), SGKeyHideVideoSwitch)])
-                               : SGRPlayerButtonsSection()];
+    if (native) {
+        [sections addObject:SGSection(nil, @[SGNativeVideoSwitchRow()])];
+    } else [sections addObject:SGRPlayerButtonsSection()];
     // Spotify's full screen cover a tap on the player's cover opens, under either look (Shared/Player/PlayerSettings.h);
     // the next track's artwork and lyrics, fetched ahead under either look (Core/SGOptionalWork.h).
     [sections addObject:SGSection(nil, @[

@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static UIViewController *sg_info, *sg_duration, *sg_floating;
+static UIViewController *sg_info, *sg_duration, *sg_floating, *sg_header;
 static UIView *sg_titleElement;
 static char kColumnKey;
 static CGRect artworkArea, artworkCover;

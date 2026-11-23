@@ -6,6 +6,14 @@
 #import "harness-fail.h"
 
 static NSUInteger walks;
+static NSUInteger classScans;
+static Class *countedClassList(unsigned int *count) {
+    classScans++;
+    return objc_copyClassList(count);
+}
+#define objc_copyClassList countedClassList
+#import "Settings/SGPageStyle.m"
+#undef objc_copyClassList
 
 // SGForEachView reads the window's subviews once per walk, so counting that counts the walks.
 @interface CountingWindow : UIWindow
@@ -109,19 +117,29 @@ static void runChecks(void) {
         EXPECT_WALKS(0, "layouts after the attach");
 
         // A table of a new page finds both.
+        NSUInteger scansBeforeNextPage = classScans;
         UITableView *next = addTable(window);
         EXPECT_INSET(next, 160, "next page");
         EXPECT_INSET(next, 160, "next page again");
-        EXPECT_WALKS(1, "a second table");
+        HARNESS_CHECK(classScans == scansBeforeNextPage);
+        EXPECT_WALKS(0, "a second table");
         playing.frame = CGRectMake(0, 600, 400, 60);
         EXPECT_INSET(next, 200, "now playing bar moved");
         EXPECT_WALKS(0, "a bar moved");
+
+        UIView *late = addBar(bars, "Late_NowPlaying_BarPageImpl", CGRectMake(0, 540, 400, 60));
+        UITableView *latePage = addTable(window);
+        EXPECT_INSET(latePage, 260, "bar class registered after first layout");
+        EXPECT_WALKS(1, "newly discovered bar");
+        [late removeFromSuperview];
+        EXPECT_INSET(latePage, 200, "late bar removed");
+        EXPECT_WALKS(1, "late bar removal");
 
         // A bar taken out of the window is not measured, by any table that had it.
         [playing removeFromSuperview];
         EXPECT_INSET(next, 100, "bar removed");
         EXPECT_INSET(table, 100, "bar removed, first page");
-        EXPECT_WALKS(2, "a bar removed");
+        EXPECT_WALKS(1, "a bar removed");
         EXPECT_INSET(next, 100, "after the removal");
         EXPECT_WALKS(0, "layouts after the removal");
 

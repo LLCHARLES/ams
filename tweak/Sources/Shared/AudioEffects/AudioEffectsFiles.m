@@ -1,10 +1,11 @@
-// The audio effects' file libraries: Documents/Vitrine/Audio effects/<Convolver|DDC|Liveprog>, where the
+// The audio effects' file libraries: Documents/Retrine/Audio effects/<Convolver|DDC|Liveprog>, where the
 // file effects find their files by name. Documents, which the app's backups keep. Every file in them is
 // one the user imported.
 //
 // Threading: any thread (the engine's queue reads the paths too); a library is made once.
 #import <os/lock.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "AudioEffects.h"
 #import "AudioEffectsApply.h"
 
@@ -74,8 +75,10 @@ static void adoptEarlierLibrary(SGDSPFileKind kind, NSString *documents, NSStrin
 
 NSString *SGDSPLibraryDirectory(SGDSPFileKind kind) {
     static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
-    NSString *documents = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    NSString *directory = [[documents stringByAppendingPathComponent:@"Vitrine/Audio effects"] stringByAppendingPathComponent:libraryName(kind)];
+    NSURL *root = SGDataRoot(NSDocumentDirectory);
+    if (!root) return nil;
+    NSString *documents = root.URLByDeletingLastPathComponent.path;
+    NSString *directory = [[root.path stringByAppendingPathComponent:@"Audio effects"] stringByAppendingPathComponent:libraryName(kind)];
     os_unfair_lock_lock(&lock);
     BOOL isDirectory = NO;
     if (![NSFileManager.defaultManager fileExistsAtPath:directory isDirectory:&isDirectory] || !isDirectory) {
@@ -92,6 +95,7 @@ NSString *SGDSPLibraryDirectory(SGDSPFileKind kind) {
 
 NSArray<NSString *> *SGDSPLibraryFiles(SGDSPFileKind kind) {
     NSString *directory = SGDSPLibraryDirectory(kind);
+    if (!directory) return @[];
     NSArray<NSString *> *extensions = SGDSPFileExtensions(kind);
     NSMutableArray<NSString *> *names = [NSMutableArray array];
     for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:nil]) {
@@ -145,6 +149,10 @@ NSString *SGDSPImportFile(SGDSPFileKind kind, NSURL *url, NSError **error) {
     }
     NSString *path = [SGDSPLibraryDirectory(kind) stringByAppendingPathComponent:name];
     NSError *writeError = nil;
+    if (!path) {
+        if (error) *error = fileError(@"The audio effects library is unavailable.");
+        return nil;
+    }
     if (![data writeToFile:path options:NSDataWritingAtomic error:&writeError]) {
         if (error) *error = writeError;
         return nil;

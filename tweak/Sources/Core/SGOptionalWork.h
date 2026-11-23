@@ -14,8 +14,8 @@ typedef NS_ENUM(NSUInteger, SGOptionalWorkReason) {
     SGOptionalWorkExpensive,
 };
 
-// Pure decision seam: callers/tests supply a coherent snapshot. Lyrics allow expensive paths;
-// artwork does not. An unknown path is unavailable until the monitor's first update.
+// Pure decision seam: callers/tests supply a coherent snapshot. Foreground lyrics allow expensive
+// paths; background advance work and artwork do not. Unknown paths wait for the first update.
 SGOptionalWorkReason SGOptionalWorkReasonForInputs(BOOL lowPower, NSProcessInfoThermalState thermal,
                                                   BOOL pathSatisfied, BOOL constrained, BOOL expensive,
                                                   BOOL allowsExpensive);

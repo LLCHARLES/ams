@@ -101,9 +101,9 @@ int main(void) {
         NSString *fileName = nil;
         NSData *data = SGDSPPresetFileData(@"Late/night: mine", &fileName);
         check(data != nil, @"a saved preset becomes a file");
-        check([fileName isEqualToString:@"Late-night- mine.vitrine-preset.json"], [NSString stringWithFormat:@"its file name is safe for Files (%@)", fileName]);
+        check([fileName isEqualToString:@"Late-night- mine.retrine-preset.json"], [NSString stringWithFormat:@"its file name is safe for Files (%@)", fileName]);
         NSDictionary *file = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-        check([file[@"format"] isEqual:@"vitrine.audio-preset"] && [file[@"version"] isEqual:@1], @"the file says what it is");
+        check([file[@"format"] isEqual:@"retrine.audio-preset"] && [file[@"version"] isEqual:@1], @"the file says what it is");
         check(file[@"values"][SGKeyDSP] == nil, @"the master switch stays out of the file");
         NSString *name = nil, *error = nil;
         NSDictionary *values = readFile(data, &name, &error);

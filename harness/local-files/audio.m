@@ -1,5 +1,5 @@
 // Checks LocalAudioImport.m as the tweak compiles it: a taken name gets a number and is never overwritten,
-// a copy leaves the original, only what Vitrine imported is listed, and a delete touches only a listed file.
+// a copy leaves the original, only what Retrine imported is listed, and a delete touches only a listed file.
 // Runs in a folder and a defaults suite of its own under the home it is given.
 #import "Shared/LocalFiles/LocalAudioImport.h"
 #import "../harness-fail.h"
@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
         NSURL *documents = makeDirectory(root, @"Documents");
         NSURL *picked = makeDirectory(root, @"picked");
         NSURL *other = makeDirectory(root, @"other");
-        NSString *suite = @"vitrine.local-audio-check";
+        NSString *suite = @"retrine.local-audio-check";
         [NSUserDefaults.standardUserDefaults removePersistentDomainForName:suite];
         NSUserDefaults *store = [[NSUserDefaults alloc] initWithSuiteName:suite];
 

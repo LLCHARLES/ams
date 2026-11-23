@@ -44,6 +44,8 @@ void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer);
 SPTPlayerState *SGPlayerState(void);
 // Main thread. NO also before Connect has reported its playback location.
 BOOL SGPlayerPlaybackIsLocal(void);
+// NO until Connect has reported a manager; an unknown location is not a remote session.
+BOOL SGPlayerPlaybackIsRemote(void);
 // Main thread, object/userInfo nil; emitted only when the local-playback fact changes.
 FOUNDATION_EXPORT NSNotificationName const SGPlayerPlaybackLocationDidChangeNotification;
 // The SPTEsperantoPlayer the mod observes, nil until the app has added its first observer.

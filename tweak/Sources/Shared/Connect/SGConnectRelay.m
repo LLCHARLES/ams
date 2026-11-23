@@ -12,7 +12,6 @@
 #import <fcntl.h>
 #import <netinet/in.h>
 #import <os/lock.h>
-#import <poll.h>
 #import <stdatomic.h>
 #import <string.h>
 #import <time.h>
@@ -24,11 +23,10 @@ ssize_t (*SGConnectRealSendto)(int, const void *, size_t, int, const struct sock
 ssize_t (*SGConnectRealSendmsg)(int, const struct msghdr *, int);
 ssize_t (*SGConnectRealRecvfrom)(int, void *, size_t, int, struct sockaddr *, socklen_t *);
 
-// A round ends after kRoundLength, after kQuietRoundLength having sent nothing, after kQuietRoundLength
-// once nothing has been sent for kSendGap, or after kMaxReplies answers. Answers handed over are kept for
+// A readiness-driven round ends at one deadline or after kMaxReplies answers. Answers handed over are kept for
 // recvfrom kRecordLife at most, kMaxRecords of them.
 static const uint64_t kMillisecond = NSEC_PER_MSEC;
-static const uint64_t kRoundLength = 1200 * kMillisecond, kQuietRoundLength = 700 * kMillisecond, kSendGap = 450 * kMillisecond;
+static const uint64_t kRoundLength = 1200 * kMillisecond;
 static const uint64_t kRecordLife = 15 * NSEC_PER_SEC;
 // The same question is relayed for an address family at most once in this long. Spotify asks it from four sockets
 // every two seconds or so while it plays, and on a busy Wi-Fi each round brings dozens of answers: with no limit
@@ -40,6 +38,14 @@ enum { kMaxRounds = 4, kMaxAddresses = 64, kMaxReplies = 32, kMaxRecords = 64 };
 static uint64_t now(void) { return clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW); }
 
 static os_unfair_lock sg_lock = OS_UNFAIR_LOCK_INIT;
+static _Atomic BOOL sg_discoveryActive = YES;
+static NSNotificationName const SGConnectReceiversChanged = @"SGConnectReceiversChanged";
+static NSNotificationName const SGConnectDiscoveryStopped = @"SGConnectDiscoveryStopped";
+
+void SGConnectSetDiscoveryActive(BOOL active) {
+    BOOL was = atomic_exchange(&sg_discoveryActive, active);
+    if (was && !active) [NSNotificationCenter.defaultCenter postNotificationName:SGConnectDiscoveryStopped object:nil];
+}
 
 #pragma mark - receivers
 
@@ -52,6 +58,7 @@ void SGConnectSetReceiver(NSString *name, NSArray<NSData *> *addresses) {
     if (!sg_receivers) sg_receivers = [NSMutableDictionary dictionary];
     sg_receivers[name] = kept;
     os_unfair_lock_unlock(&sg_lock);
+    [NSNotificationCenter.defaultCenter postNotificationName:SGConnectReceiversChanged object:nil];
 }
 
 NSArray<NSData *> *SGConnectReceiverAddresses(void) {
@@ -215,11 +222,81 @@ static int openSocket(int family) {
     return s;
 }
 
-static void runRound(int spotify, int family, in_port_t port, NSData *query) {
-    // An IPv4 socket cannot be told an IPv6 source, so it hears from IPv4 receivers only.
-    int sockets[2] = {openSocket(AF_INET), family == AF_INET6 ? openSocket(AF_INET6) : -1};
-    int sender = sockets[family == AF_INET6];
-    struct sockaddr_storage loopback = {0};
+@interface SGConnectRound : NSObject {
+    int sockets[2], sender, spotify, sentCount, replies;
+    struct sockaddr_storage loopback, sent[kMaxAddresses];
+    dispatch_source_t readers[2], deadline;
+    dispatch_queue_t queue;
+    NSData *query, *key;
+    BOOL finished;
+}
+- (void)start:(int)socket family:(int)family port:(in_port_t)port query:(NSData *)bytes key:(NSData *)roundKey;
+@end
+
+@implementation SGConnectRound
+- (void)finish {
+    if (finished) return;
+    finished = YES;
+    [NSNotificationCenter.defaultCenter removeObserver:self];
+    for (int k = 0; k < 2; k++) {
+        if (readers[k]) { dispatch_source_cancel(readers[k]); readers[k] = nil; }
+    }
+    if (deadline) { dispatch_source_cancel(deadline); deadline = nil; }
+    os_unfair_lock_lock(&sg_lock);
+    [sg_rounds removeObject:key];
+    os_unfair_lock_unlock(&sg_lock);
+}
+- (void)changed {
+    dispatch_async(queue, ^{ [self send]; });
+}
+- (void)stopped {
+    dispatch_async(queue, ^{ [self finish]; });
+}
+- (void)send {
+    if (finished) return;
+    if (!atomic_load(&sg_discoveryActive)) { [self finish]; return; }
+    for (NSData *address in SGConnectReceiverAddresses()) {
+        if (sentCount == kMaxAddresses) break;
+        const struct sockaddr *to = address.bytes;
+        if (address.length < sizeof(struct sockaddr) ||
+            (to->sa_family != AF_INET && to->sa_family != AF_INET6) ||
+            address.length < lengthOf(to->sa_family)) continue;
+        int s = sockets[to->sa_family == AF_INET6];
+        BOOL known = NO;
+        for (int i = 0; i < sentCount && !known; i++) known = sameAddress((const struct sockaddr *)&sent[i], to);
+        if (s < 0 || known) continue;
+        memcpy(&sent[sentCount++], to, lengthOf(to->sa_family));
+        sendto(s, query.bytes, query.length, 0, to, lengthOf(to->sa_family));
+    }
+}
+- (void)receive:(int)socket {
+    if (finished) return;
+    uint8_t buffer[SGMDNSMaxLength + 1];
+    const uint8_t *bytes = query.bytes;
+    uint16_t queryID = (uint16_t)(bytes[0] << 8 | bytes[1]);
+    while (replies < kMaxReplies) {
+        struct sockaddr_storage from = {0};
+        struct iovec part = {buffer, sizeof buffer};
+        struct msghdr message = {.msg_name = &from, .msg_namelen = sizeof from, .msg_iov = &part, .msg_iovlen = 1};
+        ssize_t length = recvmsg(socket, &message, 0);
+        if (length < 0) break;
+        if (message.msg_flags & MSG_TRUNC || length > SGMDNSMaxLength) continue;
+        BOOL known = NO;
+        for (int i = 0; i < sentCount && !known; i++) known = sameAddress((const struct sockaddr *)&sent[i], (const struct sockaddr *)&from);
+        if (!known || !SGMDNSIsConnectReply(buffer, (size_t)length, queryID)) continue;
+        replies++;
+        handOver(spotify, buffer, (size_t)length, &from, sender, &loopback);
+    }
+    if (replies == kMaxReplies) [self finish];
+}
+- (void)start:(int)socket family:(int)family port:(in_port_t)port query:(NSData *)bytes key:(NSData *)roundKey {
+    spotify = socket; query = bytes; key = roundKey;
+    queue = dispatch_queue_create("spotifyglass.connect.round", DISPATCH_QUEUE_SERIAL);
+    // Register and resume every source before a lifecycle notification may tear them down.
+    dispatch_sync(queue, ^{
+    sockets[0] = openSocket(AF_INET);
+    sockets[1] = family == AF_INET6 ? openSocket(AF_INET6) : -1;
+    sender = sockets[family == AF_INET6];
     if (family == AF_INET6) {
         struct sockaddr_in6 *to = (struct sockaddr_in6 *)&loopback;
         *to = (struct sockaddr_in6){.sin6_len = sizeof *to, .sin6_family = AF_INET6, .sin6_port = port, .sin6_addr = in6addr_loopback};
@@ -228,56 +305,33 @@ static void runRound(int spotify, int family, in_port_t port, NSData *query) {
         *to = (struct sockaddr_in){.sin_len = sizeof *to, .sin_family = AF_INET, .sin_port = port, .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
     }
 
-    const uint8_t *bytes = query.bytes;
-    uint16_t queryID = (uint16_t)(bytes[0] << 8 | bytes[1]);
-    struct sockaddr_storage sent[kMaxAddresses];
-    int sentCount = 0, replies = 0;
-    uint64_t start = now(), lastSend = 0;
-    uint8_t buffer[SGMDNSMaxLength + 1];
-
-    while (sender >= 0) {
-        // Receivers resolved while the round runs are sent to as well.
-        for (NSData *address in SGConnectReceiverAddresses()) {
-            if (sentCount == kMaxAddresses) break;
-            const struct sockaddr *to = address.bytes;
-            if (address.length < lengthOf(to->sa_family)) continue;
-            int s = sockets[to->sa_family == AF_INET6];
-            BOOL known = NO;
-            for (int i = 0; i < sentCount && !known; i++) known = sameAddress((const struct sockaddr *)&sent[i], to);
-            if (s < 0 || known) continue;
-            memcpy(&sent[sentCount++], to, lengthOf(to->sa_family));
-            if (sendto(s, bytes, query.length, 0, to, lengthOf(to->sa_family)) >= 0) lastSend = now();
-        }
-
-        uint64_t time = now(), elapsed = time - start;
-        if (elapsed >= kRoundLength || replies >= kMaxReplies) break;
-        if (elapsed >= kQuietRoundLength && (!lastSend || time - lastSend >= kSendGap)) break;
-
-        struct pollfd ready[2] = {{sockets[0], POLLIN, 0}, {sockets[1], POLLIN, 0}};
-        if (poll(ready, 2, 50) <= 0) continue;
-        for (int k = 0; k < 2; k++) {
-            if (!(ready[k].revents & POLLIN)) continue;
-            while (replies < kMaxReplies) {
-                struct sockaddr_storage from = {0};
-                struct iovec part = {buffer, sizeof buffer};
-                struct msghdr message = {.msg_name = &from, .msg_namelen = sizeof from, .msg_iov = &part, .msg_iovlen = 1};
-                ssize_t length = recvmsg(sockets[k], &message, 0);
-                if (length < 0) break;
-                if (message.msg_flags & MSG_TRUNC || length > SGMDNSMaxLength) continue;
-                BOOL known = NO;
-                for (int i = 0; i < sentCount && !known; i++) known = sameAddress((const struct sockaddr *)&sent[i], (const struct sockaddr *)&from);
-                if (!known || !SGMDNSIsConnectReply(buffer, (size_t)length, queryID)) continue;
-                replies++;
-                handOver(spotify, buffer, (size_t)length, &from, sender, &loopback);
-            }
-        }
+    if (sender < 0) {
+        for (int k = 0; k < 2; k++) if (sockets[k] >= 0) close(sockets[k]);
+        [self finish];
+        return;
     }
+    // Sources retain the round until finish clears them; close only after their last handler.
     for (int k = 0; k < 2; k++) {
-        if (sockets[k] >= 0) close(sockets[k]);
+        int fd = sockets[k];
+        if (fd < 0) continue;
+        readers[k] = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0, queue);
+        dispatch_source_set_event_handler(readers[k], ^{ [self receive:fd]; });
+        dispatch_source_set_cancel_handler(readers[k], ^{ close(fd); });
+        dispatch_resume(readers[k]);
     }
+    deadline = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    dispatch_source_set_timer(deadline, dispatch_time(DISPATCH_TIME_NOW, kRoundLength), DISPATCH_TIME_FOREVER, 0);
+    dispatch_source_set_event_handler(deadline, ^{ [self finish]; });
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(changed) name:SGConnectReceiversChanged object:nil];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(stopped) name:SGConnectDiscoveryStopped object:nil];
+    dispatch_resume(deadline);
+    [self changed];
+    });
 }
+@end
 
 BOOL SGConnectRelayQuery(int socket, const void *query, size_t length) {
+    if (!atomic_load(&sg_discoveryActive)) return NO;
     int type = 0;
     socklen_t typeLength = sizeof type;
     if (getsockopt(socket, SOL_SOCKET, SO_TYPE, &type, &typeLength) != 0 || type != SOCK_DGRAM) return NO;
@@ -337,10 +391,7 @@ BOOL SGConnectRelayQuery(int socket, const void *query, size_t length) {
     if (say) SGLog(@"connect: %llu rounds and %llu repeats held back in the last minute", saidRan, saidSkipped);
     if (!allowed) return YES;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        runRound(socket, family, port, bytes);
-        os_unfair_lock_lock(&sg_lock);
-        [sg_rounds removeObject:key];
-        os_unfair_lock_unlock(&sg_lock);
+        [[SGConnectRound new] start:socket family:family port:port query:bytes key:key];
     });
     return YES;
 }

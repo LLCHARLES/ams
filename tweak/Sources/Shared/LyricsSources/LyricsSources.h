@@ -36,16 +36,25 @@ UIViewController *SGLyricsTypesPage(void);
 SGModRow *SGLyricsTypesRow(void);
 
 @class SGLyricsResult, SGLyricsQuery;
+// Main queue: background consumers that need timed lines now, not a hidden lyric view.
+BOOL SGLyricsBackgroundNeeded(void);
+void SGLyricsCancelPrefetch(NSString *trackID);
+void SGLyricsResumeDeferred(void);
 // Calls back on the main queue, nil when the source has nothing for the track.
 typedef void (^SGLyricsAsk)(SGLyricsQuery *query, void (^done)(SGLyricsResult *result));
 // One invocation, never a provider-wide or track-wide counter. Subrequests OR their outcomes.
 @interface SGLyricsRequestContext : NSObject
 @property (atomic, readonly) BOOL failed;
+@property (atomic, readonly) BOOL cancelled;
 // Set only for a successful, genuinely empty name search, before matching or fetching lyrics.
 // The continuation must search by name only, never repeat an ID or ISRC lookup.
 @property (atomic, copy) SGLyricsAsk emptyNameSearch;
 - (void)noteFailure:(BOOL)failed;
 - (void)noteResponse:(NSURLResponse *)response error:(NSError *)error;
+- (void)trackTask:(NSURLSessionTask *)task;
+- (void)cancelRequests;
+- (void)onCancel:(dispatch_block_t)action;
+- (void)finishRequests;
 @end
 
 // A manual LRCLIB choice, kept by track id across launches. At most 500 pins.
@@ -136,11 +145,15 @@ void SGLyricsPageLines(NSArray<SGKaraokeLine *> *lines, NSArray<NSNumber *> **st
 @property (nonatomic, copy) SGLyricsAsk ask;
 @end
 
-void SGLyricsInvoke(SGLyricsProvider *provider, SGLyricsQuery *query,
+SGLyricsRequestContext *SGLyricsInvoke(SGLyricsProvider *provider, SGLyricsQuery *query,
                     BOOL (^current)(void),
                     void (^done)(SGLyricsResult *result, BOOL failed));
 
 // Shared backoff for empty-source retries and provisional-answer recovery.
+static const NSTimeInterval SGLyricsHedgeDelaySeconds = 2;
+static const NSTimeInterval SGLyricsRequestTimeoutSeconds = 5;
+static const NSTimeInterval SGLyricsWalkBudgetSeconds = 8;
+static const NSTimeInterval SGLyricsCredentialPauseSeconds = 600;
 static const NSTimeInterval SGLyricsRetryPause = 10, SGLyricsRetryPauseMost = 60;
 static const NSUInteger SGLyricsRecoveryTries = 4;
 // A write and its retirement serialize on this lease, including the actual disk commit.
@@ -163,6 +176,8 @@ void SGKaraokeDeferPersistence(NSString *track);
 BOOL SGLyricsRecovering(NSString *track);
 void SGLyricsRetire(NSString *track);
 void SGLyricsForgetAnswer(NSString *track);
+// Import edits retire the old walk and complete its consumers with nil. Disk is untouched.
+void SGLyricsForgetAnswerForImportChange(NSString *track);
 // Main queue, only authoritative player reports, not state getters or seeks.
 void SGLyricsPlaybackChanged(NSString *track);
 void SGKaraokeCancelStoreWrite(NSString *track);
@@ -178,6 +193,11 @@ BOOL SGLyricsEnabled(void);   // any source at all is on
 
 // Asks the sources in order and merges what they give, on the main queue. nil when none had lyrics.
 void SGLyricsFetch(NSString *trackID, void (^done)(SGLyricsResult *result));
+// Main queue. A failed lookup is not a catalog miss; good kept lines always take precedence.
+BOOL SGLyricsLoadFailed(NSString *trackID);
+void SGLyricsNoteLoadFailure(NSString *trackID, BOOL failed);
+void SGLyricsNoteSpotifyLoadFailure(NSString *trackID, BOOL failed);
+void SGLyricsRetry(NSString *trackID);
 // NO once every source has said it has nothing for the track; safe from any thread.
 BOOL SGLyricsMayHave(NSString *trackID);
 // Starts the walk for a track before anyone has asked, so the answer is in when Spotify's request
@@ -247,7 +267,7 @@ void SGLyricsSourceRequestIn(SGLyricsRequestContext *context, NSURL *url, NSDict
 SGLyricsResult *SGQQMusicResult(id payload);
 // Aggregate diagnostic count only; transports also record the outcome on their invocation context.
 void SGLyricsNoteReply(NSURLResponse *response, NSError *error);
-// What it counts as lost: the network failed, or the server answered 429 or 5xx.
+// A network error or non-success HTTP status, except a catalog's explicit 404 miss.
 BOOL SGLyricsReplyFailed(NSURLResponse *response, NSError *error);
 
 // SGTTML.m. Apple Music's TTML as timed lines, the voices already turned into alignments and each
@@ -481,6 +501,8 @@ void SGLyricsChooseSource(NSString *trackID, NSString *key);
 void SGLyricsChooseAutomatic(NSString *trackID);
 // A walk under way at the track's first pick has ended with `lyrics`: that is what Automatic puts back.
 void SGLyricsNoteOrderChoice(NSString *trackID, SGLyricsResult *lyrics);
+// The next switch to Automatic must resolve again, without changing the current pick.
+void SGLyricsForgetAutomaticFallback(NSString *trackID);
 // A walk found the track's pick `key` answering no lines, or switched off: the pick goes, so the menu shows
 // Automatic over the order's answer the walk goes on to. Nothing when the track's pick is another by now.
 void SGLyricsDropChoice(NSString *trackID, NSString *key);

@@ -6,6 +6,7 @@ void runFor(NSTimeInterval seconds);
 SGKaraokeLine *lineOf(NSString *text, NSInteger start, NSInteger end);
 SPTPlayerState *harnessState(NSString *uri, NSString *title);
 void harnessLines(NSArray *lines);
+void harnessPosition(NSInteger position);
 void harnessMetadata(NSDictionary *metadata);
 NSDictionary *harnessSystem(void);
 NSUInteger harnessSets(void);

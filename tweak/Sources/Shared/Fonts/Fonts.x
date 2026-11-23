@@ -156,13 +156,25 @@ static CGFloat fitScale(UIFontWeight weight) {
 %end
 %end
 
+// Nothing stored is Spotify's font in the native look and San Francisco in the redesign, which draws its own text in
+// it: two families on one screen read as wrong next to the Music app. A stored choice, Spotify's included, wins.
+static SGAppFont defaultFont(void) {
+    return SGRedesignedUI() ? SGAppFontSystem : SGAppFontSpotify;
+}
+
 SGAppFont SGAppFontChosen(void) {
-    NSInteger font = SGInt(SGKeyAppFont, SGAppFontSpotify);
-    return font >= SGAppFontSpotify && font <= SGAppFontLibrary ? font : SGAppFontSpotify;
+    NSInteger font = SGInt(SGKeyAppFont, defaultFont());
+    return font >= SGAppFontSpotify && font <= SGAppFontLibrary ? font : defaultFont();
+}
+
+SGAppFont SGAppFontDrawn(void) {
+    return sg_font;
 }
 
 NSArray<NSString *> *SGAppFontNames(void) {
-    return @[SGL(@"settings.font.choice.default", @"Default"), @"San Francisco", @"SF Rounded", @"New York", @"SF Mono"];
+    // Spotify's font is the default only in the native look; the redesign names it, as San Francisco is its default.
+    NSString *spotify = SGRedesignedUI() ? @"Spotify Mix" : SGL(@"settings.font.choice.default", @"Default");
+    return @[spotify, @"San Francisco", @"SF Rounded", @"New York", @"SF Mono"];
 }
 
 NSArray<NSString *> *SGAppFontFamilies(void) {
@@ -182,6 +194,7 @@ NSArray<NSString *> *SGAppFontFamilies(void) {
         sg_family = SGRegisterCustomFont();
         if (!sg_family || spotifys(sg_family)) {
             SGLog(@"fonts: the imported font is not there, Spotify's stays");
+            sg_font = SGAppFontSpotify;
             return;
         }
     }
@@ -189,6 +202,7 @@ NSArray<NSString *> *SGAppFontFamilies(void) {
         NSString *name = [NSUserDefaults.standardUserDefaults stringForKey:SGKeyAppFontFamily];
         if (![SGAppFontFamilies() containsObject:name]) {
             SGLog(@"fonts: the family %@ is not on this iPhone, Spotify's stays", name);
+            sg_font = SGAppFontSpotify;
             return;
         }
         sg_family = name;
@@ -200,6 +214,7 @@ NSArray<NSString *> *SGAppFontFamilies(void) {
         sg_family = identifier ? SGFontLibraryRegister(identifier) : nil;
         if (!sg_family) {
             SGLog(@"fonts: the downloaded family %@ is not there, Spotify's stays", identifier);
+            sg_font = SGAppFontSpotify;
             return;
         }
     }

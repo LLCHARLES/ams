@@ -6,6 +6,7 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "AIServicesInternal.h"
 
+// Stable Keychain service for existing keys, including deletion.
 static NSString *const kService = @"Vitrine.OpenAI", *const kLegacyAccount = @"api-key";
 static NSString *const kBase = @"https://api.openai.com/v1", *const kModel = @"gpt-4o-mini";
 static NSMutableDictionary *sg_done;

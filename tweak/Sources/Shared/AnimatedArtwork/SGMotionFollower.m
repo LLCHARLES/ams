@@ -10,6 +10,19 @@
 @interface SGMotionFollower () <SGPlayerStateObserver>
 @end
 
+// artistName can be only the lead. Use the structured credits when Spotify supplied them.
+static NSString *songArtists(SPTPlayerTrack *track, NSDictionary *metadata) {
+    NSString *lead = metadata[@"artist_name"];
+    if (![lead isKindOfClass:NSString.class] || !lead.length || !metadata[@"artist_name:1"]) return track.artistName;
+    NSMutableArray *names = [NSMutableArray arrayWithObject:lead];
+    for (NSUInteger i = 1; ; i++) {
+        NSString *name = metadata[[NSString stringWithFormat:@"artist_name:%lu", (unsigned long)i]];
+        if (![name isKindOfClass:NSString.class] || !name.length) break;
+        [names addObject:name];
+    }
+    return [names componentsJoinedByString:@", "];
+}
+
 @implementation SGMotionFollower {
     BOOL (^_begin)(NSString *, SPTPlayerState *);
     void (^_found)(NSString *, NSURL *);
@@ -80,7 +93,7 @@
     if (!_walked) { [self fetchAhead]; return; }
     NSDictionary *metadata = [state.track.metadata isKindOfClass:NSDictionary.class] ? state.track.metadata : nil;
     __weak SGMotionFollower *weakSelf = self;
-    _currentTicket = SGMotionRequestClip(uri, canvas, state.track.artistName, metadata[@"album_title"], SGMotionPixels(), ^(NSURL *file, NSString *source) {
+    _currentTicket = SGMotionRequestAlbumSongClip(uri, canvas, songArtists(state.track, metadata), metadata[@"album_title"], state.track.trackTitle, metadata[@"album_uri"], SGMotionPixels(), ^(NSURL *file, NSString *source) {
         SGMotionFollower *follower = weakSelf;
         if (!follower || walk != follower->_walk) return;
         follower->_source = source;
@@ -102,7 +115,7 @@
     if (!allowed) return;
     _ahead = uri;
     NSDictionary *metadata = [track.metadata isKindOfClass:NSDictionary.class] ? track.metadata : nil;
-    _aheadTicket = SGMotionRequestClip(uri, SGMotionCanvasIn(metadata), track.artistName, metadata[@"album_title"], SGMotionPixels(),
+    _aheadTicket = SGMotionRequestAlbumSongClip(uri, SGMotionCanvasIn(metadata), songArtists(track, metadata), metadata[@"album_title"], track.trackTitle, metadata[@"album_uri"], SGMotionPixels(),
                     ^(NSURL *file, NSString *source) {
         SGLog(@"motion: the next track's clip fetched ahead: %@", file ? source : @"none");
     });
@@ -114,6 +127,7 @@
     _currentTicket = _aheadTicket = nil;
     _ahead = nil;
     _track = nil;
+    _walked = NO;
     _walk++;
     SPTPlayerState *state = SGPlayerState();
     if (state) [self playerStateDidChange:state];

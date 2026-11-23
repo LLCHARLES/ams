@@ -181,6 +181,16 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
 
 SGMotionTicket *SGMotionRequestClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, CGFloat pixels,
                                    void (^done)(NSURL *file, NSString *source)) {
+    return SGMotionRequestSongClip(uri, canvas, artist, album, nil, pixels, done);
+}
+
+SGMotionTicket *SGMotionRequestSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
+                                       CGFloat pixels, void (^done)(NSURL *file, NSString *source)) {
+    return SGMotionRequestAlbumSongClip(uri, canvas, artist, album, song, nil, pixels, done);
+}
+
+SGMotionTicket *SGMotionRequestAlbumSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
+                                           NSString *albumURI, CGFloat pixels, void (^done)(NSURL *file, NSString *source)) {
     SGMotionTicket *ticket = [SGMotionTicket new];
     NSArray<NSString *> *order = SGMotionSourceOrder();
     // The walk holds itself until it ends, when it lets go.
@@ -213,7 +223,7 @@ SGMotionTicket *SGMotionRequestClip(NSString *uri, NSURL *canvas, NSString *arti
                 else next(nil);
             });
         } else {
-            ticket.child = SGMotionRequestAlbumCover(artist, album, pixels, next);
+            ticket.child = SGMotionRequestSongCover(artist, album, song, albumURI, uri, pixels, next);
         }
     };
     ask = step;
@@ -224,7 +234,7 @@ SGMotionTicket *SGMotionRequestClip(NSString *uri, NSURL *canvas, NSString *arti
 SGModRow *SGMotionSourcesRow(void) {
     SGModRow *row = SGPageRow(SGL(@"settings.artwork.sources.row.title", @"Artwork sources"), ^UIViewController *{
         return SGSourcesPageMake(SGL(@"settings.artwork.sources.title", @"Artwork sources"), SGL(@"settings.artwork.sources.intro", @"Asked top to bottom until one has a clip for the track. Apple Music is "
-                                                     @"asked for the album by its name; it never sees your account."),
+                                                     @"asked for the album by name, then by barcode or a track's recording code if needed. It never sees your account."),
                                  allSources(), ^NSArray<NSString *> * { return SGMotionSourceOrder(); },
                                  ^(NSArray<NSString *> *keys) { [NSUserDefaults.standardUserDefaults setObject:keys forKey:SGKeyMotionSources]; });
     });

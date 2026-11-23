@@ -194,7 +194,7 @@ def main():
         compute_precision=ct.precision.FLOAT16,
         minimum_deployment_target=ct.target.iOS18,
     )
-    package.short_description = "Karaoke's light voice model: Mini-BS-RoFormer-18M's vocals (HiDolen, MIT), exported by Vitrine"
+    package.short_description = "Karaoke's light voice model: Mini-BS-RoFormer-18M's vocals (HiDolen, MIT), exported by Retrine"
     path = os.path.join(out, "separator-light.mlpackage")
     package.save(path)
     subprocess.run(["xcrun", "coremlcompiler", "compile", path, out], check=True)

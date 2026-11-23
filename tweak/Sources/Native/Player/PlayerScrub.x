@@ -9,6 +9,7 @@
 // NowPlaying_ECMKit.SliderNowPlaying (a UISlider too) and Encore's SeekBarView (a drag recognizer); which
 // of them "New progress slider" brings is not proven, so they are left as Spotify has them.
 #import "Core/SGCore.h"
+#import "Shared/SponsorBlock/SponsorBlock.h"
 
 // The player's vertical list (the string is in 9.1.78's binary), so a sideways list inside it is not the one held.
 static NSString *const kListIdentifier = @"scrolling_npv_collection_view_accessibility_identifier";
@@ -60,8 +61,27 @@ static void scrubEnded(void) {
 }
 %end
 
+// SponsorBlock's segments on Spotify's own track (Shared/SponsorBlock/SponsorBlockMarkers.m), installed only with
+// the progress bar switch on. Slightly translucent, so they read as marks on Spotify's bar, not a second bar.
+static const double kSponsorBlockMarksOpacity = 0.7;
+
+%group SGSponsorBlockMarks
+%hook _TtCO17NowPlaying_ECMKit11ProgressBar6Slider
+- (void)layoutSubviews {
+    %orig;
+    SGSponsorBlockMarksLaidOut((UISlider *)self);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+    if (((UIView *)self).window) SGSponsorBlockMarksShown((UISlider *)self, kSponsorBlockMarksOpacity);
+}
+%end
+%end
+
 %ctor {
     if (!SGNativeUI()) return;
     %init;
+    if (SGSponsorBlockMarkersEnabled() && NSClassFromString(@"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider")) %init(SGSponsorBlockMarks);
     SGRequireClasses(@[@"_TtCO17NowPlaying_ECMKit11ProgressBar6Slider"]);
 }

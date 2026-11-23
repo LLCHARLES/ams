@@ -88,10 +88,20 @@ static void ask(SGLyricsQuery *query, NSDictionary *parameters, BOOL fallback, B
     SGLyricsSourceRequestIn(query.requestContext, url, nil, nil, ^(NSData *data, NSInteger status) {
         __block BOOL empty = NO;
         SGLyricsTransform(^id {
-            id root = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            id root = data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
             id rows = SGLyricsField(root, @"lyrics");
-            empty = status == 404 || ([rows isKindOfClass:NSArray.class] && ![rows count]);
-            return SGLyricsPlusResult(root);
+            id sources = SGLyricsField(SGLyricsField(root, @"processingTime"), @"sourcesStatus");
+            BOOL upstreamFailed = NO;
+            for (id source in [sources isKindOfClass:NSDictionary.class] ? [sources allValues] : @[]) {
+                id outcome = SGLyricsField(source, @"status");
+                if ([outcome isEqual:@"RTO"] || [outcome isEqual:@"BAD"]) upstreamFailed = YES;
+            }
+            [query.requestContext noteFailure:upstreamFailed ||
+                ((status == 200 || status == 404) && ![root isKindOfClass:NSDictionary.class])];
+            empty = !upstreamFailed && (status == 404 || ([rows isKindOfClass:NSArray.class] && ![rows count]));
+            SGLyricsResult *result = status == 200 ? SGLyricsPlusResult(root) : nil;
+            if (status == 200 && !empty && !result) [query.requestContext noteFailure:YES];
+            return result;
         }, ^(SGLyricsResult *result) {
         if (!result && !fallback) { ask(query, parameters, YES, empty, done); return; }
         if (!result && empty && priorEmpty) query.requestContext.emptyNameSearch = SGLyricsPlusAsk;

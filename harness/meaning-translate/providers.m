@@ -69,7 +69,7 @@ static NSArray *translate(NSArray *texts) {
 }
 + (void)translate:(NSArray<NSString *> *)texts to:(NSString *)tag from:(UIView *)view done:(void (^)(NSArray<NSString *> *, NSString *))done {
     if (!languagesInstalled && view) { preparedLanguages = YES; presentingView = view; languagesInstalled = YES; }
-    done(languagesInstalled ? translate(texts) : nil, languagesInstalled ? nil : @"vitrine.translation.languagesMissing");
+    done(languagesInstalled ? translate(texts) : nil, languagesInstalled ? nil : @"retrine.translation.languagesMissing");
 }
 + (void)translateWithAppleIntelligence:(NSArray<NSString *> *)texts to:(NSString *)tag song:(NSString *)song
                               progress:(void (^)(NSArray<NSString *> *))progress done:(void (^)(NSArray<NSString *> *, NSString *))done {

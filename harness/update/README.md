@@ -30,3 +30,8 @@ release only with the switch on, never a version below the build's.
 
 `footers` uses cached releases without a network request and exits after checking that the Updates
 page's action, notice and changelog sections all have no footer view and minimal footer height.
+
+`cache-check` (build as `1.0.0-beta.35`) opens the real page over a recent beta.34 cache and answers
+the build-change check with a local GitHub fixture that still lists only beta.34. It checks the intro
+and notes for older, semantically equal and newer releases, and that a second check stays cached.
+Run again with `cache-check legacy` for a cache with no recorded build.

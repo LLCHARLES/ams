@@ -2,7 +2,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d /tmp/vitrine-field-check.XXXXXX)
+OUT=$(mktemp -d /tmp/retrine-field-check.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun clang -fobjc-arc -O0 -g -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \

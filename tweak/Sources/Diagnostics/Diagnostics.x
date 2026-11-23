@@ -77,7 +77,7 @@ static void appendModState(NSMutableString *out) {
     ];
     for (NSString *key in [stored.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         if (![key hasPrefix:@"spotifyglass."] || [key isEqualToString:SGKeyStock]) continue;
-        if (SGPrivatePreferenceKey(key)) continue;
+        if (SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer] || [key isEqual:@"spotifyglass.wireguard"]) continue;
         BOOL skip = NO;
         for (NSString *prefix in local) skip |= [key hasPrefix:prefix];
         if (!skip) [out appendFormat:@"%@ = %@\n", key, describeValue(stored[key])];

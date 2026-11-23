@@ -235,7 +235,7 @@ static NSCache<NSString *, SGChart *> *chartCache(void) {
 static dispatch_queue_t chartQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ queue = dispatch_queue_create("vitrine.stats.charts", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0)); });
+    dispatch_once(&once, ^{ queue = dispatch_queue_create("retrine.stats.charts", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0)); });
     return queue;
 }
 

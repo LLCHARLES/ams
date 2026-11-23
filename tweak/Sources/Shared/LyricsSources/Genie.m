@@ -110,7 +110,12 @@ SGLyricsAsk SGGenieAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *))
         if (!song) { done(nil); return; }
         SGLyricsSourceRequestIn(query.requestContext, SGLyricsURL(@"https://dn.genie.co.kr/app/purchase/get_msl.asp", @{@"path": @"a", @"songid": song}), headers, nil, ^(NSData *answer, NSInteger code) {
             SGLyricsTransform(^id {
-                return code == 200 && answer.length ? SGGenieResult([[NSString alloc] initWithData:answer encoding:NSUTF8StringEncoding]) : nil;
+                NSString *text = code == 200 ? [[NSString alloc] initWithData:answer encoding:NSUTF8StringEncoding] : nil;
+                SGLyricsResult *result = text.length ? SGGenieResult(text) : nil;
+                if (code == 200 && answer.length && !result &&
+                    ![[text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] isEqual:@"NOT FOUND LYRICS"])
+                    [query.requestContext noteFailure:YES];
+                return result;
             }, ^(SGLyricsResult *result) {
             SGLog(@"genie: %lu lines", (unsigned long)result.karaokeLines.count);
             done(result);

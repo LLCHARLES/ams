@@ -63,7 +63,12 @@
 
 // SpotifySleepTimer.m's player state observer, and Spotify's own Fade out flag as forced (nil for not).
 static id<SGPlayerStateObserver> sg_observer;
-void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) { sg_observer = observer; }
+static NSHashTable *observers;
+void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) {
+    if (!sg_observer) sg_observer = observer;
+    if (!observers) observers = [NSHashTable weakObjectsHashTable];
+    [observers addObject:observer];
+}
 static NSNumber *sg_spotifyFadeForced;
 id SGForcedFlagValue(NSString *key) {
     return [key isEqualToString:@"ios-feature-sleeptimer.enable_fade_out"] ? sg_spotifyFadeForced : nil;
@@ -87,7 +92,8 @@ NSInteger SGKaraokePositionMs(void) { return sg_positionMs; }
 // How often the player's state was asked for: SpotifySleepTimer.m's check asks it four times a second.
 static NSInteger sg_playerAsks;
 id SGKaraokePlayer(void) { sg_playerAsks++; return sg_player; }
-void SGPlayerSetGain(float gain) { sg_gain = gain; }
+static NSUInteger gainWrites;
+void SGPlayerSetGain(float gain) { gainWrites++; sg_gain = gain; }
 NSString *SGURIString(id uri) {
     if ([uri isKindOfClass:NSString.class]) return uri;
     if ([uri isKindOfClass:NSURL.class]) return ((NSURL *)uri).absoluteString;
@@ -132,7 +138,8 @@ static SPTSleepTimer *spotifyTimer(NSUInteger type, NSTimeInterval seconds) {
 
 // The core reports a new state with every change, the timer's too: told to the observer before the wait.
 static void runFor(NSTimeInterval seconds) {
-    [sg_observer playerStateDidReport:sg_player.state];
+    for (id<SGPlayerStateObserver> observer in observers.allObjects)
+        [observer playerStateDidReport:sg_player.state];
     if (HarnessClockControlled()) HarnessClockAdvance(seconds);
     else [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
 }
@@ -206,6 +213,23 @@ int main(void) {
 
         HarnessClockStart();
         sg_player.state = state(a, @[b, c], @[], NO);
+        SGSetSleepTimer(SGSleepTimerAtTime, 180);
+        NSInteger beforeFade = sg_playerAsks;
+        HarnessClockAdvance(119.75);
+        CHECK(sg_playerAsks == beforeFade && sg_gain == 1, "wall timer sleeps through 119.75 s of unity gain");
+        HarnessClockAdvance(.5);
+        CHECK(near(sg_gain, SGSleepTimerGainAt(59.75)), "first quarter-second inside the fade is not late");
+        float onGrid = sg_gain;
+        NSUInteger writesOnGrid = gainWrites;
+        HarnessClockAdvance(.125);
+        [NSNotificationCenter.defaultCenter postNotificationName:@"UIApplicationDidBecomeActiveNotification" object:nil];
+        HarnessClockAdvance(0); // deliver the activation at the midpoint, with no timer due
+        CHECK(sg_gain == onGrid && gainWrites == writesOnGrid, "activation between fade samples leaves gain untouched");
+        HarnessClockAdvance(.125);
+        CHECK(near(sg_gain, SGSleepTimerGainAt(59.5)), "the next fade sample stays on its original grid");
+        SGSetSleepTimer(SGSleepTimerAtTime, 61.125);
+        HarnessClockAdvance(1.25);
+        CHECK(near(sg_gain, SGSleepTimerGainAt(59.875)), "a fractional expiry keeps fade samples on the original set-time grid");
         SGSetSleepTimer(SGSleepTimerAtTime, 30);
         CHECK(near(sg_gain, SGSleepTimerGainAt(30)), "30 s to go: 30 dB down");
         SGSleepTimerAdd(15 * 60);
@@ -428,6 +452,16 @@ int main(void) {
         sg_player.state.sleepTimer = nil;
         runFor(0.4);
         CHECK(sg_gain == 1 && sg_player.pauses == pauses, "and canceled: full volume; the mod sent no pause for Spotify's");
+        sg_fadeChoice = @0;
+        SGSetSleepTimer(SGSleepTimerAtTime, 900);
+        HarnessClockAdvance(60);
+        sg_player.state.isPaused = YES;
+        runFor(0);
+        HarnessClockSleep(850);
+        sg_player.state.isPaused = NO;
+        runFor(0);
+        CHECK(sg_player.pauses == pauses + 1 && SGSleepTimerCurrentMode() == SGSleepTimerOff,
+              "resumed report past the wall expiry pauses immediately without a timer firing");
     }
     printf("%s\n", sg_failures ? "FAILED" : "all held");
     return sg_failures ? 1 : 0;

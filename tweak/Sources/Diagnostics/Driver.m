@@ -750,14 +750,18 @@ static NSDictionary<NSString *, SGCommand> *commands(void) {
                 if (!where.count) return @{@"note" : @"the player was already open"};
                 return touchAt(where, 0.08);
             },
+            // Spotify's down arrow while it shows; the redesign puts it away for its grabber (Redesigned/Player/PlayerHeader.x),
+            // whose tap sends the arrow's own action, and takes touches only while it has that action to send.
             @"player.close" : ^NSDictionary *(NSDictionary *p) {
                 NSDictionary *where = onMain(^id {
                     for (NSString *identifier in @[@"now-playing-minimize-button", @"mobile-nowplaying-close-button"]) {
                         UIView *button = pick(@{@"id" : identifier}, nil);
                         if (button) return @{@"point" : [NSValue valueWithCGPoint:screenCenter(button)], @"target" : describe(button)};
                     }
+                    UIView *grabber = pick(@{@"class" : @"SGRPlayerGrabber"}, nil);
+                    if (grabber.userInteractionEnabled) return @{@"point" : [NSValue valueWithCGPoint:screenCenter(grabber)], @"target" : describe(grabber)};
                     if (!playerShown()) return @{};
-                    fail(@"the player is open but its down arrow is not found");
+                    fail(@"the player is open but neither its down arrow nor the grabber can close it");
                 });
                 if (!where.count) return @{@"note" : @"the player was not open"};
                 return touchAt(where, 0.08);
@@ -874,7 +878,7 @@ static NSDictionary<NSString *, SGCommand> *commands(void) {
                 result[@"tabs"] = where[@"tabs"];
                 return result;
             },
-            // One of Vitrine's settings, for a test that needs a setting changed and Spotify relaunched rather than
+            // One of Retrine's settings, for a test that needs a setting changed and Spotify relaunched rather than
             // a picker driven: --key spotifyglass.x --value 6 (a whole number), or --text for a string, or --remove 1.
             @"pref" : ^NSDictionary *(NSDictionary *p) {
                 NSString *key = p[@"key"];

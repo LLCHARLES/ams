@@ -12,6 +12,13 @@
 #import "Settings/SGPageStyle.h"
 
 #define CHECK HARNESS_CHECK
+#import "Shared/SpotifyMetadata/SGSpotifyMetadata.h"
+#import "../motion/no-recording-lookup.h"
+
+BOOL SGMotionAppleMusicOn(void) { return YES; }
+dispatch_block_t SGSpotifyMetadataRequestAllowConstrained(NSString *path, NSData *body, BOOL allow, SGSpotifyMetadataReply done) {
+    CHECK(NO); return ^{};
+}
 
 #pragma mark - stubs for what the production files take from the rest of the mod
 
@@ -371,7 +378,7 @@ int main(void) {
         sandbox = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES] URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
         CHECK([sandbox.path hasPrefix:NSTemporaryDirectory()]);
         NSURL *caches = [sandbox URLByAppendingPathComponent:@"Caches" isDirectory:YES];
-        motion = [caches URLByAppendingPathComponent:@"Vitrine/Motion" isDirectory:YES];
+        motion = [caches URLByAppendingPathComponent:@"Retrine/Motion" isDirectory:YES];
         support = [sandbox URLByAppendingPathComponent:@"Application Support" isDirectory:YES];
         answers = [motion URLByAppendingPathComponent:@"album answers.plist"];
         method_exchangeImplementations(class_getInstanceMethod(NSFileManager.class, @selector(URLsForDirectory:inDomains:)),
@@ -387,19 +394,19 @@ int main(void) {
         redLogo = makeLogo(YES); blueLogo = makeLogo(NO);
 
         // What the clear must never touch, next to and away from the cache.
-        put([support URLByAppendingPathComponent:@"Vitrine/Local file covers/cover.jpg"], @"a chosen cover");
-        put([support URLByAppendingPathComponent:@"Vitrine/Songs/a.flac"], @"a song");
-        put([support URLByAppendingPathComponent:@"Vitrine/Edits/edits.json"], @"{\"title\": \"edited\"}");
-        put([support URLByAppendingPathComponent:@"Vitrine/Lyrics/a.lrc"], @"[00:01.00]imported");
-        put([caches URLByAppendingPathComponent:@"Vitrine/Other/kept.bin"], @"another cache");
+        put([support URLByAppendingPathComponent:@"Retrine/Local file covers/cover.jpg"], @"a chosen cover");
+        put([support URLByAppendingPathComponent:@"Retrine/Songs/a.flac"], @"a song");
+        put([support URLByAppendingPathComponent:@"Retrine/Edits/edits.json"], @"{\"title\": \"edited\"}");
+        put([support URLByAppendingPathComponent:@"Retrine/Lyrics/a.lrc"], @"[00:01.00]imported");
+        put([caches URLByAppendingPathComponent:@"Retrine/Other/kept.bin"], @"another cache");
         put([motion URLByAppendingPathComponent:@"notes.txt"], @"not a clip");
         put([motion URLByAppendingPathComponent:@"hand.mp4"], @"a video that is not the store's");
-        NSDictionary *protectedFiles = snapshot(support), *protectedOther = snapshot([caches URLByAppendingPathComponent:@"Vitrine/Other"]);
+        NSDictionary *protectedFiles = snapshot(support), *protectedOther = snapshot([caches URLByAppendingPathComponent:@"Retrine/Other"]);
         NSData *notes = [NSData dataWithContentsOfURL:[motion URLByAppendingPathComponent:@"notes.txt"]];
         NSData *hand = [NSData dataWithContentsOfURL:[motion URLByAppendingPathComponent:@"hand.mp4"]];
         void (^checkProtected)(void) = ^{
             CHECK([snapshot(support) isEqual:protectedFiles]);
-            CHECK([snapshot([caches URLByAppendingPathComponent:@"Vitrine/Other"]) isEqual:protectedOther]);
+            CHECK([snapshot([caches URLByAppendingPathComponent:@"Retrine/Other"]) isEqual:protectedOther]);
             CHECK([[NSData dataWithContentsOfURL:[motion URLByAppendingPathComponent:@"notes.txt"]] isEqual:notes]);
             CHECK([[NSData dataWithContentsOfURL:[motion URLByAppendingPathComponent:@"hand.mp4"]] isEqual:hand]);
         };
@@ -411,7 +418,7 @@ int main(void) {
         CHECK([NSURLProtocol registerClass:CatalogProtocol.class]);
 
         // A clear before anything was looked up: it does not read the answers file first, and what was saved does not come back.
-        CHECK(([@{@"album\n1\nartist\nsaved": @{@"url": @"https://fixture.invalid/saved/clip.mp4", @"at": NSDate.date}} writeToURL:answers atomically:YES]));
+        CHECK(([@{@"album\n4\nartist\nsaved": @{@"url": @"https://fixture.invalid/saved/clip.mp4", @"at": NSDate.date}} writeToURL:answers atomically:YES]));
         __block BOOL firstDone = NO, firstComplete = NO;
         watchReads = YES;
         SGMotionCacheClear(^(BOOL complete) { firstComplete = complete; firstDone = YES; });
@@ -420,7 +427,7 @@ int main(void) {
         CHECK(firstComplete && ![files() fileExistsAtPath:answers.path] && answerReads == 0);   // and no read of what it removes
         NSString *remote;
         CHECK(album(@"Saved", &remote) && [remote isEqual:@"https://fixture.invalid/first/Saved/clip.mp4"] && albumSearches == 1);
-        waitFor(^BOOL { return [NSDictionary dictionaryWithContentsOfURL:answers][@"album\n1\nartist\nsaved"] != nil; });
+        waitFor(^BOOL { return [NSDictionary dictionaryWithContentsOfURL:answers][@"album\n4\nartist\nsaved"] != nil; });
 
         // Owned files: three more clips (one held by a consumer), the Saved clip and the saved answers.
         NSURL *leased = nil;
@@ -434,7 +441,7 @@ int main(void) {
         CHECK(album(@"Fresh", &remote) && !remote && albumSearches == 2);
         CHECK(!isBlue(logo(@"Singer")) && artistSearches == 1 && logoFetches == 1);
         CHECK(!isBlue(logo(@"Singer")) && artistSearches == 1 && logoFetches == 1);
-        waitFor(^BOOL { return [NSDictionary dictionaryWithContentsOfURL:answers][@"album\n1\nartist\nfresh"] != nil; });
+        waitFor(^BOOL { return [NSDictionary dictionaryWithContentsOfURL:answers][@"album\n4\nartist\nfresh"] != nil; });
 
         // The row names the size on disk.
         SGModRow *row = SGArtworkCacheRow();
@@ -519,7 +526,7 @@ int main(void) {
         waitFor(^BOOL { return slowDone; });
         CHECK(!slowFile && sessions.count == count + 2);
         cacheBytes();   // the answers file has written everything queued
-        CHECK([[NSDictionary dictionaryWithContentsOfURL:answers][@"album\n1\nartist\nslow"][@"url"] isEqual:@"https://fixture.invalid/second/Slow/clip.mp4"]);
+        CHECK([[NSDictionary dictionaryWithContentsOfURL:answers][@"album\n4\nartist\nslow"][@"url"] isEqual:@"https://fixture.invalid/second/Slow/clip.mp4"]);
 
         // The other answers and the artist image are fetched again too.
         blue = YES;

@@ -6,6 +6,7 @@
 #import "Redesigned/Lyrics/SGRKaraokeView.h"
 #import "Redesigned/Player/Player.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
+#import "Shared/Fonts/Fonts.h"
 
 @implementation SPTPlayerTrack
 @end
@@ -15,7 +16,7 @@
 static SPTPlayerState *state;
 static NSHashTable *observers;
 static NSMutableDictionary *answers;
-static BOOL translations = YES;
+static BOOL translations, simplify;
 
 void SGTitleHarnessState(id uri, NSString *title, NSString *artist, BOOL paused) {
     SPTPlayerTrack *track = [SPTPlayerTrack new];
@@ -44,18 +45,24 @@ void SGTitleHarnessAnswer(NSString *track, NSString *title, NSString *artist) {
     answers[track] = @[title, artist];
 }
 void SGTitleHarnessUseTranslations(BOOL enabled) { translations = enabled; }
-NSString *SGRShownTitle(NSString *track, NSString *title, NSString *artist, NSString **shownArtist) {
+void SGTitleHarnessSimplify(BOOL enabled) { simplify = enabled; }
+NSString *SGLyricsSimplifiedTitle(NSString *title) { return [title componentsSeparatedByString:@" - "].firstObject; }
+NSString *SGLyricsTranslatedTitle(NSString *track, NSString *title, NSString *artist, NSString **shownArtist) {
     NSArray *answer = translations && track ? answers[track] : nil;
     if (shownArtist) *shownArtist = answer ? answer[1] : artist;
-    return answer ? answer[0] : title;
+    return answer.firstObject;
 }
+SGAppFont SGAppFontDrawn(void) { return SGAppFontSystem; }
+BOOL SGRPlayerTwoColumns(void) { return NO; }
+BOOL SGRStarAddOn(void) { return NO; }
+UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *key) { return SGFindIdentifier(root, identifier, key); }
+NSNotificationName const SGSimplifyTitlesDidChangeNotification = @"harness.simplify";
 // The names are test-local; every subscriber/poster uses the production extern symbols.
 NSNotificationName const SGTranslatedTitleDidChangeNotification = @"harness.translatedTitleDidChange";
 NSNotificationName const SGTitleTranslationSettingsDidChangeNotification = @"harness.titleSettingsDidChange";
 NSNotificationName const SGRNowPlayingArtworkDidChangeNotification = @"harness.artworkDidChange";
 
-// Suppress automatic device-orientation setup only; viewDidLoad's subscriptions still run unchanged.
-BOOL SGRedesignedUI(void) { return NO; }
+BOOL SGRedesignedUI(void) { return YES; }
 NSInteger SGInt(NSString *key, NSInteger fallback) { return fallback; }
 void SGPresentDark(UIViewController *controller) {}
 BOOL SGEnabled(NSString *key) { return [key isEqualToString:SGRKeyLyricsAutoHide]; }
@@ -64,7 +71,11 @@ BOOL SGRPlayerLyricsAvailable(void) { return YES; }
 BOOL SGRPlayerLyricsNone(void) { return NO; }
 // The lyrics turned sideways: with them closed the screen is the player's, laid out without lines.
 BOOL SGRPlayerLyricsOpen(void) { return YES; }
-BOOL SGFlag(NSString *key, BOOL fallback) { return fallback; }
+BOOL SGFlag(NSString *key, BOOL fallback) {
+    if ([key isEqual:SGKeyLyricsSimplifyTitles]) return simplify;
+    if ([key isEqual:SGKeyLyricsTranslateTitles]) return translations;
+    return fallback;
+}
 BOOL SGRPlayerIsTransitioning(void) { return NO; }
 NSString *const SGPlayerTransitionEndedNotification = @"harness.playerTransitionEnded";
 void SGRequireClasses(NSArray<NSString *> *names) {}

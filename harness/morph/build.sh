@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 SRC=$(cd "$(dirname "$0")/../../tweak/Sources" && pwd)
-OUT=${MORPH_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/vitrine-morph.XXXXXX")}
+OUT=${MORPH_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/retrine-morph.XXXXXX")}
 mkdir -p "$OUT/gen" "$OUT/MorphHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${MORPH_SOURCE:-$SRC/Redesigned/Player/PlayerMorph.x}" > "$OUT/gen/PlayerMorph.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)

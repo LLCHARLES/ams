@@ -56,7 +56,8 @@ frames, so how Spotify's own content takes the narrower card is not shown here.
 `names` logs every title the glass bars show and whether UIKit cut it short ("CUT", against the width the text
 needs at the smallest size its label may shrink to): at rest, as the bar starts to expand from minimized, mid-way,
 once expanded, after four turns 0.1 s apart, after a minimize and an expand with no animation (the player opening
-and closing), and after another layout pass. Each line ends with how many are cut, which should be 0. `split2`
+and closing), and after another layout pass. Each line ends with how many are cut, which should be 0; with `strict`
+a cut name fails the run and the last report ends it with `PASS all names`. `split2`
 sets Create apart as well as Search, `five` adds a fifth tab and `long` gives two tabs long names (`names split2`,
 `names split five long`). The log is read most reliably from the console:
 `xcrun simctl launch --console-pty <udid> com.vojta.tabbarharness names split2`.
@@ -112,6 +113,10 @@ com.apple.Accessibility ReduceMotionEnabled` in the simulator) the bar and the c
 
     cc -I../../tweak/Sources/Redesigned/Navbar minimize-check.c -o build/minimize-check && build/minimize-check
 
+`reparent-drag` moves a scroll view's wrapper onto and off the tab page before separate drags; only the
+on-page drag should minimize the bar. `reparent-fling` starts outside the page and moves the wrapper
+onto it during deceleration; further travel on the page should minimize the bar without a new touch.
+
 `jam` plays a Jam: a strip under the class name of Spotify's (a SwiftUI hosting view of
 `Jam_AttachmentsImpl.JamHatElement`, 44 pt) over the card, both in a view painted the album color too,
 the bar 44 pt taller, and the strip gone again at 3.5 s. The log then lists the bar's glass panes. The
@@ -125,11 +130,34 @@ Before the fix the gap was -26 pt with nothing under the bar on an iPhone SE, an
 up on any phone: UIKit's glass bar is 83 pt, Spotify's bar was its 49 pt row with no inset under it,
 and the glass bar stood the difference above it, over the now playing bar.
 
+`glass-check.py` checks the listener's glass (Redesigned/Kit/SGRGlass.h) in a simulator of its own, over rows in color
+with the fade off: `glass` reads the glass of every platter shown and of the now playing card against literals given at
+launch (`-harness.wantMaterial`, `-harness.wantTint`, `-harness.wantInteractive`), expanded and minimized, each held for
+a screenshot, then taps Your Library's tab and a button on the card, which must both work. It runs Regular and None,
+Clear, Clear and Dark (also with `split`) and touch response off, and asks each platter and the card to look different
+on the screen in Clear, and in Clear and Dark, from Regular and None: a platter's material is read from its
+`_UIViewGlass`, the card's only shows on the screen, since an effect view hands its glass back as Regular.
+2026-11-23, iPhone 17 Pro on iOS 26.5: platters 14.6 to 56.3 and the card 14.6 to 66.7 per channel apart, and Regular
+and None with touch response off 0.0 apart from UIKit's own glass at rest. Needs Pillow.
+
 `fade-check.sh` checks the fade under the bars (`spotifyglass.redesign.navbar.fade`) in a simulator of its own:
 `fade toggle` (and `fade toggle split`) switches it off and on live the way the Tab bar page does, and asserts one
-`SGRBarFade` behind the glass from `SGRBarFadeAbovePt` over the glass bar's top to its foot taking no touches (a
-finger in its band lands on the page), none at all when off, none kept alive after 20 turns, the same minimized and
-with the bar hidden, and Spotify's own `TabBarGradientView` left clear throughout. `fade`, `fade off` and
+`SGRBarFade` behind the glass from `SGRBarFadeAbovePt` over the glass bar's top to the tab bar container's foot and
+across its whole width, taking no touches (a finger in its band lands on the page), none at all when off, none
+kept alive after 20 turns, the same minimized and with the bar hidden, and Spotify's own `TabBarGradientView` left
+clear throughout. `fade toggle regular` does it over Spotify's regular width bar, 8 pt in and 648 of the
+container's 1016 pt as 9.2.0 lays it out on an iPad Pro 13-inch and 16 pt above the container's foot as on an
+iPad Pro 11-inch (`regular` lays the bar out so everywhere), minimized left out since that bar never minimizes.
+2026-11-19, before the fix: the fade was only as wide as that bar, which an iPad showed as a dark rectangle with
+hard sides behind the glass. 2026-11-22, before the fix (issue #38): the fade ended at the bar's foot, 16 pt short
+of the container's, so the page showed undimmed in a strip under the half black, a hard edge across the screen.
+
+`ipad-check.sh` runs in an iPad simulator of its own (the harness app is built for both device families):
+`names strict` and `names strict regular`, then `fade toggle regular`. 2026-11-22, iPad Pro 11-inch on iOS 26.5,
+before the fix: an iPad's bar sets each name beside its glyph, and the names were cut ("Search" 24 pt for 42,
+"Your Library" 24 for 72, "Create" 24 for 40; "홈" 4 for 10.5 and "만…" in Spotify itself), since UIKit gave each tab
+its width as the bar took the items, before they had their glyphs. A split tab's own bar is a circle there too
+and shows its glyph alone, so `split` is not part of the check. `fade`, `fade off` and
 `fade mini` hold the page in color for a screenshot, and `navsettings` opens the Tab bar page over the bar
 (navsettings.m): its fade switch starts on, the preview reads the fade, and the switch takes the fade off the real
 bar at once. It does so through the switch's own path in the product (`SGRRefreshBarFade`, TabBar.x): stubs.m's
@@ -137,7 +165,7 @@ bar at once. It does so through the switch's own path in the product (`SGRRefres
 That scenario also checks Icons only, Custom tab bar and hiding Home through the page controls,
 without screenshot pauses.
 
-`bar-check.sh` runs the tabs' glyphs and the now playing card's edges in a simulator of its own, and `audit`.
+`bar-check.sh` runs the tabs' glyphs and the now playing card's edges in a simulator of its own, `audit` and `search`.
 `glyphs` makes the tabs' icons Encore's glyph view (a mock under its name that draws a ring for an outline icon
 and a solid shape for its `-active` variant, which the tab's view is handed when it is selected, its `isActive`
 changing only colors) and asserts the selected tab's filled glyph and every other tab's outline at launch, after
@@ -167,6 +195,82 @@ them (with Search split the main platter is centered narrower than its bar, x 27
 in the row 8 pt from the circles, back after a minimize turned back mid-spring, above the bar while a Jam's strip
 is up, and Spotify's 8 pt in a regular width and right to left.
 
+`search` (search.m, issue #34) makes the row Home, Your Library, Create, Liked Songs and Search, the last of five as
+the issue keeps it (`middle` puts Search third), and hands TabBar.x the pages of Spotify's tabs as Navbar.x reads them
+off Spotify's list: Search as `spotify:search` (9.2.0), with `find` as `spotify:find` (9.1.78 to 9.1.90). Spotify's
+tab change is played too: a tap on a mock tab tells the container (`setSelectedViewController:`), whose hook brings
+the bar back. It minimizes on Home and asserts Home on the leading circle, which says it shows all tabs, Search on a
+trailing circle on a 104 pt bar at the trailing edge (a split tab's), its item named Search with its glyph for the large
+content viewer, a finger on it landing on its bar, and the card in its slot, 8 pt from each circle; then expands, a
+minimize and an expand each turned back 0.12 s in, minimizes and expands on Search (Home leading, Search selected on
+the trailing circle), and taps the trailing circle for real: Search picked, the bar expanded. Every frame of each move,
+the tap's expansion too, is sampled: Search drawn exactly once (its buttons on either bar and the pictures of buttons
+that went, each glyph counted by the share of it the screen shows clearly: the part left inside every view above it
+that clips, by its bounds or its mask, and outside the glass platter, a capsule, of every bar standing over its own in
+the bars' host, times its opacity, drawn above 2%) and that one shown at 90% or more, so a glyph clipped by its platter
+or blurred under another bar's glass is not counted as drawn; its glyph moving no more than a spring does (50 pt a frame), the trailing
+circle drawn on Search's glyph the first frame it shows, and no platter partly faded. `labels` shows the tabs' names.
+With `middle labels` it also
+taps the circle 0.15 s into an expand, 8 pt in from its drawn left side, and asserts the tab picked is the one the
+expanded row picks for a tap at that point (before the fix the circle, drawn over the row for the expand, took the
+touch and nothing was picked). `splitcreate` makes Create a split tab, `nosearch` hides Search, `own` hides it and adds a tab of the mod's own named
+Search: the minimized bar as before, Create's circle or none, the card to 21 pt in. `leaves` hides Spotify's Search
+in its row while the bar is minimized and shows it again, as Spotify's list of tabs changing does: the trailing circle
+goes and comes, and the card takes the slot each time (290 pt without the circle, 220 pt beside it).
+`keepgoing` prints each failed check and goes on, so each case's own failure shows;
+built from the tree before the change (`SRC=`), 2026-11-21 on an iPhone 17 Pro, iOS 26.5, every Search case failed
+there (no trailing circle, Search not drawn at all once the bar minimized, the card to the edge, nothing to tap), while
+`splitcreate`, `nosearch` and `own`, which keep the bar as it was, passed. A first version that hid the circle's
+Search at once on expanding failed the visible-share count (no Search drawn for 6 or 7 frames of each expand, the row's
+glyph still clipped by the growing platter), and one whose card followed only the expanded row's edges failed `leaves`
+(the card kept 220 pt with the circle gone). With the glass counted, the tree whose circle went under the main bar at
+once on expanding failed every expand (the growing platter's glass over the circle's Search for 1 to 3 frames, a
+screen recording showing a faint ring there). After the change all pass; Search moves some 32 pt a frame at most across
+the row with `middle`.
+
+Issue #35 (a darker disc on the row's end through most of each expand): Search's glyph now goes back into the row as
+a view of its own over the bars. Each expand also checks, every frame, that the travelling glyph (the one glyph drawn
+outside the bars) has the image and color of the glyph the row shows for Search, its lit copy's when Search is
+selected; that while the bar expands no glass is drawn over or under the growing row's (`kOverlapSlackPt`) and, in an
+expand from rest, the circle's glass is drawn as long as the row's has not reached it (TabBar.x times it by the
+expand's own spring, which an expand turning a minimize back shares with what is left of the minimize's, so there it
+may go a frame early); and at rest after every move, that
+nothing but the bars is left among them, every tab's glyph and every glass on screen is drawn in full and every bar on
+screen takes touches. `expand turned back late` turns an expand back 0.25 s in, once the row has reached the circle:
+the circle comes out of the row again. `expand again inside an expand` expands, minimizes 0.08 s in and expands again
+0.16 s in; just after the first expand's spring ends, the second's glyph must still travel and the circle's glass be
+drawn exactly while the row has not reached it (the first expand's end once took the second one's hand over half way:
+no glyph travelling, Search drawn 0 times in 2 frames). 2026-11-21, iPhone 17 Pro on iOS 26.5: built from the tree before the change
+(`SRC=`), every expand failed with the circle's glass on the row's in 2 to 12 frames, the circle still drawn 0.25 s
+into the late turn; with the circle's glass taken away at once it failed `gone before the expanding row reached it`
+in 3 to 5 frames of every expand, and with the travelling glyph drawn from the row's plain copy `expand from Search`
+failed `unlike the row's`. After the change all pass, also under Reduce Motion.
+
+Issue #41: the same frame sampler also checks that the returning Search circle, while drawn, stays within
+0.5 pt of the row platter's vertical center. Before the fix, `search labels` on an iPhone 17 Pro simulator
+(iOS 26.5) failed `expand from Home: returning circle off the row's vertical center by 5.0 pt`.
+It did not reproduce the iOS 27 recording's late disappearance: in `search capture labels` the circle was
+last visible at frame 004, gone at 005, and Search's name appeared progressively from 006, before the
+last moving frame (016). The glass overlap check remains in force with and without names.
+
+`states` checks what an earlier state leaves on the bar (`bar-check.sh` runs both). Alone: the bar minimized in a compact
+width, then the window made regular (an iPad's narrow window widened) with no tab changed, and Spotify's bar laid out
+again: the bar is expanded with every tab on it. With `split`: Search, the only split tab, picked on its bar; Home chosen
+from elsewhere (Spotify repaints its labels and tells its container, as a link or the side drawer does, with no tap on the
+glass bar); the bar minimized and a finger on Search's circle: Spotify's Search is tapped. `hold` after either prints
+READY and keeps the screen four seconds for a screenshot. 2026-11-22, iPhone 17 Pro on iOS 26.5, before the fix: the
+widened bar stayed minimized (1 of 4 tabs on it), and the finger on Search's circle only expanded the bar, Spotify's
+Search not tapped, the split bar still holding Search as the item it last showed selected. After it both pass.
+
+`capture.sh` records one expand off the screen of a simulator of its own (`search capture`: the bar minimized at once,
+then expanded), for a review frame by frame of what no presentation layer shows, such as the glass UIKit draws:
+`capture/expand-NNN.png` under `OUT`, the bottom 520 px of each frame the screen drew, NNN its 1/60 s from the last
+still frame, and `capture/sheet.png` with all of them. `selected`, `labels` and `middle` after the script go to the
+scenario. `capture-frames.py` (Python 3 with Pillow) cuts the expand out of the recording.
+
+    THEOS=$HOME/theos OUT=/tmp/<dir> ./capture.sh selected labels
+
 What it does not cover: Spotify's own chrome, which is Swift with no symbols (the constraints above
 are read from its code, not run), the real now playing bar's content and its page's inset, the tab
-bar hidden by a page, the player's open and close over the bars, and a regular width.
+bar hidden by a page, the player's open and close over the bars, and a regular width beyond the bar's narrower
+width (its fixed 76 pt height, the now playing capsule beside it).

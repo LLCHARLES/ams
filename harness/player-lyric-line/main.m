@@ -65,6 +65,19 @@ static SGRLyricWait waitAtWidth(NSArray<SGKaraokeLine *> *lines, NSInteger posit
 }
 
 int main(void) {
+    for (NSArray<NSNumber *> *metrics in @[@[@23,@18], @[@21,@17]]) {
+        CGFloat row = metrics[0].doubleValue, translation = metrics[1].doubleValue;
+        for (NSInteger count = 0; count <= 2; count++) {
+            CGFloat tr = translation;
+            HARNESS_CHECK(SGRPlayerCompactRows((count + 1) * row - .25, row, &tr) == count);
+            tr = translation;
+            HARNESS_CHECK(SGRPlayerCompactRows(count * row, row, &tr) == count && tr == 0);
+        }
+        CGFloat tr = translation;
+        HARNESS_CHECK(SGRPlayerCompactRows(2 * row + translation - .25, row, &tr) == 2 && tr == 0);
+        tr = translation;
+        HARNESS_CHECK(SGRPlayerCompactRows(2 * row + translation, row, &tr) == 2 && tr == translation);
+    }
     @autoreleasepool {
         // The contract's own numbers, not the constants that carry them.
         HARNESS_CHECK(SGRLyricMinScale == 0.85);
@@ -88,32 +101,31 @@ int main(void) {
         HARNESS_CHECK(SGRLyricPortions(shortLine, 0, font()).count == 1);
         HARNESS_CHECK(SGRLyricPortions(shortLine, 0, font()).firstObject.scale == 1);
 
-        // Barely too wide: shrunk, no further than 85% of the font, every word kept whole.
+        // A line just wider than one row uses its second row, at full size.
         NSString *tight = @"one two three four";
         SGKaraokeLine *tightLine = makeLine([tight componentsSeparatedByString:@" "], 0, 4000, NO, NO);
         CGFloat full = widthOf(textOf(tightLine), 1);
         CGFloat shrunkWidth = widthOf(textOf(tightLine), 0.88);
         NSArray<SGRLyricPortion *> *shrunk = SGRLyricPortions(tightLine, shrunkWidth, font());
         HARNESS_CHECK(shrunk.count == 1);
-        HARNESS_CHECK(shrunk.firstObject.scale > kMinScale && shrunk.firstObject.scale <= 1);
+        HARNESS_CHECK(shrunk.firstObject.scale == 1);
         HARNESS_CHECK([shrunk.firstObject.text isEqualToString:textOf(tightLine)]);
         HARNESS_CHECK(full > shrunkWidth);
-        HARNESS_CHECK(widthOf(shrunk.firstObject.text, shrunk.firstObject.scale) <= shrunkWidth);
-        // Too narrow for even 85% to fit: split instead, never shrunk past it.
-        NSArray<SGRLyricPortion *> *tightSplit = SGRLyricPortions(tightLine, full * 0.5, font());
-        HARNESS_CHECK(tightSplit.count > 1);
-        for (SGRLyricPortion *portion in tightSplit) HARNESS_CHECK(portion.scale == kMinScale);
+        SGKaraokeLine *wideWord = makeLine(@[@"extraordinary"], 0, 4000, NO, NO);
+        SGRLyricPortion *alone = SGRLyricPortions(wideWord, widthOf(@"extraordinary", .9), font()).firstObject;
+        HARNESS_CHECK(alone.scale >= kMinScale && alone.scale < 1 && [alone.text isEqual:@"extraordinary"]);
 
         // Far too narrow: successive portions of whole words, each one fitting at 85%, nothing dropped.
         NSString *longText = @"and every word I ever said comes back to me tonight";
         SGKaraokeLine *longLine = makeLine([longText componentsSeparatedByString:@" "], 1000, 5000, YES, NO);
-        NSArray<SGRLyricPortion *> *split = SGRLyricPortions(longLine, kWidth, font());
+        CGFloat narrow = 100;
+        NSArray<SGRLyricPortion *> *split = SGRLyricPortions(longLine, narrow, font());
         HARNESS_CHECK(split.count > 1);
         NSMutableArray<NSString *> *kept = [NSMutableArray array];
         for (SGRLyricPortion *portion in split) {
-            HARNESS_CHECK(portion.scale == kMinScale);
-            HARNESS_CHECK(widthOf(portion.text, portion.scale) <= kWidth);
-            HARNESS_CHECK([portion.text rangeOfString:@" "].location != NSNotFound);
+            HARNESS_CHECK(portion.scale == 1);
+            HARNESS_CHECK([portion.text boundingRectWithSize:CGSizeMake(narrow, CGFLOAT_MAX)
+                  options:NSStringDrawingUsesLineFragmentOrigin attributes:@{NSFontAttributeName:font()} context:nil].size.height <= 2 * ceil(font().lineHeight));
             [kept addObject:portion.text];
         }
         HARNESS_CHECK([[kept componentsJoinedByString:@" "] isEqualToString:textOf(longLine)]);
@@ -130,7 +142,7 @@ int main(void) {
 
         // Not word timed: the line's own time shared out evenly, one share per portion.
         SGKaraokeLine *plain = makeLine([longText componentsSeparatedByString:@" "], 0, 4000, NO, NO);
-        NSArray<SGRLyricPortion *> *plainPortions = SGRLyricPortions(plain, kWidth, font());
+        NSArray<SGRLyricPortion *> *plainPortions = SGRLyricPortions(plain, narrow, font());
         HARNESS_CHECK(plainPortions.count == split.count);
         for (NSUInteger i = 0; i < plainPortions.count; i++) {
             HARNESS_CHECK(plainPortions[i].start == (NSInteger)(i * 4000 / plainPortions.count));
@@ -179,12 +191,12 @@ int main(void) {
         SGKaraokeLine *cjkLine = makeWords(spans, 0, at, YES);
         NSString *cjkText = @"君の名前を呼んでいる夜の向こうで光";
         HARNESS_CHECK([textOf(cjkLine) isEqualToString:cjkText]);
-        NSArray<SGRLyricPortion *> *cjkPortions = SGRLyricPortions(cjkLine, 100, font());
+        NSArray<SGRLyricPortion *> *cjkPortions = SGRLyricPortions(cjkLine, 60, font());
         HARNESS_CHECK(cjkPortions.count > 1);
         NSMutableString *joined = [NSMutableString string];
         for (SGRLyricPortion *portion in cjkPortions) {
             HARNESS_CHECK([portion.text rangeOfString:@" "].location == NSNotFound);
-            HARNESS_CHECK(widthOf(portion.text, portion.scale) <= 100);
+            HARNESS_CHECK(portion.scale == 1);
             [joined appendString:portion.text];
         }
         HARNESS_CHECK([joined isEqualToString:cjkText]);
@@ -230,14 +242,14 @@ int main(void) {
         // A boundary less than 20 ms away is aimed at 20 ms.
         wait = waitFor(@[ first, makeLine(@[ @"soon" ], 2005, 4000, NO, NO) ], 2000, 0, 1);
         HARNESS_CHECK(wait.wait == 0.02 && wait.tolerance == 0);
-        // The next portion of the line being sung comes before the next line: nine syllables a tenth of a second
-        // apart, three to a portion, so a portion turns over every 300 ms.
+        // One word per row, two per portion, a new portion every 300 ms.
         NSMutableArray<NSString *> *las = [NSMutableArray array];
-        for (NSUInteger i = 0; i < 9; i++) [las addObject:@"la"];
+        for (NSUInteger i = 0; i < 6; i++) [las addObject:@"la"];
         SGKaraokeLine *worded = makeLine(las, 0, 900, YES, NO);
-        CGFloat three = widthOf(@"la la la", kMinScale);
+        CGFloat three = widthOf(@"la", 1) + 1;
         NSArray<SGRLyricPortion *> *wordedPortions = SGRLyricPortions(worded, three, font());
         HARNESS_CHECK(wordedPortions.count == 3);
+        HARNESS_CHECK([wordedPortions[1].text isEqual:@"la la"] && wordedPortions[1].scale == 1);
         HARNESS_CHECK(wordedPortions[1].start == 300 && wordedPortions[2].start == 600);
         wait = waitAtWidth(@[ worded ], 0, three);
         HARNESS_CHECK(fabs(wait.wait - 0.3) < 0.001 && wait.tolerance == 0);
@@ -308,33 +320,14 @@ int main(void) {
         sung.translation = @" \n";
         HARNESS_CHECK(SGRPlayerLineTranslation(sung, YES) == nil);
 
-        // Its room: a line 20 tall, a translation 16, a margin of 8 either side, a tap 44 tall.
-        SGRPlayerLineFit alone = SGRPlayerLineFitIn(100, 20, 0, 8, 44);
-        HARNESS_CHECK(alone.line && !alone.translation && alone.height == 44);
-        SGRPlayerLineFit shallow = SGRPlayerLineFitIn(40, 20, 0, 8, 44);
-        HARNESS_CHECK(shallow.line && shallow.height == 40);
-        HARNESS_CHECK(!SGRPlayerLineFitIn(35, 20, 0, 8, 44).line);
-        // Shown: the pair within a tap's height keeps it; a taller pair takes its own.
-        SGRPlayerLineFit pair = SGRPlayerLineFitIn(100, 20, 16, 8, 44);
-        HARNESS_CHECK(pair.line && pair.translation && pair.height == 44);
-        SGRPlayerLineFit tall = SGRPlayerLineFitIn(100, 26, 22, 8, 44);
-        HARNESS_CHECK(tall.translation && tall.height == 48);
-        HARNESS_CHECK(SGRPlayerLineFitIn(52, 20, 16, 8, 44).translation);
-        // Does not fit: the translation goes and the line keeps exactly the place it has without one.
-        SGRPlayerLineFit cramped = SGRPlayerLineFitIn(51, 20, 16, 8, 44);
-        HARNESS_CHECK(cramped.line && !cramped.translation && cramped.height == SGRPlayerLineFitIn(51, 20, 0, 8, 44).height);
-        SGRPlayerLineFit cut = SGRPlayerLineFitIn(60, 26, 22, 8, 44);
-        HARNESS_CHECK(cut.line && !cut.translation && cut.height == 44);
-
         // Spotify's own preview under the cover: the line takes its place only while it is on, translations are shown
         // and the player is taller than wide; every other case leaves the preview as Spotify shows it.
-        HARNESS_CHECK(SGRPlayerLineTakesPreview(YES, YES, YES, YES));
-        HARNESS_CHECK(!SGRPlayerLineTakesPreview(YES, NO, YES, YES));
-        HARNESS_CHECK(!SGRPlayerLineTakesPreview(NO, YES, YES, YES));
-        HARNESS_CHECK(!SGRPlayerLineTakesPreview(YES, YES, NO, YES));
+        HARNESS_CHECK(SGRPlayerLineTakesPreview(YES, YES, YES));
+        HARNESS_CHECK(!SGRPlayerLineTakesPreview(NO, YES, YES));
+        HARNESS_CHECK(!SGRPlayerLineTakesPreview(YES, NO, YES));
         // A track the line has no synced lines for keeps Spotify's preview, its only lyrics.
-        HARNESS_CHECK(!SGRPlayerLineTakesPreview(YES, YES, YES, NO));
-        HARNESS_CHECK(!SGRPlayerLineTakesPreview(NO, NO, NO, NO));
+        HARNESS_CHECK(!SGRPlayerLineTakesPreview(YES, YES, NO));
+        HARNESS_CHECK(!SGRPlayerLineTakesPreview(NO, NO, NO));
 
         // Giving the previews back: none while the line takes their place; then every one hidden, the one a list
         // keeps for reuse (out of any view) included, and none twice.

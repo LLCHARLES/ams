@@ -21,6 +21,12 @@ It checks, a line each with `ok` or `WRONG`:
   no room and the cover is the centered square of the view it sits in, again after a later pass of
   Spotify's; a small cover and a tilt view outside the player's cover cell are left alone.
 
+The `sponsorblock` launch argument runs `../sponsorblock/markers-check.m` over `PlayerScrub.x`'s marks hooks and
+`Shared/SponsorBlock/SponsorBlockMarkers.m` on a mock of Spotify's 17 pt bar (see harness/player/README.md's
+`sponsorblock`; no scrub step), ending `sponsorblock native checks: n of 15 right`; `sponsorblock-off` checks that
+nothing is drawn with the switch off. `SIMCTL_CHILD_HARNESS_SHOTS=<dir>` receives `native-ltr.png` and `native-rtl.png`.
+On the sources before the marks hooks it read 9 of 15.
+
 Run both launches: the default checks scrubbing and the shown preview (`6 of 6 right -- PASS`);
 `preview-hidden` checks the hidden preview and cover sizing (`5 of 5 right -- PASS`).
 Each logs its result and exits 0 on success or 1 on failure, without crashing.

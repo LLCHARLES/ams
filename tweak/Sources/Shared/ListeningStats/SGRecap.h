@@ -47,7 +47,7 @@ enum { SGRecapAnnouncementDays = 14 };
 #define SGKeyRecapAnnouncement @"spotifyglass.stats.recap.announce"
 // The year number (SGRecapYearNumber) of the last year whose recap was announced; 0 for none.
 #define SGKeyRecapAnnouncedYear @"spotifyglass.stats.recap.announced_year"
-// A stored value outside the three reads as In Vitrine Settings.
+// A stored value outside the three reads as In Retrine Settings.
 SGRecapAnnouncement SGRecapAnnouncementFrom(NSInteger stored);
 // The year just ended while `now` is in the announcement days of the next one; nil otherwise.
 NSDateInterval *SGRecapAnnouncedYear(NSDate *now, NSCalendar *calendar);

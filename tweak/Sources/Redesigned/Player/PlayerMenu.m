@@ -1,6 +1,12 @@
-// Player redesign: the ⋯ opens the system menu (Redesigned/ContextMenu): Share, Add to playlist and Add to
-// queue in a row at its top, then the player's own items here, then More with the rest of Spotify's rows. The
-// player's items take over what Speed and pitch's block is on Spotify's sheet:
+// Player redesign: the ⋯ beside the title, where the Music app has it, opens the system menu (Redesigned/ContextMenu):
+// the song's actions first and Retrine's after them. Share, Add to playlist and Add to queue in a row at its top, then
+// the title row's own buttons, which the ⋯ takes the place of -- the add button (Save to Your Library, or Change
+// Where It's Saved once saved) and Spotify's X when it shows one (feedback_headunit_right_ban_button, "Don't play
+// this") -- each fired as a tap on it would be, and each left out while Spotify's rows have its action (Add to Liked
+// Songs for a song not saved yet, Hide in this playlist or album). With Star add button on, the add button stays on the
+// row as a star (Kit/SGRPlainCheck.x) and the ⋯ stands in the row's end after it, so the menu has no add item. Then
+// the rest of Spotify's rows, and then the
+// player's own items here, which take over what Speed and pitch's block is on Spotify's sheet:
 //
 //     Speed, Pitch & Reverb   opens the sliders in a popover from the ⋯ (SGPlayerShowSpeedPitchPanel): speed,
 //                             pitch, reverb and Pitch follows speed, as on Spotify's sheet (issue #14)
@@ -31,8 +37,13 @@
 #import "ShareCards.h"
 #import "Shared/ArtistBlock/ArtistBlock.h"
 #import "Shared/AudioEffects/AudioEffectsPage.h"
+#import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRRefinements.h"
 
-static __weak UIView *sg_moreButton;   // the ⋯ the panels come from
+static __weak UIView *sg_moreButton;   // the ⋯ the panels come from: the mod's, beside the title
+static __weak UIView *sg_spotifyMore;  // Spotify's own ⋯ in the header, whose action brings its sheet up
+// The title row's buttons the ⋯ took the place of: the add button (a UIButton) and the X (an Encore button, a UIControl).
+static __weak UIControl *sg_addButton, *sg_banButton;
 
 static UIImage *symbol(NSString *name) {
     return [UIImage systemImageNamed:name];
@@ -275,7 +286,115 @@ static NSString *sheetKind(void) {
     return parts.count > 2 ? parts[1] : @"";
 }
 
+#pragma mark - the title row's buttons
+
+// Whether Spotify shows `button`: neither it nor a view above it in `row` hidden. Its slot's alpha is the mod's (the ⋯
+// is drawn in its place), so alpha is not asked.
+static BOOL shownBySpotify(UIView *button, UIView *row) {
+    if (!button.window || button.bounds.size.width < 1) return NO;
+    for (UIView *view = button; view && view != row; view = view.superview) {
+        if (view.hidden) return NO;
+    }
+    return YES;
+}
+
+// The rows of Spotify's sheet that do what the title row's buttons do, by their identifiers (Spotify's item numbers,
+// read off 9.1.90's and 9.2.0's sheets): Add to Liked Songs, which the sheet has for a song not saved yet, as the add
+// button saves it (a saved song's sheet has no such row; an episode's is Add to Your Episodes, the same item); and
+// Hide in this playlist, or album, which the X does there
+// (outside one the sheet has none, and a hidden song's has Show in this playlist, 8, instead). The menu leaves a
+// button's item out while it shows its row (ContextMenu.h).
+static NSString *const kLikedSongsRow = @"18", *const kHideRow = @"7";
+
+static UIAction *titleRowAction(UIControl *button, NSString *title, NSString *symbol, NSString *spotifyRow) {
+    UIAction *action = [UIAction actionWithTitle:title image:[UIImage systemImageNamed:symbol] identifier:spotifyRow
+                                         handler:^(UIAction *picked) { SGRFireControl(button); }];
+    if (!button.enabled) action.attributes = UIMenuElementAttributesDisabled;
+    return action;
+}
+
+// The add button, named for what its tap does: an unsaved song's saves it (where, Spotify decides), a saved one's
+// opens Spotify's Saved in sheet to change where it is saved. Spotify marks a saved song by selecting the button, in
+// any playlist, so the selection is not read as Liked Songs (Spotify's Like row in the menu is its own). Its glyph is
+// Spotify's plus or circled tick. Left out with Star add button on, the button then on the row itself. Then
+// Spotify's X, in Spotify's words, while Spotify shows it. Each fires its button, and stands aside for Spotify's row
+// that does the same.
+static NSArray<UIMenuElement *> *titleRowItems(void) {
+    NSMutableArray<UIMenuElement *> *items = [NSMutableArray array];
+    UIControl *add = sg_addButton, *ban = sg_banButton;
+    UIView *row = sg_moreButton.superview;
+    if (add && !SGRStarAddOn() && shownBySpotify(add, row)) {
+        BOOL saved = add.isSelected;
+        NSString *title = saved ? SGL(@"player.menu.add.saved", @"Change Where It's Saved") : SGL(@"player.menu.add.save", @"Save to Your Library");
+        [items addObject:titleRowAction(add, title, saved ? @"checkmark.circle.fill" : @"plus.circle", kLikedSongsRow)];
+    }
+    if (ban && shownBySpotify(ban, row) && ban.accessibilityLabel.length)
+        [items addObject:titleRowAction(ban, ban.accessibilityLabel, @"xmark.circle", kHideRow)];
+    return items;
+}
+
+static SGRMenuItems sg_leadItems = ^NSArray<UIMenuElement *> *{ return titleRowItems(); };
+static SGRMenuItems sg_playerItems = ^NSArray<UIMenuElement *> *{ return playerItems(); };
+static SGRMenuKind sg_kind = ^NSString *{ return sheetKind(); };
+
 void SGRPlayerMenuWatch(UIView *button) {
-    sg_moreButton = button;
-    SGRSystemMenuWatch(button, ^NSArray<UIMenuElement *> *{ return playerItems(); }, ^NSString *{ return sheetKind(); });
+    sg_spotifyMore = button;
+    UIView *host = sg_moreButton.superview;
+    if (host) SGRSystemMenuButtonIn(host, button, sg_leadItems, sg_playerItems, sg_kind);
+}
+
+// The Music app's ⋯ glyph beside the title, in the title's color.
+static const CGFloat kMoreGlyphSize = 20;
+// The slot the ⋯ takes in the row's end, where the row has no add button or keeps it for the star: Spotify's add
+// button's own size.
+static const CGFloat kMoreSlot = 48;
+static char kAddKey, kBanKey;
+
+// `button`'s slot in `row`: the arranged view holding it (Spotify's ElementView).
+static UIView *slotIn(UIView *button, UIView *row) {
+    UIView *slot = button;
+    while (slot && slot.superview != row) slot = slot.superview;
+    return slot;
+}
+
+// The slot, not the button, is put away: Spotify gives the add button its alpha back as it redraws its state (9.2.0
+// simulator, 2026-11-18), and leaves the slot's to its hidden flag.
+static void hideForMore(UIView *slot) {
+    if (slot.alpha != 0) slot.alpha = 0;
+    if (!slot.accessibilityElementsHidden) slot.accessibilityElementsHidden = YES;
+}
+
+void SGRPlayerMenuInTitleRow(UIView *title) {
+    UIView *row = title.superview;
+    if (!row) return;
+    [row layoutIfNeeded];
+    UIView *add = SGRFindByIdentifier(row, @"Components.UI.AddToButton", &kAddKey);
+    UIView *ban = SGRFindByIdentifier(row, @"feedback_headunit_right_ban_button_accessibility_identifier", &kBanKey);
+    sg_addButton = [add isKindOfClass:UIControl.class] ? (UIControl *)add : nil;
+    sg_banButton = [ban isKindOfClass:UIControl.class] ? (UIControl *)ban : nil;
+    UIButton *more = SGRSystemMenuButtonIn(row, sg_spotifyMore, sg_leadItems, sg_playerItems, sg_kind);
+    if (!more) return;
+    if (sg_moreButton != more) {
+        sg_moreButton = more;
+        UIImageSymbolConfiguration *size = [UIImageSymbolConfiguration configurationWithPointSize:kMoreGlyphSize weight:UIImageSymbolWeightSemibold];
+        [more setImage:[UIImage systemImageNamed:@"ellipsis" withConfiguration:size] forState:UIControlStateNormal];
+        more.tintColor = SGRPrimary();
+        SGLog(@"redesign player: the ⋯ beside the title, %@%@", !sg_addButton ? @"in place of no add button"
+              : SGRStarAddOn() ? @"in the row's end after the add button's star" : @"in place of the add button",
+              sg_banButton ? @" and Spotify's X" : @"");
+    }
+    // Star add button keeps the add button's slot as Spotify draws it, the star on Spotify's own button.
+    UIView *slot = SGRStarAddOn() ? nil : slotIn(sg_addButton, row), *banSlot = slotIn(sg_banButton, row);
+    if (slot) hideForMore(slot);
+    if (banSlot) hideForMore(banSlot);
+    // In the add button's slot, else the row's trailing one, PlayerTitle.x holding the row's arranged views in before it.
+    CGRect frame;
+    if (slot && !slot.hidden && slot.bounds.size.width >= 1) {
+        frame = slot.frame;
+    } else {
+        BOOL rtl = row.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+        CGRect bounds = row.bounds;
+        frame = CGRectMake(rtl ? CGRectGetMinX(bounds) : CGRectGetMaxX(bounds) - kMoreSlot, CGRectGetMidY(bounds) - kMoreSlot / 2, kMoreSlot, kMoreSlot);
+    }
+    if (!CGRectEqualToRect(more.frame, frame)) more.frame = frame;
 }

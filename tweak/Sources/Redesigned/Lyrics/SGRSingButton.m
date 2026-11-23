@@ -75,11 +75,17 @@ static char kButtonGlassKey, kPanelGlassKey;
     [_hide invalidate];
 }
 
+- (void)updateButtonGlass {
+    UIView *shape = SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height));
+    SGRGlassBacks(shape, _button);
+    SGRShowGlass(shape, !_tucked);
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
     _button.frame = bounds;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(bounds.size.width, bounds.size.height)), !_tucked);
+    [self updateButtonGlass];
     _ring.frame = bounds;
     // Starting at the top and running clockwise, as a download ring does.
     CGFloat radius = MIN(bounds.size.width, bounds.size.height) / 2 - kRingInset - kRingWidth / 2;
@@ -92,7 +98,7 @@ static char kButtonGlassKey, kPanelGlassKey;
 // fade, and an open slider goes with them.
 - (void)setTucked:(BOOL)tucked {
     _tucked = tucked;
-    SGRShowGlass(SGRGlassInside(self, &kButtonGlassKey, MIN(self.bounds.size.width, self.bounds.size.height)), !tucked);
+    [self updateButtonGlass];
     _button.alpha = tucked ? 0 : 1;
     [self showRing];
     self.userInteractionEnabled = !tucked;

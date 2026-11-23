@@ -69,3 +69,8 @@ void HarnessClockAdvance(NSTimeInterval seconds) {
     }
     now = end;
 }
+
+void HarnessClockSleep(NSTimeInterval seconds) {
+    now += seconds;
+    for (HarnessClockEvent *event in events) event.at += seconds;
+}

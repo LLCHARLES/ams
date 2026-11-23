@@ -16,7 +16,14 @@ def replace(old, new):
 
 if mode == "seams":
     source = f'#import "{Path(__file__).resolve().with_name("cover-seams.h")}"\n' + source
-    replace("SGMotionAlbumCover(artist, album, pixels,", "SGRAlbumTestAlbumCover(artist, album, pixels,")
+    if "SGMotionPageAlbumCover(" in source:
+        replace("SGMotionPageAlbumCover(", "SGRAlbumTestPageCover(")
+    else:
+        replace("SGMotionAlbumCover(artist, album, pixels,", "SGRAlbumTestAlbumCover(artist, album, pixels,")
+    if "SGMotionAlbumRowMatcher(" in source:  # earlier BASELINE revisions have no row lookup
+        replace("SGMotionAlbumRowMatcher(", "SGRAlbumTestRowMatcher(")
+    if "SGMotionPageIdentifierCover(" in source:
+        replace("SGMotionPageIdentifierCover(", "SGRAlbumTestIdentifierCover(")
     replace("SGMotionPoster(file,", "SGRAlbumTestPoster(file,")
     replace("SGRCoverRead(poster,", "SGRAlbumTestStillRead(poster,")
     replace("[AVPlayerLayer playerLayerWithPlayer:_player]", "SGRAlbumTestPlayerLayer(_player)")

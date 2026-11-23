@@ -85,6 +85,22 @@ SGMotionTicket *SGMotionRequestFile(NSURL *remote, void (^done)(NSURL *file));
 SGMotionTicket *SGMotionRequestAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file));
 SGMotionTicket *SGMotionRequestClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, CGFloat pixels,
                                    void (^done)(NSURL *file, NSString *source));
+// When the artist credit is a song's, pass that song's full title as evidence.
+// An album page can use one of its own rows; never use an unrelated playing track.
+SGMotionTicket *SGMotionRequestSongCover(NSString *artist, NSString *album, NSString *song, NSString *albumURI, NSString *trackURI, CGFloat pixels,
+                                       void (^done)(NSURL *file));
+// One title search. The page may try distinct rows against the retained records locally until
+// one returns YES (its file is then requested). A nil `found` file signals no candidate
+// in the title search, not an identified release without video or a transfer failure.
+typedef BOOL (^SGMotionRowMatch)(NSString *artist, NSString *song);
+void SGMotionAlbumRowMatcher(NSString *albumArtist, NSString *album, CGFloat pixels, void (^ready)(SGMotionRowMatch match), void (^found)(NSURL *file));
+// Main queue. A page may use rows only when the header did not identify a release.
+void SGMotionPageAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file, BOOL identified));
+void SGMotionPageIdentifierCover(NSString *albumURI, NSString *album, CGFloat pixels, void (^done)(NSURL *file));
+SGMotionTicket *SGMotionRequestSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
+                                      CGFloat pixels, void (^done)(NSURL *file, NSString *source));
+SGMotionTicket *SGMotionRequestAlbumSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
+                                           NSString *albumURI, CGFloat pixels, void (^done)(NSURL *file, NSString *source));
 
 // Follows the player for one user of moving artwork, the lock screen or the redesign's player
 // (SGMotionFollower.m). Each track's sources are walked once, and again when its Canvas turns up in a later
@@ -120,7 +136,7 @@ void SGMotionMakeFile(NSURL *file, BOOL (^write)(void), void (^done)(BOOL));
 void SGMotionStoreBytes(void (^done)(uint64_t bytes));
 void SGMotionStoreClear(void (^done)(BOOL complete));
 
-// Everything downloaded for covers and artist photos that Vitrine can fetch again (SGMotionCatalog.m): the store's
+// Everything downloaded for covers and artist photos that Retrine can fetch again (SGMotionCatalog.m): the store's
 // clips and the catalog's answers, in memory and on disk. `done` runs on main. Clearing is main queue; `complete` is NO
 // when something could not be removed. Lookups and downloads started before a clear leave nothing behind after it.
 void SGMotionCacheBytes(void (^done)(uint64_t bytes));

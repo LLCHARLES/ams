@@ -21,7 +21,7 @@ NSNotificationName const SGRAlbumPlayCountsDidChangeNotification = @"SGRAlbumPla
 BOOL SGRedesignedUI(void) { return YES; }
 static SGSpotifyMetadataReply sg_pendingMetadataReply;
 static NSString *const sg_trackURI = @"spotify:track:0000000000000000000001";
-void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
+dispatch_block_t SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
     if (!SGRAlbumUsesSpotifyCounts()) HARNESS_FAIL(@"Spotify metadata reached from a personal-count fixture");
     if (body) {
         dispatch_async(dispatch_get_main_queue(), ^{ sg_pendingMetadataReply = done; });
@@ -30,6 +30,7 @@ void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataRep
             @[@{@"uri": sg_trackURI}, @{@"uri": @"spotify:track:0000000000000000000002"}]}]} options:0 error:nil];
         done(json, 200, nil);
     }
+    return ^{ sg_pendingMetadataReply = nil; };
 }
 NSUInteger SGRAlbumPlayCount(NSString *album, NSString *title) {
     if (SGRAlbumUsesSpotifyCounts()) HARNESS_FAIL(@"personal title matching reached from a Spotify-count page");
@@ -87,6 +88,8 @@ SGRLab SGRLabFromRGB(CGFloat red, CGFloat green, CGFloat blue) { return (SGRLab)
 void SGRLabToRGB(SGRLab lab, CGFloat *red, CGFloat *green, CGFloat *blue) { *red = *green = *blue = 0; }
 SGRLab SGRLabInSRGB(CGFloat L, CGFloat chroma, CGFloat hue) { return (SGRLab){L, 0, 0}; }
 BOOL SGRObserveImage(UIImageView *view, void (^changed)(UIImageView *view)) { return NO; }
+// Track numbers (the only layout observer AlbumRows.x asks for) stay off here.
+BOOL SGRObserveLayout(UIView *view, void (^laidOut)(UIView *view)) { return NO; }
 
 #pragma mark - an album's track cell
 

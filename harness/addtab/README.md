@@ -8,7 +8,7 @@ dispatcher up.
 
     THEOS=$HOME/theos ./build.sh
     xcrun simctl install <udid> build/AddTabHarness.app
-    xcrun simctl launch <udid> com.vitrine.addtabharness added
+    xcrun simctl launch <udid> com.retrine.addtabharness added
     xcrun simctl io <udid> screenshot shot.png
     xcrun simctl spawn <udid> log show --last 1m --style compact --predicate 'process == "AddTabHarness" AND (eventMessage CONTAINS "[harness]" OR eventMessage CONTAINS "add tab")'
 

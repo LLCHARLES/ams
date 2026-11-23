@@ -50,7 +50,7 @@ static NSArray<NSURL *> *files(NSURL *dir) {
 
 // Every fixture is a unique directory; it is the only tree this test deletes.
 static NSURL *temp(void) {
-    NSString *pattern = [NSTemporaryDirectory() stringByAppendingPathComponent:@"vitrine-lyrics-XXXXXX"];
+    NSString *pattern = [NSTemporaryDirectory() stringByAppendingPathComponent:@"retrine-lyrics-XXXXXX"];
     char *path = strdup(pattern.fileSystemRepresentation);
     CHECK(mkdtemp(path));
     NSURL *url = [NSURL fileURLWithPath:[NSFileManager.defaultManager stringWithFileSystemRepresentation:path length:strlen(path)] isDirectory:YES];

@@ -36,7 +36,7 @@ cat > "$BUNDLE/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>MeaningTranslateCheck</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.meaningtranslate.check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.meaningtranslate.check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>UIUserInterfaceStyle</key><string>Dark</string>

@@ -37,6 +37,8 @@
 #import "Settings/SGModPage.h"
 #import "Shared/Navigation/Links.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsTranslation/LyricsTranslation.h"
 
 static const CGFloat kCardRadius = 24;
 // The strip's pane is this much smaller than the strip at each end, so a gap parts it from the card's glass.
@@ -399,7 +401,7 @@ static BOOL edgesTo(UIView *bar, CGRect r, CGPoint origin) {
 // the room up. Not one of the buttons' stack: Spotify moves its items there by index, and Next among them put the add
 // button after play (9.1.90). It asks the player for the next track as the Live Activity's Next does.
 static NSString *const kPlayId = @"SPTNowPlayingPlayButton";
-static NSString *const kNextId = @"vitrine.nowplayingbar.next";
+static NSString *const kNextId = @"retrine.nowplayingbar.next";
 static char kNextKey;
 
 // The smallest touch target a control may have, in points (Apple's Human Interface Guidelines). Play's item, which the
@@ -492,7 +494,7 @@ static UIStackView *buttonRow(UIView *bar, UIStackView **buttons, UIView **playI
 // capsule's buttons come after it. In the minimized row tuckExtras hides it with the device and add buttons.
 static void placeNextButton(UIView *bar) {
     SGRBarNextButton *next = objc_getAssociatedObject(bar, &kNextKey);
-    if (!SGHidden(SGRKeyBarNextButton)) {
+    if (!SGEnabled(SGRKeyBarNextButton)) {
         [next removeFromSuperview];
         return;
     }
@@ -531,6 +533,11 @@ typedef NS_ENUM(NSInteger, SGRBarTuck) { SGRBarTuckNone, SGRBarTuckRow, SGRBarTu
 static NSHashTable<UIView *> *sg_tucked;
 static SGRBarTuck sg_tuck;
 
+BOOL SGRBarRowKeepsConnect(void) {
+    return sg_tuck == SGRBarTuckRow && SGHidden(SGRKeyBarInlineConnect);
+}
+
+// The device button the full card hides (BarConnect.x) is placed again for the new state in the same pass.
 static void tuckExtras(UIView *bar, SGRBarTuck tuck) {
     if (!sg_tucked) sg_tucked = [NSHashTable weakObjectsHashTable];
     // A stack hides an item only once the animation it was hidden in ends, so the buttons also fade on
@@ -542,8 +549,9 @@ static void tuckExtras(UIView *bar, SGRBarTuck tuck) {
         SGRAnimate(SGRMotionRespond, ^{ for (UIView *item in items) item.alpha = 1; }, nil);
         sg_tuck = tuck;
     }
+    SGRBarPlaceConnect(bar);
     if (tuck == SGRBarTuckNone) return;
-    BOOL keepConnect = tuck == SGRBarTuckRow && SGHidden(SGRKeyBarInlineConnect), keepNext = tuck == SGRBarTuckCapsule;
+    BOOL keepConnect = SGRBarRowKeepsConnect(), keepNext = tuck == SGRBarTuckCapsule;
     SGForEachView(bar, ^(UIView *v) {
         NSString *name = v.accessibilityIdentifier;
         BOOL connect = [name isEqualToString:@"Components.ConnectButtonOutputSwitcher"];
@@ -569,8 +577,8 @@ static void tuckExtras(UIView *bar, SGRBarTuck tuck) {
 // opens the player, through spotify:now-playing on Spotify's link dispatcher, on its lyrics (SGRPlayerShowLyricsOnOpen);
 // queue opens Playing Next over the app (PlayerQueue.m). For their room the capsule grows from Spotify's card toward
 // the glass tab bar beside it, keeping its other side where Spotify put it, and stops short of the tab bar's glass.
-static NSString *const kShuffleId = @"vitrine.nowplayingbar.shuffle", *const kRepeatId = @"vitrine.nowplayingbar.repeat";
-static NSString *const kLyricsId = @"vitrine.nowplayingbar.lyrics", *const kQueueId = @"vitrine.nowplayingbar.queue";
+static NSString *const kShuffleId = @"retrine.nowplayingbar.shuffle", *const kRepeatId = @"retrine.nowplayingbar.repeat";
+static NSString *const kLyricsId = @"retrine.nowplayingbar.lyrics", *const kQueueId = @"retrine.nowplayingbar.queue";
 static NSString *const kRepeatSymbol = @"repeat", *const kRepeatOneSymbol = @"repeat.1";
 // The four glyphs' point size, drawn as heavy as play's and Next's glyphs read beside them.
 static const CGFloat kCapsuleGlyphSize = 17;
@@ -723,6 +731,9 @@ static void placeCapsuleButtons(UIView *bar, BOOL capsule) {
     BOOL _pending;
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    // KVO reports setters, not movement. UIKit assigns the same platter geometry during layout;
+    // turning those assignments into another synchronous layout feeds the next notification.
+    if ([change[NSKeyValueChangeOldKey] isEqual:change[NSKeyValueChangeNewKey]]) return;
     if (_pending) return;
     _pending = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -740,26 +751,41 @@ static void watchTabGlass(UIView *platter) {
     if (!watcher) watcher = [SGRTabGlassWatcher new];
     for (NSString *key in @[@"frame", @"center", @"bounds"]) {
         [previous removeObserver:watcher forKeyPath:key];
-        [platter addObserver:watcher forKeyPath:key options:0 context:NULL];
+        [platter addObserver:watcher forKeyPath:key options:NSKeyValueObservingOptionOld | NSKeyValueObservingOptionNew context:NULL];
     }
     watched = platter;
 }
 
-// The glass tab bar's platter on the bar's row, in the bar's superview's coordinates: UIKit's floating tab bar draws its
-// glass in a view of its own, narrower than the bar (Redesigned/Navbar/TabBar.x reads it the same way), inside Spotify's
-// tab bar view. CGRectNull when there is none beside the bar.
+// The glass tab bar's platter on the bar's row nearest the bar, in the bar's superview's coordinates: UIKit's floating tab
+// bar draws its glass in a view of its own, narrower than the bar (Redesigned/Navbar/TabBar.x reads it the same way),
+// inside Spotify's tab bar view, and a split tab stands on a platter of its own between the main one and the bar. The
+// nearest is the one whose side toward the bar is furthest that way: the rightmost right side, right to left the
+// leftmost left side. Only a platter that is seen counts: TabBar.x hides the split bar that has lost its last tab and
+// leaves it, platter and all, where it stood. CGRectNull when there is none beside the bar.
+static BOOL platterSeen(UIView *platter) {
+    for (UIView *v = platter; v; v = v.superview) {
+        if (v.hidden || v.alpha < 0.01) return NO;
+    }
+    return YES;
+}
+
 static CGRect tabGlassBeside(UIView *bar) {
     UIView *tabs = bar.window ? SGRFindByIdentifier(bar.window, @"elements-tabs-view-identifier", &kTabsKey) : nil;
+    BOOL rtl = bar.superview.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     __block UIView *platter = nil;
+    __block CGRect glass = CGRectNull;
     if (tabs) SGForEachView(tabs, ^(UIView *v) {
-        if (v.hidden || v.alpha < 0.01 || ![NSStringFromClass(v.class) hasSuffix:@"PlatterView"]) return;
-        if (!platter || v.bounds.size.width > platter.bounds.size.width) platter = v;
+        if (![NSStringFromClass(v.class) hasSuffix:@"PlatterView"] || !platterSeen(v)) return;
+        CGRect frame = [v convertRect:v.bounds toView:bar.superview];
+        if (CGRectGetMaxY(frame) <= CGRectGetMinY(bar.frame) || CGRectGetMinY(frame) >= CGRectGetMaxY(bar.frame)) return;
+        BOOL nearer = rtl ? CGRectGetMinX(frame) < CGRectGetMinX(glass) : CGRectGetMaxX(frame) > CGRectGetMaxX(glass);
+        if (platter && !nearer) return;
+        platter = v;
+        glass = frame;
     });
     if (!platter) return CGRectNull;
     watchTabGlass(platter);
-    CGRect glass = [platter convertRect:platter.bounds toView:bar.superview];
-    BOOL beside = CGRectGetMaxY(glass) > CGRectGetMinY(bar.frame) && CGRectGetMinY(glass) < CGRectGetMaxY(bar.frame);
-    return beside ? glass : CGRectNull;
+    return glass;
 }
 
 // What the row's views after the title take, at their own widths, with the row's spacing before each.
@@ -901,45 +927,73 @@ static BOOL inSight(UIView *view, UIView *unit) {
 // pager may show a neighbor: a title equal to the line wins, else the longest title the line starts with that
 // the track's artist follows, so a short title ("Rock" by "Roll") never takes the line of a longer one
 // ("Rock • Roll" by "The Band"). Nil when none matches.
-static NSString *scanKnownTitle(SPTPlayerState *state, NSString *line) {
+static NSString *scanKnownTitle(SPTPlayerState *state, NSString *line, NSString *visibleArtist, SPTPlayerTrack **match) {
     NSMutableArray *tracks = [NSMutableArray array];
     if (state.track) [tracks addObject:state.track];
     if ([state.future isKindOfClass:NSArray.class]) [tracks addObjectsFromArray:state.future];
     if ([state.reverse isKindOfClass:NSArray.class]) [tracks addObjectsFromArray:state.reverse];
     NSString *best = nil;
+    NSUInteger bestArtistLength = 0;
     for (id item in tracks) {
         if (![item isKindOfClass:NSClassFromString(@"SPTPlayerTrack")]) continue;
         SPTPlayerTrack *track = item;
         NSString *title = track.trackTitle, *artist = track.artistName;
         if (![title isKindOfClass:NSString.class] || !title.length) continue;
-        if ([line isEqualToString:title]) return title;
-        NSString *head = [title stringByAppendingString:kBullet];
-        if (![line hasPrefix:head] || title.length <= best.length) continue;
-        NSString *rest = [line substringFromIndex:head.length];
-        if (rest.length && (![artist isKindOfClass:NSString.class] || !artist.length || [rest hasPrefix:artist])) best = title;
+        if (title.length < best.length) continue;
+        BOOL exact = [line isEqualToString:title];
+        NSString *pageArtist = visibleArtist;
+        if (!exact) {
+            NSString *head = [title stringByAppendingString:kBullet];
+            if (![line hasPrefix:head] || line.length == head.length) continue;
+            pageArtist = [line substringFromIndex:head.length];
+        }
+        BOOL hasArtist = [artist isKindOfClass:NSString.class] && artist.length;
+        NSUInteger artistLength = hasArtist && [pageArtist hasPrefix:artist] ? artist.length : 0;
+        if (!exact && hasArtist && !artistLength) continue;
+        if (exact && (!pageArtist.length || [pageArtist isEqualToString:artist])) {
+            *match = track;
+            return title;
+        }
+        // For equal titles the longest matching artist prefix wins; otherwise keep the first.
+        if (title.length > best.length || artistLength > bestArtistLength) {
+            best = title;
+            bestArtistLength = artistLength;
+            *match = track;
+        }
     }
     return best;
 }
 
-// The scan's answers kept for the state object they were made for, one per line, since the pager's pages each
+// The scan's answers kept for the state object they were made for, keyed by the lines used to match, since the pager's pages each
 // hold their own: the cells lay out far more often than either changes, and the player reports a new state
 // object whenever it does. The state is held so that its address cannot be reused by another while the answers
 // are kept.
 static SPTPlayerState *sg_knownState;
-static NSMutableDictionary<NSString *, id> *sg_knownTitles;
+static NSMutableDictionary *sg_knownTitles;
 
-static NSString *knownTitleOf(NSString *line) {
+// With either title setting on, cache the track instead of just the split point's title.
+static BOOL sg_showTitles;
+static BOOL showTitlesEnabled(void) {
+    return SGFlag(SGKeyLyricsSimplifyTitles, NO) || SGFlag(SGKeyLyricsTranslateTitles, NO);
+}
+static NSString *knownTitleOf(NSString *line, NSString *visibleArtist, SPTPlayerTrack **match) {
     SPTPlayerState *state = SGPlayerState();
     if (!sg_knownTitles || state != sg_knownState) {
         sg_knownTitles = [NSMutableDictionary dictionary];
         sg_knownState = state;
     }
-    id known = sg_knownTitles[line];
+    id key = visibleArtist.length ? (id)@[line, visibleArtist] : line;
+    id known = sg_knownTitles[key];
     if (!known) {
-        known = scanKnownTitle(state, line) ?: NSNull.null;
-        sg_knownTitles[[line copy]] = known;
+        SPTPlayerTrack *track = nil;
+        NSString *title = scanKnownTitle(state, line, visibleArtist, &track);
+        known = (sg_showTitles ? (id)track : title) ?: NSNull.null;
+        sg_knownTitles[key] = known;
     }
-    return known == NSNull.null ? nil : known;
+    if (known == NSNull.null) return nil;
+    if (!sg_showTitles) return known;
+    *match = known;
+    return (*match).trackTitle;
 }
 
 static void placeText(UIView *page) {
@@ -966,10 +1020,22 @@ static void placeText(UIView *page) {
     });
     if (!line.length) return;
     NSString *title = line;
-    NSString *known = knownTitleOf(line);
+    SPTPlayerTrack *track = nil;
+    NSString *known = knownTitleOf(line, sg_showTitles ? shown : nil, &track);
     if (known) {
         title = known;
         artists = line.length > known.length ? [line substringFromIndex:known.length + kBullet.length] : shown;
+        if (track) {
+            id uri = track.URI;
+            NSString *text = [uri isKindOfClass:NSURL.class] ? ((NSURL *)uri).absoluteString : [uri description];
+            NSString *trackID = [text hasPrefix:@"spotify:track:"] ? [text substringFromIndex:@"spotify:track:".length] : nil;
+            if (trackID || [text hasPrefix:@"spotify:local:"]) {
+                NSString *artist = track.artistName, *translated = nil;
+                title = SGRShownTitle(trackID, known, artist, &translated);
+                if (translated.length && ![translated isEqualToString:artist] && [artists isEqualToString:artist])
+                    artists = translated;
+            }
+        }
     } else if (artists) {
         title = [line substringToIndex:line.length - artists.length - kBullet.length];
     } else {
@@ -1063,10 +1129,10 @@ void SGRNowPlayingBarFollowTabBar(void) {
 
 // The same bar class also stands at the top of Spotify's sheets (the DJ request one: Up next, device, play).
 // It is not the tab bar's card there: the sheet has its own blue ground and corners, and a dark 24pt pane of
-// the bar's full width on it reads as a frame round the track. It is left as Spotify draws it, and it must not
-// become the bar this file tracks (sg_container, sg_cardGlass, sgr_nowPlayingRoot): the player takes its card
-// frame from those.
-static BOOL inSheet(UIView *view) {
+// the bar's full width on it reads as a frame round the track. It is left as Spotify draws it, its device button
+// too (BarConnect.x), and it must not become the bar this file tracks (sg_container, sg_cardGlass,
+// sgr_nowPlayingRoot): the player takes its card frame from those.
+BOOL SGRBarInSheet(UIView *view) {
     for (UIView *v = view.superview; v; v = v.superview) {
         if ([v.accessibilityIdentifier isEqualToString:@"sheet-view"] || [NSStringFromClass(v.class) containsString:@"SheetImpl"]) return YES;
     }
@@ -1074,7 +1140,7 @@ static BOOL inSheet(UIView *view) {
 }
 
 static void styleNowPlayingBar(UIViewController *container) {
-    if (container.isViewLoaded && inSheet(container.view)) {
+    if (container.isViewLoaded && SGRBarInSheet(container.view)) {
         UIVisualEffectView *pane = objc_getAssociatedObject(container.view, &kGlassKey);
         if (pane) [pane removeFromSuperview];
         return;
@@ -1138,7 +1204,9 @@ static void styleNowPlayingBar(UIViewController *container) {
         restyleCardContent(card);
     }
 
+    BOOL made = objc_getAssociatedObject(container.view, &kGlassKey) != nil;
     UIVisualEffectView *glass = SGGlassFor(container.view, &kGlassKey);
+    if (!made) glass.effect = SGRGlassEffect();
     // Dark whatever the system is set to: the bar is outside the navigation stacks Spotify makes dark, and
     // took the system's light glass on a phone in light mode (TabBar.x).
     if (glass.overrideUserInterfaceStyle != UIUserInterfaceStyleDark) glass.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
@@ -1241,6 +1309,20 @@ static SGRBarOptionsWatcher *sg_optionsWatcher;
     %init;
     sg_optionsWatcher = [SGRBarOptionsWatcher new];
     SGAddPlayerStateObserver(sg_optionsWatcher);
+    sg_showTitles = showTitlesEnabled();
+    for (NSString *name in @[SGSimplifyTitlesDidChangeNotification, SGTranslatedTitleDidChangeNotification,
+                             SGTitleTranslationSettingsDidChangeNotification]) {
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            // The next layout places every page after the player has applied its own settings notification.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                BOOL enabled = showTitlesEnabled();
+                if (!enabled && !sg_showTitles) return;
+                if (sg_showTitles != enabled) [sg_knownTitles removeAllObjects];
+                sg_showTitles = enabled;
+                [sgr_nowPlayingRoot setNeedsLayout];
+            });
+        }];
+    }
     // Posted on the main thread.
     [NSNotificationCenter.defaultCenter addObserverForName:SGRAccentDidChangeNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *note) { showPlayerOptions(); }];

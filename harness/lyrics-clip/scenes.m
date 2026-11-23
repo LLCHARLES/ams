@@ -244,7 +244,7 @@ int scenesMain(NSURL *out, CGImageRef cover) {
             NSString *file = [NSString stringWithFormat:@"%@-full-%@.mp4", name, style == SGLyricsClipStill ? @"still" : @"animated"];
             NSURL *url = [out URLByAppendingPathComponent:file];
             printf("%s\n", file.UTF8String);
-            BOOL written = SGLyricsClipWriteWithLayout(url, NULL, cover, before, line, translation, next, size, style, layout);
+            BOOL written = SGLyricsClipWriteWithLayout(url, NULL, cover, before, line, translation, next, size, style, layout, nil);
             check(written, @"written");
             if (written) readBack(url, style, ground);
         }

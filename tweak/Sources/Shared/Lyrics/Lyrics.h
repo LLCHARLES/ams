@@ -126,6 +126,9 @@ static const NSInteger SGKaraokeMaxTimeMs = 86400000;
 // A copy shares the words, the backing and the pronunciation, which nothing changes once a line is
 // built; a translation set on the copy leaves the original as it was.
 @interface SGKaraokeLine : NSObject <NSCopying>
+// File-owned words must never replace the ordinary offline sheet, including through
+// provider walks, copies for translation, and deferred store writes.
+@property (nonatomic) BOOL fileOwned;
 @property (nonatomic, copy) NSArray<SGKaraokeWord *> *words;
 @property (nonatomic) NSInteger start, end;
 // The voice singing the line, named as the source names it ("v1", "v2"), nil when it names none.

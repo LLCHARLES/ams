@@ -247,7 +247,8 @@ enum { kSaveRow, kImportRow, kActionRows };
     NSURL *url = urls.firstObject;
     if (!url) return;
     NSString *fallback = url.lastPathComponent;
-    for (NSString *suffix in @[@".vitrine-preset.json", @".json"]) {
+    // Old exports use the previous suffix; strip it too when deriving a name.
+    for (NSString *suffix in @[@".retrine-preset.json", @".vitrine-preset.json", @".json"]) {
         if ([fallback.lowercaseString hasSuffix:suffix]) { fallback = [fallback substringToIndex:fallback.length - suffix.length]; break; }
     }
     __weak SGDSPPresetList *page = self;

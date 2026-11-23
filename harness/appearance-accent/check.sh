@@ -3,7 +3,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d /tmp/vitrine-appearance-accent.XXXXXX)
+OUT=$(mktemp -d /tmp/retrine-appearance-accent.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 # Every check runs from a bundle of its own, so each has a preference domain no other harness shares
@@ -17,7 +17,7 @@ cat > "$CHECK/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>check</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.appearance.check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.appearance.check</string>
 <key>CFBundleVersion</key><string>1</string>
 </dict></plist>
 PLIST
@@ -26,7 +26,7 @@ cat > "$PLAYER/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>player-check</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.appearance.player-check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.appearance.player-check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>UIApplicationSceneManifest</key><dict>
 <key>UIApplicationSupportsMultipleScenes</key><false/>
@@ -42,7 +42,7 @@ cat > "$NAV/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>navigation-check</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.appearance.navigation-check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.appearance.navigation-check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>UIApplicationSceneManifest</key><dict>
 <key>UIApplicationSupportsMultipleScenes</key><false/>

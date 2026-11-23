@@ -1,4 +1,4 @@
-Third-party licenses for Vitrine's app-local WireGuard engine (from YTMusicUltimate)
+Third-party licenses for Retrine's app-local WireGuard engine (from YTMusicUltimate)
 (statically linked into the tweak when built with WIREGUARD=1).
 Generated from the Go module cache for the exact versions pinned in go.mod/go.sum.
 
@@ -479,7 +479,7 @@ github.com/google/btree@v1.1.2  (LICENSE)
    limitations under the License.
 
 ================================================================
-golang.org/x/crypto@v0.37.0  (LICENSE)
+golang.org/x/crypto@v0.59.0  (LICENSE)
 ================================================================
 Copyright 2009 The Go Authors.
 
@@ -510,7 +510,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================
-golang.org/x/net@v0.39.0  (LICENSE)
+golang.org/x/net@v0.62.0  (LICENSE)
 ================================================================
 Copyright 2009 The Go Authors.
 
@@ -541,7 +541,7 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ================================================================
-golang.org/x/sys@v0.32.0  (LICENSE)
+golang.org/x/sys@v0.50.0  (LICENSE)
 ================================================================
 Copyright 2009 The Go Authors.
 

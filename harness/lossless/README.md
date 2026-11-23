@@ -15,7 +15,7 @@ In another terminal, with the intended simulator booted:
 ```sh
 xcrun simctl install booted harness/lossless/build/LosslessProbe.app
 SIMCTL_CHILD_LOSSLESS_HTTP_BASE=http://localhost:18764 \
-  xcrun simctl launch --console booted dev.vitrine.lossless-probe > /tmp/lossless-probe.log 2>&1
+  xcrun simctl launch --console booted dev.retrine.lossless-probe > /tmp/lossless-probe.log 2>&1
 python3 harness/lossless/check.py /tmp/lossless-probe.log
 ```
 
@@ -76,7 +76,7 @@ using a real converter/mixer/RemoteIO chain. It emits quiet audio. See
 ```sh
 THEOS="$HOME/theos" sh harness/lossless/handoff-build.sh
 xcrun simctl install booted harness/lossless/build/handoff/LosslessHandoff.app
-xcrun simctl launch --console booted dev.vitrine.lossless-handoff > /tmp/lossless-handoff.log 2>&1
+xcrun simctl launch --console booted dev.retrine.lossless-handoff > /tmp/lossless-handoff.log 2>&1
 ```
 
 Require a final `RESULT failures=0`, not just successful launch. The app has a 30-second watchdog.

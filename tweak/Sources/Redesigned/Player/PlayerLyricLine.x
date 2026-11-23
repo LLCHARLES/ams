@@ -5,22 +5,16 @@
 // footer's lyrics glyph does (SGRPlayerToggleLyrics).
 //
 // It is a view of the mod's in SPTNowPlayingView (NowPlayingViewController's view), placed on every layout pass
-// of the player, of its cover (CoverArtTiltView, which PlayerArtwork.x sizes) and of the chips' unit, centered across the cover's width in the
-// room between the cover's own frame (not its paused shrink) and Spotify's bottom stack, which starts with the
-// title row. A chip over the title (Switch to video) ends that room where it starts. With less room than the
-// line and a gap either side, a player wider than it is tall, or Spotify's own lyric preview under the cover,
-// it is not shown. While translations are shown (below) and the track has synced lines of the line's own, the line
-// takes the preview's place instead (SGRPlayerLineTakesPreview): the preview is hidden by an empty mask of the
-// line's (again on every pass, as Spotify may set its own), its alpha and touches left to Spotify, the room is
-// measured as if it were not there, and the line shows where it would without it. Translations switched off, or a
-// track with no synced lines, give every preview hidden back as it was, and the line stands down for it again.
+// of the player, cover and chips. Synced lyrics own a stable text slot one grid gap above the title or pill.
+// The ordinary cover fills the remaining room. Its size depends on the reserved rows, never the current words.
+// Spotify's preview is masked while we own the slot and restored when the song has no synced lyrics.
 //
-// A line too wide for the room shrinks a little, and then shows in successive portions, each of whole words: the
+// A lyric longer than two rows shows in full-size portions (only an overwide word shrinks): the
 // line being sung's portion while it is timed by the word, else its share of the line's time (PlayerLyricFit.h).
 //
 // While the lyrics' menu shows translations (SGRKeyLyricsTranslation, the lyrics page's own switch), the line's
 // translation (SGRPlayerLineTranslation: none, or one that only repeats the line, shows nothing) sits under it in a
-// smaller, dimmer footnote with the lyrics page's translation weight and brightness, on one row that shrinks to
+// smaller type in the artist color with the lyrics page's translation weight and brightness, on one row that shrinks to
 // SGRLyricMinScale and then truncates. It goes under the line only when the room holds both with a gap either side
 // (SGRPlayerLineFitIn); else the line shows alone in today's place. The translations are the lyrics page's: on the
 // same kept lines, which it translates in place, and the saved ones read onto them from disk (SGLyricsLoadTranslation,
@@ -36,35 +30,60 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/Player/PlayerSettings.h"
 #import "Redesigned/Lyrics/AutoTranslation.h"
-#import "Redesigned/Lyrics/LyricsLook.h"
 #import "Redesigned/Lyrics/LyricsText.h"
 #import <math.h>
+#import <stdatomic.h>
 #import "Player.h"
 #import "PlayerLyricLine.h"
 #import "PlayerLyricFit.h"
+#import "PlayerQueue.h"
 
-static const CGFloat kTapHeight = 44;
+static const CGFloat kPreviewInset = 24, kPreviewPoints = 19.098;
+static NSString *const kSmall = @"spotifyglass.redesign.player.lyricLine.small";
+static NSNotificationName const sizeChanged = @"SGRPlayerLineSizeChanged";
+BOOL SGRPlayerLineSmall(void) { return [NSUserDefaults.standardUserDefaults boolForKey:kSmall]; }
+void SGRSetPlayerLineSmall(BOOL small) {
+    [NSUserDefaults.standardUserDefaults setBool:small forKey:kSmall];
+    [NSNotificationCenter.defaultCenter postNotificationName:sizeChanged object:nil];
+}
+static void placeLine(void);
 
-static char kLineKey, kStackKey;
+static char kLineKey, kStackKey, kTitleKey;
 static __weak UIView *sg_host;              // SPTNowPlayingView
 static __weak UIViewController *sg_floating; // the chips over the title (FloatingElementsUnit)
-static BOOL lineHasPlace(void);
-static void placeLine(void);
-static CGRect takenPreviewIn(UIView *view);
+#if SG_DRIVER
+static void flushChip(BOOL leaving);
+#else
+#define flushChip(leaving) ((void)0)
+#endif
+static CGFloat visibleChipTop(UIView *host, CGRect area);
+static void watchLineChip(CALayer *root);
 
 BOOL SGRPlayerLyricLineOn(void) {
     static BOOL on;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ on = SGEnabled(SGRKeyPlayerLyricLine); });
+    dispatch_once(&once, ^{ on = SGHidden(SGRKeyPlayerLyricLine); });
     return on;
 }
 
 @interface SGRLyricLineView : UIView
+@property (nonatomic, readonly) BOOL running;
+@property (nonatomic) BOOL obscured;
 @property (nonatomic) BOOL fits;   // set by the layout: there is room for it
+@property (nonatomic) BOOL overClip;
+@property (nonatomic) CGRect slot;
+@property (nonatomic) CGFloat chipTop;
+@property (nonatomic) CGRect chipArea;
+@property (nonatomic, weak) UIView *ownedTilt;
+@property (nonatomic) CGFloat normalSide;
+- (void)setRightToLeft:(BOOL)rtl;
 @property (nonatomic) CGRect room; // set by the layout: the gap under the cover, CGRectNull without one
 - (void)tick;
+- (void)setPlayerCovered:(BOOL)covered;
 - (BOOL)place;
+- (BOOL)placeWithChipTop:(CGFloat)top;
 @end
 
 @interface SGRLyricLineView () <SGPlayerStateObserver>
@@ -74,6 +93,8 @@ BOOL SGRPlayerLyricLineOn(void) {
     UILabel *_label;
     NSTimer *_timer;   // one-shot, armed again after every update
     BOOL _running;     // in a window and Spotify in front: the timer runs
+    BOOL _inactive, _covered, _underQueue, _refreshAfterQueue;
+    UIView *_covers;
     NSArray<SGKaraokeLine *> *_source, *_ordered;
     BOOL _timed;
     NSInteger _index;
@@ -97,6 +118,7 @@ BOOL SGRPlayerLyricLineOn(void) {
     if (!(self = [super initWithFrame:frame])) return nil;
     _index = NSNotFound;
     _room = CGRectNull;
+    _chipTop = CGFLOAT_MAX;
     self.alpha = 0;
     self.userInteractionEnabled = NO;
     self.accessibilityElementsHidden = YES;
@@ -104,14 +126,12 @@ BOOL SGRPlayerLyricLineOn(void) {
     self.accessibilityTraits = UIAccessibilityTraitButton | UIAccessibilityTraitUpdatesFrequently;
     self.accessibilityHint = SGL(@"settings.player.lyric_line.hint", @"Opens the lyrics.");
     _label = [[UILabel alloc] initWithFrame:self.bounds];
-    _label.textAlignment = NSTextAlignmentCenter;
-    _label.numberOfLines = 1;
-    _label.lineBreakMode = NSLineBreakByTruncatingTail;
-    _label.textColor = SGRSecondary();
-    _label.font = [SGRLyricLineView font];
+    _label.numberOfLines = 2;
+    _label.lineBreakMode = NSLineBreakByWordWrapping;
+    _label.textColor = UIColor.whiteColor;
+    _label.font = [self font];
     [self addSubview:_label];
     _translationLabel = [[UILabel alloc] initWithFrame:CGRectZero];
-    _translationLabel.textAlignment = NSTextAlignmentCenter;
     _translationLabel.numberOfLines = 1;
     _translationLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     _translationLabel.adjustsFontSizeToFitWidth = YES;
@@ -121,8 +141,9 @@ BOOL SGRPlayerLyricLineOn(void) {
     [self addSubview:_translationLabel];
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped)]];
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    [center addObserver:self selector:@selector(clock) name:UIApplicationDidBecomeActiveNotification object:nil];
-    [center addObserver:self selector:@selector(clock) name:UIApplicationDidEnterBackgroundNotification object:nil];
+    [center addObserver:self selector:@selector(queuePlaced:) name:SGRQueueSheetPlacedNotification object:nil];
+    [center addObserver:self selector:@selector(activity:) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [center addObserver:self selector:@selector(activity:) name:UIApplicationWillResignActiveNotification object:nil];
     // Lyrics kept for the track, or the Lyrics page's Delay changed: the line and its portions are read again.
     [center addObserver:self selector:@selector(linesChanged) name:SGKaraokeLinesKeptNotification object:nil];
     [center addObserver:self selector:@selector(linesChanged) name:SGLyricsOffsetsDidChangeNotification object:nil];
@@ -134,18 +155,20 @@ BOOL SGRPlayerLyricLineOn(void) {
     }
     // The menu's translation switch, or the Text sizes page's translation look.
     [center addObserver:self selector:@selector(lyricsTextChanged) name:SGRLyricsTextDidChangeNotification object:nil];
-    // The size chosen for the line under the cover (LyricsLook.h).
-    [center addObserver:self selector:@selector(sizeChanged) name:SGRLyricsLookDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(sizeChanged) name:sizeChanged object:nil];
     SGAddPlayerStateObserver(self);
     return self;
 }
 
-// The lyrics page's translation weight and brightness (its Text sizes page) on a footnote, dimmer than the line.
+- (UIFont *)font {
+    return [UIFont systemFontOfSize:SGRPlayerLineSmall() ? 17 : kPreviewPoints weight:UIFontWeightBold];
+}
+
 - (void)styleTranslation {
     SGRLyricsTextLook look = SGRLyricsTextLookOf(SGRLyricsTextTranslation);
-    _translationLabel.font = SGCategoryCappedFont(UIFontTextStyleFootnote, SGRLyricsTextFontWeight(look.weight),
-                                                  UIContentSizeCategoryExtraExtraExtraLarge);
-    UIColor *dim = SGRTertiary();
+    _translationLabel.font = [UIFont systemFontOfSize:round([self font].pointSize * 0.8) weight:SGRLyricsTextFontWeight(look.weight)];
+    // PlayerTitle.x gives the artist this same color, including under Increase Contrast.
+    UIColor *dim = SGRSecondary();
     _translationLabel.textColor = [dim colorWithAlphaComponent:MIN(1, CGColorGetAlpha(dim.CGColor) * look.brightness / 100.0)];
 }
 
@@ -153,8 +176,7 @@ BOOL SGRPlayerLyricLineOn(void) {
     return ceil(_translationLabel.font.lineHeight);
 }
 
-// The translation switch also hands the place under the cover between the line and Spotify's preview: the room is
-// measured again from the player at once.
+// Changing translation settings immediately updates the reserved rows.
 - (void)lyricsTextChanged {
     [self styleTranslation];
     placeLine();
@@ -186,49 +208,73 @@ BOOL SGRPlayerLyricLineOn(void) {
     });
 }
 
-// The frame in the room, with the translation under the line when the room holds both; NO when it cannot hold the
-// line, which leaves the frame as it was. The translation fades in or out with its place.
+- (void)setRightToLeft:(BOOL)rtl {
+    _label.textAlignment = _translationLabel.textAlignment = rtl ? NSTextAlignmentRight : NSTextAlignmentLeft;
+}
+
+- (BOOL)placeWithChipTop:(CGFloat)top {
+    BOOL moving = _chipTop != top && self.userInteractionEnabled;
+    _chipTop = top;
+    if (!moving) return [self place];
+    __block BOOL fits;
+    SGRAnimate(SGRMotionLayout, ^{
+        fits = [self place];
+        [self layoutIfNeeded];
+    }, nil);
+    return fits;
+}
+
 - (BOOL)place {
     if (CGRectIsNull(_room)) return NO;
-    SGRPlayerLineFit fit = SGRPlayerLineFitIn(_room.size.height, [self lineHeight], _translation ? [self translationHeight] : 0,
-                                              SGRGrid, kTapHeight);
-    if (!fit.line) return NO;
-    CGRect frame = CGRectIntegral(CGRectMake(CGRectGetMinX(_room), CGRectGetMinY(_room) + (_room.size.height - fit.height) / 2,
-                                             _room.size.width, fit.height));
-    if (!CGRectEqualToRect(self.frame, frame)) self.frame = frame;
-    if (fit.translation != _translationShown) {
-        _translationShown = fit.translation;
+    // On the fallback path the room already starts below the unreserved artwork;
+    // the same row budget applies, with no additional cover floor to subtract.
+    CGFloat bottom = MIN(CGRectGetMaxY(_room), _chipTop) - SGRGrid;
+    CGFloat row = ceil([self font].lineHeight);
+    CGFloat tr = SGFlag(SGRKeyLyricsTranslation, NO) ? [self translationHeight] : 0;
+    CGFloat floor = ceil(_normalSide * 2 / 3);
+    CGFloat available = bottom - CGRectGetMinY(_room) - (_overClip ? 0 : SGRGrid + floor);
+    NSInteger rows = SGRPlayerCompactRows(available, row, &tr);
+    if (!rows) { SGRPlayerReserveCover(nil, 0); return NO; }
+    CGRect slot = CGRectMake(_room.origin.x, bottom - rows * row - tr, _room.size.width, rows * row + tr);
+    if (!CGRectEqualToRect(slot, _slot) || _label.numberOfLines != rows) {
+        _slot = slot;
+        _label.numberOfLines = rows;
+        _portions = nil;
         [self setNeedsLayout];
-        UILabel *label = _translationLabel;
-        SGRAnimate(SGRMotionFade, ^{ label.alpha = fit.translation ? 1 : 0; }, nil);
     }
-    self.accessibilityValue = _translationShown ? _translation : nil;
+    CGFloat side = MIN(_normalSide, CGRectGetMinY(slot) - SGRGrid - CGRectGetMinY(_room));
+    SGRPlayerReserveCover(_overClip ? nil : _ownedTilt, _overClip ? 0 : side);
+    BOOL pair = tr > 0 && _translation.length;
+    if (pair != _translationShown) {
+        _translationShown = pair;
+        _translationLabel.alpha = pair ? 1 : 0;
+        [self setNeedsLayout];
+    }
+    self.accessibilityValue = pair ? _translation : nil;
+    if (!CGRectEqualToRect(self.frame, slot)) {
+        self.frame = slot;
+        if (_overClip && _shown) SGRPlayerMotionLineMoved();
+    }
     return YES;
 }
 
-// The line alone fills the view, as it always has; with its translation the two are centered together.
+// Give UILabel exactly Spotify's text rectangle. The translation never pushes it upwards.
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
-    if (!_translationShown) {
-        _label.frame = bounds;
-        return;
-    }
-    CGFloat lineHeight = [self lineHeight], translationHeight = [self translationHeight];
-    CGFloat top = floor((bounds.size.height - lineHeight - translationHeight) / 2);
-    _label.frame = CGRectMake(0, top, bounds.size.width, lineHeight);
-    _translationLabel.frame = CGRectMake(SGRGrid, top + lineHeight, [self textWidth], translationHeight);
+    _label.frame = CGRectMake(0, 0, bounds.size.width,
+        bounds.size.height - (_translationShown ? [self translationHeight] : 0));
+    CGFloat width = MIN(bounds.size.width, ceil([_translationLabel sizeThatFits:CGSizeMake(bounds.size.width, CGFLOAT_MAX)].width));
+    _translationLabel.frame = CGRectMake(_label.textAlignment == NSTextAlignmentRight ? bounds.size.width - width : 0,
+        CGRectGetMidY(_label.frame) + [self lineHeight] / 2, width, [self translationHeight]);
 }
 
-// The phone's text size, times the share the Lyrics page sets for the line under the cover.
-+ (UIFont *)font {
-    UIFont *font = SGCategoryCappedFont(UIFontTextStyleSubheadline, UIFontWeightSemibold, UIContentSizeCategoryExtraExtraExtraLarge);
-    CGFloat share = SGRLyricsSizeShare(SGRLyricsPlaceUnderCover);
-    return share == 1 ? font : [font fontWithSize:round(font.pointSize * share)];
-}
+- (NSInteger)lyricRows { return _label.numberOfLines; }
 
 - (CGFloat)lineHeight {
-    return ceil([SGRLyricLineView font].lineHeight);
+    if (!_label.text.length || self.slot.size.width <= 0) return ceil([self font].lineHeight);
+    return ceil([_label textRectForBounds:(CGRect){CGPointZero, self.slot.size}
+                    limitedToNumberOfLines:_label.numberOfLines].size.height);
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
@@ -238,28 +284,28 @@ BOOL SGRPlayerLyricLineOn(void) {
 
 // The text size changed: the line is measured again for the room, and its portions for the new font.
 - (void)restyle {
-    _label.font = [SGRLyricLineView font];
-    _label.textColor = SGRSecondary();
+    _label.font = [self font];
     [self styleTranslation];
     _portions = nil;
+    // Over a clip the labels are sized to their text here, and the view's frame may not change with the font.
+    [self setNeedsLayout];
     [self.superview setNeedsLayout];
 }
 
-// A size chosen on the Lyrics page shows at once, rather than at the line's next portion.
+// A size change shows at once, rather than at the line's next portion.
 - (void)sizeChanged {
     [self restyle];
+    placeLine();
     if (_running) [self tick];
 }
 
 // Touches only over the words, a tap's height tall, so a swipe across the rest of the gap still reaches the covers.
-// Over a preview the line has hidden too: a tap there would inspect the cover where nothing shows, and opens the
-// lyrics instead.
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
-    if (CGRectContainsPoint(takenPreviewIn(self), point)) return YES;
     CGFloat text = [_label sizeThatFits:self.bounds.size].width;
     if (_translationShown) text = MAX(text, [_translationLabel sizeThatFits:self.bounds.size].width);
     CGFloat width = MIN(self.bounds.size.width, text + 2 * SGRSideMargin);
-    CGRect words = CGRectMake(CGRectGetMidX(self.bounds) - width / 2, 0, width, self.bounds.size.height);
+    CGRect words = CGRectMake(_label.textAlignment == NSTextAlignmentRight ? self.bounds.size.width - width : 0,
+                              0, width, self.bounds.size.height);
     return CGRectContainsPoint(words, point);
 }
 
@@ -269,28 +315,82 @@ BOOL SGRPlayerLyricLineOn(void) {
     SGRPlayerToggleLyrics();
 }
 
+- (BOOL)accessibilityActivate {
+    if (!_shown || SGRPlayerLyricsOpen()) return NO;
+    [self tapped];
+    return YES;
+}
+
+- (CGRect)accessibilityFrame {
+    CGRect rows = [_label textRectForBounds:_label.bounds limitedToNumberOfLines:_label.numberOfLines];
+    rows = [self convertRect:rows fromView:_label];
+    if (_translationShown) rows = CGRectUnion(rows, _translationLabel.frame);
+    return UIAccessibilityConvertFrameToScreenCoordinates(rows, self);
+}
+
 #pragma mark - the clock
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    if (!self.window && self.superview == sg_host) flushChip(YES);
     [self clock];
 }
 
 - (void)dealloc {
     [NSNotificationCenter.defaultCenter removeObserver:self];
+    [_covers removeObserver:self forKeyPath:@"alpha"];
     [_timer invalidate];
+}
+
+- (void)watchCovers:(UIView *)covers {
+    if (_covers == covers) return;
+    [_covers removeObserver:self forKeyPath:@"alpha"];
+    _covers = covers;
+    [_covers addObserver:self forKeyPath:@"alpha" options:0 context:NULL];
+}
+
+// Full lyrics take the covers away and give them back by setting alpha, even at the same slot width.
+- (void)observeValueForKeyPath:(NSString *)key ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (object == _covers) [self tick];
+    else [super observeValueForKeyPath:key ofObject:object change:change context:context];
+}
+
+- (void)activity:(NSNotification *)note {
+    _inactive = [note.name isEqual:UIApplicationWillResignActiveNotification];
+    [self clock];
+}
+
+- (void)setPlayerCovered:(BOOL)covered {
+    _covered = covered;
+    [self clock];
+}
+
+- (void)queuePlaced:(NSNotification *)note {
+    UIView *sheet = note.object;
+    BOOL covered = self.window && sheet.window == self.window &&
+        CGRectContainsRect(sheet.bounds, [self convertRect:self.bounds toView:sheet]);
+    if (_underQueue == covered) return;
+    _underQueue = covered;
+    if (covered) {
+        _refreshAfterQueue = YES;
+        [_label.layer removeAllAnimations];
+        [_translationLabel.layer removeAllAnimations];
+    }
+    [self clock];
 }
 
 // Runs while the line is in a window and Spotify is in front; stopped otherwise. Coming back starts it over, which
 // catches up with where the song went while it was away.
 - (void)clock {
-    BOOL run = self.window && UIApplication.sharedApplication.applicationState != UIApplicationStateBackground;
+    BOOL run = self.window && !_inactive && !_covered && !_underQueue && UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     if (run == _running) return;
     _running = run;
     if (!run) {
         [_timer invalidate];
         _timer = nil;
         _armed = NO;
+        [self watchCovers:nil];
+        if (self.superview == sg_host) watchLineChip(nil);
         return;
     }
     [self tick];
@@ -321,7 +421,7 @@ BOOL SGRPlayerLyricLineOn(void) {
 // A report from the player: a seek re-aims the timer, and so does a speed change. A paused report carries the exact
 // place the song was put, so any move of it while paused is a seek, however small: it can cross a portion's boundary.
 - (void)playerStateDidChange:(SPTPlayerState *)state {
-    [self rearmForState:state];
+    if (_running) [self tick];  // a new track can start at exactly the last one's reported position
 }
 
 - (void)playerStateDidReport:(SPTPlayerState *)state {
@@ -329,8 +429,8 @@ BOOL SGRPlayerLyricLineOn(void) {
 }
 
 - (void)rearmForState:(SPTPlayerState *)state {
-    if (!_running) return;
-    if (!_armed || !_timer) {
+    if (!_running || !_fits || !_timed || SGRPlayerLyricsOpen() || (_covers && _covers.alpha <= 0.01)) return;
+    if (!_armed) {
         [self tick];
         return;
     }
@@ -363,12 +463,30 @@ BOOL SGRPlayerLyricLineOn(void) {
     return index < 0 ? NSNotFound : index;
 }
 
-// The width the words have to fit in: the line's own, less a gap either side.
 - (CGFloat)textWidth {
-    return MAX(CGRectGetWidth(self.bounds) - 2 * SGRGrid, 0);
+    return CGRectGetWidth(self.slot);
+}
+
+- (void)showLine:(BOOL)shown {
+    if (shown == _shown) return;
+    _shown = shown;
+    self.userInteractionEnabled = shown;
+    self.accessibilityElementsHidden = !shown;
+    if (_overClip) SGRPlayerMotionLineMoved();
+    SGRAnimate(shown ? SGRMotionFade : SGRMotionRespond, ^{ self.alpha = shown ? 1 : 0; }, nil);
 }
 
 - (void)tick {
+    if (!_running) return;
+    [self watchCovers:SGRPlayerCoverList()];
+    _obscured = SGRPlayerLyricsOpen() || (_covers && _covers.alpha <= 0.01);
+    if (_obscured) {
+        [_timer invalidate];
+        _timer = nil;
+        _armed = NO;
+        [self showLine:NO];
+        return;
+    }
     NSArray<SGKaraokeLine *> *before = _source;
     NSInteger index = [self currentIndex];
     if (index != _index || _source != before) {
@@ -383,13 +501,16 @@ BOOL SGRPlayerLyricLineOn(void) {
     SGKaraokeLine *line = _index == NSNotFound ? nil : _ordered[(NSUInteger)_index];
     if (line && (!_portions || _portionWidth != [self textWidth])) {
         _portionWidth = [self textWidth];
-        _portions = SGRLyricPortions(line, _portionWidth, [SGRLyricLineView font]);
+        _portions = SGRLyricPortionsInRows(line, _portionWidth, [self font], _label.numberOfLines);
     }
+    SGRLyricPortion *following = nil;
     if (_portions.count) {
         // The portion holding the position, which is the first for a line just begun and after a seek back into it.
-        SGRLyricPortion *shown = _portions[(NSUInteger)SGRLyricPortionAt(_portions, SGKaraokePositionMs() - SGKaraokeDelayMs())];
+        NSUInteger at = (NSUInteger)SGRLyricPortionAt(_portions, SGKaraokePositionMs() - SGKaraokeDelayMs());
+        SGRLyricPortion *shown = _portions[at];
+        if (at + 1 < _portions.count) following = _portions[at + 1];
         [self showText:shown.text scale:shown.scale];
-    }
+    } else if (line && _text) [self showText:_text scale:1];
     // Its translation, read again every update, so one that arrives mid-line shows at once. With no line the last one
     // stays, as the line's own text does, for the fade out.
     BOOL translations = SGFlag(SGRKeyLyricsTranslation, NO);
@@ -401,43 +522,54 @@ BOOL SGRPlayerLyricLineOn(void) {
     // Spotify's own preview can come up with no pass of a view this file hooks (its cover cell unhidden as the song
     // changes), so every update looks again: while the line takes its place it is hidden again, else the line stands
     // down by its next portion at the latest. The layout gives the room back once the preview goes.
-    if (!lineHasPlace()) _fits = NO;
-    UIView *covers = SGRPlayerCoverList();
-    BOOL shown = _fits && _text && !SGRPlayerLyricsOpen() && (!covers || covers.alpha > 0.01);
-    if (shown != _shown) {
-        _shown = shown;
-        self.userInteractionEnabled = shown;
-        self.accessibilityElementsHidden = !shown;
-        SGRAnimate(shown ? SGRMotionFade : SGRMotionRespond, ^{ self.alpha = shown ? 1 : 0; }, nil);
-    }
-    // Armed again from every update, whether or not the line changed: the clock is the only thing that moves it.
-    if (_running) {
-        [self armTimer:SGRLyricLineWait(_ordered, SGKaraokePositionMs(), SGKaraokeDelayMs(),
-                                        [self textWidth], [SGRLyricLineView font], [self rate])];
+    if (objc_getAssociatedObject(self.superview, &kLineKey) == self) placeLine();
+    [self showLine:_fits && _text];
+    _refreshAfterQueue = NO;
+    NSInteger position = SGKaraokePositionMs(), delay = SGKaraokeDelayMs();
+    double rate = [self rate];
+    // A hidden slot has no deadline. A visible slot before the first line does, even though its label is clear.
+    BOOL future = _index == NSNotFound || _index + 1 < (NSInteger)_ordered.count || following != nil;
+    if (_fits && _timed && position >= 0 && rate > 0 && future) {
+        // Placement can straddle the boundary. Catch up to words not yet drawn instead of waiting past them.
+        SGRLyricWait next = following && following.start <= position - delay ? (SGRLyricWait){SGRLyricMinWait, 0}
+            : SGRLyricLineWaitInRows(_ordered, position, delay, [self textWidth], [self font], rate, _label.numberOfLines);
+        [self armTimer:next];
+    } else {
+        [_timer invalidate];
+        _timer = nil;
+        _armedMs = position;
+        _armedAt = CFAbsoluteTimeGetCurrent();
+        _armedRate = rate;
+        _armed = position >= 0;
     }
 }
 
 // A new line, or a new portion of it, crosses over the one before; one coming while the line is out of sight is set
 // at once. With no line the last one stays in the label for the fade out.
 - (void)showText:(NSString *)text scale:(CGFloat)scale {
-    UIFont *font = SGRLyricFontAtScale([SGRLyricLineView font], scale);
-    if (![_label.font isEqual:font]) _label.font = font;
-    if (!text || [text isEqualToString:_label.text]) return;
+    UIFont *font = SGRLyricFontAtScale([self font], scale);
+    if (!text) return;
+    NSDictionary *attributes = @{NSFontAttributeName:font};
+    if (text.length && [text isEqual:_label.text] && _label.attributedText.length &&
+        [[_label.attributedText attribute:NSFontAttributeName atIndex:0 effectiveRange:nil] isEqual:font] &&
+        [_label.font isEqual:font]) return;
+    _label.font = font;
     UILabel *label = _label;
-    if (!_shown) {
-        label.text = text;
-        return;
-    }
-    [UIView transitionWithView:label duration:SGRCrossfade
+    [self setNeedsLayout];
+    NSAttributedString *styled = [[NSAttributedString alloc] initWithString:text attributes:attributes];
+    if (!_shown || _refreshAfterQueue || [label.text isEqual:text]) label.attributedText = styled;
+    else [UIView transitionWithView:label duration:SGRCrossfade
                        options:UIViewAnimationOptionTransitionCrossDissolve | UIViewAnimationOptionAllowUserInteraction
-                    animations:^{ label.text = text; } completion:nil];
+                    animations:^{ label.attributedText = styled; } completion:nil];
+    _fits = [self place];
 }
 
 // A new translation crosses over the one under the line, or comes in with its place; none fades the last one out.
 // The pair settles into its place with a layout spring, at once under Reduce Motion, where only the fade is kept.
 - (void)showTranslation:(NSString *)translation {
-    BOOL crossing = _shown && _translationShown && translation;
+    BOOL crossing = _shown && !_refreshAfterQueue && _translationShown && translation;
     _translation = translation;
+    [self setNeedsLayout];
     UILabel *label = _translationLabel;
     if (crossing) {
         [UIView transitionWithView:label duration:SGRCrossfade
@@ -468,19 +600,314 @@ static BOOL showsIn(UIView *view, UIView *root) {
     return YES;
 }
 
-// The chips the floating unit shows (its buttons, labels and images with a size), as one frame in `host`;
-// CGRectNull when it shows none. The unit's own alpha is left out: it is 0 while the lyrics are open.
-static CGRect chipsIn(UIView *host) {
+// The video switch owns its whole pill, not just the inset text or image. For other chips
+// use the visible controls, labels and images. Carry clipping and visibility down the tree.
+static BOOL layerOwnPaint(CALayer *layer) {
+    if (!layer || layer.hidden || layer.opacity < .01 || CGRectIsEmpty(layer.bounds)) return NO;
+    if (layer.contents || (layer.backgroundColor && CGColorGetAlpha(layer.backgroundColor) > .01) ||
+        (layer.borderWidth > 0 && layer.borderColor && CGColorGetAlpha(layer.borderColor) > .01)) return YES;
+    if ([layer isKindOfClass:CAShapeLayer.class]) {
+        CAShapeLayer *shape = (CAShapeLayer *)layer;
+        if (shape.path && !CGPathIsEmpty(shape.path) && ((shape.fillColor && CGColorGetAlpha(shape.fillColor) > .01) ||
+            (shape.lineWidth > 0 && shape.strokeColor && CGColorGetAlpha(shape.strokeColor) > .01))) return YES;
+    }
+    if ([layer isKindOfClass:CAGradientLayer.class])
+        for (id color in ((CAGradientLayer *)layer).colors) if (CGColorGetAlpha((__bridge CGColorRef)color) > .01) return YES;
+    UIView *v = [layer.delegate isKindOfClass:UIView.class] ? (UIView *)layer.delegate : nil;
+    if (([v isKindOfClass:UILabel.class] && [(UILabel *)v text].length) ||
+        ([v isKindOfClass:UIImageView.class] && [(UIImageView *)v image])) return YES;
+    return NO;
+}
+static BOOL layerPaints(CALayer *layer) {
+    if (layer.hidden || layer.opacity < .01 || CGRectIsEmpty(layer.bounds) ||
+        (layer.mask && !layerPaints(layer.mask))) return NO;
+    if (layerOwnPaint(layer)) return YES;
+    for (CALayer *child in layer.sublayers) if (layerPaints(child)) return YES;
+    return NO;
+}
+static CGRect maskBox(UIView *v, UIView *host) {
+    CALayer *mask = v.layer.mask;
+    CGPathRef path = [mask isKindOfClass:CAShapeLayer.class] ? ((CAShapeLayer *)mask).path : NULL;
+    if (!path) return [host convertRect:mask.frame fromView:v];
+    CGRect box = CGPathGetPathBoundingBox(path);
+    if (CGRectIsEmpty(box)) return CGRectNull;
+    // A mask has no superlayer. Its anchor/position nevertheless place its local path in the owner's bounds.
+    CGRect b = mask.bounds;
+    box = CGRectOffset(box, -b.origin.x - b.size.width * mask.anchorPoint.x, -b.origin.y - b.size.height * mask.anchorPoint.y);
+    box = CGRectApplyAffineTransform(box, mask.affineTransform);
+    return [host convertRect:CGRectOffset(box, mask.position.x, mask.position.y) fromView:v];
+}
+static BOOL chipVisibleThrough(UIView *v, UIView *host, CGRect *clip) {
+    if (v.hidden || v.layer.hidden || v.alpha < .01 || v.layer.opacity < .01 || CGRectIsEmpty(v.bounds)) return NO;
+    CGRect bounds = [host convertRect:v.bounds fromView:v];
+    if (CGRectIsEmpty(bounds)) return NO;
+    if (v.clipsToBounds) *clip = CGRectIntersection(*clip, bounds);
+    CALayer *mask = v.layer.mask;
+    if (mask) {
+        if (!layerPaints(mask)) return NO;
+        *clip = CGRectIntersection(*clip, maskBox(v, host));
+    }
+    return !CGRectIsEmpty(*clip);
+}
+#if SG_DRIVER
+static __weak UIView *sg_chip;
+static uint64_t sg_tree;
+static void chipMix(uint64_t n) { sg_tree = (sg_tree ^ n) * UINT64_C(1099511628211); }
+static void chipNumbers(const CGFloat *numbers, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        double value = numbers[i];
+        uint64_t bits;
+        memcpy(&bits, &value, sizeof(bits));
+        chipMix(bits);
+    }
+}
+static void fingerprintLayer(CALayer *l, CGRect frame) {
+    chipMix((uintptr_t)(__bridge void *)l.class);
+    chipMix(l.hidden | ((l.contents != nil) << 1) | ((l.backgroundColor && CGColorGetAlpha(l.backgroundColor) > 0) << 2));
+    chipNumbers((CGFloat[]){frame.origin.x, frame.origin.y, frame.size.width, frame.size.height, l.opacity, l.cornerRadius}, 6);
+    if ([l isKindOfClass:CAShapeLayer.class] && ((CAShapeLayer *)l).path) {
+        CGRect b = CGPathGetPathBoundingBox(((CAShapeLayer *)l).path);
+        chipNumbers((CGFloat[]){b.origin.x,b.origin.y,b.size.width,b.size.height},4);
+    }
+    if (l.mask) fingerprintLayer(l.mask, l.mask.frame);
+}
+enum { kChipPartBytes = 840, kChipParts = 4 };
+static NSString *chipClass(id object) {
+    NSString *name = NSStringFromClass([object class]);
+    // Keep the informative type suffix, not a private Swift context hash.
+    if ([name hasPrefix:@"_Tt"] && name.length > 48) return [@"…" stringByAppendingString:[name substringFromIndex:name.length-48]];
+    return name;
+}
+static void appendChipTree(NSMutableString *tree, UIView *v, UIView *host, NSUInteger depth) {
+    if (tree.length >= kChipPartBytes * kChipParts) return;
+    CALayer *l = v.layer;
+    NSMutableString *layers = [NSMutableString string];
+    for (CALayer *child in l.sublayers) {
+        if ([child.delegate isKindOfClass:UIView.class] && ((UIView *)child.delegate).layer == child) continue;
+        if (layers.length >= 180) { [layers appendString:@"…"]; break; }
+        [layers appendFormat:@"%@%@", layers.length ? @"," : @"", chipClass(child)];
+    }
+    [tree appendFormat:@"\nd%lu %@%@ %@", (unsigned long)depth, chipClass(v), v == sg_chip ? @"*" : @"",
+        v.window == host.window ? NSStringFromCGRect([host convertRect:v.bounds fromView:v]) : @"unattached"];
+    if (v.accessibilityIdentifier.length) [tree appendFormat:@" id=%@", [v.accessibilityIdentifier isEqual:SGVideoSwitchIdentifier] ? @"switch" : @"other"];
+    if (v.hidden || l.hidden) [tree appendFormat:@" hidden=%d/%d",v.hidden,l.hidden];
+    if (v.alpha != 1) [tree appendFormat:@" alpha=%.3g",v.alpha];
+    if (v.clipsToBounds) [tree appendString:@" clips=1"];
+    if (l.class != CALayer.class) [tree appendFormat:@" layer=%@",chipClass(l)];
+    if (l.opacity != 1) [tree appendFormat:@" opacity=%.3g",l.opacity];
+    if (l.mask) [tree appendFormat:@" mask=%@ box=%@",chipClass(l.mask),v.window == host.window ? NSStringFromCGRect(maskBox(v,host)) : @"unattached"];
+    if (l.backgroundColor && CGColorGetAlpha(l.backgroundColor)>0) [tree appendString:@" bg=1"];
+    if (l.contents) [tree appendString:@" contents=1"];
+    if (l.cornerRadius) [tree appendFormat:@" radius=%.3g",l.cornerRadius];
+    if (layers.length) [tree appendFormat:@" sub=%@",layers];
+    for (UIView *child in v.subviews) {
+        if (tree.length >= kChipPartBytes * kChipParts) break;
+        appendChipTree(tree, child, host, depth + 1);
+    }
+}
+// Structure and decision are independent of host translation. Keep the latest absolute pose
+// separately so an animation costs one trailing snapshot, not one snapshot per layout.
+static CGRect sg_area, sg_unitFrame;
+static CGFloat sg_top;
+static uint64_t sg_sentTree, sg_observedTree;
+static CFTimeInterval sg_sentAt, sg_poseAt;
+static BOOL sg_scheduled;
+static NSData *sg_pending;
+static void flushChip(BOOL leaving) {
+    if (!sg_pending || (!leaving && sg_scheduled)) return;
+    CFTimeInterval now = CACurrentMediaTime();
+    CFTimeInterval due = sg_sentAt + 1;
+    if (sg_observedTree == sg_sentTree) due = MAX(due, sg_poseAt + 1);
+    if (!leaving && due > now) {
+        sg_scheduled = YES;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((due-now)*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            sg_scheduled = NO; flushChip(NO);
+        });
+        return;
+    }
+    sg_sentTree = sg_observedTree; sg_sentAt = now;
+    NSData *data = sg_pending;
+    sg_pending = nil;
+    const uint8_t *bytes = data.bytes;
+    NSUInteger offset = 0;
+    for (NSUInteger part = 1; part <= kChipParts && offset < data.length; part++) {
+        NSUInteger end = MIN(offset + kChipPartBytes, data.length);
+        while (end < data.length && (bytes[end] & 0xc0) == 0x80) end--;
+        NSString *chunk = [[NSString alloc] initWithBytes:bytes+offset length:end-offset encoding:NSUTF8StringEncoding];
+        SGLog(@"lyrics unit: %lu %@%@", (unsigned long)part, chunk, part == kChipParts && end < data.length ? @" [capped]" : @"");
+        offset = end;
+    }
+}
+static void reportChip(UIView *host, CGRect area, CGFloat top, CGFloat titleTop, CGRect stack, CGFloat normalSide) {
+    if (!host.window) return;
+    UIView *unit = sg_floating.viewIfLoaded;
+    BOOL attached = unit.window && unit.window == host.window;
+    CGRect frame = attached ? [host convertRect:unit.bounds fromView:unit] : CGRectNull;
+    chipMix(attached); chipMix((uintptr_t)(__bridge void *)sg_chip);
+    if (sg_chip) chipNumbers((CGFloat[]){top - CGRectGetMinY(frame)}, 1);
+    chipNumbers(&normalSide,1);
+    static CGRect priorStack;
+    static CGFloat priorTitle;
+    BOOL pose = !CGRectEqualToRect(frame, sg_unitFrame) || !CGRectEqualToRect(area, sg_area) || top != sg_top ||
+        !CGRectEqualToRect(stack,priorStack) || titleTop != priorTitle;
+    priorStack = stack; priorTitle = titleTop;
+    if (!pose && sg_tree == sg_observedTree) return;
+    if (pose) sg_poseAt = CACurrentMediaTime();
+    sg_unitFrame = frame; sg_area = area; sg_top = top;
+    sg_observedTree = sg_tree;
+    // The player can disappear before the coalescing deadline. Keep bytes, not its live views.
+    NSMutableString *record = [NSMutableString stringWithFormat:@"loaded=%d attached=%d area=%@ top=%@ winner=%@ titleTop=%@ stack=%@ normalSide=%.3f",
+        unit != nil, attached, NSStringFromCGRect(area), top == CGFLOAT_MAX ? @"none" : @(top).stringValue,
+        sg_chip ? chipClass(sg_chip) : @"none", titleTop == CGFLOAT_MAX ? @"none" : @(titleTop).stringValue,
+        NSStringFromCGRect(stack),normalSide];
+    if (unit) appendChipTree(record, unit, host, 0);
+    sg_pending = [record dataUsingEncoding:NSUTF8StringEncoding];
+    flushChip(NO);
+}
+#endif
+static CGFloat chipTopInBranch(UIView *view, UIView *host, CGRect clip, UIView **winner, BOOL placement) {
+    // Parent-local geometry preserves hierarchy and ignores a translation of the whole unit.
+    BOOL identified = [view.accessibilityIdentifier isEqualToString:SGVideoSwitchIdentifier];
+#if SG_DRIVER
+    BOOL record = placement;
+    if (record) {
+        fingerprintLayer(view.layer, view == sg_floating.viewIfLoaded ? view.bounds : view.frame);
+        chipMix(view.subviews.count); chipMix(view.layer.sublayers.count);
+        chipMix((uintptr_t)(__bridge void *)view.class);
+        chipMix(view.clipsToBounds | (view.hidden << 1) | (identified << 2) | ((view.accessibilityIdentifier.length != 0) << 3));
+        chipNumbers((CGFloat[]){view.alpha}, 1);
+    }
+#else
+    BOOL record = NO;
+#endif
+    if (!CGRectIsEmpty(clip) && !chipVisibleThrough(view, host, &clip)) clip = CGRectNull;
+    CGRect visible = CGRectIsEmpty(clip) ? CGRectNull : CGRectIntersection(clip, [host convertRect:view.bounds fromView:view]);
+    if (!record && CGRectIsEmpty(clip)) return CGFLOAT_MAX;
+    BOOL control = !placement && ([view isKindOfClass:UIControl.class] || [view isKindOfClass:UIVisualEffectView.class]);
+    BOOL owns = !CGRectIsEmpty(visible) && (identified || control || layerOwnPaint(view.layer));
+    CGFloat top = CGFLOAT_MAX;
+    for (CALayer *layer in view.layer.sublayers) {
+        if ([layer.delegate isKindOfClass:UIView.class] && ((UIView *)layer.delegate).layer == layer) continue;
+#if SG_DRIVER
+        if (record) fingerprintLayer(layer, layer.frame);
+#endif
+        if (owns || CGRectIsEmpty(clip) || !layerPaints(layer)) continue;
+        CGRect rect = CGRectIntersection(clip, [host convertRect:layer.frame fromView:view]);
+        if (!CGRectIsEmpty(rect) && CGRectGetMinY(rect) < top) { *winner = view; top = CGRectGetMinY(rect); }
+    }
+    for (UIView *child in view.subviews) {
+        UIView *candidate = nil;
+        CGFloat other = chipTopInBranch(child, host, clip, &candidate, placement);
+        if (other < top) { top = other; *winner = candidate; }
+    }
+    if (owns) { *winner = view; return CGRectGetMinY(visible); }
+    return top;
+}
+
+static CGFloat visibleChipTop(UIView *host, CGRect area) {
     UIView *floating = sg_floating.viewIfLoaded;
-    if (!floating.window || floating.window != host.window || floating.hidden) return CGRectNull;
-    __block CGRect chips = CGRectNull;
-    SGForEachView(floating, ^(UIView *view) {
-        if (view == floating || view.bounds.size.width < 1 || view.bounds.size.height < 1) return;
-        if (![view isKindOfClass:UIControl.class] && ![view isKindOfClass:UILabel.class] && ![view isKindOfClass:UIImageView.class]) return;
-        for (UIView *v = view; v && v != floating; v = v.superview) if (v.hidden || v.alpha < 0.01) return;
-        chips = CGRectUnion(chips, [host convertRect:view.bounds fromView:view]);
+#if SG_DRIVER
+    sg_chip = nil;
+    sg_tree = UINT64_C(14695981039346656037);
+#endif
+    if (!floating) return CGFLOAT_MAX;
+    CGRect clip = CGRectNull;
+    if (!CGRectIsEmpty(area) && floating.window && floating.window == host.window) {
+        clip = CGRectIntersection(area, [host convertRect:host.window.bounds fromView:host.window]);
+        clip = CGRectIntersection(clip, [host convertRect:floating.bounds fromView:floating]);
+        for (UIView *v = floating.superview; v; v = v.superview)
+            if (!chipVisibleThrough(v, host, &clip)) { clip = CGRectNull; break; }
+    }
+    UIView *winner = nil;
+    CGFloat top = chipTopInBranch(floating, host, clip, &winner, YES);
+#if SG_DRIVER
+    sg_chip = winner;
+#endif
+    return top;
+}
+
+static void refreshEmptyStrip(UIView *host);
+
+// With the lyric clock off, follow the inputs to the same chip measurement.
+// Watch only the floating unit (including its masks); sublayers changes catch
+// insertions/removals even when neither controller is laid out again.
+@interface SGRFloatingStripWatch : NSObject
+- (void)follow:(CALayer *)root;
+@end
+
+@implementation SGRFloatingStripWatch {
+    NSSet<CALayer *> *_layers;
+    __weak CALayer *_root;
+    BOOL _rescan;
+    atomic_bool _pending;
+}
+static void collectStripLayers(CALayer *layer, NSMutableSet *layers) {
+    if (!layer || [layers containsObject:layer]) return;
+    [layers addObject:layer];
+    collectStripLayers(layer.mask, layers);
+    for (CALayer *child in layer.sublayers) collectStripLayers(child, layers);
+}
+static NSArray<NSString *> *stripKeys(CALayer *layer) {
+    static NSArray *keys, *shape, *gradient;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keys = @[@"sublayers", @"mask", @"hidden", @"opacity", @"bounds", @"position", @"anchorPoint",
+                 @"transform", @"sublayerTransform", @"masksToBounds", @"contents", @"backgroundColor", @"borderColor", @"borderWidth"];
+        shape = [keys arrayByAddingObjectsFromArray:@[@"path", @"fillColor", @"strokeColor", @"lineWidth"]];
+        gradient = [keys arrayByAddingObject:@"colors"];
     });
-    return chips;
+    return [layer isKindOfClass:CAShapeLayer.class] ? shape : [layer isKindOfClass:CAGradientLayer.class] ? gradient : keys;
+}
+- (void)follow:(CALayer *)root {
+    if (root == _root && !_rescan) return;
+    _root = root;
+    _rescan = NO;
+    NSMutableSet *next = [NSMutableSet set];
+    collectStripLayers(root, next);
+    for (CALayer *layer in _layers) if (![next containsObject:layer])
+        for (NSString *key in stripKeys(layer)) [layer removeObserver:self forKeyPath:key];
+    for (CALayer *layer in next) if (![_layers containsObject:layer])
+        for (NSString *key in stripKeys(layer)) [layer addObserver:self forKeyPath:key options:0 context:NULL];
+    _layers = next;
+}
+- (void)observeValueForKeyPath:(NSString *)key ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (atomic_exchange(&_pending, true)) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        atomic_store(&self->_pending, false);
+        self->_rescan = YES;
+        if (SGRPlayerLyricLineOn()) placeLine();
+        else refreshEmptyStrip(sg_host);
+    });
+}
+@end
+
+static void watchLineChip(CALayer *root) {
+    static SGRFloatingStripWatch *watch;
+    if (root && !watch) watch = [SGRFloatingStripWatch new];
+    [watch follow:root];
+    if (!root) watch = nil;
+}
+
+// The shared switch hook removes the button, not its allocated unit. Do
+// not change the stack: give just the artwork its ordinary square back.
+static void refreshEmptyStrip(UIView *host) {
+    UIView *unit = sg_floating.viewIfLoaded;
+    CALayer *root = nil;
+    BOOL empty = NO;
+    if (host.window && unit.window == host.window && SGVideoSwitchHidden() &&
+        host.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPhone && host.bounds.size.height > host.bounds.size.width) {
+        UIView *stack = SGRFindByIdentifier(host, @"npv.bottomStackView", &kStackKey);
+        if (stack && [unit isDescendantOfView:stack]) {
+            root = unit.layer;
+            CGRect strip = [host convertRect:unit.bounds fromView:unit];
+            UIView *winner = nil;
+            empty = !CGRectIsEmpty(strip) && CGRectContainsRect([host convertRect:stack.bounds fromView:stack], strip) &&
+                chipTopInBranch(unit, unit, unit.bounds, &winner, NO) == CGFLOAT_MAX;
+        }
+    }
+    // With the line on, placement already watches this same unit for chip movement.
+    if (!SGRPlayerLyricLineOn()) watchLineChip(root);
+    SGRPlayerEmptyStripIn(empty ? host : nil);
 }
 
 // Spotify's own lyric preview under the cover, beside the tilt view, shown when Spotify's lyrics setting has it:
@@ -495,9 +922,25 @@ static BOOL isPreview(UIView *view) {
     return (preview && [view isKindOfClass:preview]) || (wrapper && [view isKindOfClass:wrapper]);
 }
 
+static BOOL previewOccupies(UIView *preview, UIView *root) {
+    return preview.bounds.size.height > 1 && showsIn(preview, root);
+}
+
+NSArray<CALayer *> *SGRPlayerPreviewLayers(UIView *column, BOOL *showing) {
+    NSMutableArray *layers = [NSMutableArray array];
+    *showing = NO;
+    for (UIView *sibling in column.subviews) if (isPreview(sibling)) {
+        [layers addObject:sibling.layer];
+        // Both pictures move/hide with the column; only the preview's own
+        // visibility decides their relative sizes when the page returns.
+        if (previewOccupies(sibling, sibling)) *showing = YES;
+    }
+    return layers;
+}
+
 static BOOL previewShowing(UIView *tilt, UIView *host) {
     for (UIView *sub in tilt.superview.subviews) {
-        if (isPreview(sub) && sub.bounds.size.height > 1 && showsIn(sub, host)) return YES;
+        if (isPreview(sub) && previewOccupies(sub, host)) return YES;
     }
     return NO;
 }
@@ -544,9 +987,7 @@ static BOOL playingTrackSynced(void) {
 // preview in the covers (the next cover's too, so a skip or a swipe never shows one), or the preview does not show.
 // Every preview it hid, under the covers or not, is given back once it no longer takes their place. Asked again on
 // every update, so lines kept for the track, or a new track, are looked at.
-static BOOL settlePreview(UIView *host, UIView *tilt) {
-    BOOL takes = SGRPlayerLineTakesPreview(SGRPlayerLyricLineOn(), SGFlag(SGRKeyLyricsTranslation, NO),
-                                           host.bounds.size.height > host.bounds.size.width, playingTrackSynced());
+static void settlePreview(UIView *host, UIView *tilt, BOOL takes) {
     for (UIView *preview in SGRPlayerPreviewsToGiveBack(sg_hiddenPreviews, takes)) showPreview(preview);
     if (takes) {
         UIView *covers = SGRPlayerCoverList();
@@ -562,31 +1003,13 @@ static BOOL settlePreview(UIView *host, UIView *tilt) {
         sg_takesPreview = takes;
         [host setNeedsLayout];
     }
-    return takes || !previewShowing(tilt, host);
-}
-
-// The previews the line has hidden beside the cover on screen, as one frame in `view`; CGRectNull with none.
-static CGRect takenPreviewIn(UIView *view) {
-    UIView *tilt = SGRPlayerShowingCover().superview;
-    if (!sg_takesPreview || !tilt) return CGRectNull;
-    CGRect frame = CGRectNull;
-    for (UIView *sub in tilt.superview.subviews) {
-        if ([sg_hiddenPreviews containsObject:sub] && sub.bounds.size.height > 1) {
-            frame = CGRectUnion(frame, [view convertRect:sub.bounds fromView:sub]);
-        }
-    }
-    return frame;
-}
-
-// The line has the place under the cover on screen now (settlePreview); YES while no cover is up to have one.
-static BOOL lineHasPlace(void) {
-    UIView *host = sg_host, *tilt = SGRPlayerShowingCover().superview;
-    return !host || !tilt || ![tilt isDescendantOfView:host] || settlePreview(host, tilt);
 }
 
 static void placeLine(void) {
     UIView *host = sg_host;
-    if (!host || !SGRPlayerLyricLineOn()) return;
+    static BOOL placing;
+    if (!host || !SGRPlayerLyricLineOn() || placing) return;
+    placing = YES; // Reserving or releasing a tilt synchronously lays it out again.
     SGRLyricLineView *line = objc_getAssociatedObject(host, &kLineKey);
     if (!line) {
         line = [[SGRLyricLineView alloc] initWithFrame:CGRectZero];
@@ -594,28 +1017,90 @@ static void placeLine(void) {
         SGLog(@"redesign player: the line under the cover goes into %@", NSStringFromClass(host.class));
     }
     if (line.superview != host) [host addSubview:line];
+    UIView *unitView = sg_floating.viewIfLoaded;
+    if (line.running)
+        watchLineChip(unitView.window == host.window ? unitView.layer : nil);
 
-    UIView *tilt = SGRPlayerShowingCover().superview;
+    UIView *art = SGRPlayerShowingCover();
+    UIView *tilt = art.superview;
     UIView *stack = SGRFindByIdentifier(host, @"npv.bottomStackView", &kStackKey);
     CGRect room = CGRectNull;
-    // Settled first, in any orientation, so a preview the line hid is given back where the line has no room.
-    BOOL clear = tilt && [tilt isDescendantOfView:host] && settlePreview(host, tilt);
+    BOOL clear = tilt && [tilt isDescendantOfView:host];
+    BOOL clip = SGRPlayerMotionShowing();
+    UIView *title = SGRFindByIdentifier(stack, @"now-playing-title-label", &kTitleKey);
+    BOOL rtl = (title ?: stack).effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    CGFloat priorWidth = line.slot.size.width;
+    NSInteger priorRows = [line lyricRows];
+    BOOL wasCompact = line.normalSide > 0;
+    CGFloat chipTop = CGFLOAT_MAX;
+    line.chipArea = CGRectNull;
+    line.normalSide = 0;
+    line.ownedTilt = nil;
+    BOOL wants = title && SGRPlayerLineTakesPreview(YES, host.bounds.size.height > host.bounds.size.width, playingTrackSynced());
+    CGRect stackFrame = stack ? [host convertRect:stack.bounds fromView:stack] : CGRectNull;
+    CGRect anchor = title ? [host convertRect:title.bounds fromView:title] : stackFrame;
     if (clear && stack && host.bounds.size.height > host.bounds.size.width) {
-        CGRect cover = [host convertRect:tilt.bounds fromView:tilt];
-        CGFloat top = CGRectGetMaxY(cover), bottom = CGRectGetMinY([host convertRect:stack.bounds fromView:stack]);
-        CGRect chips = chipsIn(host);
-        if (!CGRectIsNull(chips) && CGRectGetMaxY(chips) > top && CGRectGetMinY(chips) < bottom) bottom = MAX(top, CGRectGetMinY(chips));
-        room = CGRectMake(CGRectGetMinX(cover), top, cover.size.width, bottom - top);
-    }
+        CGFloat inset = title ? (rtl ? CGRectGetMaxX(host.bounds) - CGRectGetMaxX(anchor)
+                                     : CGRectGetMinX(anchor) - CGRectGetMinX(host.bounds)) : kPreviewInset;
+        CGRect slot = CGRectInset(host.bounds, inset, 0);
+        [line setRightToLeft:rtl];
+        CGRect unshrunk = CGRectMake(art.center.x - art.bounds.size.width / 2, art.center.y - art.bounds.size.height / 2,
+                                     art.bounds.size.width, art.bounds.size.height);
+        CGFloat top = clip ? host.safeAreaInsets.top : CGRectGetMaxY([host convertRect:unshrunk fromView:tilt]);
+        CGFloat bottom = CGRectGetMinY(anchor);
+        // Artwork and chip detection use the player's content margins, not the title's live inset.
+        CGRect content = CGRectInset(host.bounds, 3 * SGRGrid, 0);
+        CGRect normal = SGRPlayerNormalCover(host, tilt, content.size.width);
+        // The floating unit can be the first row *inside* the stack. Search independently
+        // of the reserved cover's bottom, including on the pass that first finds the switch.
+        CGFloat searchTop = !clip && wants && !CGRectIsNull(normal) ? normal.origin.y : top;
+        line.chipArea = CGRectMake(content.origin.x, searchTop, content.size.width, MAX(0, bottom-searchTop));
+        chipTop = visibleChipTop(host, line.chipArea);
+        // Removing the button need not collapse Spotify's allocated strip. Only visible
+        // paint sets clearance, but the strip itself explains the narrower native square.
+        UIView *unit = sg_floating.viewIfLoaded;
+        CGRect strip = host.window && unit.window == host.window ? [host convertRect:unit.bounds fromView:unit] : CGRectNull;
+        BOOL allocated = !CGRectIsEmpty(strip) && CGRectContainsRect(stackFrame,strip) && CGRectGetMaxY(strip) <= bottom;
+        if (wants && !CGRectIsNull(normal) &&
+            (fabs(tilt.bounds.size.width - normal.size.width) <= 1 || allocated || previewShowing(tilt, host))) {
+            line.ownedTilt = tilt;
+            line.normalSide = normal.size.width;
+        }
+        if (line.normalSide && !clip) top = normal.origin.y;
+        if (bottom > top)
+            room = CGRectMake(slot.origin.x, top, slot.size.width, bottom - top);
+    } else chipTop = visibleChipTop(host, line.chipArea);
+    BOOL changed = line.overClip != clip;
+    line.overClip = clip;
+    if (!line.normalSide) SGRPlayerReserveCover(nil, 0);
     line.room = room;
-    BOOL fits = [line place];
-    if (fits != line.fits) {
+    BOOL fits = [line placeWithChipTop:chipTop];
+    settlePreview(host, tilt, wants && fits);
+    if (!fits) SGRPlayerReserveCover(nil, 0);
+    if (fits && line.normalSide && !clip) SGRPlayerEmptyStripIn(nil);
+    else refreshEmptyStrip(host);
+#if SG_DRIVER
+    reportChip(host,line.chipArea,chipTop,title ? CGRectGetMinY(anchor) : CGFLOAT_MAX,stackFrame,fits && !clip ? line.normalSide : 0);
+#endif
+    if (!wants && previewShowing(tilt, host)) fits = NO;
+    // Both slots can fit and have the same width. Their ownership still changes
+    // which source the clock must show (or clear) on this layout pass.
+    UIView *covers = SGRPlayerCoverList();
+    if (line.running) [line watchCovers:covers];
+    BOOL obscured = SGRPlayerLyricsOpen() || (covers && covers.alpha <= 0.01);
+    if (fits != line.fits || changed || obscured != line.obscured || wasCompact != (line.normalSide > 0) ||
+        priorWidth != line.slot.size.width || priorRows != [line lyricRows]) {
         line.fits = fits;
-        static NSUInteger logged;
-        if (logged++ < 4) SGLog(@"redesign player: the line under the cover %@ (%.0fx%.0f at %.0f)", fits ? @"has room" : @"has no room",
-                                line.frame.size.width, line.frame.size.height, line.frame.origin.y);
         [line tick];
     }
+    placing = NO;
+}
+
+void SGRPlayerLyricClipChanged(void) { placeLine(); }
+
+CGRect SGRPlayerVisibleClipLineIn(UIView *view) {
+    SGRLyricLineView *line = objc_getAssociatedObject(sg_host, &kLineKey);
+    return line.overClip && line.userInteractionEnabled && view.window == line.window ? SGRPlayerLyricLineIn(view) : CGRectNull;
 }
 
 CGRect SGRPlayerLyricLineIn(UIView *view) {
@@ -625,8 +1110,24 @@ CGRect SGRPlayerLyricLineIn(UIView *view) {
     return [view convertRect:line.bounds fromView:line];
 }
 
+// Spotify's preview is as wide as the cover's column, 24 pt in from the player's sides, and its text starts at its
+// edge: 8 pt out from the title under it, which stands SGRPlayerSideMargin in. The preview is inset in its column the
+// way the title row is in its unit (SGRPlayerHoldMargin, through Spotify's own side pins: H:|-0-[preview] and its
+// trailing to the column's, 9.2.0), the column's own distance from the player's side counted as where its content
+// starts. Only where the column runs from side to side: a column of a wide player has no title under it to start with.
+static void holdPreviewMargin(UIView *preview, UIView *host) {
+    UIView *column = preview.superview;
+    if (!column || column.bounds.size.width <= 0 || !host.window) return;
+    CGRect inHost = [host convertRect:column.bounds fromView:column];
+    CGFloat left = CGRectGetMinX(inHost) - CGRectGetMinX(host.bounds), right = CGRectGetMaxX(host.bounds) - CGRectGetMaxX(inHost);
+    BOOL across = left >= 0 && right >= 0 && left < SGRPlayerSideMargin && right < SGRPlayerSideMargin;
+    BOOL rtl = column.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    SGRPlayerHoldMargin(preview, across ? (rtl ? right : left) : SGRPlayerSideMargin);
+}
+
 // The cover's own layout (PlayerArtwork.x sizes it there): the line follows where the cover now is. Only the
 // player's covers, not the now playing bar's.
+%group SGRLyricPreviewLayout
 %hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
 - (void)layoutSubviews {
     %orig;
@@ -653,14 +1154,100 @@ CGRect SGRPlayerLyricLineIn(UIView *view) {
     if (host && [(UIView *)self isDescendantOfView:host]) placeLine();
 }
 %end
+%end
+
+// Spotify's own lyric preview takes no touch itself. A tap on it goes up to the covers' list, which selects the
+// cell, and for that Spotify opens the cover's viewer: not through the tilt view's handleTap (PlayerGestures.x), so
+// whatever the Full screen cover on tap switch says (issue #36; read from the call stack of the viewer going up,
+// 9.2.0 in the simulator). A tap on a preview that shows opens the lyrics instead, as the line and the footer's
+// glyph do. The recognizer cancels the touch, so the list never selects, and waits for the zones' double tap
+// while Gestures is on.
+@interface SGRPreviewTap : NSObject <UIGestureRecognizerDelegate>
+@end
+
+@implementation SGRPreviewTap
++ (instancetype)shared {
+    static SGRPreviewTap *shared;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ shared = [SGRPreviewTap new]; });
+    return shared;
+}
+
+// A preview the line hid is not there to tap.
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
+    UIView *preview = recognizer.view;
+    CALayer *mask = objc_getAssociatedObject(preview, &kPreviewMaskKey);
+    return !SGRPlayerLyricsOpen() && !(mask && preview.layer.mask == mask);
+}
+
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRequireFailureOfGestureRecognizer:(UIGestureRecognizer *)other {
+    return [other isKindOfClass:UITapGestureRecognizer.class] && ((UITapGestureRecognizer *)other).numberOfTapsRequired > 1;
+}
+
+- (void)tapped:(UITapGestureRecognizer *)recognizer {
+    if (SGRPlayerLyricsOpen()) return;
+    SGLog(@"redesign player: Spotify's lyric preview opens the lyrics");
+    SGRPlayerOpenPreviewLyrics(recognizer.view);
+}
+@end
+
+static void watchPreviewTaps(UIView *preview) {
+    static char key;
+    if (!preview.window || objc_getAssociatedObject(preview, &key)) return;
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:SGRPreviewTap.shared action:@selector(tapped:)];
+    tap.delegate = SGRPreviewTap.shared;
+    [preview addGestureRecognizer:tap];
+    objc_setAssociatedObject(preview, &key, tap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// These two are there whether the line is on or not (SGRLyricPreviewLayout is the line's): the preview shows when it
+// is off.
+%hook _TtC25Lyrics_NPVElementsKitImpl24LyricsElementWrapperView
+- (void)didMoveToWindow {
+    %orig;
+    watchPreviewTaps((UIView *)self);
+}
+- (void)layoutSubviews {
+    %orig;
+    UIView *host = sg_host;
+    if (host && [(UIView *)self isDescendantOfView:host]) holdPreviewMargin((UIView *)self, host);
+}
+%end
+
+%hook _TtC22Lyrics_NPVContainerKit19LyricsContainerView
+- (void)didMoveToWindow {
+    %orig;
+    watchPreviewTaps((UIView *)self);
+}
+- (void)layoutSubviews {
+    %orig;
+    UIView *host = sg_host;
+    if (host && [(UIView *)self isDescendantOfView:host]) holdPreviewMargin((UIView *)self, host);
+}
+%end
 
 %hook _TtC19NowPlaying_ViewImpl24NowPlayingViewController
+- (void)viewWillAppear:(BOOL)animated {
+    %orig;
+    [objc_getAssociatedObject(((UIViewController *)self).viewIfLoaded, &kLineKey) setPlayerCovered:NO];
+}
+- (void)viewDidDisappear:(BOOL)animated {
+    if (((UIViewController *)self).viewIfLoaded == sg_host) {
+        if (SGRPlayerLyricLineOn()) {
+            [objc_getAssociatedObject(sg_host, &kLineKey) setPlayerCovered:YES];
+            flushChip(YES);
+        }
+        else { sg_host = nil; refreshEmptyStrip(nil); }
+    }
+    %orig;
+}
 - (void)viewDidLayoutSubviews {
     %orig;
     UIView *host = ((UIViewController *)self).viewIfLoaded;
     if (!host.window) return;
+    if (sg_host != host && SGRPlayerLyricLineOn()) flushChip(YES);
     sg_host = host;
-    placeLine();
+    if (SGRPlayerLyricLineOn()) placeLine(); else refreshEmptyStrip(host);
 }
 %end
 
@@ -668,13 +1255,20 @@ CGRect SGRPlayerLyricLineIn(UIView *view) {
 - (void)viewDidLayoutSubviews {
     %orig;
     sg_floating = (UIViewController *)self;
-    placeLine();
+    if (SGRPlayerLyricLineOn()) { placeLine(); return; }
+    refreshEmptyStrip(sg_host);
 }
 %end
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    if (!SGRPlayerLyricLineOn()) return;
+    if (SGRPlayerLyricLineOn()) {
+        %init(SGRLyricPreviewLayout);
+#if SG_DRIVER
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil
+            usingBlock:^(NSNotification *note) { flushChip(YES); }];
+#endif
+    }
     %init;
     SGRequireClasses(@[
         @"_TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView",

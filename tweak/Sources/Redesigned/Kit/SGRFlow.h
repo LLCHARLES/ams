@@ -3,11 +3,11 @@
 // it, each drifting on a slow loop of its own and breathing in size, over the artwork's main color and
 // under a shade that deepens toward the bottom, where the controls are.
 //
-// All of it is Core Animation: radial gradient layers moved by repeating animations that the render
-// server plays, so the app itself does no work per frame -- no display link, no timer, nothing redrawn
-// -- and a paused layer tree costs nothing at all. The animations ask for 30 frames a second (the discs
-// are soft and slow; more would only spend the GPU) and allow up to 60, so they can fall in with other
-// sources rather than holding them down.
+// Radial gradient layers, moved a step at a time by a timer while it drifts and drawn small, then
+// stretched to the screen: the discs are soft and slow, so neither shows. Animations the render server
+// played cost the app nothing but drew the whole screen again on every frame (the figures are in
+// SGRFlow.m). A timer, not a display link, so it asks nothing of the screen's frame rate; held still it
+// has no timer and costs nothing at all.
 //
 // Stopping holds every disc where it is and starting again carries on from there, so the owner can stop
 // it as often as it likes (the player's transition, the app leaving the screen) without a jump.

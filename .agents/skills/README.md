@@ -23,7 +23,7 @@ is `UIAccessibilityIsReduceMotionEnabled()`.
 
 ## Where they come from
 
-`phone-check` and `clean-room-describer` are Vitrine's own. The rest are
+`phone-check` and `clean-room-describer` are Retrine's own. The rest are
 copied unchanged unless noted. To update one, copy the upstream directory over it and redo the note.
 
 | Skill | Upstream | Commit | License |

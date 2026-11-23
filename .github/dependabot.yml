@@ -1,0 +1,16 @@
+# Only GitHub Actions get version updates. WireGuard/go.mod stays pinned to an exact Go
+# release (AGENTS.md), so Go modules get security updates alone, from the repository setting.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+      - "/.github/actions/*"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns:
+          - "*"

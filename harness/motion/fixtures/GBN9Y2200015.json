@@ -1,0 +1,19 @@
+{
+  "data": [{
+    "id": "1665303757",
+    "type": "songs",
+    "attributes": {"name": "Speak to Me", "isrc": "GBN9Y2200015"},
+    "relationships": {
+      "albums": {
+        "data": [{
+          "id": "1665303755", "type": "albums",
+          "attributes": {
+            "name": "The Dark Side of the Moon (50th Anniversary) [Remastered]",
+            "artistName": "Pink Floyd", "upc": "196589805232", "isSingle": false,
+            "editorialVideo": {"motionTallVideo3x4": {"video": "https://fixture.invalid/1665303755/master.m3u8"}}
+          }
+        }]
+      }
+    }
+  }]
+}

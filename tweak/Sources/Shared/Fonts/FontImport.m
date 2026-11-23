@@ -5,14 +5,14 @@
 #import <CoreText/CoreText.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Shared/Fonts/FontLibrary.h"
 #import "Shared/Fonts/Fonts.h"
 
 static NSURL *fontFolder(void) {
-    NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    return [[support URLByAppendingPathComponent:@"Vitrine" isDirectory:YES] URLByAppendingPathComponent:@"Font" isDirectory:YES];
+    return [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Font" isDirectory:YES];
 }
 
 // The family name of every face in the file, "" for a face without one; empty when Core Text finds no font. A
@@ -39,12 +39,14 @@ static void migrate(void) {
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSString *file = [store stringForKey:SGKeyAppFontFile];
     if (!file.length) return;
-    NSString *family = familiesIn([fontFolder() URLByAppendingPathComponent:file.lastPathComponent]).firstObject;
+    NSURL *url = [fontFolder() URLByAppendingPathComponent:file.lastPathComponent];
+    if (!url) return;
+    NSString *family = familiesIn(url).firstObject;
     if (family.length) {
         [store setObject:@[file] forKey:SGKeyAppFontFiles];
         [store setObject:family forKey:SGKeyAppFontName];
+        [store removeObjectForKey:SGKeyAppFontFile];
     }
-    [store removeObjectForKey:SGKeyAppFontFile];
 }
 
 // The imported files still in the folder.
@@ -113,7 +115,10 @@ static void removeImported(BOOL resetSelection) {
         [NSFileManager.defaultManager removeItemAtURL:url error:nil];
     }
     for (NSString *key in @[SGKeyAppFontFiles, SGKeyAppFontName]) [store removeObjectForKey:key];
-    if (resetSelection && SGAppFontChosen() == SGAppFontCustom) SGSetInt(SGKeyAppFont, SGAppFontSpotify);
+    if (resetSelection && SGAppFontChosen() == SGAppFontCustom) {
+        [store removeObjectForKey:SGKeyAppFont];
+        SGPrefsChanged();
+    }
 }
 
 static void tell(NSString *title, NSString *message) {
@@ -142,7 +147,7 @@ static void import(NSArray<NSURL *> *picked, dispatch_block_t done) {
     NSFileManager *files = NSFileManager.defaultManager;
     NSURL *incoming = [fontFolder() URLByAppendingPathComponent:@"Incoming" isDirectory:YES];
     NSMutableArray<NSString *> *copied = [NSMutableArray array];
-    if (family) {
+    if (family && incoming) {
         [files removeItemAtURL:incoming error:nil];
         [files createDirectoryAtURL:incoming withIntermediateDirectories:YES attributes:nil error:nil];
         for (NSURL *url in picked) {

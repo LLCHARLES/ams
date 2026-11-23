@@ -1,6 +1,7 @@
 #import "Core/SGCore.h"
 #import "SGRGlass.h"
 #import "SGRTokens.h"
+#import <objc/message.h>
 
 typedef NS_ENUM(NSInteger, SGRGlassMode) {
     SGRGlassModeGlass,
@@ -14,11 +15,91 @@ static SGRGlassMode glassMode(void) {
     return SGRGlassModeBlur;
 }
 
+#pragma mark - the listener's glass
+
+// Light and Dark, laid in the glass as its tint: a shade, so what is behind it still comes through.
+static const CGFloat kLightTintAlpha = 0.3, kDarkTintAlpha = 0.45;
+
+SGRGlassMaterial SGRStoredGlassMaterial(void) {
+    return SGInt(SGRKeyGlassMaterial, SGRGlassMaterialRegular) == SGRGlassMaterialClear ? SGRGlassMaterialClear : SGRGlassMaterialRegular;
+}
+
+SGRGlassTint SGRStoredGlassTint(void) {
+    NSInteger tint = SGInt(SGRKeyGlassTint, SGRGlassTintNone);
+    return tint == SGRGlassTintLight || tint == SGRGlassTintDark ? tint : SGRGlassTintNone;
+}
+
+// The choices the launch started with, read as the redesign starts rather than when the first glass is made: a launch
+// under Reduce Transparency makes no glass until it is switched off, and choices changed in between wait for a restart.
+static SGRGlassMaterial sg_material;
+static SGRGlassTint sg_tint;
+static BOOL sg_interactive;
+
+__attribute__((constructor)) static void readGlassChoices(void) {
+    if (!SGRedesignedUI()) return;
+    sg_material = SGRStoredGlassMaterial();
+    sg_tint = SGRStoredGlassTint();
+    sg_interactive = SGEnabled(SGRKeyGlassInteractive);
+}
+
+UIVisualEffect *SGRGlassEffect(void) {
+    if (@available(iOS 26.0, *)) {
+        UIGlassEffect *effect = [UIGlassEffect effectWithStyle:sg_material == SGRGlassMaterialClear ? UIGlassEffectStyleClear : UIGlassEffectStyleRegular];
+        if (sg_tint == SGRGlassTintLight) effect.tintColor = [UIColor colorWithWhite:1 alpha:kLightTintAlpha];
+        if (sg_tint == SGRGlassTintDark) effect.tintColor = [UIColor colorWithWhite:0 alpha:kDarkTintAlpha];
+        effect.interactive = sg_interactive;
+        return effect;
+    }
+    return SGGlassEffect();
+}
+
+static char kRestyledKey;
+
+// UIKit's own glass behind its tab bar's tabs is Regular, untinted and interactive, the choices' defaults, and any effect
+// handed to it comes out with its smoothness 0 where UIKit's is 6 (iOS 26.5 simulator, -[UIView _background]), so it is
+// left as UIKit made it unless the listener chose otherwise. Set once per view: -[UIView _glassEffect] reads the style
+// back as Regular whatever was set, so it cannot tell whether the glass is still the one given, and UIKit kept it
+// through selections, resizes and the bar minimizing and expanding (iOS 26.5 simulator, harness/tabbar glass-check.py).
+void SGRGlassRestyle(UIView *view) {
+    if (@available(iOS 26.0, *)) {
+        if (sg_material == SGRGlassMaterialRegular && sg_tint == SGRGlassTintNone && sg_interactive) return;
+        if (objc_getAssociatedObject(view, &kRestyledKey)) return;
+        SEL get = NSSelectorFromString(@"_glassEffect"), set = NSSelectorFromString(@"_setGlassEffect:");
+        if (![view respondsToSelector:get] || ![view respondsToSelector:set]) return;
+        if (![((id (*)(id, SEL))objc_msgSend)(view, get) isKindOfClass:UIGlassEffect.class]) return;
+        ((void (*)(id, SEL, id))objc_msgSend)(view, set, SGRGlassEffect());
+        objc_setAssociatedObject(view, &kRestyledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+// A shape takes no touch: the control it backs does. Interactive glass gives under the touches of the view UIKit
+// asks -_flexInteractionGestureView for when a finger comes down, the glass itself unless that view names another,
+// as UIKit's own glass background behind a button names the button. So the shape names its control, the one
+// SGRGlassBacks gave it or else the control it sits in: the glass answers the control's touches while the control
+// keeps them, with its action, highlight and accessibility. A disabled control names nothing, so its glass stays
+// still as UIKit's does. Should UIKit stop asking, the glass stays still and the control works as ever (the
+// simulator, iOS 26.5: a shape that took touches itself left its button without a tap).
+@interface SGRGlassShape : UIVisualEffectView
+@property (nonatomic, weak) UIControl *backedControl;
+@end
+
+@implementation SGRGlassShape
+- (UIView *)_flexInteractionGestureView {
+    UIView *control = self.backedControl ?: self.superview;
+    if (!control || ([control isKindOfClass:UIControl.class] && !((UIControl *)control).isEnabled)) return self;
+    return control;
+}
+@end
+
+void SGRGlassBacks(UIView *shape, UIControl *control) {
+    if ([shape isKindOfClass:SGRGlassShape.class]) ((SGRGlassShape *)shape).backedControl = control;
+}
+
 static UIView *newShape(SGRGlassMode mode) {
     UIView *shape;
     switch (mode) {
         case SGRGlassModeGlass:
-            shape = [[UIVisualEffectView alloc] initWithEffect:SGGlassEffect()];
+            shape = [[SGRGlassShape alloc] initWithEffect:SGRGlassEffect()];
             break;
         case SGRGlassModeBlur:
             shape = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialDark]];
@@ -111,7 +192,7 @@ UIView *SGRGlassInside(UIView *control, const void *key, CGFloat side) {
 void SGRShowGlass(UIView *shape, BOOL shown) {
     if ([shape isKindOfClass:UIVisualEffectView.class]) {
         UIVisualEffectView *glass = (UIVisualEffectView *)shape;
-        if ((glass.effect != nil) != shown) glass.effect = shown ? SGGlassEffect() : nil;
+        if ((glass.effect != nil) != shown) glass.effect = shown ? SGRGlassEffect() : nil;
     } else {
         shape.alpha = shown ? 1 : 0;
     }

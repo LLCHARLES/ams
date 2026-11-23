@@ -2,6 +2,11 @@ package main
 
 /*
 #include <stdlib.h>
+#include <stdint.h>
+#include "../tweak/Sources/Shared/WireGuard/SGWGBridge.h"
+static inline void reportEngineState(uintptr_t callback, int state) {
+	if (callback) ((void (*)(int))callback)(state);
+}
 */
 import "C"
 
@@ -11,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 )
@@ -21,10 +27,23 @@ import (
 // SGWGInspect, which returns the non-secret profile summary for the UI).
 
 var (
-	bridgeMu  sync.Mutex
-	current   *Engine
-	lastError string
+	bridgeMu      sync.Mutex
+	current       *Engine
+	lastError     string
+	stateCallback atomic.Uintptr
 )
+
+const (
+	engineStopped           = int(C.SGWGEngineStopped)
+	engineAvailable         = int(C.SGWGEngineAvailable)
+	engineUnavailable       = int(C.SGWGEngineUnavailable)
+	engineDestinationFailed = int(C.SGWGEngineDestinationFailed)
+)
+
+//export SGWGSetStateCallback
+func SGWGSetStateCallback(callback C.uintptr_t) {
+	stateCallback.Store(uintptr(callback))
+}
 
 func cString(v any) *C.char {
 	b, err := json.Marshal(v)
@@ -80,7 +99,10 @@ func SGWGStart(text, user, pass *C.char, listenerFD C.int, port C.int) C.int {
 		lastError = err.Error()
 		return -1
 	}
-	e, err := StartEngine(p, C.GoString(user), C.GoString(pass), EngineOptions{Listener: listener, Port: int(port)})
+	e, err := StartEngine(p, C.GoString(user), C.GoString(pass), EngineOptions{
+		Listener: listener, Port: int(port),
+		StateChanged: func(state int) { C.reportEngineState(C.uintptr_t(stateCallback.Load()), C.int(state)) },
+	})
 	if err != nil {
 		if listener != nil {
 			listener.Close()

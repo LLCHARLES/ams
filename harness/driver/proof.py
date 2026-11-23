@@ -2,7 +2,7 @@
 """Drives the driver harness (main.m) through scripts/phone.py and prints PASS or FAIL per check.
 
     THEOS=$HOME/theos ./build.sh
-    xcrun simctl install <udid> build/DriverHarness.app && xcrun simctl launch <udid> com.vitrine.driverharness
+    xcrun simctl install <udid> build/DriverHarness.app && xcrun simctl launch <udid> com.retrine.driverharness
     ./proof.py                     # PHONE_PORT=8095 unless set, the port build.sh serves on
 """
 import json

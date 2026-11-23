@@ -13,8 +13,8 @@ static SGLyricsBackgroundStyle normalized(SGLyricsBackgroundStyle style) {
     style.color &= 0xFFFFFF;
     return style;
 }
-static double number(NSDictionary *values, NSString *key, double fallback) {
-    id value = values[key];
+static double number(NSUserDefaults *values, NSString *key, double fallback) {
+    id value = [values objectForKey:key];
     return [value isKindOfClass:NSNumber.class] && isfinite([value doubleValue]) ? [value doubleValue] : fallback;
 }
 SGLyricsBackgroundStyle SGLyricsBackgroundDefault(NSString *prefix) {
@@ -22,7 +22,7 @@ SGLyricsBackgroundStyle SGLyricsBackgroundDefault(NSString *prefix) {
     return (SGLyricsBackgroundStyle){lock ? SGLyricsBackgroundBlur : SGLyricsBackgroundCover, .45, lock ? 60 : 20, 0x18181B};
 }
 SGLyricsBackgroundStyle SGLyricsBackgroundRead(NSString *prefix) {
-    NSDictionary *values = NSUserDefaults.standardUserDefaults.dictionaryRepresentation;
+    NSUserDefaults *values = NSUserDefaults.standardUserDefaults;
     SGLyricsBackgroundStyle fallback = SGLyricsBackgroundDefault(prefix);
     SGLyricsBackgroundStyle style = {
         .mode = (NSInteger)bounded(number(values, [prefix stringByAppendingString:@".mode"], fallback.mode), fallback.mode, 4),

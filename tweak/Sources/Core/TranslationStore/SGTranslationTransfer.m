@@ -52,7 +52,7 @@ static BOOL output(NSOutputStream *stream, NSData *data, NSError **error) {
     return YES;
 }
 // The ZIP field codec derives from ciowfreshh SGTranslationArchive (d829851).
-// The manifest, stricter feature policy, staging and partial-progress contract are Vitrine's.
+// Keep the v1 manifest discriminator: archives travel between old and new installs.
 static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NSError **error) {
     NSMutableArray *manifest = [NSMutableArray array];
     for (NSDictionary *record in records) [manifest addObject:@{@"name":record[@"name"], @"sha256":record[@"sha256"]}];
@@ -102,8 +102,9 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
     if (!stage) return YES;
     NSString *name = stage[@"directory"];
     if (![name isKindOfClass:NSString.class] || ![[NSUUID alloc] initWithUUIDString:name]) return bad(error);
-    NSDictionary *pending = [self pendingStage:store error:error];
-    if (error && *error) return NO;
+    NSError *failure = nil;
+    NSDictionary *pending = [self pendingStage:store error:&failure];
+    if (failure) { if (error) *error = failure; return NO; }
     if ([pending[@"directory"] isEqual:name]) return bad(error);
     NSURL *directory = [[store.root URLByAppendingPathComponent:@"TranslationImports"] URLByAppendingPathComponent:name];
     struct stat st;
@@ -115,8 +116,9 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
     return [NSFileManager.defaultManager removeItemAtURL:directory error:error];
 }
 + (BOOL)reclaimStaging:(SGTranslationFiles *)store error:(NSError **)error {
-    NSDictionary *pending = [self pendingStage:store error:error];
-    if (error && *error) return NO;
+    __block NSError *failure = nil;
+    NSDictionary *pending = [self pendingStage:store error:&failure];
+    if (failure) { if (error) *error = failure; return NO; }
     NSURL *root = [store.root URLByAppendingPathComponent:@"TranslationImports"];
     struct stat st;
     if (lstat(root.fileSystemRepresentation, &st) != 0) {
@@ -125,7 +127,6 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
         return NO;
     }
     if (!S_ISDIR(st.st_mode)) return bad(error);
-    __block NSError *failure = nil;
     NSDirectoryEnumerator *entries = [NSFileManager.defaultManager enumeratorAtURL:root includingPropertiesForKeys:nil
         options:NSDirectoryEnumerationSkipsSubdirectoryDescendants errorHandler:^BOOL(NSURL *url, NSError *problem) { failure = problem; return NO; }];
     for (;;) { @autoreleasepool {
@@ -243,7 +244,7 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
     }
     NSError *cleanup = nil;
     if (![NSFileManager.defaultManager removeItemAtURL:ok ? snapshot : directory error:&cleanup]) { failure = cleanup; ok = NO; }
-    if (!ok && error) *error = [NSError errorWithDomain:@"Vitrine.TranslationStorage" code:1 userInfo:@{
+    if (!ok && error) *error = [NSError errorWithDomain:@"Retrine.TranslationStorage" code:1 userInfo:@{
         NSLocalizedDescriptionKey:selection ? (failure.localizedDescription ?: @"Could not write export.") :
             [NSString stringWithFormat:@"Full export could not read all records in %@: %@", store.root.path, failure.localizedDescription ?: @"Export failed."],
         NSUnderlyingErrorKey:failure ?: SGTranslationStorageError(@"Could not write export.")}];
@@ -339,11 +340,12 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
     if (![self reclaimStaging:store error:error]) return nil;
     NSNumber *authority = [store importAuthority:error];
     if (!authority) return nil;
-    if ([self pendingStage:store error:error]) {
+    NSError *pendingError = nil;
+    if ([self pendingStage:store error:&pendingError]) {
         if (error) *error = SGTranslationStorageError(@"Resume the interrupted import before starting another.");
         return nil;
     }
-    if (error && *error) return nil;
+    if (pendingError) { if (error) *error = pendingError; return nil; }
     NSURL *directory = [[store.root URLByAppendingPathComponent:@"TranslationImports"] URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
     NSMutableArray *records = [NSMutableArray array];
     NSMutableSet *identities = [NSMutableSet set];

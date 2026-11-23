@@ -3,7 +3,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-hangul.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-hangul.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 xcrun --sdk macosx clang -fobjc-arc -Wall -I"$SRC" \
     "$HERE/check.m" "${ROMANISE_SOURCE:-$SRC/Shared/Lyrics/Romanise.m}" \

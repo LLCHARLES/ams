@@ -75,7 +75,7 @@ static SGModPage *rootPage(void) {
     SGModRow *gate = SGOptionRow(@"Show the hidden rows", nil, kGate);
     SGModRow *hidden = row(@"Concealed setting", nil);
     hidden.visible = ^BOOL { return SGFlag(kGate, NO); };
-    return [[SGModPage alloc] initWithTitle:@"Vitrine" intro:nil
+    return [[SGModPage alloc] initWithTitle:@"Retrine" intro:nil
                                    sections:@[
         SGSection(nil, @[gate, hidden, row(@"Plain title", @"Plain subtitle")]),
         SGSection(nil, @[pageRow(@"Live Activity", ^UIViewController *{ return carPlayPage(); }),
@@ -349,7 +349,7 @@ static void runChecks(void) {
     // a recent of the old look leads nowhere.
     __block NSString *storedLook = @"native";
     SGModRow *lookedRow = pageRow(@"Home", ^UIViewController *{ return pageOf(@"Home", @[row(@"Gradient", nil)]); });
-    SGModPage *openRoot = pageOf(@"Vitrine", @[lookedRow]);
+    SGModPage *openRoot = pageOf(@"Retrine", @[lookedRow]);
     SGSettingsIndexRenamesWith(openRoot, ^{ lookedRow.searchIdentifier = [@"page.home." stringByAppendingString:storedLook]; });
     SGSearchForgetRecents();
     SGSettingsIndex *beforeFlip = [SGSettingsIndex new];

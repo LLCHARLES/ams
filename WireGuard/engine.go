@@ -30,8 +30,14 @@ import (
 // loopback listener. Every proxied TCP connection, and every DNS lookup for a
 // proxied hostname, goes through the WireGuard tunnel. There is no net.Dial
 // fallback anywhere in the data path.
+type engineDevice interface {
+	BindUpdate() error
+	Close()
+	IpcGet() (string, error)
+}
+
 type Engine struct {
-	dev   *device.Device
+	dev   engineDevice
 	stack *netstack.Net
 	user  []byte
 	pass  []byte
@@ -41,8 +47,12 @@ type Engine struct {
 	listener net.Listener
 	clients  map[net.Conn]struct{}
 
-	dialTimeout time.Duration
-	stopped     atomic.Bool
+	dialTimeout  time.Duration
+	stopped      atomic.Bool
+	stateMu      sync.Mutex
+	state        int
+	unavailable  uint8
+	stateChanged func(int)
 
 	// Counters. Only counts are kept; hostnames, URLs and addresses are not.
 	total, active, failed, dnsFailed atomic.Int64
@@ -60,6 +70,10 @@ type Engine struct {
 
 const maxUnauthenticatedClients = 32
 const authenticationTimeout = 3 * time.Second
+const (
+	listenerUnavailable uint8 = 1 << iota
+	bindUnavailable
+)
 
 type EngineOptions struct {
 	// Listener, when non-nil, is used as the local proxy socket. Otherwise the
@@ -67,6 +81,8 @@ type EngineOptions struct {
 	Listener    net.Listener
 	Port        int
 	DialTimeout time.Duration
+	// SGWGEngineEvent from the shared bridge header. No traffic details.
+	StateChanged func(int)
 	// Resolve resolves a hostname Endpoint. It is the one lookup that cannot go
 	// through the tunnel, because it is needed to reach the tunnel.
 	Resolve func(ctx context.Context, host string) ([]netip.Addr, error)
@@ -123,7 +139,8 @@ func StartEngine(p *Profile, user, pass string, opt EngineOptions) (*Engine, err
 		dev: dev, stack: stack, user: []byte(user), pass: []byte(pass),
 		listener: listener, clients: map[net.Conn]struct{}{},
 		dialTimeout: opt.DialTimeout, started: time.Now(), endpointResolvedLocally: local,
-		pendingAuth: make(chan struct{}, maxUnauthenticatedClients),
+		pendingAuth:  make(chan struct{}, maxUnauthenticatedClients),
+		stateChanged: opt.StateChanged,
 	}
 	if e.dialTimeout <= 0 {
 		e.dialTimeout = 15 * time.Second
@@ -131,6 +148,7 @@ func StartEngine(p *Profile, user, pass string, opt EngineOptions) (*Engine, err
 	if addr, ok := listener.Addr().(*net.TCPAddr); ok {
 		e.port = addr.Port
 	}
+	e.setUnavailable(listenerUnavailable, false)
 	go e.acceptLoop(listener)
 	return e, nil
 }
@@ -163,10 +181,47 @@ func resolveEndpoint(p *Profile, resolve func(context.Context, string) ([]netip.
 
 func (e *Engine) Port() int { return e.port }
 
+func (e *Engine) publishStateLocked(state int) {
+	if e.stopped.Load() && state != engineStopped {
+		return
+	}
+	if state != engineDestinationFailed {
+		if e.state == state {
+			return
+		}
+		e.state = state
+	}
+	if e.stateChanged != nil {
+		e.stateChanged(state)
+	}
+}
+
+func (e *Engine) reportState(state int) {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	e.publishStateLocked(state)
+}
+
+func (e *Engine) setUnavailable(component uint8, failed bool) {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	if failed {
+		e.unavailable |= component
+	} else {
+		e.unavailable &^= component
+	}
+	state := engineAvailable
+	if e.unavailable != 0 {
+		state = engineUnavailable
+	}
+	e.publishStateLocked(state)
+}
+
 func (e *Engine) Close() {
 	if e.stopped.Swap(true) {
 		return
 	}
+	e.reportState(engineStopped)
 	e.mu.Lock()
 	e.listener.Close()
 	for c := range e.clients {
@@ -242,11 +297,13 @@ func (e *Engine) relisten(old net.Listener) {
 			e.mu.Unlock()
 			return
 		}
+		e.setUnavailable(listenerUnavailable, true)
 		old.Close()
 		l, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(e.port)))
 		if err == nil {
 			e.listener = l
 			e.relistens.Add(1)
+			e.setUnavailable(listenerUnavailable, false)
 			e.mu.Unlock()
 			go e.acceptLoop(l)
 			return
@@ -272,6 +329,7 @@ func (e *Engine) Rebind() error {
 	} else {
 		e.bindUpdates.Add(1)
 	}
+	e.setUnavailable(bindUnavailable, err != nil)
 	e.mu.Lock()
 	l := e.listener
 	e.mu.Unlock()
@@ -326,6 +384,7 @@ func (e *Engine) dial(host string, port int) (net.Conn, error) {
 	}
 	if err != nil {
 		e.failed.Add(1)
+		e.reportState(engineDestinationFailed)
 		var dnsErr *net.DNSError
 		if errors.As(err, &dnsErr) {
 			e.dnsFailed.Add(1)

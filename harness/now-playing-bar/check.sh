@@ -12,6 +12,8 @@ if [ -n "${OUT:-}" ]; then mkdir -p "$OUT"; else OUT=$(mktemp -d /tmp/now-playin
 APP=$OUT/NowPlayingBarCheck.app
 mkdir -p "$APP/Contents/MacOS"
 "$LOGOS" -c generator=internal "$SRC/Redesigned/NowPlayingBar/NowPlayingBar.x" > "$OUT/NowPlayingBar.gen.m"
+# The device button on the full card (SGRBarPlaceConnect), checked with the minimized row's tuck.
+"$LOGOS" -c generator=internal "$SRC/Redesigned/NowPlayingBar/BarConnect.x" > "$OUT/BarConnect.gen.m"
 python3 - "$SRC/Shared/Player/PlayerState.x" "$OUT/repeat.inc" <<'PY'
 import pathlib, sys
 text = pathlib.Path(sys.argv[1]).read_text()
@@ -29,7 +31,7 @@ else
 fi
 xcrun clang -target "$TARGET" -fobjc-arc -g -O0 -isysroot "$SDK" $FRAMEWORKS \
     -I"$SRC" -I"$SRC/Redesigned/NowPlayingBar" -I"$OUT" -Wall -Werror -Wno-unused-parameter -Wno-unused-function -Wno-deprecated-declarations \
-    "$HERE/check.m" "$HERE/../scene.m" "$HERE/stubs.m" \
+    "$HERE/check.m" "$HERE/../scene.m" "$HERE/stubs.m" "$OUT/BarConnect.gen.m" \
     "$SRC/Settings/SGMarquee.m" "$SRC/Redesigned/Kit/SGRTokens.m" \
     "$SRC/Core/SGLog.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGGlass.m" \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreText -framework Foundation \
@@ -39,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>now-playing-bar-check</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.nowplayingbar.check</string>
+<key>CFBundleIdentifier</key><string>com.retrine.nowplayingbar.check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
 <key>UILaunchScreen</key><dict/>

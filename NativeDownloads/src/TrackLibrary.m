@@ -1,4 +1,5 @@
 #import "TrackLibrary.h"
+#import "NativeAdmission.h"
 #import "TrackDownload.h"
 #import "Localization.h"
 #import "Deadline.h"
@@ -24,6 +25,7 @@ static void rememberPlatform(id platform) {
 }
 
 void SAPInstallTrackLibrary(void) {
+    if(!SAPRuntimeProfileAdmitted())return;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         Class cls = NSClassFromString(platformClass);
@@ -64,6 +66,7 @@ static void finishLibrary(SAPLibraryRequest *request, NSString *status) {
 
 void SAPAddTrackToLikedSongs(NSString *uri, BOOL (^requested)(void),
                             void (^completion)(NSString *, NSString *)) {
+    if(!SAPRuntimeProfileAdmitted()){if(completion)completion(@"unavailable",SAPL(@"settings.pixie.native.unsupported_profile",@"Pixie is not enabled for this exact Spotify profile."));return;}
     NSString *capturedURI = [uri copy];
     dispatch_async(dispatch_get_main_queue(), ^{
         SAPLibraryRequest *request = [SAPLibraryRequest new];

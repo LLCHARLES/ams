@@ -13,7 +13,7 @@ https://github.com/kes158/YTMusicUltimate/tree/5291c728c1dc57909b915dcb421e8ba4f
 The Go engine, Objective-C session/profile core, settings form and test fixtures
 retain that license. Google-specific transport patches are replaced by Spotify
 delegate diagnostics and main-image TCP import rebinding. Dependency license
-texts are in THIRD_PARTY_LICENSES.txt. The port uses Vitrine's existing
+texts are in THIRD_PARTY_LICENSES.txt. The port uses Retrine's existing
 Localizable.strings table; there is no WireGuard.strings table.
 
 Only source is imported. Dependencies are fetched by Go using go.mod/go.sum;

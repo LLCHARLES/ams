@@ -3,7 +3,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-hangul-settings.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-hangul-settings.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun --sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \

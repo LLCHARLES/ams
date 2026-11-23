@@ -8,7 +8,7 @@
 #     THEOS=$HOME/theos harness/album/veil-check.sh <UDID> [OUT]
 set -e
 UDID=$1
-OUT=${2:-/tmp/vitrine-veil-check}
+OUT=${2:-/tmp/retrine-veil-check}
 HARNESS=$(cd "$(dirname "$0")/.." && pwd)
 mkdir -p "$OUT"
 for page in album playlist artist; do

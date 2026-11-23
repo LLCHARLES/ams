@@ -15,7 +15,7 @@ xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -O2 -Wall -Werror \
     -I"$SRC" -I"$SRC/Shared/ListeningStats" recorder.m "$OUT/ListeningStats.m" \
     "$SRC/Shared/ListeningStats/SGPlayLog.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGPrefs.m" \
-    -framework UIKit -framework Foundation -o "$OUT/recorder"
+    -framework UIKit -framework Foundation "$SRC/Core/SGDataRoot.m" -o "$OUT/recorder"
 # The recorder checks count plays from an empty log, so every run starts from an empty home. Without
 # the daemon bypass, cfprefsd would write the "recorder" defaults to the real ~/Library/Preferences.
 rm -rf "$OUT/recorder-home"

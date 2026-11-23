@@ -9,7 +9,7 @@ SOURCE = ROOT / "tweak/Sources/Shared/LocalFiles/LocalInfoLookup.m"
 
 
 def run():
-    with tempfile.TemporaryDirectory(prefix="vitrine-suggest-") as temp:
+    with tempfile.TemporaryDirectory(prefix="retrine-suggest-") as temp:
         out = pathlib.Path(temp)
         subprocess.run(["xcrun", "clang", "-fobjc-arc", "-fblocks", "-Wall", "-Werror",
             "-I" + str(ROOT / "tweak/Sources"), "-I" + str(SOURCE.parent),

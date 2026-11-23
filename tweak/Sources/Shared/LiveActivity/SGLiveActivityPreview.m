@@ -343,6 +343,7 @@ static NSString *stepName(NSInteger view, NSInteger step) {
     UIView *_card;
     NSTimer *_timer;
     NSInteger _view, _step;
+    BOOL _inactive;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -370,6 +371,10 @@ static NSString *stepName(NSInteger view, NSInteger step) {
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(advance)]];
     self.isAccessibilityElement = YES;
     self.accessibilityLabel = SGL(@"settings.liveactivity.preview.a11y.label", @"Preview of the Live Activity on the lock screen");
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(resigned) name:UIApplicationWillResignActiveNotification object:nil];
+    [center addObserver:self selector:@selector(becameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+    [center addObserver:self selector:@selector(updateTimer) name:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
     [self reload];
     return self;
 }
@@ -425,6 +430,7 @@ static NSString *stepName(NSInteger view, NSInteger step) {
         _step = 0;
     }
     [self show];
+    [self updateTimer];
 }
 
 - (void)advance {
@@ -474,9 +480,29 @@ static NSString *stepName(NSInteger view, NSInteger step) {
 
 - (void)setRunning:(BOOL)running {
     _running = running;
+    [self updateTimer];
+}
+
+- (void)resigned {
+    _inactive = YES;
+    [self updateTimer];
+}
+
+- (void)becameActive {
+    _inactive = NO;
+    [self updateTimer];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self updateTimer];
+}
+
+- (void)updateTimer {
     [_timer invalidate];
     _timer = nil;
-    if (!running) return;
+    if (!_running || !self.window || _inactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive
+        || UIAccessibilityIsReduceMotionEnabled() || stepsIn(_view) < 2) return;
     [self show];
     __weak SGLiveActivityPreview *weakSelf = self;
     _timer = [NSTimer scheduledTimerWithTimeInterval:kStep repeats:YES block:^(NSTimer *timer) { [weakSelf tick]; }];
@@ -491,6 +517,7 @@ static NSString *stepName(NSInteger view, NSInteger step) {
 
 - (void)dealloc {
     [_timer invalidate];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 @end

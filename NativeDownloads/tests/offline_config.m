@@ -23,7 +23,7 @@
 - (void)URLSession:(id)session task:(id)task didCompleteWithError:(NSError *)error { self.completions++; self.error = error; }
 @end
 
-// Vitrine holds the body, then delivers its full rewritten/cached response by
+// Retrine holds the body, then delivers its full rewritten/cached response by
 // calling the delegate selector again during completion or a 304 response.
 @interface SPTDataLoaderService : NSObject
 @property(nonatomic,strong) NSMutableData *received,*held;
@@ -158,16 +158,16 @@ int main(void) { @autoreleasepool {
     [delegate URLSession:nil dataTask:t didReceiveData:customize];
     [delegate URLSession:nil task:t didCompleteWithError:nil];assert([delegate.received isEqual:customize]);
     puts("PASS: cached positive/negative HTTP classifications follow redirects");
-    SPTDataLoaderService *vitrine=[SPTDataLoaderService new];
+    SPTDataLoaderService *retrine=[SPTDataLoaderService new];
     t=task(@"https://spclient.wg.spotify.com/ucs/v1/customize",200);
-    [vitrine URLSession:nil dataTask:t didReceiveData:customize];
-    [vitrine URLSession:nil task:t didCompleteWithError:nil];
-    assert(vitrine.completions==1 && [vitrine.received isEqual:SAPRewriteOfflineConfig(customize,NO)]);
-    vitrine=[SPTDataLoaderService new];vitrine.cached=customize;
+    [retrine URLSession:nil dataTask:t didReceiveData:customize];
+    [retrine URLSession:nil task:t didCompleteWithError:nil];
+    assert(retrine.completions==1 && [retrine.received isEqual:SAPRewriteOfflineConfig(customize,NO)]);
+    retrine=[SPTDataLoaderService new];retrine.cached=customize;
     t=task(@"https://spclient.wg.spotify.com/ucs/v1/customize",304);
-    [vitrine URLSession:nil dataTask:t didReceiveResponse:t.response completionHandler:nil];
-    [vitrine URLSession:nil task:t didCompleteWithError:nil];
-    assert(vitrine.completions==1 && [vitrine.received isEqual:SAPRewriteOfflineConfig(customize,NO)]);
-    puts("PASS: Vitrine's full-body and cached-304 reentrant deliveries reach Spotify once with offline attributes");
+    [retrine URLSession:nil dataTask:t didReceiveResponse:t.response completionHandler:nil];
+    [retrine URLSession:nil task:t didCompleteWithError:nil];
+    assert(retrine.completions==1 && [retrine.received isEqual:SAPRewriteOfflineConfig(customize,NO)]);
+    puts("PASS: Retrine's full-body and cached-304 reentrant deliveries reach Spotify once with offline attributes");
     puts("PASS: exact bootstrap/customize wire paths; original value types and unknown/unrelated fields; malformed/overflow passthrough; chunk reassembly; errors/304; 4 MiB cap; no network calls/timers");
 } }

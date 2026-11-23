@@ -1,5 +1,12 @@
 #import "catalog-boundary.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/SpotifyMetadata/SGSpotifyMetadata.h"
+#import "../motion/no-recording-lookup.h"
+
+BOOL SGMotionAppleMusicOn(void) { return YES; }
+dispatch_block_t SGSpotifyMetadataRequestAllowConstrained(NSString *path, NSData *body, BOOL allow, SGSpotifyMetadataReply done) {
+    CHECK(NO); return ^{};
+}
 
 NSDictionary *CatalogFixture;
 BOOL CatalogLowData;
@@ -100,7 +107,7 @@ void CatalogStart(NSString *path) {
     CatalogFixture = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
     CHECK([CatalogFixture isKindOfClass:NSDictionary.class]);
     CatalogAssetPaths = [NSMutableArray array];
-    NSString *workspace = NSProcessInfo.processInfo.environment[@"VITRINE_TEST_ROOT"];
+    NSString *workspace = NSProcessInfo.processInfo.environment[@"RETRINE_TEST_ROOT"];
     CHECK(workspace.length > 0);
     CatalogRoot = [NSURL fileURLWithPath:workspace isDirectory:YES];
     CHECK([NSFileManager.defaultManager createDirectoryAtURL:CatalogRoot withIntermediateDirectories:YES attributes:nil error:nil]);

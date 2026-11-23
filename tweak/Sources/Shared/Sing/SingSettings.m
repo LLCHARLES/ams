@@ -265,13 +265,13 @@ UIViewController *SGSingSettingsPage(void) {
     SGModRow *units = SGChoiceRow(SGL(@"settings.karaoke.computeunits.title", @"Runs on"), nil, SGKeySingComputeUnits, SGSingComputeUnitNames(), 0);
     units.choiceNotes = @[SGL(@"settings.karaoke.computeunits.note.auto", @"The Neural Engine, the fastest, with the CPU while it loads"), SGL(@"settings.karaoke.computeunits.note.cpu", @"Slower and warmer, and a little less memory")];
     units.choiceFooter = SGL(@"settings.karaoke.computeunits.footer", @"Karaoke loads the voice model on the CPU first and starts with it. On Automatic a second copy then loads on "
-                         @"the Neural Engine and takes over, in the background too. The iPhone prepares it the first time after Vitrine "
+                         @"the Neural Engine and takes over, in the background too. The iPhone prepares it the first time after Retrine "
                          @"is installed or updated, for a minute or so, and Karaoke runs on the CPU until then, unless Prepare after "
                          @"updates did it already. If it does not load, "
                          @"Karaoke stays on the CPU until Spotify is opened again.");
     units.chosen = ^(NSInteger index) { SGSingComputeUnitsChanged(); };
     SGModRow *prepare = SGSwitchRow(SGL(@"settings.karaoke.prepareahead.title", @"Prepare after updates"),
-                                    SGL(@"settings.karaoke.prepareahead.subtitle", @"Readies the Neural Engine in the background after Vitrine or iOS updates, so Karaoke starts at full speed"), SGKeySingPrepareAhead);
+                                    SGL(@"settings.karaoke.prepareahead.subtitle", @"Readies the Neural Engine in the background after Retrine or iOS updates, so Karaoke starts at full speed"), SGKeySingPrepareAhead);
     SGSingPage *made = [[SGSingPage alloc] initWithTitle:SGL(@"settings.karaoke.title", @"Karaoke") intro:nil sections:@[
         SGSection(nil, @[sing, button]),
         SGNotedSection(SGL(@"settings.karaoke.model.header", @"Voice model"), @[full, light, model, remove, other],

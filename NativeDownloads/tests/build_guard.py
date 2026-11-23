@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from build_vitrine_9190 import read_input, prepare_native, require_separate_output
+from build_retrine_9190 import read_input, prepare_native, require_separate_output
 from patch_native_restrictions import layout, SETTER, CAVE
 from patch_key_request_mode import WINDOW, PROVIDER, MAPPING, DLSYM_STUB
 from patch_native_trace import POINTS
@@ -24,11 +24,11 @@ def rejects(call, label):
 
 
 source = Path(sys.argv[1]).resolve()
-native, prepared = read_input(source, require_vitrine=False)
+native, prepared = read_input(source, require_retrine=False)
 assert len(native) == len(prepared[0])
 print("PASS supported Spotify source and all overlay guards")
 rejects(lambda: require_separate_output(source, source), "input equals output")
-rejects(lambda: read_input(source), "base without Vitrine")
+rejects(lambda: read_input(source), "base without Retrine")
 rejects(lambda: prepare_native(prepared[0]), "repeat overlay")
 _, _, segments, _ = layout(native)
 text = next(s for s in segments if s[0] == b"__TEXT")
@@ -59,12 +59,12 @@ with tempfile.TemporaryDirectory(prefix="pixie-guard-") as temporary:
     with ZipFile(bad, "w") as archive:
         archive.writestr("Payload/Spotify.app/Info.plist",
                         plistlib.dumps({"CFBundleShortVersionString": "9.1.88"}))
-    rejects(lambda: read_input(bad, require_vitrine=False), "unsupported version")
+    rejects(lambda: read_input(bad, require_retrine=False), "unsupported version")
     output = Path(temporary) / "preserved.ipa"
     output.write_bytes(b"previous complete output")
     pipeline = Path(__file__).resolve().parents[2] / "scripts/pipeline.sh"
     for input_path, destination, message in [
-        (bad, output, "Expected Spotify 9.1.90"),
+        (bad, output, "Unexpected Spotify executable name"),
         (source, source, "Input and output IPA must be separate files"),
     ]:
         result = subprocess.run(

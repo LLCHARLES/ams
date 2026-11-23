@@ -1,4 +1,4 @@
-// The home screen icon, picked from the alternate icons the IPA carries: Vitrine's, which
+// The home screen icon, picked from the alternate icons the IPA carries: Retrine's, which
 // scripts/pipeline.sh adds from icons/, and any other mod's. iOS keeps the choice, so the row
 // reads it back from iOS rather than from the settings.
 #import <UIKit/UIKit.h>

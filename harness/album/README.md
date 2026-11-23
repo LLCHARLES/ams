@@ -18,8 +18,31 @@ clone (iOS 26.5, default text size, motion off) with the same fixtures at
 a scratch source tree selected by `HARNESS_SRC`, never by reverting the working
 tree. Both setting states must match these independent captures, including the
 info/hero frames and visible title, details, description and action frames.
+The creator and details literals (and what they move: the info's height, the playlist title, the album's
+row) were captured again the same way after the header took the Music app's sizes (creator Title 3 regular,
+24 pt high and 111 pt wide for the fixture's name, against Body's 21 and 96; details Caption 1 semibold, 15 pt
+against Footnote's 16); every other literal is unchanged.
 The iPad playlist also checks Card cover restoration after switching beside off,
 compact width and replacing the source cover, with both nil and existing masks.
+
+`python3 harness/album/layout-check.py --screenshots <directory> [case ...]` (`layout-check.h`, `layout <case>` on the
+launch line) runs the album header through the changes an open page lives through, on an iPhone 17 Pro and an iPad Pro
+13-inch (M5) of its own: `text-size` opens the page at Extra Small, changes the simulator's text size to Extra Extra
+Extra Large once the page says READY, and requires the title, artist and details at Title 2, Title 3 and Caption 1 at
+Extra Large (the cap), an artist header's Large Title the same, and that header's content measured again onto its
+bottom edge; `resize-card` narrows the iPad page to 68% with Spotify's square re-centred and requires the hero's square
+on it, then held while Spotify's square shrinks at that width, then widens it to 84% with Spotify centring its square a
+pass after the header's width and requires the hero's square there; `beside-scrim` turns Cover beside off over a Full
+screen cover and requires the contrast gradient back; `beside-faces` gives the artist line, beside the cover with its
+face, names that fit the column on one line but not after the face, and requires them wrapped, not cut, with the details
+under them. Each of those writes `album-<case>.png` before its checks. `measure` (iPhone) counts `sizeThatFits:` on the
+header info's labels and requires none over ten header and info passes with nothing changed, some once the artist's
+name changes (the line then as wide as the new name), and none over ten passes after. `chrome-card` (iPhone, Card,
+`-coverTop 76` putting Spotify's square at {77, 76, 248, 248} as a 402pt phone measured it) requires the pinned download
+and ⋯ at {298, 62} and {342, 62}, the square and its shadow at {96, 114, 210, 210}, the same moved up 120pt with the
+page scrolled that far, Spotify's square again with download gone (⋯'s circle alone) and the smaller one with it back;
+`chrome-card-rtl` the same with the pair mirrored onto the left; `chrome-full` the Full screen cover the hero's top
+{0, 0, 402, 402} square under the pair.
 
 The side-column checks require a 28pt cover gap, leading text/actions (mirrored in
 RTL), a description wrapped below the row, and action sizes identical to the
@@ -71,6 +94,12 @@ The log says what the redesign answered with.
 2 s the way Apple Music's catalog would. The log says the clip was added at opacity 0 and not yet fading, that by
 2.5 s its first frame was ready and it had faded in and was playing, and that taken out of the window at 4.5 s it
 stopped and put back it played again.
+
+`bash harness/album/motion-visibility.sh <simulator UUID>` checks the album and artist clips with a generated
+local video. After the viewport checks it overrides the process's thermal and Low Power Mode readings and
+posts their notifications off main. Both the clip's playback rate and the Fluid layer's moving state must
+stop at Serious or Critical, return at Nominal or Fair, and stop in Low Power Mode alone. This checks the
+response to a reported state, not actual device temperature.
 
 `SGLog` goes to the unified log rather than stdout, so the redesign's own lines are read with
 
@@ -133,7 +162,8 @@ screenshot of what a page opening shows.
 the picture's parallax and pull zoom, the dim in the page's color and the header fading in over the 14pt under the top
 bar; `veil-card`, with `-spotifyglass.redesign.album.fullCover NO -spotifyglass.redesign.album.motion NO` as well,
 checks the same blur and dim on the square's picture alone, the square left where it is; `veil-off`, without the
-setting, checks that none of it is drawn. Each holds d = 0, 190 and 400 (with the veil on, "mid" too: the title half
+setting, checks that the artwork has no blur or dim and does not move, while the album text still clips under the
+top bar and is unclipped at rest. Each holds d = 0, 190 and 400 (with the veil on, "mid" too: the title half
 under the bar) for screenshots first, then exits 0 or logs a FAIL and exits 1. `veil-check.sh <UDID> [OUT]` builds this, the playlist and the artist harness and runs all of
 it, the artist's Play checks too (`../artist/README.md`), with the screenshots in OUT.
 
@@ -156,11 +186,18 @@ which the AMOLED rule paints black. The scanned sleeve checks the
 pale border and reflected square edge, including the actual layer composition: adjacent-row mean absolute linear
 sRGB luminance difference must not exceed 0.02 within 24pt of the edge. The layer composition also checks
 24pt above the scanned sleeve's stripe at 94% through the square's extension; the drawing must be opaque.
+`rebuilt` hands the hero a replacement artwork view and requires the retired one's later pictures ignored, then rebuilds
+a header under the page's own header pass: the cover element gone for one pass, then back with the replacement still
+under the lookup's 80pt. A picture landing in the retired view after either pass is ignored, and the replacement's is
+taken once it is sized and filled on passes of its own, with no header or page pass between.
 `still-swap` reuses a hero from A with a clip to B without one: both an installed still and late poster/read replies
 must leave B blue. A -> B -> A reuses the identical clip URL and checks both delayed stages against the new album
 lifetime, then accepts its current still. Media lookup, poster delivery and player readiness are test doubles;
 the field and hero are real. `cache-reuse` aliases only the address prefix of cache keys after the first source
 deallocates; a mirrored cover with identical size, page colour and geometry must draw blue, not the old magenta.
+`motion-identifiers` gives the page controller an album URI and delivers candidate-row and identifier replies
+independently. With only a localized, unmatched credit the identifier clip must start; with a matching row,
+both reply orders must start only the first clip. The adaptive hero's poster requests record each clip it starts.
 `Kit/SGRCoverRead` is not modified.
 The blur reaches its maximum over 40pt rather than 80pt: 80pt left a measured 19/255 step at the scanner border.
 Also checked: a cover replaced mid read whose

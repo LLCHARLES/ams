@@ -146,6 +146,7 @@ static void googleHolds(void) {
 #include "wrap-check.inc"
 #include "round-one-check.inc"
 #include "model-budget-check.inc"
+#include "reader-check.inc"
 
 void SGHarnessRunTranslationCheck(UIWindow *window) {
     modelBudgetChecks();
@@ -201,9 +202,14 @@ void SGHarnessRunTranslationCheck(UIWindow *window) {
     SGRKaraokeView *player = [[SGRKaraokeView alloc] initWithFrame:CGRectMake(0, 0, bounds.size.width, bounds.size.height / 2)];
     SGRKaraokeView *page = [[SGRKaraokeView alloc] initWithFrame:CGRectMake(0, bounds.size.height / 2, bounds.size.width, bounds.size.height / 2)];
     for (SGRKaraokeView *view in @[player, page]) {
-        [root.view addSubview:view];
-        ((void (*)(id, SEL))objc_msgSend)(view, NSSelectorFromString(@"tick"));
+        // Each real lyrics host owns its siblings' opacity. Let both views reach their on-screen state.
+        UIView *host = [[UIView alloc] initWithFrame:view.frame];
+        [root.view addSubview:host];
+        view.frame = host.bounds;
+        [host addSubview:view];
+        autoTick(view);
     }
+    check(extrasWait(^BOOL { return !player.hidden && !page.hidden; }), @"both manual translation menus are on screen");
     NSArray<SGRKaraokeView *> *views = @[player, page];
     BOOL (^both)(BOOL (^)(SGRKaraokeView *)) = ^BOOL(BOOL (^test)(SGRKaraokeView *)) { return test(player) && test(page); };
     NSDictionary *(^saved)(void) = ^NSDictionary * { return SGHarnessSavedTranslations[@"harness|en"]; };
@@ -346,6 +352,7 @@ void SGHarnessRunTranslationCheck(UIWindow *window) {
         autoCheck(window);
 #endif
         roundOneChecks(window);
+        readerChecks(window);
         printf("%d failed\n", sg_failed);
         fflush(stdout);
         exit(sg_failed);

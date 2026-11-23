@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="meaning-dynamic-type.") as directory:
         command("xcrun", "simctl", "install", device, app)
         result = subprocess.run(
             ["xcrun", "simctl", "launch", "--console", "--terminate-running-process",
-             device, "com.vitrine.meaningtranslate.check", "--dynamic-type"],
+             device, "com.retrine.meaningtranslate.check", "--dynamic-type"],
             capture_output=True, text=True, timeout=60)
         output = result.stdout + result.stderr
         print(output, end="", flush=True)

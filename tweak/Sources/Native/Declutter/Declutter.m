@@ -8,6 +8,7 @@ BOOL SGNativeSectionHidden(NSString *title, const SGNativeSectionRule *rules, si
         NSString *wanted = rules[i].title;
         BOOL match = rules[i].prefix
             ? [title.lowercaseString hasPrefix:wanted.lowercaseString]
+            : rules[i].suffix ? [title hasSuffix:wanted]
             : [title caseInsensitiveCompare:wanted] == NSOrderedSame;
         if (match) return SGHidden(rules[i].key);
     }

@@ -1,0 +1,27 @@
+# A push to main starts the Mac checks in Retrine-CI at once. That repository's own schedule
+# stays as the fallback: GitHub starts scheduled runs late or not at all.
+name: Start private checks
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  dispatch:
+    if: github.repository == 'oneulddu/Retrine'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # No checkout and no input: Retrine-CI's poll fetches and selects the commit itself.
+      - name: Dispatch the poll in Retrine-CI
+        env:
+          GH_TOKEN: ${{ secrets.RETRINE_CI_DISPATCH_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::RETRINE_CI_DISPATCH_TOKEN is not set; Retrine-CI's schedule will pick this push up."
+            exit 0
+          fi
+          gh workflow run poll.yml --repo oneulddu/Retrine-CI --ref main

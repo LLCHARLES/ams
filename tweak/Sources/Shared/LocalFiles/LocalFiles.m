@@ -5,6 +5,7 @@
 #import <os/lock.h>
 #import <ImageIO/ImageIO.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "LocalFiles.h"
 
 static NSString *const kLocalPrefix = @"spotify:local:";
@@ -107,14 +108,7 @@ NSDictionary<NSString *, id> *SGLocalFileInfo(NSString *uri) {
 #pragma mark - storing an edit
 
 NSString *SGLocalFileCoversDirectory(void) {
-    static NSString *directory;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        // Application Support rather than Documents: Spotify scans Documents for music, and the Files app shows it.
-        NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-        directory = [support stringByAppendingPathComponent:@"Vitrine/Local file covers"];
-    });
-    return directory;
+    return [SGDataRoot(NSApplicationSupportDirectory).path stringByAppendingPathComponent:@"Local file covers"];
 }
 
 NSString *SGLocalFileCoverPath(NSDictionary<NSString *, id> *edit) {
@@ -142,7 +136,7 @@ NSString *SGLocalFileCoverInURL(NSString *url) {
     NSString *path = [url substringFromIndex:kImagePrefix.length].stringByRemovingPercentEncoding;
     NSString *directory = [SGLocalFileCoversDirectory() stringByAppendingString:@"/"];
     // Only a file of the covers' own, by its name alone, so no address reaches anything else.
-    if (![path hasPrefix:directory] || [path substringFromIndex:directory.length].pathComponents.count != 1) return nil;
+    if (!directory || ![path hasPrefix:directory] || [path substringFromIndex:directory.length].pathComponents.count != 1) return nil;
     return path;
 }
 
@@ -227,7 +221,7 @@ static void changed(NSString *uri) {
 }
 
 void SGLocalFileSaveEdit(NSString *uri, NSDictionary<NSString *, NSString *> *names, UIImage *cover, BOOL keepCover) {
-    if (!SGLocalFileIs(uri)) return;
+    if (!SGLocalFileIs(uri) || !SGLocalFileCoversDirectory()) return;
     NSDictionary *tags = SGLocalFileTags(uri), *old = SGLocalFileEditFor(uri);
     NSMutableDictionary<NSString *, id> *edit = [NSMutableDictionary dictionary];
     for (NSString *field in @[@"title", @"artist", @"album"]) {

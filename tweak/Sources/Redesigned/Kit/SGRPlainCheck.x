@@ -1,6 +1,7 @@
-// The add button's glyph: Plain checkmark (Appearance), Spotify's circled tick on a saved song swapped for a plain
-// checkmark in the accent, and Star add button (the Player page), the player's button as a star, outlined until the
-// song is saved and filled in the accent once it is. In the player the star wins (SGRAddGlyphFor, SGRRefinements.h).
+// The add button's glyph: Saved mark (Appearance), Spotify's circled tick on a saved song swapped for a plain
+// checkmark or a filled dot in the accent, and Star add button (the Player page), the player's button as a star,
+// outlined until the song is saved and filled in the accent once it is. In the player the star wins (SGRAddGlyphFor,
+// SGRRefinements.h).
 //
 // The Add button (id=Components.UI.AddToButton, a UIButton) draws its state with a Lottie animation in a
 // StateMicroInteractionView<AddToButtonState> (trees: player 1434-1436, the rows' buttons the same): a plus when the
@@ -17,14 +18,14 @@
 #import "SGRKit.h"
 #import "SGRRefinements.h"
 
-static const CGFloat kCheckSize = 19, kStarSize = 22;
+static const CGFloat kCheckSize = 19, kDotSize = 10, kStarSize = 22;
 static char kGlyphKey, kAnimationKey;
 
-BOOL SGRPlainCheckOn(void) {
-    static BOOL on;
+SGRSavedMark SGRSavedMarkChosen(void) {
+    static SGRSavedMark mark;
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ on = SGHidden(SGRKeyPlainCheck); });
-    return on;
+    dispatch_once(&once, ^{ mark = SGRSavedMarkFrom(SGInt(SGRKeySavedMark, -1), SGHidden(SGRKeyPlainCheck)); });
+    return mark;
 }
 
 BOOL SGRStarAddOn(void) {
@@ -43,33 +44,27 @@ static BOOL inPlayer(UIView *button) {
 }
 
 static UIImage *imageOf(SGRAddGlyph glyph) {
-    BOOL check = glyph == SGRAddGlyphPlainCheck;
-    UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:check ? kCheckSize : kStarSize
+    BOOL check = glyph == SGRAddGlyphPlainCheck, dot = glyph == SGRAddGlyphDot;
+    UIImageSymbolConfiguration *configuration = [UIImageSymbolConfiguration configurationWithPointSize:check ? kCheckSize : dot ? kDotSize : kStarSize
                                                                                                  weight:check ? UIImageSymbolWeightBold : UIImageSymbolWeightMedium];
-    NSString *name = check ? @"checkmark" : glyph == SGRAddGlyphStarFilled ? @"star.fill" : @"star";
+    NSString *name = check ? @"checkmark" : dot ? @"circle.fill" : glyph == SGRAddGlyphStarFilled ? @"star.fill" : @"star";
     return [UIImage systemImageNamed:name withConfiguration:configuration];
 }
 
 static UIView *animationIn(UIButton *button) {
-    UIView *found = objc_getAssociatedObject(button, &kAnimationKey);
-    if (found.superview) return found;
     static Class lottie;
     if (!lottie) lottie = NSClassFromString(@"Lottie.LottieAnimationView");
-    found = nil;
-    for (UIView *child in button.subviews) {
-        for (UIView *inner in child.subviews) {
-            if (lottie && [inner isKindOfClass:lottie]) found = inner;
-        }
-    }
-    objc_setAssociatedObject(button, &kAnimationKey, found, OBJC_ASSOCIATION_ASSIGN);
-    return found;
+    if (!lottie) return nil;
+    return SGFindRemembered(button, &kAnimationKey, ^BOOL(UIView *view) {
+        return [view isKindOfClass:lottie] && view.superview.superview == button;
+    });
 }
 
 static void showState(UIButton *button) {
     UIView *animation = animationIn(button);
     if (!animation) return;
     UIImageView *view = objc_getAssociatedObject(button, &kGlyphKey);
-    SGRAddGlyph glyph = SGRAddGlyphFor(button.isSelected, button.isEnabled, SGRStarAddOn() && inPlayer(button), SGRStarAddOn(), SGRPlainCheckOn());
+    SGRAddGlyph glyph = SGRAddGlyphFor(button.isSelected, button.isEnabled, SGRStarAddOn() && inPlayer(button), SGRStarAddOn(), SGRSavedMarkChosen());
     BOOL drawn = glyph != SGRAddGlyphSpotify;
     // A button that never had a glyph of the Kit's is left to Spotify.
     if (!drawn && !view) return;
@@ -115,6 +110,6 @@ static void showState(UIButton *button) {
 %end
 
 %ctor {
-    if (!SGRedesignedUI() || !(SGRPlainCheckOn() || SGRStarAddOn())) return;
+    if (!SGRedesignedUI() || !(SGRSavedMarkChosen() != SGRSavedMarkSpotify || SGRStarAddOn())) return;
     %init;
 }

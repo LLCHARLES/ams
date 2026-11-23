@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
-OUT=$(mktemp -d /tmp/vitrine-artist-artwork.XXXXXX)
+OUT=$(mktemp -d /tmp/retrine-artist-artwork.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 FLAGS=(-target arm64-apple-ios17.0-macabi -isysroot "$SDK"
@@ -11,19 +11,20 @@ FLAGS=(-target arm64-apple-ios17.0-macabi -isysroot "$SDK"
 xcrun -sdk macosx clang "${FLAGS[@]}" -DSG_MOTION_TEST_STORE main.m ../album-notes/catalog-boundary.m \
     ../../tweak/Sources/Core/SGLog.m \
     ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionCatalog.m ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionTicket.m \
+    ../../tweak/Sources/Shared/Lyrics/LyricsLanguage.m -framework NaturalLanguage -Wl,-dead_strip \
     ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionClip.m ../../tweak/Sources/Shared/AdBlock/Protobuf.m \
-    -o "$OUT/vitrine-artist-artwork-check"
-VITRINE_TEST_ROOT="$OUT/catalog" "$OUT/vitrine-artist-artwork-check" fixtures/catalog.json
+    ../../tweak/Sources/Core/SGDataRoot.m -o "$OUT/retrine-artist-artwork-check"
+RETRINE_TEST_ROOT="$OUT/catalog" "$OUT/retrine-artist-artwork-check" fixtures/catalog.json
 xcrun -sdk macosx clang "${FLAGS[@]}" late-check.m ../../tweak/Sources/Redesigned/Artist/ArtistArtwork.m \
     ../../tweak/Sources/Core/SGLog.m \
     ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionClip.m ../../tweak/Sources/Shared/AdBlock/Protobuf.m \
-    -o "$OUT/vitrine-artist-late-check"
-"$OUT/vitrine-artist-late-check"
+    -o "$OUT/retrine-artist-late-check"
+"$OUT/retrine-artist-late-check"
 xcrun -sdk macosx clang "${FLAGS[@]}" header-check.m ../../tweak/Sources/Redesigned/Artist/ArtistArtwork.m \
     ../../tweak/Sources/Core/SGLog.m \
     ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionClip.m ../../tweak/Sources/Shared/AdBlock/Protobuf.m \
-    -o "$OUT/vitrine-artist-header-check"
-"$OUT/vitrine-artist-header-check"
+    -o "$OUT/retrine-artist-header-check"
+"$OUT/retrine-artist-header-check"
 xcrun -sdk macosx clang "${FLAGS[@]}" download-check.m ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionStore.m ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionTicket.m \
-    -o "$OUT/vitrine-artist-download-check"
-VITRINE_TEST_ROOT="$OUT/downloads" "$OUT/vitrine-artist-download-check"
+    ../../tweak/Sources/Core/SGDataRoot.m -o "$OUT/retrine-artist-download-check"
+RETRINE_TEST_ROOT="$OUT/downloads" "$OUT/retrine-artist-download-check"

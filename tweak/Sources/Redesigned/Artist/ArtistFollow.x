@@ -45,6 +45,7 @@ static id currentProvider(void) {
     return provider;
 }
 
+%group LegacyPlatform
 %hook SPTCollectionPlatformImplementation
 - (id)initWithCosmosDataLoader:(id)loader isGatedEntityRelationsEnabled:(BOOL)gated {
     id platform = %orig;
@@ -58,6 +59,8 @@ static id currentProvider(void) {
 }
 %end
 
+%end
+
 %hook _TtC23Collection_PlatformImpl22CollectionPlatformImpl
 - (id)stateProvider {
     id provider = %orig;
@@ -66,12 +69,15 @@ static id currentProvider(void) {
 }
 %end
 
+%group MigrationPlatform
 %hook _TtC23Collection_PlatformImpl27CollectionPlatformMigration
 - (id)stateProvider {
     id provider = %orig;
     keepProvider(provider);
     return provider;
 }
+%end
+
 %end
 
 %hook _TtC26AlignedCuration_CommonImpl21ACUCollectionPlatform
@@ -121,12 +127,15 @@ static id currentProvider(void) {
 %end
 
 // The Follow element asks Curation's provider, which wraps the collection one.
+%group CurationProvider
 %hook _TtC21Curation_PlatformImpl30CUPStateProviderImplementation
 - (id)subscribeCollectionStateForURL:(id)url inContext:(id)context completion:(id)completion {
     Ivar ivar = class_getInstanceVariable(object_getClass(self), "collectionPlatformStateProvider");
     if (ivar) keepProvider(object_getIvar(self, ivar));
     return %orig;
 }
+%end
+
 %end
 
 #pragma mark - one subscription per page
@@ -217,6 +226,15 @@ BOOL SGRArtistFollowing(UIView *page, NSString *moreIdentifier, BOOL *following,
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    if (class_getInstanceMethod(objc_getClass("SPTCollectionPlatformImplementation"), @selector(stateProvider))) {
+        %init(LegacyPlatform);
+    }
+    if (class_getInstanceMethod(objc_getClass("_TtC23Collection_PlatformImpl27CollectionPlatformMigration"), @selector(stateProvider))) {
+        %init(MigrationPlatform);
+    }
+    if (class_getInstanceMethod(objc_getClass("_TtC21Curation_PlatformImpl30CUPStateProviderImplementation"), @selector(subscribeCollectionStateForURL:inContext:completion:))) {
+        %init(CurationProvider);
+    }
     %init;
     SGRequireClasses(@[@"SPTCollectionPlatformState", @"_TtC23Collection_PlatformImpl35CollectionPlatformStateProviderImpl"]);
 }

@@ -45,6 +45,8 @@ static SGRPlayerBackgroundKind background = SGRPlayerBackgroundAnimated;
 static SGRPlayerBackgroundKind SGRPlayerBackground(void) { return background; }
 static BOOL videoShowing(void) { return NO; }
 static BOOL motionAllowed(void) { return YES; }
+static BOOL consumerOnScreen = YES;
+static BOOL consumerVisible(void) { return consumerOnScreen; }
 static BOOL seen(UIView *view) { return YES; }
 static void clear(BOOL animated) {}
 // As PlayerMotion.x reads them: what a clip is shown under, and the Visualizer that stands in for a missing clip.
@@ -138,6 +140,10 @@ int main(void) {
         check(beginTrack(@"spotify:track:canvas"), @"the same track is walked again");
         check(answer(&same->recovery, YES) == SGRPlayerMotionRecoveryRebuild && same->recovery.rebuilds == 1,
               @"the same track walked again keeps its recovery");
+
+        consumerOnScreen = NO;
+        check(!beginTrack(@"spotify:track:hidden"), @"a hidden consumer does not start a clip lookup");
+        consumerOnScreen = YES;
 
         // A file that keeps failing: three rebuilds, then given up, so the poster or Fluid takes over.
         recovery = (SGRPlayerMotionRecovery){0};

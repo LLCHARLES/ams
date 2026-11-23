@@ -17,7 +17,7 @@ static const NSInteger kLengthSlack = 4;
 static const NSUInteger kMostTimedRows = 4000;
 
 static NSDictionary<NSString *, NSString *> *headers(void) {
-    return @{@"User-Agent": @"Vitrine " @SG_VERSION};
+    return @{@"User-Agent": @"Retrine " @SG_VERSION};
 }
 
 // Bound transport before JSON allocation, and each sheet before ranking or LRC conversion.
@@ -25,6 +25,7 @@ static void getJSON(SGLyricsRequestContext *context, NSURL *url, id (^transform)
     SGLyricsSourceRequestIn(context, url, headers(), nil, ^(NSData *data, NSInteger status) {
         SGLyricsTransform(^id {
             id reply = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            if (status == 200 && !reply) [context noteFailure:YES];
             return transform(reply);
         }, done);
     });
@@ -278,6 +279,7 @@ SGLyricsAsk SGLrcLibAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
 
     void (^bySearch)(void) = ^{
         getJSON(query.requestContext, SGLyricsURL(kSearch, search), ^id(id found) {
+            if (found && ![found isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
             if ([found isKindOfClass:NSArray.class] && ![found count])
                 query.requestContext.emptyNameSearch = SGLrcLibAsk;
             return resultFor(matching(found, title, artist, seconds), seconds);

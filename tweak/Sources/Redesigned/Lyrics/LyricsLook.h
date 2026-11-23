@@ -37,18 +37,15 @@ UIViewController *SGRLyricsStylesSettingsPage(void);
 SGRLyricsLook SGRLyricsLookNow(void);
 void SGRSetLyricsLook(SGRLyricsLook look, id changer);
 
-// The words' size in each place the lyrics show, over that place's own size: the line under the player's cover
-// (Redesigned/Player/PlayerLyricLine.x, the system's text size), the lyrics in the player (PlayerLyrics.x) and the
+// The words' size in the lyrics in the player (PlayerLyrics.x) and the
 // landscape screen and full-screen lyrics (PlayerLandscape.x, KaraokePage.x), the look's size. Each place's choice is
 // stored as the index into SGRLyricsSizeNames under its own key; unset, the first, is the place's size as it is. A
 // change posts SGRLyricsLookDidChangeNotification.
 typedef NS_ENUM(NSInteger, SGRLyricsPlace) {
     SGRLyricsPlaceNone = 0,     // a view with no place of its own (the Lyrics page's previews): the look's size
-    SGRLyricsPlaceUnderCover,
     SGRLyricsPlacePlayer,
     SGRLyricsPlaceFullScreen,
 };
-#define SGRKeyLyricsSizeUnderCover @"spotifyglass.redesign.lyricsSize.underCover"
 #define SGRKeyLyricsSizePlayer @"spotifyglass.redesign.lyricsSize.player"
 #define SGRKeyLyricsSizeFullScreen @"spotifyglass.redesign.lyricsSize.fullScreen"
 // The share of the place's own size the words are set at: exactly 1 until a size is chosen for it.

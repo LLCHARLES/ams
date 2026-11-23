@@ -2,7 +2,7 @@
 """Keeps the mod's translations in step with its sources (docs/tweaks.md, Localization).
 
   scripts/check-strings.py          check, exit 1 on a problem
-  scripts/check-strings.py --sync   also rewrite en.lproj from Vitrine's SGL(...) and Pixie's SAPL(...) calls
+  scripts/check-strings.py --sync   also rewrite en.lproj from Retrine's SGL(...) and Pixie's SAPL(...) calls
 
 Checks: every SGL(@"key", @"English") key is well formed and stands for one English text; en.lproj holds exactly
 those keys and texts; every other .lproj has the same keys, and each translation reads the same format specifiers
@@ -14,7 +14,7 @@ import os, re, subprocess, sys, shutil
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 SOURCES = os.path.join(ROOT, 'tweak', 'Sources')
 PIXIE_SOURCES = os.path.join(ROOT, 'NativeDownloads', 'src')
-BUNDLE = os.path.join(ROOT, 'tweak', 'layout', 'Library', 'Application Support', 'Vitrine.bundle')
+BUNDLE = os.path.join(ROOT, 'tweak', 'layout', 'Library', 'Application Support', 'Retrine.bundle')
 ALLOW = os.path.join(ROOT, 'scripts', 'strings-allow.txt')
 KEY = re.compile(r'^[a-z0-9]+(\.[a-z0-9_]+)+$')
 problems = []
@@ -227,7 +227,7 @@ def main():
     en_path = os.path.join(BUNDLE, 'en.lproj', 'Localizable.strings')
     english = {k: v[0] for k, v in used.items()}
     if sync:
-        write_strings(en_path, english, '/* Vitrine\'s English, written by scripts/check-strings.py --sync from SGL(...) and SAPL(...) source calls. */')
+        write_strings(en_path, english, '/* Retrine\'s English, written by scripts/check-strings.py --sync from SGL(...) and SAPL(...) source calls. Historical license and Pixie lookup keys remain stable. */')
     en = read_strings(en_path) if os.path.exists(en_path) else {}
     for k in sorted(set(english) - set(en)): problem(f'en.lproj lacks {k} (run scripts/check-strings.py --sync)')
     for k in sorted(set(en) - set(english)): problem(f'en.lproj has {k}, which no SGL(...) uses (run --sync)')

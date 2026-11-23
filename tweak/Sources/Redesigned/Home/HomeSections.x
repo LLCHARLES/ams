@@ -21,10 +21,11 @@
 // The DJ stays without its heading ("Your own personal DJ" over a card that says DJ): the stack is a plain
 // UIStackView, so the heading's LazyElementView is hidden before the cell is measured and the stack closes up.
 //
-// Each section is a section of the list's own, one item under a 24pt top inset its layout's provider gives it
-// (the first, the shortcuts, has none). A dropped section is marked on the list's layout and asked for again
-// without that inset, so the list closes up around it with one 24pt gap, not two.
+// A dropped section must also stop being estimated in the compositional layout. Returning zero only from the
+// cell leaves UIKit recreating and self-sizing that cell at its original estimate on subsequent layout passes.
+// Keep the snapshot's indices, but give dropped sections an empty, absolute-height layout.
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Home.h"
@@ -35,23 +36,64 @@ typedef NS_ENUM(NSInteger, SGRHomeKind) {
     SGRHomeKindDrop,
 };
 
-static char kCollapsedKey, kDroppedKey;
+static char kCollapsedKey, kDroppedKey, kModelKey;
 
-#pragma mark - the dropped sections' gap
+@interface SGRHomeFeed : NSObject
++ (NSArray *)sectionsOf:(id)page;
++ (NSArray *)sectionsOf:(id)page items:(NSArray *)identifiers generation:(id)generation;
+@end
+@interface __UIDiffableDataSource : NSObject
+@end
 
-// The provider's sections, a dropped one without its top inset. `layout` gives the layout once it is made.
-static UICollectionViewCompositionalLayoutSectionProvider withoutDroppedInsets(UICollectionViewCompositionalLayoutSectionProvider inner,
+static BOOL modelDrops(UICollectionViewCompositionalLayout *layout, NSInteger section);
+
+// UIKit's private diffable internals differ between iOS releases; a missing one leaves the model unavailable
+// (cells then classify themselves) instead of an unrecognized selector in every diffable list of the app.
+static id sendIfAnswered(id object, NSString *name) {
+    SEL selector = NSSelectorFromString(name);
+    return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+}
+
+static UICollectionView *homeListOf(id source) {
+    id list = sendIfAnswered(source, @"_collectionView");
+    if (![list isKindOfClass:UICollectionView.class]) return nil;
+    return SGClassNamed(object_getClass(((UICollectionView *)list).delegate), @"Home_EvoPageImpl") ? list : nil;
+}
+
+static void captureModel(UICollectionView *list, id source, id generation) {
+    SEL itemSelector = @selector(itemIdentifierForIndexPath:);
+    NSArray *model = nil;
+    if (generation && [source respondsToSelector:@selector(numberOfSectionsInCollectionView:)]
+        && [source respondsToSelector:itemSelector]) {
+        NSMutableArray *identifiers = [NSMutableArray array];
+        NSInteger count = [(id<UICollectionViewDataSource>)source numberOfSectionsInCollectionView:list];
+        for (NSInteger section = 0; section < count; section++) {
+            id identifier = ((id (*)(id, SEL, NSIndexPath *))objc_msgSend)(source, itemSelector,
+                [NSIndexPath indexPathForItem:0 inSection:section]);
+            [identifiers addObject:identifier ?: NSNull.null];
+        }
+        model = [SGRHomeFeed sectionsOf:list.delegate items:identifiers generation:generation];
+    }
+    objc_setAssociatedObject(list.collectionViewLayout, &kModelKey, model ?: NSNull.null, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+#pragma mark - the dropped sections' layout
+
+// `layout` gives the layout once it is made. Hidden content has no estimated items to recreate.
+static UICollectionViewCompositionalLayoutSectionProvider withoutDroppedSections(UICollectionViewCompositionalLayoutSectionProvider inner,
                                                                                UICollectionViewCompositionalLayout *(^layout)(void)) {
     return ^NSCollectionLayoutSection *(NSInteger section, id<NSCollectionLayoutEnvironment> environment) {
-        NSCollectionLayoutSection *made = inner(section, environment);
         UICollectionViewCompositionalLayout *owner = layout();
         NSIndexSet *dropped = owner ? objc_getAssociatedObject(owner, &kDroppedKey) : nil;
-        if ([dropped containsIndex:(NSUInteger)section]) {
-            NSDirectionalEdgeInsets insets = made.contentInsets;
-            insets.top = 0;
-            made.contentInsets = insets;
+        if ([dropped containsIndex:(NSUInteger)section] || modelDrops(owner, section)) {
+            NSCollectionLayoutSize *size = [NSCollectionLayoutSize
+                sizeWithWidthDimension:[NSCollectionLayoutDimension fractionalWidthDimension:1]
+                heightDimension:[NSCollectionLayoutDimension absoluteDimension:0]];
+            return [NSCollectionLayoutSection sectionWithGroup:
+                [NSCollectionLayoutGroup customGroupWithLayoutSize:size itemProvider:
+                    ^NSArray<NSCollectionLayoutGroupCustomItem *> *(id<NSCollectionLayoutEnvironment> env) { return @[]; }]];
         }
-        return made;
+        return inner(section, environment);
     };
 }
 
@@ -60,16 +102,43 @@ static UICollectionViewCompositionalLayoutSectionProvider withoutDroppedInsets(U
                           configuration:(UICollectionViewCompositionalLayoutConfiguration *)configuration {
     if (!provider) return %orig;
     __block __weak UICollectionViewCompositionalLayout *made = nil;
-    UICollectionViewCompositionalLayout *layout = %orig(withoutDroppedInsets(provider, ^{ return made; }), configuration);
+    UICollectionViewCompositionalLayout *layout = %orig(withoutDroppedSections(provider, ^{ return made; }), configuration);
     made = layout;
     return layout;
 }
 - (instancetype)initWithSectionProvider:(UICollectionViewCompositionalLayoutSectionProvider)provider {
     if (!provider) return %orig;
     __block __weak UICollectionViewCompositionalLayout *made = nil;
-    UICollectionViewCompositionalLayout *layout = %orig(withoutDroppedInsets(provider, ^{ return made; }));
+    UICollectionViewCompositionalLayout *layout = %orig(withoutDroppedSections(provider, ^{ return made; }));
     made = layout;
     return layout;
+}
+%end
+
+// UIKit's transaction identifies the input generation even when committing advances the state ID.
+// Resolve that generation once on main; layouts must not retry an unavailable model.
+%hook __UIDiffableDataSource
+- (void)_storeState:(id)state {
+    %orig;
+    if (!NSThread.isMainThread) {
+        // A commit off main cannot be matched to its model here; the previous model must not classify it.
+        __weak id source = self;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UICollectionView *list = homeListOf(source);
+            if (!list) return;
+            objc_setAssociatedObject(list.collectionViewLayout, &kDroppedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            captureModel(list, source, nil);
+            [list.collectionViewLayout invalidateLayout];
+        });
+        return;
+    }
+    UICollectionView *list = homeListOf(self);
+    if (!list) return;
+    objc_setAssociatedObject(list.collectionViewLayout, &kDroppedKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    id snapshotState = sendIfAnswered(sendIfAnswered(sendIfAnswered(sendIfAnswered(self, @"currentTransaction"),
+        @"finalSnapshot"), @"impl"), @"state");
+    captureModel(list, self, sendIfAnswered(snapshotState, @"generationID"));
+    [list.collectionViewLayout invalidateLayout];
 }
 %end
 
@@ -120,6 +189,31 @@ static SGRHomeKind optionalKind(NSString *name) {
     }
     if ([name containsString:@"ContentEvaluationList"]) return SGHidden(SGRKeyHomeSongSuggestions) ? SGRHomeKindKeep : SGRHomeKindDrop;
     return SGRHomeKindDrop;
+}
+
+// Decide before constructing cells where the model names the kind. In particular, a hidden music preview
+// must never be materialized merely because collapsing shelves brought it into the viewport: Spotify's
+// DataElement can ask for its not-yet-ready data while creating the cell, before self-sizing can hide it.
+static BOOL modelDrops(UICollectionViewCompositionalLayout *layout, NSInteger section) {
+    UICollectionView *list = layout.collectionView;
+    if (!SGClassNamed(object_getClass(list.delegate), @"Home_EvoPageImpl")) return NO;
+    id cached = objc_getAssociatedObject(layout, &kModelKey);
+    if (![cached isKindOfClass:NSArray.class]) return NO;
+    NSArray *model = cached;
+    if (section < 0 || (NSUInteger)section >= model.count) return NO;
+    id entry = model[section];
+    if (![entry isKindOfClass:NSArray.class]) return NO;
+    NSString *kind = entry[0];
+    if ([kind isEqualToString:@"musicPreview"]) return optionalKind(@"MediumDensityCard") == SGRHomeKindDrop;
+    if ([kind isEqualToString:@"shortcuts"]) return SGHidden(SGRKeyHomeHideShortcuts);
+    if ([kind isEqualToString:@"shelf"] || [kind isEqualToString:@"recents"]) {
+        NSArray *heading = entry[1];
+        if (heading.count != 2) return NO;
+        NSString *identity = SGRHomeShelfIdentityFrom(heading[0], heading[1]);
+        SGRHomeNoteShelf(identity);
+        return SGRHomeShelfHidden(identity);
+    }
+    return NO;
 }
 
 // A LazyElementView names the element it will hold before it holds it.

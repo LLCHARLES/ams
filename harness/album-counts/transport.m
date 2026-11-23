@@ -8,6 +8,7 @@ static void check(BOOL ok, NSString *reason) {
 typedef NS_ENUM(NSUInteger, FixtureMode) { Good, WrongHost, CrossRedirect, SameRedirect, TooLongHeader, TooLongStream, AtLimit };
 static FixtureMode mode;
 static NSUInteger headersRead;
+static BOOL allowConstrained = YES;
 void SGSpclientHeaders(void (^use)(NSDictionary *headers)) {
     headersRead++;
     use(@{@"Authorization": @"fixture-only"});
@@ -19,6 +20,7 @@ void SGSpclientHeaders(void (^use)(NSDictionary *headers)) {
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
     NSURL *url = self.request.URL;
+    check(self.request.allowsConstrainedNetworkAccess == allowConstrained, @"respects caller's Low Data Mode policy");
     check([url.scheme isEqual:@"https"] && [url.host isEqual:@"spclient.wg.spotify.com"], @"request must have the fixed Spotify origin");
     check([self.request valueForHTTPHeaderField:@"Authorization"] != nil, @"fixture headers delivered only to Spotify");
     if (mode == CrossRedirect || mode == SameRedirect) {
@@ -120,14 +122,16 @@ void SGSpclientHeaders(void (^use)(NSDictionary *headers)) {
 static NSData *ask(NSString *path, NSData *body, NSInteger expectedError) {
     __block BOOL finished = NO;
     __block NSData *result;
-    SGSpotifyMetadataRequest(path, body, ^(NSData *data, NSInteger status, NSError *error) {
+    SGSpotifyMetadataReply reply = ^(NSData *data, NSInteger status, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             check(error.code == expectedError, [NSString stringWithFormat:@"expected error %ld, got %@", (long)expectedError, error]);
             check(expectedError ? data == nil : status == 200, @"failed transfers expose no body; success carries HTTP 200");
             result = data;
             finished = YES;
         });
-    });
+    };
+    if (allowConstrained) SGSpotifyMetadataRequest(path, body, reply);
+    else SGSpotifyMetadataRequestAllowConstrained(path, body, NO, reply);
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
     while (!finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
@@ -148,7 +152,9 @@ int main(void) {
         ask(get, [NSData data], 1);
         ask(SGSpotifyExtendedMetadataPath, nil, 1);
         check(headersRead == 0, @"rejected paths cannot request captured credentials");
+        allowConstrained = NO;
         check([ask(get, nil, 0) isEqual:[@"{}" dataUsingEncoding:NSUTF8StringEncoding]], @"allowed album endpoint returns body");
+        allowConstrained = YES;
         check(ask(SGSpotifyExtendedMetadataPath, [NSData data], 0).length == 2, @"allowed extension endpoint returns body");
         mode = WrongHost; ask(get, nil, 3);
         mode = CrossRedirect; ask(get, nil, 2);
@@ -156,6 +162,19 @@ int main(void) {
         mode = TooLongHeader; ask(get, nil, 4);
         mode = TooLongStream; ask(get, nil, 4);
         mode = AtLimit; check(ask(get, nil, 0).length == 2097152, @"exactly 2 MiB remains accepted");
+        mode = Good;
+        __block BOOL cancelled = NO;
+        dispatch_block_t cancel = SGSpotifyMetadataRequest(get, nil, ^(NSData *data, NSInteger status, NSError *error) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                check(!data && error.code == NSURLErrorCancelled, @"cancelled metadata exposes cancellation, not a missing record");
+                cancelled = YES;
+            });
+        });
+        cancel();
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+        while (!cancelled && deadline.timeIntervalSinceNow > 0)
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
+        check(cancelled, @"metadata cancellation reaches the active transfer");
         puts("metadata transport: endpoint, response origin, redirects and streaming bounds passed");
     }
     return 0;

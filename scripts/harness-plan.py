@@ -36,6 +36,10 @@ TWEAK = "tweak/Sources"
 # Explicit weights estimate CI minutes. Mutation checks prove a check catches its
 # bug while it is written; they run by hand, not on every push.
 HARNESSES = [
+    {"name": "Data migration", "dir": "data-migration",
+     "run": "bash harness/data-migration/build.sh"},
+    {"name": "Unavailable clip storage", "dir": "data-migration", "theos": True,
+     "run": "bash harness/data-migration/clip-unavailable.sh"},
     {"name": "Page zoom", "dir": "page-zoom", "theos": True,
      "run": "python3 harness/page-zoom/check.py"},
     {"name": "AutoMix facts", "dir": "automix",
@@ -58,6 +62,8 @@ HARNESSES = [
      "run": "sh harness/settings-search/build.sh"},
     {"name": "Home podcasts", "dir": "home-podcasts", "theos": True,
      "run": "bash harness/home-podcasts/check.sh"},
+    {"name": "Home header", "dir": "home-header", "theos": True,
+     "run": "sh harness/home-header/check.sh"},
     {"name": "Settings bars inset", "dir": "settings-bars",
      "run": "sh harness/settings-bars/build.sh"},
     {"name": "Ad block hubs", "dir": "adblock", "theos": True,
@@ -156,14 +162,26 @@ HARNESSES = [
      "run": "sh harness/player/repeat-check.sh"},
     {"name": "Player lyrics layout", "dir": "player", "theos": True,
      "run": "sh harness/player/lyrics-layout-check.sh"},
-    {"name": "Player Connect volume", "dir": "player",
+    {"name": "Player Connect volume", "dir": "player", "theos": True,
      "run": "sh harness/player/volume-check.sh"},
     {"name": "Player volume layout", "dir": "player",
      "run": "sh harness/player/volume-layout-check.sh"},
+    {"name": "Player progress timers", "dir": "player", "theos": True,
+     "run": "sh harness/player/progress-check.sh"},
+    {"name": "Player podcast buffering", "dir": "player", "theos": True,
+     "run": "sh harness/player/buffering-check.sh"},
+    {"name": "Pinned menu claim", "dir": "system-menu", "theos": True,
+     "run": "bash harness/system-menu/pinned-check.sh"},
+    {"name": "Home hooks on other pages", "dir": "home-tiles", "theos": True,
+     "run": "bash harness/home-tiles/label-scroll-check.sh"},
     {"name": "Volume bar haptics", "dir": "haptics-page",
      "run": "sh harness/haptics-page/volume-check.sh"},
     {"name": "Player lyric line", "dir": "player-lyric-line",
      "run": "sh harness/player-lyric-line/build.sh"},
+    {"name": "Player lyric preview margin", "dir": "player-lyric-line", "theos": True,
+     "run": "sh harness/player-lyric-line/margin-check.sh"},
+    {"name": "Playlist chip row", "dir": "playlist", "theos": True,
+     "run": "sh harness/playlist/chip-check.sh"},
     {"name": "Player refinements", "dir": "player-refinements", "theos": True,
      "run": "sh harness/player-refinements/check.sh"},
     {"name": "Player upcoming tracks", "dir": "player",
@@ -178,6 +196,8 @@ HARNESSES = [
      "run": "sh harness/radio-modes/build.sh"},
     {"name": "Song audio retention", "dir": "song-audio",
      "run": "sh harness/song-audio/build.sh"},
+    {"name": "Signing sheet", "dir": "signing",
+     "run": "bash harness/signing/check.sh"},
     {"name": "Sing model-free", "dir": "sing",
      "run": "sh harness/sing/build.sh && harness/sing/build/sing spatial"},
     {"name": "Sing render regressions", "dir": "sing",
@@ -188,6 +208,8 @@ HARNESSES = [
      "run": "sh harness/spicy-lyrics/build.sh"},
     {"name": "SponsorBlock", "dir": "sponsorblock",
      "run": "sh harness/sponsorblock/build.sh"},
+    {"name": "SponsorBlock screens", "dir": "onboarding",
+     "run": "sh harness/onboarding/sponsorblock-check.sh"},
     {"name": "UI refinements album menu", "dir": "ui-refinements", "theos": True,
      "run": "sh harness/ui-refinements/menu-check.sh"},
     {"name": "Update offline", "dir": "update",
@@ -204,7 +226,7 @@ SKIP_PARTS = {"build", ".build"}
 # use their process name even when CFFIXED_USER_HOME points somewhere else.
 SHARED_PREFERENCE_DOMAINS = {
     "check": {
-        "appearance-page", "driver", "fonts", "genius-lyrics", "gesture-hold", "local-files", "lyrics-sources",
+        "appearance-page", "driver", "fonts", "genius-lyrics", "gesture-hold", "home-tiles", "local-files", "lyrics-sources",
         "lyrics-translation", "native-declutter", "player",
         "prefs", "radio-modes", "spicy-lyrics", "ui-refinements", "update",
     },
@@ -616,14 +638,24 @@ def script_calls(script_rel):
     text = re.sub(r'\$\(\s*dirname\s+"?\$0"?\s*\)', script_dir, text)
     text = substitute(text, shell_vars(text, script_dir)).replace("\\\n", " ")
     delimiter = None
-    for line in text.splitlines():
+    lines = iter(text.splitlines())
+    for line in lines:
         if delimiter is not None:
             if line.strip() == delimiter:
                 delimiter = None
             continue
-        lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|()<>")
-        lexer.whitespace_split = True
-        tokens = list(lexer)
+        # A quoted argument (e.g. whats-new.sh's awk program) can span physical lines.
+        while True:
+            lexer = shlex.shlex(line, posix=True, punctuation_chars=";&|()<>")
+            lexer.whitespace_split = True
+            try:
+                tokens = list(lexer)
+                break
+            except ValueError as error:
+                continuation = next(lines, None)
+                if str(error) != "No closing quotation" or continuation is None:
+                    raise
+                line += "\n" + continuation
         for index, token in enumerate(tokens):
             if token in {"<<", "<<-"} and index + 1 < len(tokens):
                 delimiter = tokens[index + 1]
@@ -693,10 +725,61 @@ def selected_for(path, index):
     return names
 
 
+PLANNER_PATH = "scripts/harness-plan.py"
+
+
+def registry_parts(source, *, check_runtime=False):
+    """Return the exact bytes around the list and its literal entries keyed by name."""
+    assignments = [s for s in ast.parse(source.decode("utf-8")).body
+                   if isinstance(s, ast.Assign) and len(s.targets) == 1
+                   and isinstance(s.targets[0], ast.Name) and s.targets[0].id == "HARNESSES"]
+    if len(assignments) != 1 or not isinstance(assignments[0].value, ast.List):
+        raise ValueError("expected one HARNESSES list literal")
+    literal = assignments[0].value
+    if any(isinstance(node, (ast.Call, ast.BinOp)) for node in ast.walk(literal)):
+        raise ValueError("expected plain literals inside HARNESSES")
+    entries = {}
+    parsed = ast.literal_eval(literal)
+    if check_runtime and parsed != HARNESSES:
+        raise ValueError("runtime HARNESSES differs from the head literal")
+    for entry in parsed:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+            raise ValueError("expected a named HARNESSES entry")
+        name = entry["name"]
+        if name in entries:
+            raise ValueError("duplicate harness name: " + name)
+        # Preserve type changes (True == 1 in Python), but not key ordering.
+        entries[name] = {key: repr(value) for key, value in entry.items()}
+    # AST columns count UTF-8 bytes. Keep comments and whitespace outside
+    # the expression significant, even on its opening and closing lines.
+    lines = source.splitlines(keepends=True)
+    prefix = b"".join(lines[:literal.lineno - 1]) + lines[literal.lineno - 1][:literal.col_offset]
+    suffix = lines[literal.end_lineno - 1][literal.end_col_offset:] + b"".join(lines[literal.end_lineno:])
+    return (prefix, suffix), entries
+
+
+def read_base_planner():
+    base = os.environ.get("HARNESS_PLAN_BASE", "")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", base):
+        raise ValueError("missing or invalid HARNESS_PLAN_BASE")
+    return subprocess.check_output(["git", "show", base + ":" + PLANNER_PATH], cwd=REPO)
+
+
+def changed_registry_entries(old_source, new_source):
+    old_code, old = registry_parts(old_source)
+    new_code, new = registry_parts(new_source, check_runtime=True)
+    if old_code != new_code:
+        raise ValueError("planner changed outside the HARNESSES literal")
+    # find_harness resolves the first matching name or directory.
+    if [n for n in old if n in new] != [n for n in new if n in old]:
+        raise ValueError("relative order of existing harnesses changed")
+    return [name for name in new if new[name] != old.get(name)]
+
+
 def is_global_change(path):
     return (
-        path.startswith(".github/")
-        or path in ("scripts/harness-plan.py", "scripts/harness-plan-data.json")
+        path.startswith(".github/actions/")
+        or path == ".github/workflows/harness.yml"
         or path == "tweak/Makefile"
     )
 
@@ -731,27 +814,33 @@ def plan(index, changed, all_harnesses):
     reasons = []
     always = [h["name"] for h in index if h["always"]]
     if all_harnesses:
-        reasons.append("all harnesses requested (workflow_dispatch, schedule, or the changed list is unknown)")
+        reasons.append("run all: all harnesses requested (workflow_dispatch, schedule, or the changed list is unknown)")
         selected = list(index)
     else:
         global_paths = [p for p in changed if is_global_change(p)]
         # A path no longer in the checkout (deleted, or a rename's old name; the workflow diffs with --no-renames)
         # is in no dependency set, as those are read from the files that exist, yet a harness may still use it.
         gone = [p for p in changed if not (REPO / p).exists()]
-        if global_paths or gone:
-            if global_paths:
-                reasons.append("global change: " + ", ".join(global_paths))
-            if gone:
-                reasons.append("deleted or renamed away, a harness may still use it: " + ", ".join(gone))
+        registry_names = []
+        if global_paths:
+            reasons.append("run all: global change: " + ", ".join(global_paths))
+        if gone:
+            reasons.append("run all: deleted or renamed away, a harness may still use it: " + ", ".join(gone))
+        if not reasons and PLANNER_PATH in changed:
+            try:
+                registry_names = changed_registry_entries(read_base_planner(), (REPO / PLANNER_PATH).read_bytes())
+            except (OSError, subprocess.CalledProcessError, SyntaxError, ValueError, TypeError,
+                    RecursionError, MemoryError) as error:
+                reasons.append("run all: cannot isolate registry change: %s" % error)
+        if reasons:
             selected = list(index)
         else:
-            selected = [h for h in index if h["always"]]
+            if PLANNER_PATH in changed:
+                reasons.append("registry change selects: " + (", ".join(registry_names) or "(none)"))
+            names = set(registry_names)
             for path in changed:
-                for name in selected_for(path, index):
-                    entry = next(h for h in index if h["name"] == name)
-                    if entry not in selected:
-                        selected.append(entry)
-            selected.sort(key=lambda h: HARNESSES.index(next(x for x in HARNESSES if x["name"] == h["name"])))
+                names.update(selected_for(path, index))
+            selected = [h for h in index if h["always"] or h["name"] in names]
     if always and not all_harnesses:
         for name in always:
             print("warning: no tweak dependency found for %r; always selected" % name,
@@ -796,7 +885,7 @@ def cmd_plan(args):
     selected, matrix, reasons = plan(index, changed, unknown)
 
     for reason in reasons:
-        print("run all: " + reason)
+        print(reason)
     print("changed files: %d" % len(changed))
     print("selected (%d of %d):" % (len(selected), len(index)))
     for harness in selected:

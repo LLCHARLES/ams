@@ -139,10 +139,10 @@ void SGFitNote(UITableView *table, UIView *wrapper, CGFloat top, CGFloat bottom)
     else table.tableFooterView = wrapper;
 }
 
-// The bars a table found in its window, held weakly and hidden or not, so a layout measures them without
+// The bars found in a window, held weakly and hidden or not, so a layout measures them without
 // walking the window's view tree (Spotify's is large, and a scroll lays the table out on every frame).
 @interface SGBarsMemory : NSObject
-@property (nonatomic, weak) UIWindow *window;
+@property (nonatomic, weak) UITableView *lastTable;
 @property (nonatomic, strong) NSHashTable<UIView *> *bars;
 @property (nonatomic) NSUInteger generation;
 @end
@@ -164,15 +164,23 @@ static NSUInteger barGeneration;
 // that a bar came or went. The classes are the ones the walk below recognizes, and each is given its own
 // -didMoveToWindow that counts and then runs the one it had; no other class and no UIView method is touched.
 static void countBarMoves(void) {
+    static unsigned int scannedCount;
+    if ((unsigned int)objc_getClassList(NULL, 0) == scannedCount) return;
     static NSHashTable<Class> *hooked;
     if (!hooked) hooked = [NSHashTable hashTableWithOptions:NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality];
     SEL moved = @selector(didMoveToWindow);
     unsigned int count = 0;
     Class *classes = objc_copyClassList(&count);
+    scannedCount = count;
     for (unsigned int i = 0; i < count; i++) {
         Class cls = classes[i];
-        if (!isBarClassName(class_getName(cls)) || [hooked containsObject:cls] || ![cls isSubclassOfClass:UIView.class]) continue;
+        if (!isBarClassName(class_getName(cls))) continue;
+        Class ancestor = cls;
+        while (ancestor && ancestor != UIView.class) ancestor = class_getSuperclass(ancestor);
+        if (!ancestor || [hooked containsObject:cls]) continue;
         [hooked addObject:cls];
+        // Instances may already have moved into a cached window before this hook.
+        barGeneration++;
         IMP original = class_getMethodImplementation(cls, moved);
         class_replaceMethod(cls, moved, imp_implementationWithBlock(^(UIView *view) {
             barGeneration++;
@@ -182,22 +190,21 @@ static void countBarMoves(void) {
     free(classes);
 }
 
-// The walk runs when the table first lays out in a window or moves to another (every page is a new table), and
-// after any bar came or went in a window since the last one, so a bar attached beside remembered ones, or
-// attached to a window where none was found, is measured on the next layout; a layout with no change walks nothing.
-static NSArray<UIView *> *barsIn(UITableView *table, UIWindow *window) {
-    SGBarsMemory *memory = objc_getAssociatedObject(table, kBarsMemoryKey);
-    if (memory.window == window && memory.generation == barGeneration) return memory.bars.allObjects;
-    countBarMoves();
+// All pages in this window share its walk until a bar comes or goes.
+static NSArray<UIView *> *barsIn(UIWindow *window, UITableView *table) {
+    SGBarsMemory *memory = objc_getAssociatedObject(window, kBarsMemoryKey);
+    if (memory.lastTable != table || memory.generation != barGeneration) countBarMoves();
+    memory.lastTable = table;
+    if (memory && memory.generation == barGeneration) return memory.bars.allObjects;
     NSMutableArray<UIView *> *found = [NSMutableArray array];
     SGForEachView(window, ^(UIView *v) {
         if (isBarClassName(class_getName(v.class))) [found addObject:v];
     });
     if (!memory) {
         memory = [SGBarsMemory new];
-        objc_setAssociatedObject(table, kBarsMemoryKey, memory, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        memory.lastTable = table;
+        objc_setAssociatedObject(window, kBarsMemoryKey, memory, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    memory.window = window;
     memory.bars = [NSHashTable weakObjectsHashTable];
     for (UIView *bar in found) [memory.bars addObject:bar];
     memory.generation = barGeneration;
@@ -208,7 +215,7 @@ static CGFloat barsHeight(UITableView *table) {
     UIWindow *window = table.window;
     if (!window) return 0;
     CGFloat top = window.bounds.size.height;
-    for (UIView *v in barsIn(table, window)) {
+    for (UIView *v in barsIn(window, table)) {
         if (v.hidden || v.alpha == 0 || v.bounds.size.height == 0) continue;
         top = MIN(top, SGFrameIn(v, window).origin.y);
     }
@@ -426,7 +433,7 @@ void SGPresentPopover(UIViewController *panel, UIView *from) {
 }
 
 // The fork's repo. Its links stay hidden while this is nil.
-NSString *const SGRepoURL = @"https://github.com/My-Name-Is-Jeff/vitrine";
+NSString *const SGRepoURL = @"https://github.com/oneulddu/Retrine";
 
 void SGOpenURL(NSString *url) {
     NSURL *target = url ? [NSURL URLWithString:url] : nil;

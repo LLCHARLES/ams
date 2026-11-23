@@ -164,18 +164,25 @@ id SGPlayer(void) {
 
 NSNotificationName const SGPlayerPlaybackLocationDidChangeNotification = @"SGPlayerPlaybackLocationDidChangeNotification";
 static BOOL sg_localPlayback;
+static BOOL sg_reportedRemotePlayback;
 static __weak id<SGPlayerConnectLocation> sg_connectManager;
 
 BOOL SGPlayerPlaybackIsLocal(void) {
     return sg_localPlayback;
 }
 
+BOOL SGPlayerPlaybackIsRemote(void) {
+    return sg_connectManager != nil && !sg_localPlayback;
+}
+
 static void updateLocation(id<SGPlayerConnectLocation> manager) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (manager != sg_connectManager) return;
-        BOOL local = [manager isPlayingLocally];
-        if (local == sg_localPlayback) return;
-        sg_localPlayback = local;
+        BOOL wasLocal = sg_localPlayback;
+        sg_localPlayback = [manager isPlayingLocally];
+        BOOL remote = SGPlayerPlaybackIsRemote();
+        if (sg_localPlayback == wasLocal && remote == sg_reportedRemotePlayback) return;
+        sg_reportedRemotePlayback = remote;
         [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerPlaybackLocationDidChangeNotification object:nil];
     });
 }

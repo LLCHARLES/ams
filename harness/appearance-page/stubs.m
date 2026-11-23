@@ -1,9 +1,13 @@
 // What the Logos files hold for the page: the accent colors as Accent.x and SGRAccent.x read them, and the
-// font choice as Fonts.x reads it.
+// font choice as Fonts.x reads it. And the two tokens the glass rows' SGRGlass.m links against, as SGRTokens.m has them.
 #import "Core/SGCore.h"
 #import "Native/Appearance/Appearance.h"
 #import "Redesigned/Kit/SGRAccent.h"
+#import "Redesigned/Kit/SGRTokens.h"
 #import "Shared/Fonts/Fonts.h"
+
+BOOL SGRReduceTransparency(void) { return UIAccessibilityIsReduceTransparencyEnabled(); }
+UIColor *SGRSolidGlassFill(void) { return [UIColor colorWithWhite:1 alpha:0.16]; }
 
 static NSInteger valid(NSInteger rgb) {
     return rgb >= 0 && rgb <= 0xFFFFFF ? rgb : -1;

@@ -1,6 +1,47 @@
 @interface HarnessPlatterView : UIView @end
 @implementation HarnessPlatterView @end
 
+@interface HarnessBarLayoutView : UIView
+@property (nonatomic) NSUInteger passes;
+@end
+@implementation HarnessBarLayoutView
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    self.passes++;
+}
+@end
+
+static void checkPlatterInvalidation(void (^done)(void)) {
+    UIViewController *container = [UIViewController new];
+    HarnessBarLayoutView *view = [[HarnessBarLayoutView alloc] initWithFrame:CGRectMake(0, 0, 500, 76)];
+    container.view = view;
+    sg_container = container;
+    sg_capsule = YES;
+    UIView *platter = [[HarnessPlatterView alloc] initWithFrame:CGRectMake(0, 0, 280, 76)];
+    [view addSubview:platter];
+    [view layoutIfNeeded];
+    watchTabGlass(platter);
+    NSUInteger settled = view.passes;
+    // UIKit assigns platter geometry during layout even when it has not moved.
+    platter.frame = platter.frame;
+    platter.bounds = platter.bounds;
+    platter.center = platter.center;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        HARNESS_CHECK(view.passes == settled);
+        platter.center = CGPointMake(150, 38);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            HARNESS_CHECK(view.passes > settled);
+            watchTabGlass(nil);
+            sg_container = nil;
+            sg_capsule = NO;
+            (void)container; // Keep the weak production owner alive through both deliveries.
+            sg_checks++;
+            NSLog(@"[harness] unchanged platter geometry leaves layout idle: PASS");
+            done();
+        });
+    });
+}
+
 static BOOL whiteTint(UIColor *color) {
     CGFloat r, g, b, a;
     return [color getRed:&r green:&g blue:&b alpha:&a] && r == 1 && g == 1 && b == 1 && a == 1;
@@ -218,4 +259,98 @@ static void checkStaleCapsuleRow(void) {
     dispatch_source_cancel(watchdog);
     sg_checks++;
     NSLog(@"[harness] stale capsule row: PASS");
+}
+
+// With a split tab in a regular width the tab bar has two platters on the capsule's row (TabBar.x): the main bar's and,
+// nearer the capsule, the split tab's 62 pt circle. The capsule grows toward the tab bar until kCapsuleTabGap from the
+// nearer one, however much wider the other is. The stale row's fixture, whose capsule wants 516 pt, beside a tab bar
+// whose circle ends 34 pt short of Spotify's capsule: the main platter would let it grow to 516, the circle to 18 pt more.
+// Third, the split bar that has lost its last tab: hidden by TabBar.x, its circle left where it stood, nearer than the
+// main platter. Unseen, it limits nothing, and the capsule grows to its full 516 pt.
+static void checkCapsuleBesideSplitTab(void) {
+    // The gap the design keeps from the tab bar's glass, written here rather than read from NowPlayingBar.x.
+    const CGFloat expectedGap = 16, expectedFullWidth = 516;
+    UIViewController *root = [(id)UIApplication.sharedApplication.delegate window].rootViewController;
+    for (NSUInteger pass = 0; pass < 3; pass++) {
+        BOOL rtl = pass == 1, splitHidden = pass == 2;
+        CGFloat width = 1376, tabsWidth = 860, mainWidth = 600, circleSide = 62;
+        UIView *host = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 1032)];
+        host.backgroundColor = [UIColor colorWithRed:0.06 green:0.09 blue:0.14 alpha:1];
+        [root.view addSubview:host];
+        UIView *tabs = [[UIView alloc] initWithFrame:CGRectMake(rtl ? width - 24 - tabsWidth : 24, 900, tabsWidth, 76)];
+        tabs.accessibilityIdentifier = @"elements-tabs-view-identifier";
+        UIView *main = [[HarnessPlatterView alloc] initWithFrame:CGRectMake(rtl ? tabsWidth - mainWidth : 0, 0, mainWidth, 76)];
+        CGRect circleFrame = CGRectMake(rtl ? 0 : tabsWidth - circleSide, 0, circleSide, 76);
+        UIView *splitBar = [[UIView alloc] initWithFrame:circleFrame];
+        splitBar.hidden = splitHidden;
+        [tabs addSubview:splitBar];
+        UIView *circle = [[HarnessPlatterView alloc] initWithFrame:splitBar.bounds];
+        for (UIView *platter in @[main, circle]) {
+            platter.backgroundColor = [UIColor colorWithWhite:1 alpha:0.25];
+            platter.layer.cornerRadius = 38;
+        }
+        [tabs addSubview:main];
+        [splitBar addSubview:circle];
+        [host addSubview:tabs];
+        UIViewController *container = [UIViewController new], *bar = [UIViewController new];
+        [root addChildViewController:container];
+        [host addSubview:container.view];
+        container.view.frame = CGRectMake(rtl ? 8 : 910, 900, 458, 76);
+        [container addChildViewController:bar];
+        [container.view addSubview:bar.view];
+        bar.view.backgroundColor = UIColor.darkGrayColor;
+        bar.view.layer.cornerRadius = 38;
+        bar.view.translatesAutoresizingMaskIntoConstraints = NO;
+        [NSLayoutConstraint activateConstraints:@[
+            [bar.view.leadingAnchor constraintEqualToAnchor:container.view.leadingAnchor constant:8],
+            [bar.view.trailingAnchor constraintEqualToAnchor:container.view.trailingAnchor constant:-8],
+            [bar.view.topAnchor constraintEqualToAnchor:container.view.topAnchor],
+            [bar.view.bottomAnchor constraintEqualToAnchor:container.view.bottomAnchor]
+        ]];
+        UIButton *play = [UIButton buttonWithType:UIButtonTypeSystem];
+        play.accessibilityIdentifier = kPlayId;
+        [play.widthAnchor constraintEqualToConstant:44].active = YES;
+        UIStackView *buttons = [[UIStackView alloc] initWithArrangedSubviews:@[play]];
+        UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:@[[UIView new], buttons]];
+        row.spacing = 4;
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+        [bar.view addSubview:row];
+        [NSLayoutConstraint activateConstraints:@[
+            [row.leadingAnchor constraintEqualToAnchor:bar.view.leadingAnchor constant:68],
+            [row.trailingAnchor constraintEqualToAnchor:bar.view.trailingAnchor constant:-8],
+            [row.topAnchor constraintEqualToAnchor:bar.view.topAnchor constant:16],
+            [row.heightAnchor constraintEqualToConstant:44]
+        ]];
+        SGForEachView(host, ^(UIView *view) {
+            view.semanticContentAttribute = rtl ? UISemanticContentAttributeForceRightToLeft : UISemanticContentAttributeForceLeftToRight;
+        });
+        sg_capsule = YES;
+        placeCapsuleButtons(bar.view, YES);
+        [container.view layoutIfNeeded];
+        placeInline(container);
+        [container.view layoutIfNeeded];
+        CGRect capsule = [bar.view convertRect:bar.view.bounds toView:host];
+        CGRect nearest = [circle convertRect:circle.bounds toView:host];
+        shoot(host, CGRectMake(0, 880, width, 116), splitHidden ? @"capsule-split-hidden" : rtl ? @"capsule-split-rtl" : @"capsule-split");
+        if (splitHidden) {
+            if (fabs(capsule.size.width - expectedFullWidth) > 0.5) {
+                HARNESS_FAIL(@"capsule beside a hidden split bar: %.1f pt wide, wanted %.0f; stopped at the unseen circle (%@)?",
+                             capsule.size.width, expectedFullWidth, NSStringFromCGRect(nearest));
+            }
+        } else {
+            CGFloat edge = rtl ? CGRectGetMaxX(capsule) : CGRectGetMinX(capsule);
+            CGFloat wanted = rtl ? CGRectGetMinX(nearest) - expectedGap : CGRectGetMaxX(nearest) + expectedGap;
+            if (fabs(edge - wanted) > 0.5) {
+                HARNESS_FAIL(@"capsule beside a split tab %@: its side toward the tab bar at x %.1f, wanted %.0f pt from the split tab's circle (%@)",
+                             rtl ? @"RTL" : @"LTR", edge, expectedGap, NSStringFromCGRect(nearest));
+            }
+        }
+        [container willMoveToParentViewController:nil];
+        [container.view removeFromSuperview];
+        [container removeFromParentViewController];
+        [host removeFromSuperview];
+    }
+    sg_capsule = NO;
+    sg_checks++;
+    NSLog(@"[harness] capsule beside a split tab: PASS");
 }

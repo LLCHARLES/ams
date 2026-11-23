@@ -60,8 +60,8 @@ sg-wireguard:
 	@bash ../WireGuard/build-ios.sh
 
 after-stage::
-	@mkdir -p "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Vitrine.bundle"
-	@cp ../WireGuard/THIRD_PARTY_LICENSES.txt "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Vitrine.bundle/WireGuard-THIRD_PARTY_LICENSES.txt"
+	@mkdir -p "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Retrine.bundle"
+	@cp ../WireGuard/THIRD_PARTY_LICENSES.txt "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Retrine.bundle/WireGuard-THIRD_PARTY_LICENSES.txt"
 endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk

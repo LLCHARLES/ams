@@ -374,7 +374,8 @@ static CGFloat layoutPill(UIView *header, UIStackView *stack, UIView *face) {
     place(buttons, pill);
     CGRect filter = CGRectMake(kPillPad, 0, kPillButton, kPillHeight);
     if (!CGRectEqualToRect(buttons.filter.frame, filter)) buttons.filter.frame = filter;
-    SGRGlassCapsuleInside(glass, &kPillGlassKey, pill.size, NO);
+    // The glass sits in its holder beside the buttons, so it is told the Filter button it backs (touch response).
+    SGRGlassBacks(SGRGlassCapsuleInside(glass, &kPillGlassKey, pill.size, NO), buttons.filter);
     layoutFriday(glass, pill.size);
     return CGRectGetMinX(pill);
 }
@@ -405,13 +406,11 @@ void SGRHomeSetPageTint(UIColor *color) {
 }
 
 // The gradient at the back of the page's view (HomePageView, which holds the feed), the feed's own black cleared so
-// it shows through behind the title and the first shelf; the shelves clear theirs (HomeSections.x).
-static void layoutTint(UIView *view) {
-    __block UIView *page = sg_tintView.superview;
-    if (!page) SGForEachView(view, ^(UIView *v) {
-        if (!page && [v.accessibilityIdentifier hasPrefix:@"HomePageView"]) page = v;
-    });
-    if (!page) return;
+// it shows through behind the title and the first shelf; the shelves clear theirs (HomeSections.x). Laid out in the
+// page view's own pass (the feed's controller's, whose view it is), so with its size of the moment: the header's pass
+// comes before it on a turn or a resize, and at launch can come before the page view is there at all, with no pass
+// after. Spotify can replace the page view as Home loads (another HomePageView-<uuid>); each one gets its own tint.
+static void layoutTint(UIView *page) {
     SGRHomeTintView *tint = objc_getAssociatedObject(page, &kTintKey);
     if (!tint) {
         tint = [SGRHomeTintView new];
@@ -614,14 +613,15 @@ static void layoutHeader(UIViewController *page) {
         stack.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
         [stack setNeedsLayout];
     }
-    [stack layoutIfNeeded];
+    // The page's pass runs before its header's: on a turn or a resize the header still has its old width here, its
+    // stack the new one about the old center, and the header's own pass that puts the stack right comes after this
+    // one with no pass of the page after it, which left the pill half the change in width away from the avatar. Laid
+    // out from what holds it, the header, its stack and the avatar in it take the page's new size before they are read.
+    [header.superview layoutIfNeeded];
     // With the Home look off, the avatar stands alone in the stack and the title ends before it; it rises and fades
     // with the title either way.
     CGFloat pillLeading = face ? CGRectGetMinX(facePlace(stack, face)) : header.bounds.size.width - SGRSideMargin + SGRGrid;
-    if (SGRHomeLook()) {
-        pillLeading = layoutPill(header, stack, face);
-        layoutTint(view);
-    }
+    if (SGRHomeLook()) pillLeading = layoutPill(header, stack, face);
 
     UILabel *title = SGRLargeTitleIn(header, &kTitleKey);
     NSString *text = tabName(header.window);
@@ -648,12 +648,14 @@ static void layoutHeader(UIViewController *page) {
 
 // The feed can come after the header's last pass (its page loads while the header is laid out, a few seconds on
 // a slow account), and the page's view has no pass of its own after; a feed that replaces another (a filter) comes
-// while the old one is still in the window. The feed's own controller hands it the follower on each of its passes.
+// while the old one is still in the window. The feed's own controller hands it the follower on each of its passes,
+// and lays the page's tint out in its view, the page view.
 %hook _TtC16Home_EvoPageImpl33EvoLoadableResourceViewController
 - (void)viewDidLayoutSubviews {
     %orig;
     UIView *view = ((UIViewController *)self).viewIfLoaded;
     if (!sg_pageView || !view.window || ![view isDescendantOfView:sg_pageView]) return;
+    if (SGRHomeLook() && [view.accessibilityIdentifier hasPrefix:@"HomePageView"]) layoutTint(view);
     for (UIView *sub in view.subviews) {
         if ([sub isKindOfClass:UICollectionView.class]) {
             if (sub != sg_feed) followFeed((UIScrollView *)sub);

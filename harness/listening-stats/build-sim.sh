@@ -3,7 +3,7 @@
 # through Logos), the Settings/ framework, stubs.m for the player.
 set -e
 SRC=$(cd "$(dirname "$0")/../../tweak/Sources" && pwd)
-OUT=$(dirname "$0")/build/sim
+OUT=${OUT:-$(dirname "$0")/build/sim}
 rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/ListeningStatsHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/ListeningStats/ListeningStats.x" > "$OUT/gen/ListeningStats.m"
 
@@ -17,14 +17,14 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC"/Settings/SGPage.m "$SRC"/Settings/SGPageStyle.m "$SRC"/Settings/SGModPage.m "$SRC"/Settings/SGSettingsSearch.m "$SRC"/Settings/SGSettingsIndex.m "$SRC"/Settings/SGGlowSwitch.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGFlagForce.m "$SRC"/Core/SGUIMode.m "$SRC"/Core/SGGlass.m "$SRC"/Core/SGLocalize.m \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework Foundation -framework UniformTypeIdentifiers \
-    -o "$OUT/ListeningStatsHarness.app/ListeningStatsHarness"
+    "$SRC/Core/SGDataRoot.m" -o "$OUT/ListeningStatsHarness.app/ListeningStatsHarness"
 
 cat > "$OUT/ListeningStatsHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>ListeningStatsHarness</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.listeningstatsharness</string>
+<key>CFBundleIdentifier</key><string>com.retrine.listeningstatsharness</string>
 <key>CFBundleName</key><string>ListeningStatsHarness</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>

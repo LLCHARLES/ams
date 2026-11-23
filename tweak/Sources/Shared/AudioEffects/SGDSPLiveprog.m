@@ -155,6 +155,16 @@ SGDSPLiveprog *SGDSPLiveprogCreate(const char *script, double rate, char *error,
         return NULL;
     }
     NSEEL_VM_preallocram(liveprog->vm, -1);
+    // A block preallocation could not get would be calloc'd by EEL2 itself on first touch, on the render thread.
+    for (unsigned int at = 0; at < kMemory;) {
+        int valid = 0;
+        if (!NSEEL_VM_getramptr_noalloc(liveprog->vm, at, &valid) || valid <= 0) {
+            SGDSPLiveprogFree(liveprog);
+            copyError(error, errorSize, "Not enough memory for the script");
+            return NULL;
+        }
+        at += (unsigned int)valid;
+    }
     if (liveprog->code[SectionInit]) NSEEL_code_execute(liveprog->code[SectionInit]);
     if (liveprog->code[SectionSlider]) NSEEL_code_execute(liveprog->code[SectionSlider]);
     return liveprog;

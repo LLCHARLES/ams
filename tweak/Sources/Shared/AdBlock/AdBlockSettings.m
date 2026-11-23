@@ -2,6 +2,8 @@
 #import "Settings/SGModPage.h"
 #import "AdBlock.h"
 #import "Shared/Privacy/Privacy.h"
+#import "Shared/SponsorBlock/SponsorBlock.h"
+#import "Shared/Flags/Flags.h"
 
 NSString *SGFakePremiumWarningText(void) {
     return SGL(@"settings.privacy.spoof_premium.warning", @"This is the part of EeveeSpotify Spotify's takedown went after, and it has not been tested here. It can end in a forced logout or worse for the account. A Premium account gains nothing from it.");
@@ -11,15 +13,21 @@ NSString *SGFakePremiumWarningText(void) {
 // the thing, off is Spotify's own value. Hide ads and Hide upsells already force the first two
 // sections off, which locks those rows.
 static UIViewController *adFlagsPage(void) {
+    NSMutableArray<SGModRow *> *upsells = [NSMutableArray array];
+    NSString *shuffleKey = @"ios-feature-shuffletoggleupsell.is_enabled_pt2";
+    for (NSUInteger i = 0; i < SGFlagCount; i++) {
+        if (strcmp(SGFlagTable[i].key, shuffleKey.UTF8String) == 0) {
+            [upsells addObject:SGKillRow(SGL(@"settings.privacy.hide_shuffle_upsell.title", @"Hide the shuffle toggle upsell"), shuffleKey)];
+            break;
+        }
+    }
+    [upsells addObject:SGKillRow(SGL(@"settings.privacy.hide_video_shuffle_upsell.title", @"Hide the shuffle upsell in the video player"), @"ios-feature-nowplaying-modes.video_first_shuffle_upsell_enabled")];
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.privacy.ad_flags.title", @"Ad and upsell flags") intro:SGRestartNote sections:@[
         SGNotedSection(SGL(@"settings.privacy.ads.header", @"Ads"), @[
             SGKillRow(SGL(@"settings.privacy.block_open_ad.title", @"Block the ad when the app opens"), @"ios-feature-adonappopen.enabled"),
             SGKillRow(SGL(@"settings.privacy.block_cta_card.title", @"Block its CTA card"), @"ios-feature-adonappopen.cta_card_enabled"),
         ], SGL(@"settings.privacy.ads.footer", @"Locked while Hide ads is on.")),
-        SGNotedSection(SGL(@"settings.privacy.upsells.header", @"Upsells"), @[
-            SGKillRow(SGL(@"settings.privacy.hide_shuffle_upsell.title", @"Hide the shuffle toggle upsell"), @"ios-feature-shuffletoggleupsell.is_enabled_pt2"),
-            SGKillRow(SGL(@"settings.privacy.hide_video_shuffle_upsell.title", @"Hide the shuffle upsell in the video player"), @"ios-feature-nowplaying-modes.video_first_shuffle_upsell_enabled"),
-        ], SGL(@"settings.privacy.upsells.footer", @"Locked while Hide upsells is on.")),
+        SGNotedSection(SGL(@"settings.privacy.upsells.header", @"Upsells"), upsells, SGL(@"settings.privacy.upsells.footer", @"Locked while Hide upsells is on.")),
         SGSection(SGL(@"settings.privacy.interventions.header", @"Reduce interventions"), @[
             SGFlagRow(SGL(@"settings.privacy.reduce_interventions.title", @"Reduce interventions"), @"ios-messaging-reduceinterventions-impl.enabled"),
         ]),
@@ -82,6 +90,7 @@ UIViewController *SGAdsSettingsPage(void) {
         SGNotedSection(SGL(@"settings.privacy.premium.header", @"Premium"), @[
             SGWithSymbol(fakePremium, @"crown"),
         ], SGL(@"settings.privacy.premium.footer", @"Free accounts only.")),
+        SGSponsorBlockSettingsSection(),
         SGPrivacySection(),
         SGNotedSection(SGL(@"settings.privacy.blocked_stats.header", @"Ads blocked so far"), counts,
                        SGL(@"settings.privacy.blocked_stats.footer", @"\"3 of 214\" is 3 stopped of 214 checked. 0 of 0 means Spotify never asked, so that part does nothing on this version.")),

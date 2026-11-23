@@ -108,7 +108,8 @@ SGLinkRoute SGSpotifyURIRoute(NSURL *uri, NSString **via) {
 
 // Authentication and accessory callbacks use Spotify's other schemes; their existing handlers stay.
 static BOOL isInboundLink(NSURL *url) {
-    return [@[@"spotify", @"vitrine", @"https", @"http"] containsObject:url.scheme.lowercaseString];
+    // Continue accepting handoffs from before the rename.
+    return [@[@"spotify", @"retrine", @"vitrine", @"https", @"http"] containsObject:url.scheme.lowercaseString];
 }
 
 static BOOL isRegisteredCallback(NSURL *url) {

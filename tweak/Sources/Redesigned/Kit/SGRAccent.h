@@ -73,11 +73,11 @@ NSArray<NSNumber *> *SGRAccentRecentAdding(NSArray<NSNumber *> *recent, NSIntege
 // the sheet chooses nothing.
 void SGRPickAccent(NSString *title, NSInteger current, NSArray<NSNumber *> *recent, void (^chosen)(NSInteger rgb));
 
-// Plain checkmark (SGRPlainCheck.x): a saved song's circled tick as a plain checkmark in the accent. Off until switched
-// on, read at launch.
+// Plain checkmark's switch, from before Saved mark (SGRKeySavedMark, SGRRefinements.h) took its place: read only, to
+// give Saved mark its value while that has none, and never written or removed, so a downgrade finds it as it was.
 #define SGRKeyPlainCheck @"spotifyglass.redesign.plainCheck"
-BOOL SGRPlainCheckOn(void);
-// The plain checkmark's view, a template image: Follow the cover (Player/PlayerCoverAccent.x) sets its tint.
+// The accent mark's view (the plain checkmark, the dot, the filled star), a template image: Follow the cover
+// (Player/PlayerCoverAccent.x) sets its tint.
 #define SGRPlainCheckIdentifier @"spotifyglass.plainCheck"
 
 @class SGModRow;

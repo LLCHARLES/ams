@@ -9,6 +9,7 @@
 // does not.
 #import "Core/SGLocalize.h"
 #import "Core/SGLog.h"
+#import "Core/SGDataRoot.h"
 #import "AudioEffects.h"
 #import "AudioEffectsPresets.h"
 
@@ -77,8 +78,8 @@ NSArray<SGAutoEqHeadphone *> *SGAutoEqFilterByForm(NSArray<SGAutoEqHeadphone *> 
 #pragma mark - downloads
 
 static NSURL *cachedIndex(void) {
-    NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-    NSURL *folder = [caches URLByAppendingPathComponent:@"Vitrine/AutoEq" isDirectory:YES];
+    NSURL *folder = [SGDataRoot(NSCachesDirectory) URLByAppendingPathComponent:@"AutoEq" isDirectory:YES];
+    if (!folder) return nil;
     [NSFileManager.defaultManager createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil];
     return [folder URLByAppendingPathComponent:@"INDEX.md"];
 }

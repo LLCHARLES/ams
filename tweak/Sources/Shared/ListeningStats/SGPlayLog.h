@@ -15,7 +15,7 @@
 @property (nonatomic) int64_t end;   // Unix seconds, when the play stopped
 @property (nonatomic) int64_t ms;    // how long it was listened to
 @property (nonatomic, copy) NSString *uri, *title, *artist, *album;   // uri and album may be empty, never nil
-// Parser-only provenance. Vitrine backups retain distinct nearby plays and deduplicate exact rows;
+// Parser-only provenance. Retrine backups retain distinct nearby plays and deduplicate exact rows;
 // Spotify exports use the tolerant title/artist/time match described on -merge:completion:.
 @property (nonatomic) BOOL exactImport;
 @end
@@ -33,12 +33,12 @@ BOOL SGPlayCounts(double listenedSeconds, double durationSeconds);
 - (void)setPlaying:(BOOL)playing elapsed:(NSTimeInterval)elapsedSeconds at:(NSTimeInterval)unixSeconds;
 @end
 
-// Vitrine's versioned history object, or either Spotify shape: StreamingHistory_music_*.json (endTime,
+// Retrine's versioned history object, or either Spotify shape: StreamingHistory_music_*.json (endTime,
 // artistName, trackName, msPlayed) or the extended Streaming_History_Audio_*.json (ts, ms_played,
 // master_metadata_*, spotify_track_uri). For Spotify only, podcasts and plays under SGPlayMinimumMs
 // are left out. Nil when unsupported, malformed or over the file/row limits below.
 NSArray<SGPlay *> *SGPlaysFromExport(NSData *json);
-// Vitrine's version 1 history envelope (not a Spotify export). All six SGPlay fields are retained,
+// Retrine's version 1 history envelope (not a Spotify export). All six SGPlay fields are retained,
 // including counted short tracks. Unknown versions or malformed local rows reject the whole file.
 NSData *SGHistoryJSON(NSArray<SGPlay *> *plays, NSError **error);
 // The .json files inside a zip, such as the export as Spotify mails it. Empty when it is not a zip.
@@ -73,7 +73,7 @@ SGHistoryImport *SGReadHistoryURLs(NSArray<NSURL *> *urls);
 // UIApplicationWillTerminate and the mod's own restart (SGWillRestartNotification) only: waits at most one second for the recorder, never bulk work/main callbacks.
 - (BOOL)drainForTermination;
 // Adds the plays the log does not have yet, and answers how many that was. Spotify rows match the same
-// track and artist within 90 s, covering basic-export minute precision and clock drift. Vitrine rows
+// track and artist within 90 s, covering basic-export minute precision and clock drift. Retrine rows
 // match all six persisted fields exactly, so a backup restores legitimate nearby repeats losslessly.
 - (void)merge:(NSArray<SGPlay *> *)plays completion:(void (^)(NSUInteger added, NSError *error))completion;
 // Clears the snapshot immediately; disk deletion follows earlier recorder writes on their queue.

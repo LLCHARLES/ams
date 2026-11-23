@@ -236,7 +236,7 @@ void SGLyricsMeaningsFor(NSString *trackID, NSArray<SGKaraokeLine *> *lines,
         static NSCache *prepared;
         static dispatch_once_t once;
         dispatch_once(&once, ^{
-            worker = dispatch_queue_create("vitrine.lyrics.meanings.match", DISPATCH_QUEUE_SERIAL);
+            worker = dispatch_queue_create("retrine.lyrics.meanings.match", DISPATCH_QUEUE_SERIAL);
             prepared = [NSCache new];
             prepared.countLimit = kKeptTracks;
         });

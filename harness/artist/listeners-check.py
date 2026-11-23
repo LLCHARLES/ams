@@ -14,11 +14,12 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
 
 
-def check_case(device, enabled, hidden):
+def check_case(device, enabled, hidden, shown):
     result = subprocess.run([
         "xcrun", "simctl", "launch", "--console", "--terminate-running-process",
         device, "com.vojta.artistharness", "verify-listeners",
-        "-spotifyglass.redesign.artist.listenersInAbout", enabled,
+        *(["expect-listeners"] if shown else []),
+        *(["-spotifyglass.redesign.artist.listenersInAbout", enabled] if enabled else []),
         "-spotifyglass.redesign.artist.hide.about", hidden,
         "-spotifyglass.redesign.artist.logo", "NO",
         "-spotifyglass.redesign.artist.motion", "NO"],
@@ -46,8 +47,8 @@ def main():
         run("xcrun", "simctl", "bootstatus", device, "-b")
         app = workspace / "normal/ArtistHarness.app"
         run("xcrun", "simctl", "install", device, str(app))
-        for enabled, hidden in (("NO", "NO"), ("YES", "NO"), ("YES", "YES")):
-            check_case(device, enabled, hidden)
+        for case in (("YES", "NO", False), (None, "NO", True), ("YES", "YES", True)):
+            check_case(device, *case)
 
     finally:
         try:

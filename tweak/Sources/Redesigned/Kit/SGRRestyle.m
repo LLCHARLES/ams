@@ -6,7 +6,7 @@
 #import "SGRRefinements.h"
 #import "SGRTokens.h"
 
-static char kPlateKey, kImageObserverKey, kLayoutObserverKey, kSuppressedKey;
+static char kPlateKey, kImageObserverKey, kLayoutObserverKey, kHeldAlphaKey, kTextObserverKey;
 
 #pragma mark - instance subclasses
 
@@ -96,6 +96,115 @@ static void logWatch(UIView *view, SEL selector, BOOL kept, BOOL onClass) {
     if (!SGLogFirst(&logged, mark)) return;
     if (!kept) SGLog(@"redesign kit: %@ cannot be watched for %s", name, sel_getName(selector));
     else if (onClass) SGLog(@"redesign kit: %@ watched for %s through its class", name, sel_getName(selector));
+}
+
+// `alpha` held on an instance of one of Spotify's own classes through one setAlpha: override on its class, shared by
+// SGRSuppress (0) and SGRKeepOpaque (1); every instance not marked keeps what it is given. The class `class` answers,
+// so an instance KVO observes (the player's repeat button) is held too: KVO's class passes setAlpha: on to it. Only a
+// class inside the app: a plain UILabel KVO observes answers UILabel, which must never be touched. An instance marked
+// on an earlier call is held already: callers ask on every layout pass.
+static BOOL holdAlphaOnClass(UIView *view, CGFloat alpha) {
+    NSNumber *held = objc_getAssociatedObject(view, &kHeldAlphaKey);
+    if (held && held.doubleValue == alpha) return YES;
+    BOOL spotifys = [[NSBundle bundleForClass:view.class].bundlePath hasPrefix:NSBundle.mainBundle.bundlePath];
+    BOOL onClass = spotifys && overrideOnClass(view.class, @selector(setAlpha:), ^id(IMP replaced) {
+        return ^(UIView *self, CGFloat given) {
+            NSNumber *hold = objc_getAssociatedObject(self, &kHeldAlphaKey);
+            ((void (*)(id, SEL, CGFloat))replaced)(self, @selector(setAlpha:), hold ? hold.doubleValue : given);
+        };
+    });
+    if (onClass) objc_setAssociatedObject(view, &kHeldAlphaKey, @(alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    logWatch(view, @selector(setAlpha:), onClass, onClass);
+    return onClass;
+}
+
+#pragma mark - visibility through the ancestor chain
+
+static char kVisibilityObserverKey, kVisibilitySubscribersKey;
+
+@interface SGRVisibilityObserver : NSObject
+@property (nonatomic, weak) UIView *view;
+@property (nonatomic, copy) dispatch_block_t changed;
+@property (nonatomic, strong) NSHashTable<UIView *> *ancestors;
+- (void)detach;
+- (void)attach;
+@end
+
+@implementation SGRVisibilityObserver
+- (void)detach {
+    for (UIView *ancestor in self.ancestors) {
+        NSHashTable *subscribers = objc_getAssociatedObject(ancestor, &kVisibilitySubscribersKey);
+        [subscribers removeObject:self];
+        if (!subscribers.count) objc_setAssociatedObject(ancestor, &kVisibilitySubscribersKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    self.ancestors = nil;
+}
+- (void)dealloc { [self detach]; }
+- (void)attach {
+    [self detach];
+    self.ancestors = [NSHashTable weakObjectsHashTable];
+    for (UIView *ancestor = self.view; ancestor; ancestor = ancestor.superview) {
+        NSHashTable *subscribers = objc_getAssociatedObject(ancestor, &kVisibilitySubscribersKey);
+        if (!subscribers) {
+            subscribers = [NSHashTable weakObjectsHashTable];
+            objc_setAssociatedObject(ancestor, &kVisibilitySubscribersKey, subscribers, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        [subscribers addObject:self];
+        [self.ancestors addObject:ancestor];
+    }
+}
+@end
+
+static void reportVisibility(UIView *view, BOOL hierarchyChanged) {
+    NSHashTable *subscribers = objc_getAssociatedObject(view, &kVisibilitySubscribersKey);
+    if (!subscribers) return;
+    for (SGRVisibilityObserver *observer in subscribers.allObjects) {
+        if (hierarchyChanged) [observer attach];
+        if (observer.view && observer.changed) observer.changed();
+    }
+}
+
+void SGRObserveVisibility(UIView *view, dispatch_block_t changed) {
+    SGRVisibilityObserver *observer = objc_getAssociatedObject(view, &kVisibilityObserverKey);
+    if (!changed) {
+        [observer detach];
+        observer.changed = nil;
+        objc_setAssociatedObject(view, &kVisibilityObserverKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        // A descendant gets no callback when an ancestor moves inside one window. Observe UIKit's
+        // mutation boundary, without KVO changing Spotify's Swift classes or our other instance subclasses.
+        for (NSString *name in @[@"didMoveToSuperview", @"didMoveToWindow"]) {
+            SEL selector = NSSelectorFromString(name);
+            Method method = class_getInstanceMethod(UIView.class, selector);
+            IMP original = method_getImplementation(method);
+            method_setImplementation(method, imp_implementationWithBlock(^(UIView *self) {
+                ((void (*)(id, SEL))original)(self, selector);
+                reportVisibility(self, YES);
+            }));
+        }
+        Method hidden = class_getInstanceMethod(UIView.class, @selector(setHidden:));
+        IMP setHidden = method_getImplementation(hidden);
+        method_setImplementation(hidden, imp_implementationWithBlock(^(UIView *self, BOOL value) {
+            ((void (*)(id, SEL, BOOL))setHidden)(self, @selector(setHidden:), value);
+            reportVisibility(self, NO);
+        }));
+        Method alpha = class_getInstanceMethod(UIView.class, @selector(setAlpha:));
+        IMP setAlpha = method_getImplementation(alpha);
+        method_setImplementation(alpha, imp_implementationWithBlock(^(UIView *self, CGFloat value) {
+            ((void (*)(id, SEL, CGFloat))setAlpha)(self, @selector(setAlpha:), value);
+            reportVisibility(self, NO);
+        }));
+    });
+    if (!observer) {
+        observer = [SGRVisibilityObserver new];
+        observer.view = view;
+        objc_setAssociatedObject(view, &kVisibilityObserverKey, observer, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [observer attach];
+    }
+    observer.changed = changed;
 }
 
 #pragma mark - views
@@ -203,24 +312,17 @@ void SGRSuppress(UIView *view) {
         });
     });
     // One of Spotify's Swift classes (an Encore button, whose state render sets its alpha back to 1) keeps it
-    // through an override on the class, which only holds the instances marked here. The class `class` answers,
-    // so an instance KVO observes (the player's repeat button) is held too: KVO's class passes setAlpha: on to it.
-    // Only a class inside the app: a plain UILabel KVO observes answers UILabel, which must never be touched.
-    // An instance marked on an earlier call is held already: callers ask on every layout pass.
-    BOOL onClass = objc_getAssociatedObject(view, &kSuppressedKey) != nil;
-    if (!kept && !onClass) {
-        BOOL spotifys = [[NSBundle bundleForClass:view.class].bundlePath hasPrefix:NSBundle.mainBundle.bundlePath];
-        onClass = spotifys && overrideOnClass(view.class, @selector(setAlpha:), ^id(IMP replaced) {
-            return ^(UIView *self, CGFloat alpha) {
-                ((void (*)(id, SEL, CGFloat))replaced)(self, @selector(setAlpha:), objc_getAssociatedObject(self, &kSuppressedKey) ? 0 : alpha);
-            };
-        });
-        if (onClass) objc_setAssociatedObject(view, &kSuppressedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        logWatch(view, @selector(setAlpha:), onClass, onClass);
-    }
+    // through an override on the class, which only holds the instances marked here (holdAlphaOnClass).
+    if (!kept) holdAlphaOnClass(view, 0);
     view.alpha = 0;
     view.userInteractionEnabled = NO;
     view.accessibilityElementsHidden = YES;
+}
+
+void SGRKeepOpaque(UIView *view) {
+    if (!view) return;
+    holdAlphaOnClass(view, 1);
+    if (view.alpha != 1) view.alpha = 1;
 }
 
 static BOOL hasMonospacedDigits(UIFont *font) {
@@ -262,12 +364,38 @@ static void keepMonospaced(UILabel *label, Class original) {
     sg_keepingMonospaced = NO;
 }
 
+// Snapshot the input, not UIKit's synthesized attributedText. Edits through
+// UILabel's original class still invalidate its drawing even if they bypass our setters.
+@interface SGRDigitsWrite : NSObject
+@property (nonatomic) SEL setter;
+@property (nonatomic, copy) id input;
+@end
+@implementation SGRDigitsWrite
+@end
+static char kDigitsWrite;
+
+static BOOL equalValue(id a, id b) {
+    return a == b || [a isEqual:b];
+}
+
 void SGRMonospacedDigits(UILabel *label) {
     if (![label isKindOfClass:UILabel.class]) return;
     BOOL kept = adopt(label, "SGRMonospaced_", ^(Class subclass, Class original) {
+        for (NSString *name in @[@"setNeedsDisplay", @"invalidateIntrinsicContentSize"]) {
+            SEL selector = NSSelectorFromString(name);
+            addOverride(subclass, original, selector, ^(UILabel *self) {
+                ((SGRDigitsWrite *)objc_getAssociatedObject(self, &kDigitsWrite)).setter = NULL;
+                struct objc_super parent = {self, original};
+                ((void (*)(struct objc_super *, SEL))objc_msgSendSuper)(&parent, selector);
+            });
+        }
         for (NSString *name in @[@"setText:", @"setAttributedText:", @"setFont:"]) {
             SEL selector = NSSelectorFromString(name);
             addOverride(subclass, original, selector, ^(UILabel *self, id value) {
+                SGRDigitsWrite *last = objc_getAssociatedObject(self, &kDigitsWrite);
+                BOOL textSetter = selector != @selector(setFont:);
+                if (textSetter && last.setter == selector && equalValue(last.input, value)) return;
+                last.setter = NULL; // Invalidate before UIKit can call another setter.
                 // A label SGRRollDigits marked shows the change by SGRRefinements.h's rules.
                 BOOL watched = SGRRollingDigitsWatched(self);
                 NSAttributedString *before = watched ? self.attributedText : nil;
@@ -275,6 +403,14 @@ void SGRMonospacedDigits(UILabel *label) {
                 ((void (*)(struct objc_super *, SEL, id))objc_msgSendSuper)(&parent, selector, value);
                 keepMonospaced(self, original);
                 if (watched) SGRRollingDigitsTextChanged(self, before);
+                if (textSetter && !sg_keepingMonospaced) {
+                    if (!last) {
+                        last = [SGRDigitsWrite new];
+                        objc_setAssociatedObject(self, &kDigitsWrite, last, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    }
+                    last.input = value;
+                    last.setter = selector;
+                } else last.setter = NULL;
             });
         }
         addOverride(subclass, original, @selector(didMoveToWindow), ^(UILabel *self) {
@@ -314,6 +450,24 @@ BOOL SGRObserveImage(UIImageView *view, void (^changed)(UIImageView *view)) {
     });
     if (first) logWatch(view, @selector(setImage:), kept || onClass, onClass);
     return kept || onClass;
+}
+
+BOOL SGRObserveText(UILabel *label, void (^changed)(UILabel *label)) {
+    if (![label isKindOfClass:UILabel.class]) return NO;
+    objc_setAssociatedObject(label, &kTextObserverKey, changed, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    BOOL kept = adopt(label, "SGRTextObserved_", ^(Class subclass, Class original) {
+        for (NSString *name in @[@"setText:", @"setAttributedText:"]) {
+            SEL selector = NSSelectorFromString(name);
+            addOverride(subclass, original, selector, ^(UILabel *self, id value) {
+                struct objc_super parent = {self, original};
+                ((void (*)(struct objc_super *, SEL, id))objc_msgSendSuper)(&parent, selector, value);
+                void (^block)(UILabel *) = objc_getAssociatedObject(self, &kTextObserverKey);
+                if (block) block(self);
+            });
+        }
+    });
+    if (!kept) logWatch(label, @selector(setText:), NO, NO);
+    return kept;
 }
 
 // A pass the block itself sets off (a frame it moves) reaches layoutSubviews again before the block has

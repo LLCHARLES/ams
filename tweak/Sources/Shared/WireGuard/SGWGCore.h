@@ -6,6 +6,7 @@
 // wireguard-go + gVisor netstack run inside this process; an authenticated
 // SOCKS5 server on 127.0.0.1 is applied to every NSURLSession configuration via
 // nw_proxy_config (iOS 17+) with failover to direct connections disabled.
+// User-selected exact HTTPS lyrics hosts use a separate guarded direct path.
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -31,6 +32,15 @@ FOUNDATION_EXPORT NSString *const SGWGVersion;
 // Settings (take effect on next launch).
 BOOL SGWGSettingEnabled(void);
 void SGWGSetSettingEnabled(BOOL enabled);
+typedef NS_ENUM(NSInteger, SGWGLyricsRoute) {
+    SGWGLyricsThroughTunnel = 0,
+    SGWGLyricsBlockedDirect = 1,
+    SGWGLyricsAllDirect = 2,
+};
+// Read for each new request, including requests on already-created sessions.
+SGWGLyricsRoute SGWGSettingLyricsRoute(void);
+void SGWGSetSettingLyricsRoute(SGWGLyricsRoute route);
+BOOL SGWGLyricsRequestIsDirect(NSURLRequest *request);
 NSString *SGWGSettingKind(void);
 NSDictionary *SGWGSettingExternalProxy(void); // host, port, username (no password)
 BOOL SGWGHasStoredProxyPassword(void);
@@ -47,6 +57,7 @@ BOOL SGWGActiveThisLaunch(void);
 BOOL SGWGReady(void);
 BOOL SGWGGuardsInstalled(void);
 BOOL SGWGAdmissionReady(void);
+BOOL SGWGCheckAdmission(BOOL * _Nullable pendingImages);
 void SGWGRefreshReadiness(void);
 void SGWGNotifyRecovery(void);
 NSString *SGWGStateDescription(SGWGState state);

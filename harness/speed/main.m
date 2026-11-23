@@ -23,11 +23,13 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #import <stdatomic.h>
+#import "../harness-fail.h"
 
 // No songs are kept here: exercise the real speed path without the per-song persistence owner.
 void SGSpeedPitchSongValuesChanged(NSString *control) {}
 
 double SGPlayerSpeed(void);
+extern NSNotificationName const SGPlayerSpeedDidChangeNotification;
 void SGSetPlayerSpeed(double speed);
 void SGSetPlayerPitch(float semitones);
 BOOL SGPlayerSpeedAllowed(void);
@@ -70,12 +72,14 @@ typedef struct {
 @interface SPTPlayerState : NSObject
 @property (nonatomic) double positionAsOfTimestamp;
 @property (nonatomic, strong) NSDate *timestamp;
+@property (nonatomic, copy) NSString *URI;
 @end
 
 @implementation SPTPlayerState
-// What SpeedPitch.x asks of the state for the track playing: no track in the harness.
+static NSUInteger trackReads;
 - (id)track {
-    return nil;
+    trackReads++;
+    return self;
 }
 - (BOOL)isPaused {
     return NO;
@@ -256,6 +260,7 @@ static void expect(NSString *what, double wantA, double wantB) {
 // The player reporting: a state whose position is what the decoder has handed over, as of now.
 - (void)playerReports {
     _state = [SPTPlayerState new];
+    _state.URI = @"spotify:track:test";
     _state.positionAsOfTimestamp = atomic_load(&sg_decoded) / kRate;
     _state.timestamp = [NSDate date];
     sg_reportedState = _state;
@@ -275,7 +280,14 @@ static void expect(NSString *what, double wantA, double wantB) {
     }
     [self startChain];
     NSLog(@"[harness] speed allowed: %d", SGPlayerSpeedAllowed());
-    [self after:1 do:^{ [self playerReports]; self->_lastDecoded = atomic_load(&sg_decoded); self->_lastAt = CACurrentMediaTime(); }];
+    [self after:1 do:^{
+        [self playerReports];
+        NSUInteger before = trackReads;
+        (void)[self->_state position];
+        if (trackReads != before) HARNESS_FAIL(@"idle position read the track");
+        self->_lastDecoded = atomic_load(&sg_decoded);
+        self->_lastAt = CACurrentMediaTime();
+    }];
     NSArray *script = @[
         @[@3, @"normal", @1, @0],
         @[@6, @"1.5x", @1.5, @0],
@@ -287,11 +299,34 @@ static void expect(NSString *what, double wantA, double wantB) {
         @[@24, @"gain back to 1", @1, @0, @1],
     ];
     __block NSString *label = @"normal";
+    __block NSUInteger speedChanges = 0;
+    [NSNotificationCenter.defaultCenter addObserverForName:SGPlayerSpeedDidChangeNotification object:nil queue:nil
+        usingBlock:^(NSNotification *note) {
+            if (!NSThread.isMainThread) HARNESS_FAIL(@"speed change posted off main");
+            ++speedChanges;
+        }];
+    // An equal timestamp is not a new seek report: only the changed track can reset the clock here.
+    [self after:8 do:^{
+        (void)self->_state.position;
+        SPTPlayerState *other = [SPTPlayerState new];
+        other.timestamp = self->_state.timestamp;
+        other.URI = @"spotify:track:other";
+        other.positionAsOfTimestamp = 45;
+        double raw = 45 - other.timestamp.timeIntervalSinceNow * other.playbackSpeed;
+        if (fabs(other.position - raw) > .1) HARNESS_FAIL(@"new track did not reset position");
+        other.timestamp = NSDate.date;
+        other.positionAsOfTimestamp = 95;
+        if (fabs(other.position - 95) > .1) HARNESS_FAIL(@"remote seek did not reset position");
+        (void)self->_state.position; // back on the fixture track for the audio-chain measurements
+    }];
     for (NSArray *step in script) {
         [self after:[step[0] doubleValue] do:^{
             [self report:label];
             label = step[1];
-            SGSetPlayerSpeed([step[2] doubleValue]);
+            double desired = [step[2] doubleValue];
+            NSUInteger expected = speedChanges + (SGPlayerSpeed() != desired);
+            SGSetPlayerSpeed(desired);
+            if (speedChanges != expected) HARNESS_FAIL(@"effective speed change not announced exactly once");
             SGSetPlayerPitch([step[3] floatValue]);
             if (step.count > 4) SGPlayerSetGain([step[4] floatValue]);
         }];

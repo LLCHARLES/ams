@@ -4,6 +4,7 @@
 // length; NetEase censors swear words with asterisks.
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
+#import "LyricsHosts.h"
 
 static const NSTimeInterval kTimeout = 3;
 // A NetEase recording is only taken when its length is this close to the track's, so the words fall
@@ -14,14 +15,20 @@ static const NSUInteger kTriedSongs = 3;
 static void get(SGLyricsRequestContext *context, NSString *path, NSDictionary<NSString *, NSString *> *query, void (^done)(NSDictionary *root)) {
     NSURL *url = SGLyricsURL([@"https://music.163.com/api/" stringByAppendingString:path], query);
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:kTimeout];
+    SGLyricsMarkRequest(request);
     [request setValue:@"https://music.163.com" forHTTPHeaderField:@"Referer"];
-    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         SGLyricsNoteReply(response, error);
         [context noteResponse:response error:error];
         id root = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        [context noteFailure:![root isKindOfClass:NSDictionary.class]];
+        id code = SGLyricsField(root, @"code");
+        if (code && ![code isEqual:@200]) [context noteFailure:YES];
         if (error || !root) SGLog(@"netease: %@ failed: status %ld, error %@", path, (long)[(NSHTTPURLResponse *)response statusCode], error);
         dispatch_async(dispatch_get_main_queue(), ^{ done([root isKindOfClass:NSDictionary.class] ? root : nil); });
-    }] resume];
+    }];
+    [context trackTask:task];
+    [task resume];
 }
 
 // [43060,3600](43060,120,0)To (43180,330,0)seize (43510,420,0)everything …
@@ -81,6 +88,7 @@ static void tryLyrics(SGLyricsRequestContext *context, NSArray<NSString *> *song
     get(context, @"song/lyric/v1", @{@"id": songs[index], @"lv": @"1", @"yv": @"1", @"tv": @"-1"}, ^(NSDictionary *root) {
         id yrc = [root[@"yrc"] isKindOfClass:NSDictionary.class] ? root[@"yrc"][@"lyric"] : nil;
         NSArray<SGKaraokeLine *> *lines = [yrc isKindOfClass:NSString.class] ? SGLyricsPieceLines(yrc, NO) : nil;
+        if (yrc && yrc != NSNull.null && ![yrc isEqual:@""] && !lines) [context noteFailure:YES];
         if (lines) {
             SGLog(@"netease: song %@ has %lu word timed lines", songs[index], (unsigned long)lines.count);
             done(lines);
@@ -113,6 +121,8 @@ SGLyricsAsk SGNetEaseAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *
     get(query.requestContext, @"search/get", @{@"s": [NSString stringWithFormat:@"%@ %@", title, lead], @"type": @"1", @"limit": @"10"}, ^(NSDictionary *root) {
         id result = [root[@"result"] isKindOfClass:NSDictionary.class] ? root[@"result"] : nil;
         id songs = result[@"songs"];
+        if (root && ![songs isKindOfClass:NSArray.class] && ![result[@"songCount"] isEqual:@0])
+            [query.requestContext noteFailure:YES];
         if ([root[@"code"] isEqual:@200] && (([songs isKindOfClass:NSArray.class] && ![songs count])
             || (!songs && [result[@"songCount"] isEqual:@0])))
             query.requestContext.emptyNameSearch = SGNetEaseAsk;

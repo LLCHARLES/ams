@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
-with tempfile.TemporaryDirectory(prefix="vitrine-page-zoom-") as work:
+with tempfile.TemporaryDirectory(prefix="retrine-page-zoom-") as work:
     subprocess.run(["sh", str(ROOT / "harness/page-zoom/build.sh")],
                    env=dict(os.environ, HARNESS_BUILD_DIR=work), check=True)
     runtimes = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "runtimes", "-j"]))
@@ -22,7 +22,7 @@ with tempfile.TemporaryDirectory(prefix="vitrine-page-zoom-") as work:
         subprocess.run(["xcrun", "simctl", "install", device, str(Path(work) / "PageZoomHarness.app")], check=True)
         for value, verdict in [("YES", "on"), ("NO", "off")]:
             result = subprocess.run(["xcrun", "simctl", "launch", "--console-pty", device,
-                                     "com.vitrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
+                                     "com.retrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
             print(result.stdout, end="", flush=True)
             if result.returncode or f"PASS page zoom {verdict}:" not in result.stdout:

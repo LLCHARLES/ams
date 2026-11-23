@@ -17,10 +17,12 @@ NSString *SGRLyricsSyncSummary(NSString *trackID);
 // for, which has no lyrics view and so no corner menu, can still be given some; nil without a track.
 UIAction *SGRLyricsSearchAction(NSString *trackID);
 
-// Off until switched on. Read when a lyrics view is made and when the row changes it.
+// On until switched off.
 #define SGRKeyLyricsKeepAwake @"spotifyglass.redesign.lyrics.keepAwake"
+#define SGRKeyLyricsFullRate @"spotifyglass.redesign.lyrics.fullRate"
 BOOL SGRLyricsKeepAwakeOn(void);
 // A lyrics view holding the screen awake, or letting it go; the idle timer is off while any view holds it.
 void SGRLyricsHoldAwake(id holder, BOOL hold);
 @class SGModRow;
 SGModRow *SGRLyricsKeepAwakeRow(void);
+SGModRow *SGRLyricsFullRateRow(void);

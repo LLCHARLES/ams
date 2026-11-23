@@ -25,7 +25,8 @@
 // The row's own accessibility label still names the artists and says explicit; the picture is not an element.
 //
 // **Play counts.** A track played in Listening stats says how many times, "12 plays", in the secondary color on
-// the row's middle just before ⋯, as small as the row's own type allows; none for a track never played. The
+// the row's middle just before ⋯ (before the green check Spotify puts there on a liked track), as small as the row's
+// own type allows; none for a track never played. The
 // count is the album's title and the row's title matched in the log (AlbumPlays.m), so the rows are laid out
 // again when the header's title arrives and when the counts change. The title and the artist line are narrowed
 // so neither runs under it. This is done before the artist line's change, which then measures the narrowed
@@ -62,7 +63,8 @@
 static const CGFloat kHairline = 0.5;
 // Between the end of the title's text and the badge drawn after it.
 static const CGFloat kBadgeGap = 4;
-// Between the play count and ⋯'s box, whose glyph is inset in it already, and between the text and the count.
+// Between the play count and the box of ⋯ or of the liked check before it, whose glyph is inset in it already, and
+// between the text and the count.
 static const CGFloat kCountGap = 2, kCountTextGap = 8;
 
 static char kRowKey, kSubtitleKey, kLineKey, kTitleKey, kBadgeKey, kArtistKey, kChangeKey;
@@ -232,6 +234,99 @@ static void layOutRowsAgain(UIView *page) {
     });
 }
 
+static char kMotionRowKey, kMotionBatchDepth, kMotionPageKey, kMotionOwnerKey;
+static const NSUInteger kMotionPagePairs = 8;
+
+@interface SGRAlbumMotionLifetime : NSObject
+@property (nonatomic, copy) NSString *album, *releaseID;
+@property (nonatomic) BOOL headerOnly;
+@property (nonatomic, strong) NSMutableSet *pairs;
+@end
+@implementation SGRAlbumMotionLifetime
+@end
+
+static void observeRelease(SGRAlbumMotionLifetime *state, NSString *album, NSString *releaseID) {
+    if ((state.album && album && ![state.album isEqual:album]) ||
+        (state.releaseID && releaseID && ![state.releaseID isEqual:releaseID])) state.headerOnly = YES;
+    if (!state.album && album) state.album = album;
+    if (!state.releaseID && releaseID) state.releaseID = releaseID;
+}
+
+// A replaced hero must not forget the page's album, nor may a reparented list
+// bring rows from its previous owner. The state holds no view or callback.
+static SGRAlbumMotionLifetime *bindMotionOwner(UIView *page, UIView *owner) {
+    SGRAlbumMotionLifetime *state = objc_getAssociatedObject(page, &kMotionPageKey);
+    if (!state) {
+        state = [SGRAlbumMotionLifetime new];
+        objc_setAssociatedObject(page, &kMotionPageKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    SGRAlbumMotionLifetime *prior = objc_getAssociatedObject(owner, &kMotionOwnerKey);
+    if (state != prior) {
+        observeRelease(state, prior.album, prior.releaseID);
+        if (prior.headerOnly) state.headerOnly = YES;
+        objc_setAssociatedObject(owner, &kMotionOwnerKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return state;
+}
+
+void SGRAlbumMotionHeader(UIView *page, UIView *hero, NSString *albumKey, NSString *releaseID) {
+    if (!page) return;
+    SGRAlbumMotionLifetime *state = bindMotionOwner(page, hero);
+    observeRelease(state, albumKey, releaseID);
+    if (state.headerOnly) objc_setAssociatedObject(page, &kMotionRowKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
+BOOL SGRAlbumMotionRowsAllowed(UIView *page) {
+    SGRAlbumMotionLifetime *state = objc_getAssociatedObject(page, &kMotionPageKey);
+    return state.album != nil && !state.headerOnly;
+}
+
+void SGRAlbumWaitForMotionRow(UIView *page, BOOL evaluating, BOOL (^use)(NSString *, NSString *)) {
+    if (!page) return;
+    SGRAlbumMotionLifetime *state = objc_getAssociatedObject(page, &kMotionPageKey);
+    if (!use || !SGRAlbumMotionRowsAllowed(page) || state.pairs.count >= kMotionPagePairs) {
+        objc_setAssociatedObject(page, &kMotionRowKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        return;
+    }
+    if (evaluating && !state.pairs) state.pairs = [NSMutableSet set];
+    BOOL (^offer)(NSArray *) = ^BOOL(NSArray *pair) {
+        if (!evaluating) return use(pair[0], pair[1]);
+        if ([state.pairs containsObject:pair]) return NO;
+        [state.pairs addObject:pair];
+        return use(pair[0], pair[1]) || state.pairs.count >= kMotionPagePairs;
+    };
+    objc_setAssociatedObject(page, &kMotionRowKey, offer, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    layOutRowsAgain(page); // existing rows may have laid out while the header search was pending
+}
+
+static NSArray *motionEvidence(UIView *row) {
+    NSString *song = titleOf(row).text, *credit = onlyLabel(subtitleOf(row)).text;
+    if (!song.length || !credit.length) return nil;
+    return @[[credit stringByReplacingOccurrencesOfString:@" 및 " withString:@", "], song];
+}
+
+static void offerMotionRow(UICollectionViewCell *cell, UIView *row, UIView *page) {
+    NSString *kind = row.accessibilityIdentifier;
+    if (![kind isEqual:@"Components.UI.RetrievalRowElementUI_Loaded"] && ![kind isEqual:@"Components.UI.RetrievalRowElementUI"]) return;
+    // The device tree's track cell belongs directly to the template's list, not a carousel
+    // or a header's nested collection. Recheck the live ancestry, not a recycled cell's cached place.
+    UICollectionView *list = (id)cell.superview;
+    if (![list isKindOfClass:UICollectionView.class] ||
+        ![list.superview isKindOfClass:%c(_TtC32CreativeWorkPlatform_TemplateKit28CreativeWorkTemplateListView)] ||
+        SGRAlbumPageOf(list.superview) != page) return;
+    if (bindMotionOwner(page, list).headerOnly) {
+        objc_setAssociatedObject(page, &kMotionRowKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+        return;
+    }
+    BOOL (^use)(NSArray *) = objc_getAssociatedObject(page, &kMotionRowKey);
+    if (!use || cell.hidden || [objc_getAssociatedObject(list, &kMotionBatchDepth) unsignedIntegerValue] ||
+        ![list indexPathForCell:cell]) return;
+    NSArray *pair = motionEvidence(row);
+    if (!pair) return;
+    if (use(pair) && objc_getAssociatedObject(page, &kMotionRowKey) == use)
+        objc_setAssociatedObject(page, &kMotionRowKey, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
 void SGRAlbumSetArtist(UIView *view, NSString *artist) {
     UIView *page = SGRAlbumPageOf(view);
     NSString *known = objc_getAssociatedObject(page, &kArtistKey);
@@ -243,8 +338,6 @@ void SGRAlbumSetArtist(UIView *view, NSString *artist) {
 static void applyCredit(UIView *cell, UIView *row, UIView *page) {
     NSString *album = objc_getAssociatedObject(page, &kArtistKey);
     if (!album) return;
-    // The content's own pass first: a new row has no size in its text before it.
-    [((UICollectionViewCell *)cell).contentView layoutIfNeeded];
     UIView *subtitle = SGRFindByIdentifier(row, @"EncoreConsumerMobile.View.Granular.Subtitle", &kSubtitleKey);
     UILabel *title = onlyLabel(SGRFindByIdentifier(row, @"EncoreConsumerMobile.View.Granular.Title", &kTitleKey));
     UILabel *artist = onlyLabel(subtitle);
@@ -324,6 +417,16 @@ static NSHashTable<UIView *> *countedPages(void) {
     return pages;
 }
 
+static NSString *pageAlbumURI(UIView *page) {
+    NSString *uri;
+    for (UIResponder *r = page.nextResponder; r; r = r.nextResponder) {
+        if (![r isKindOfClass:UIViewController.class]) continue;
+        uri = [NSClassFromString(@"SGAlbumQueuePage") albumURI:r];
+        if (uri) break;
+    }
+    return uri;
+}
+
 static SGRAlbumCountPage *spotifyCountsForPage(UIView *page) {
     static char key;
     SGRAlbumCountPage *counts = objc_getAssociatedObject(page, &key);
@@ -331,12 +434,7 @@ static SGRAlbumCountPage *spotifyCountsForPage(UIView *page) {
         counts = [[SGRAlbumCountPage alloc] initWithStore:SGRAlbumSpotifyCountsStore()];
         objc_setAssociatedObject(page, &key, counts, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    NSString *uri;
-    for (UIResponder *r = page.nextResponder; r; r = r.nextResponder) {
-        if (![r isKindOfClass:UIViewController.class]) continue;
-        uri = [NSClassFromString(@"SGAlbumQueuePage") albumURI:r];
-        if (uri) break;
-    }
+    NSString *uri = pageAlbumURI(page);
     __weak UIView *weakPage = page;
     [counts followAlbum:uri changed:^{
         UIView *page = weakPage;
@@ -346,8 +444,28 @@ static SGRAlbumCountPage *spotifyCountsForPage(UIView *page) {
     return counts;
 }
 
+static BOOL sg_trackNumbers;
+static char kIndexAlbum, kTrackIndex;
+static void followTrackIndex(UIView *page) {
+    NSString *uri = pageAlbumURI(page);
+    NSString *previous = objc_getAssociatedObject(page, &kIndexAlbum);
+    if (previous == uri || [previous isEqual:uri]) return;
+    objc_setAssociatedObject(page, &kIndexAlbum, uri, OBJC_ASSOCIATION_COPY_NONATOMIC);
+    objc_setAssociatedObject(page, &kTrackIndex, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    layOutRowsAgain(page);
+    if (!uri) return;
+    __weak UIView *weakPage = page;
+    [SGRAlbumSpotifyCountsStore() loadTrackIndex:uri completion:^(SGRAlbumTrackIndex *index) {
+        UIView *page = weakPage;
+        if (![objc_getAssociatedObject(page, &kIndexAlbum) isEqual:uri]) return;
+        objc_setAssociatedObject(page, &kTrackIndex, index, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (index) layOutRowsAgain(page);
+    }];
+}
+
 void SGRAlbumSetTitle(UIView *view, NSString *title) {
     UIView *page = SGRAlbumPageOf(view);
+    if (sg_trackNumbers && page) followTrackIndex(page);
     if (page && countsPlace() != SGRAlbumPlayCountsOff && SGRAlbumUsesSpotifyCounts()) {
         spotifyCountsForPage(page);
         return;
@@ -456,11 +574,33 @@ static BOOL restoreCount(UIView *cell) {
     return YES;
 }
 
+// Whether `view` draws, as far as its own and its ancestors' hidden and alpha say, up to `top`.
+static BOOL shownUnder(UIView *view, UIView *top) {
+    for (UIView *v = view; v && v != top; v = v.superview) {
+        if (v.hidden || v.alpha < 0.01) return NO;
+    }
+    return YES;
+}
+
+// The box, in the row, of what trails its text: ⋯ and every control shown in the stack it sits in, each by its box as ⋯
+// is. On a liked track that is the green check before ⋯ (Components.UI.AddToButton, in an element view of its own that
+// Spotify hides on a track not liked), which the count was drawn over (issue #41).
+static CGRect trailingFrameOf(UIView *menu, UIView *row) {
+    __block CGRect frame = [menu.superview convertRect:menu.frame toView:row];
+    UIView *stack = menu.superview;
+    while (stack && stack != row && ![stack.accessibilityIdentifier isEqualToString:@"Encore.StackView"]) stack = stack.superview;
+    if (!stack || stack == row) return frame;
+    SGForEachView(stack, ^(UIView *v) {
+        if (![v isKindOfClass:UIControl.class] || CGRectIsEmpty(v.bounds) || !shownUnder(v, stack)) return;
+        frame = CGRectUnion(frame, [v.superview convertRect:v.frame toView:row]);
+    });
+    return frame;
+}
+
 static void applyCount(UIView *cell, UIView *row, UIView *page) {
     NSString *album = objc_getAssociatedObject(page, &kAlbumKey);
     BOOL spotify = SGRAlbumUsesSpotifyCounts();
     if (!album && !spotify) return;
-    [((UICollectionViewCell *)cell).contentView layoutIfNeeded];
     UILabel *title = titleOf(row);
     if (!title) return;
     UIView *menu = SGRFindByIdentifier(row, @"Components.UI.ContextMenuButton*", &kMenuKey);
@@ -489,8 +629,8 @@ static void applyCount(UIView *cell, UIView *row, UIView *page) {
     size = CGSizeMake(ceil(size.width), ceil(size.height));
 
     BOOL rtl = row.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-    CGRect menuFrame = [menu.superview convertRect:menu.frame toView:row];
-    CGFloat x = rtl ? CGRectGetMaxX(menuFrame) + kCountGap : CGRectGetMinX(menuFrame) - kCountGap - size.width;
+    CGRect trailing = trailingFrameOf(menu, row);
+    CGFloat x = rtl ? CGRectGetMaxX(trailing) + kCountGap : CGRectGetMinX(trailing) - kCountGap - size.width;
     CGFloat scale = row.window.screen.scale ?: UIScreen.mainScreen.scale;
     CGFloat y = round((CGRectGetMidY(row.bounds) - size.height / 2) * scale) / scale;
     CGRect frame = CGRectMake(x, y, size.width, size.height);
@@ -680,6 +820,76 @@ static void applyMore(UIView *cell, UIView *row, UIView *page) {
 
 #pragma mark - the rows
 
+// Layout coordinates, independent of the vertical transform that belongs to the credit change.
+typedef struct { CGPoint center; CGRect bounds; } SGRTitleGeometry;
+
+static SGRTitleGeometry titleGeometry(UILabel *title) {
+    return (SGRTitleGeometry){title.center, title.bounds};
+}
+
+static BOOL hasTitleGeometry(UILabel *title, SGRTitleGeometry geometry) {
+    return CGPointEqualToPoint(title.center, geometry.center) && CGRectEqualToRect(title.bounds, geometry.bounds);
+}
+
+static void setTitleGeometry(UILabel *title, SGRTitleGeometry geometry) {
+    title.bounds = geometry.bounds;
+    title.center = geometry.center;
+}
+
+@interface SGROrdinal : UILabel
+@property (nonatomic, weak) UILabel *titleLabel;
+@property (nonatomic, weak) UIView *observedOwner;
+@property (nonatomic) SGRTitleGeometry original, inset, settled;
+@property (nonatomic) CGSize ownerSize;
+@end
+@implementation SGROrdinal
+@end
+
+static char kOrdinal;
+static void restoreOrdinal(UIView *cell) {
+    SGROrdinal *number = objc_getAssociatedObject(cell, &kOrdinal);
+    if (!number.superview) return;
+    if (hasTitleGeometry(number.titleLabel, number.inset))
+        setTitleGeometry(number.titleLabel, number.original);
+    number.titleLabel = nil;
+    [number removeFromSuperview];
+}
+
+static SGROrdinal *applyOrdinal(UIView *cell, UIView *row, UIView *page) {
+    SGRAlbumTrackIndex *index = objc_getAssociatedObject(page, &kTrackIndex);
+    if (!index) return nil;
+    UILabel *title = titleOf(row);
+    if (!title.text.length || !CGAffineTransformIsIdentity(title.transform)) return nil;
+    UIView *menu = SGRFindByIdentifier(row, @"Components.UI.ContextMenuButton*", &kMenuKey);
+    NSString *uri = SGRAlbumTrackURIFromMenuIdentifier(menu.accessibilityIdentifier);
+    NSNumber *position = [index numberForURI:uri title:title.text];
+    if (!position) return nil;
+    SGROrdinal *number = objc_getAssociatedObject(cell, &kOrdinal);
+    if (!number) {
+        number = [SGROrdinal new];
+        number.userInteractionEnabled = number.isAccessibilityElement = NO;
+        objc_setAssociatedObject(cell, &kOrdinal, number, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    number.text = position.stringValue;
+    number.font = SGMonospacedDigitsFont(title.font);
+    number.textColor = title.textColor;
+    number.alpha = title.alpha;
+    CGFloat width = ceil(number.intrinsicContentSize.width), lead = width + 6;
+    CGRect frame = title.frame;
+    if (frame.size.width <= lead) return nil;
+    BOOL rtl = row.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    number.original = titleGeometry(title);
+    CGRect inRow = [title.superview convertRect:frame toView:row];
+    number.frame = CGRectMake(rtl ? CGRectGetMaxX(inRow) - width : CGRectGetMinX(inRow), inRow.origin.y, width, inRow.size.height);
+    frame.size.width -= lead;
+    if (!rtl) frame.origin.x += lead;
+    title.frame = frame; // Identity transform here, before applyCredit.
+    number.inset = titleGeometry(title);
+    [row addSubview:number];
+    number.titleLabel = title;
+    return number;
+}
+
 static void applyRow(UIView *cell, UIView *page) {
     clearSurface(cell);
     UIView *row = SGRFindByIdentifier(cell, @"Components.UI.RetrievalRow*", &kRowKey);
@@ -701,18 +911,74 @@ static void applyRow(UIView *cell, UIView *page) {
     });
 
     applyHairline(row);
+    offerMotionRow((UICollectionViewCell *)cell, row, page);
+    // Settle Spotify's text constraints once, before any decorator measures or insets the title.
+    if (sg_trackNumbers || hidesCredits() || countsPlace() == SGRAlbumPlayCountsInRow)
+        [((UICollectionViewCell *)cell).contentView layoutIfNeeded];
     if (countsPlace() == SGRAlbumPlayCountsInRow) applyCount(cell, row, page);
     else if (countsPlace() == SGRAlbumPlayCountsInMenu) watchMenu(cell, row);
+    SGROrdinal *number = sg_trackNumbers ? applyOrdinal(cell, row, page) : nil;
     if (hidesCredits()) applyCredit(cell, row, page);
+    if (number) {
+        UILabel *title = number.titleLabel;
+        number.center = CGPointMake(number.center.x, CGRectGetMidY([title convertRect:title.bounds toView:row]));
+        // The Encore label wrapper lays its UILabel out again independently of the cell.
+        // Keep the final box (including credit/badge and count geometry), not another
+        // incremental inset. Reuse clears titleLabel before the next row takes ownership.
+        number.settled = titleGeometry(title);
+        number.ownerSize = title.superview.bounds.size;
+        if (number.observedOwner != title.superview) {
+            __weak SGROrdinal *weakNumber = number;
+            __weak UIView *weakCell = cell;
+            if (SGRObserveLayout(title.superview, ^(UIView *owner) {
+                SGROrdinal *active = weakNumber;
+                UILabel *label = active.titleLabel;
+                if (label.superview != owner) return;
+                if (!CGSizeEqualToSize(owner.bounds.size, active.ownerSize)) {
+                    [weakCell setNeedsLayout];
+                } else if (!hasTitleGeometry(label, active.settled))
+                    setTitleGeometry(label, active.settled);
+            })) number.observedOwner = title.superview;
+        }
+    }
     applyMore(cell, row, page);
 }
 
 #pragma mark - the cells
 
+// As for album notes, a valid index path during a reload/batch can still name the
+// previous snapshot. Track the album list itself, including when editorial notes are off.
+static void motionBatch(UICollectionView *list, NSInteger delta) {
+    NSInteger depth = [objc_getAssociatedObject(list, &kMotionBatchDepth) integerValue] + delta;
+    objc_setAssociatedObject(list, &kMotionBatchDepth, depth ? @(depth) : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!depth && objc_getAssociatedObject(SGRAlbumPageOf(list), &kMotionRowKey))
+        for (UICollectionViewCell *cell in list.visibleCells) [cell setNeedsLayout];
+}
+
+%hook _TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView
+- (void)layoutSubviews {
+    UICollectionView *list = (id)self;
+    UIView *page = SGRAlbumPageOf(list.superview);
+    if (page) bindMotionOwner(page, list);
+    %orig;
+}
+- (void)reloadData {
+    motionBatch((id)self, 1);
+    %orig;
+    motionBatch((id)self, -1);
+}
+- (void)performBatchUpdates:(void (^)(void))updates completion:(void (^)(BOOL))completion {
+    UICollectionView *list = (id)self;
+    motionBatch(list, 1);
+    %orig(updates, ^(BOOL finished) { motionBatch(list, -1); if (completion) completion(finished); });
+}
+%end
+
 %hook _TtC12Element_List18CollectionViewCell
 - (void)layoutSubviews {
     // In the reverse of the order they were made: the artist line's change measured the narrowed title.
     restoreCredit((UIView *)self);
+    if (sg_trackNumbers) restoreOrdinal((UIView *)self);
     restoreCount((UIView *)self);
     // Flagged again below while it is still an album's track row.
     unwatch((UIView *)self);
@@ -731,6 +997,7 @@ static void applyRow(UIView *cell, UIView *page) {
     unwatch(cell);
     dropDrawnBadge(cell);
     BOOL changed = restoreCredit(cell);
+    if (sg_trackNumbers) restoreOrdinal(cell);
     changed = restoreCount(cell) || changed;
     if (changed || SGRIsTrackContent(cell.contentView.subviews.firstObject)) [cell setNeedsLayout];
 }
@@ -738,6 +1005,7 @@ static void applyRow(UIView *cell, UIView *page) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    sg_trackNumbers = SGFlag(SGRKeyAlbumTrackNumbers, NO);
     %init;
     if (countsPlace() == SGRAlbumPlayCountsInMenu) %init(SGRAlbumMenuActions);
     if (countsPlace() == SGRAlbumPlayCountsInRow) {

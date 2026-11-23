@@ -41,7 +41,7 @@ static NSUInteger channel(CGImageRef image, NSUInteger x, NSUInteger component) 
 
 int main(void) {
     @autoreleasepool {
-        NSString *prefix = @"vitrine.harness.background";
+        NSString *prefix = @"retrine.harness.background";
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
         // Volatile arguments shadow persistent preferences and disappear with this process.
         [defaults setVolatileDomain:@{} forName:NSArgumentDomain];

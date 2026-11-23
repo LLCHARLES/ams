@@ -30,5 +30,6 @@ run() {
 
 run "PASS all fade" fade toggle
 run "PASS all fade" fade toggle split
+run "PASS all fade" fade toggle regular
 run "PASS all navsettings" navsettings
 echo "PASS tab bar fade checks"

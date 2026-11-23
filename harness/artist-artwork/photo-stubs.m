@@ -1,12 +1,22 @@
 // What photo-hero-check does not compile: the rest of the artist header's pass (the Kit's header info and lookups,
 // Follow, About, the logo), which the harness never runs, and the hooks the field leans on elsewhere.
 #import <UIKit/UIKit.h>
+#import "motion-view-stubs.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
 
 const CGFloat SGRHeaderInfoBottom = 14;
 const CGFloat SGRHeaderInfoTitleRise = 56;
 @implementation SGRHeaderInfo
 @end
+
+// Play's hold to shuffle (ArtistShuffleHold.h): never pressed here.
+#import "Redesigned/Kit/SGRActionRow.h"
+#import "Shared/Haptics/Haptics.h"
+@implementation SGRPlayCapsule
+@end
+void SGPlayFeedback(SGFeedback feedback) {}
+BOOL SGRActivate(UIView *source) { return NO; }
+BOOL SGRSourceEnabled(UIView *source) { return NO; }
 
 // Core/SGLocalize.m: English.
 NSString *SGL(NSString *key, NSString *english) { return english; }
@@ -55,7 +65,7 @@ NSString *SGRFirstLabelText(UIView *view) {
 UIImageView *SGRHeaderArtworkIn(UIView *root) { return nil; }
 BOOL SGRObserveLayout(UIView *view, void (^laidOut)(UIView *view)) { return NO; }
 void SGRBlankView(UIView *view) {}
-void SGRPinnedMore(UIView *page, const void *key, UIView *more) {}
+SGRMirrorButton *SGRPinnedMore(UIView *page, const void *key, UIView *more) { return nil; }
 
 // Artist/ArtistFollow.x and ArtistSections.x.
 BOOL SGRArtistFollowing(UIView *page, NSString *moreIdentifier, BOOL *following, void (^changed)(void)) { return NO; }

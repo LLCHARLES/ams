@@ -363,6 +363,12 @@ int main(void) {
         checkReplies();
         if ([NSProcessInfo.processInfo.arguments containsObject:@"--fuzz"]) checkMutations();
         checkGate();
+        SGConnectSetDiscoveryActive(NO);
+        int pausedSocket = boundSocket(AF_INET, 1, NULL);
+        Packet pausedQuery = query();
+        CHECK(!SGConnectRelayQuery(pausedSocket, pausedQuery.bytes, pausedQuery.length), "background discovery admits no relay round");
+        close(pausedSocket);
+        SGConnectSetDiscoveryActive(YES);
         checkRelay(AF_INET);
         checkRelay(AF_INET6);
     }

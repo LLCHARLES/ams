@@ -2,6 +2,7 @@
 import sys
 import unittest
 from pathlib import Path
+from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -9,14 +10,15 @@ import patch_imports
 import patch_native_restrictions as limits
 import patch_key_request_mode as key
 
-ORIGINAL = ROOT / 'build/key-flow-audit/Spotify-original'
+ORIGINAL = ROOT.parent / 'ipa/Spotify-9.1.90.ipa'
 
 
 @unittest.skipUnless(ORIGINAL.is_file(), 'exact Spotify binary fixture absent')
 class KeyModeRuntime(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        raw = ORIGINAL.read_bytes()
+        with ZipFile(ORIGINAL) as archive:
+            raw = archive.read("Payload/Spotify.app/Spotify")
         with_imports, _ = patch_imports.patch(raw)
         cls.before, _ = limits.patch(with_imports)
 

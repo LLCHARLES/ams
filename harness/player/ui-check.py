@@ -11,7 +11,7 @@ import threading
 
 HERE = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("scenarios", nargs="+", choices=["settings", "automix", "share", "share-system"])
+parser.add_argument("scenarios", nargs="+", choices=["settings", "automix", "share", "share-system", "volumebar", "preview-tap", "preview-pending"])
 args = parser.parse_args()
 with tempfile.TemporaryDirectory(prefix="player-ui-") as work:
     work = Path(work)

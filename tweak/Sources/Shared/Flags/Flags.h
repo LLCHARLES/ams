@@ -6,6 +6,7 @@
 
 #define SGKeyAIBadges @"spotifyglass.aiBadges"
 #define SGKeyLikelyAIBadges @"spotifyglass.likelyAIBadges"
+#define SGKeyShowCacheLimit @"spotifyglass.showCacheLimit"
 
 typedef NS_ENUM(NSInteger, SGFlagType) { SGFlagUnknown, SGFlagBool, SGFlagInt, SGFlagEnum };
 typedef struct { const char *key; SGFlagType type; long value, lower, upper; } SGFlagDef;

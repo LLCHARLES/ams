@@ -2,7 +2,8 @@
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
 
-BOOL SGWGAdmissionReady(void) {
+BOOL SGWGCheckAdmission(BOOL *pendingImages) {
+    if (pendingImages) *pendingImages = NO;
 #ifdef SGWG_TESTING
     NSString *build = NSProcessInfo.processInfo.environment[@"SGWG_TEST_APP_BUILD"] ?: @"919002269";
     return [SGWGAppVersion() isEqualToString:@"9.1.90"] && [build isEqualToString:@"919002269"];
@@ -40,6 +41,9 @@ BOOL SGWGAdmissionReady(void) {
         mainSeen |= main;
         sharedSeen |= shared;
     }
+    if (pendingImages) *pendingImages = !mainSeen || !sharedSeen;
     return mainSeen && sharedSeen;
 #endif
 }
+
+BOOL SGWGAdmissionReady(void) { return SGWGCheckAdmission(NULL); }

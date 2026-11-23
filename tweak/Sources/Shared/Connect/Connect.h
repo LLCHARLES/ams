@@ -35,6 +35,8 @@ BOOL SGMDNSIsConnectReply(const uint8_t *packet, size_t length, uint16_t queryID
 void SGConnectSetReceiver(NSString *name, NSArray<NSData *> *addresses);
 // Every receiver's addresses, from any thread.
 NSArray<NSData *> *SGConnectReceiverAddresses(void);
+// Stops outstanding rounds as well as admitting no new ones. Browser owns this lifecycle.
+void SGConnectSetDiscoveryActive(BOOL active);
 // The address's IP as text, for the log.
 NSString *SGConnectAddressText(const struct sockaddr *address);
 

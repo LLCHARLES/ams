@@ -1,7 +1,7 @@
 // Free fonts to download (FontLibrary.m): families under the SIL Open Font License, from Google Fonts' own
 // repository (github.com/google/fonts) pinned to one commit, so a file is the one this build was made with. Each
 // file is checked against its size and SHA-256 before it is kept, and the family's OFL.txt is kept beside it.
-// A downloaded family lives in Application Support/Vitrine/Font Library/<identifier>/ and is one of the app
+// A downloaded family lives in Application Support/Retrine/Font Library/<identifier>/ and is one of the app
 // font's choices (SGAppFontLibrary, Fonts.h); Fonts.x registers its files again at each launch.
 //
 // Main thread, except where a function says otherwise.

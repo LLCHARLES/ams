@@ -205,10 +205,10 @@ static void readFormat(AudioUnit unit) {
     atomic_store(&sg_layout, (uint64_t)format.mFormatFlags | (uint64_t)(format.mChannelsPerFrame & 0xffff) << 32 | (uint64_t)bytes << 48);
 }
 
-// The music's output started, changed or changed format (Shared/Player): its format read, the notify on it,
-// and the analyzer started over, since what it held came from before.
+// A running output started, changed or changed format: read its format and restart the analyzer.
+// A stopped output keeps its notify untouched until the next start notification.
 static void listenTo(AudioUnit unit) {
-    if (!unit) return;
+    if (!unit || !SGPlayerMusicOutputRunning()) return;
     AudioUnitRemoveRenderNotify(unit, rendered, unit);
     readFormat(unit);
     atomic_fetch_add(&sg_generation, 1);

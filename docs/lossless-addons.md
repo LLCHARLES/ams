@@ -1,10 +1,10 @@
 # HTTP addon compatibility research
 
 Follow-up to [Lossless sources and automatic upgrades](lossless-sources.md), checked 2026-10-08 against
-the links and September announcements supplied by the user. **No provider is validated in Vitrine.**
+the links and September announcements supplied by the user. **No provider is validated in Retrine.**
 These are provider candidates for the same background-upgrade coordinator, not separate player designs.
 Server-side JavaScript is compatible with the decision to execute no downloaded provider code in the app.
-The [playback investigation](lossless-playback.md) records Vitrine's native decoder and integration
+The [playback investigation](lossless-playback.md) records Retrine's native decoder and integration
 limits. Provider range support alone does not prove progressive decoding or timestamp seeking.
 The [audio prototype](lossless-prototype.md) does not yet connect to any of these providers.
 
@@ -13,10 +13,10 @@ The [audio prototype](lossless-prototype.md) does not yet connect to any of thes
 | Candidate | Evidence | Implication |
 | --- | --- | --- |
 | [Plex/Jellyfin addon](https://github.com/rairulyle/bitchord-selfhosted-addon) | Inspected source at `2a20c3ac76327f56a4189df66c79292462e154f3`: manifest/search/stream endpoints and original-file proxy with range forwarding | Best first controlled integration target when a test library is available; each configured server is a separate source |
-| [Telegram Music Addon](https://github.com/Imnotshashwat/Telegram-Music-Addon) | Inspected source at `cb336d2cce2b77676a450f11587edf42985cc17a`: JSON endpoints, ISRC resolution and range-aware audio route | Second candidate; requires the user's own channel and hosted server. WebDAV support does not require Vitrine to implement WebDAV |
-| Deezer addon | User supplied `https://deezer.nom.deno.net/` and an announcement describing an account/free-pool requirement; the browser tool could not access the page | Current authentication, returned formats, availability and Vitrine access remain unverified |
+| [Telegram Music Addon](https://github.com/Imnotshashwat/Telegram-Music-Addon) | Inspected source at `cb336d2cce2b77676a450f11587edf42985cc17a`: JSON endpoints, ISRC resolution and range-aware audio route | Second candidate; requires the user's own channel and hosted server. WebDAV support does not require Retrine to implement WebDAV |
+| Deezer addon | User supplied `https://deezer.nom.deno.net/` and an announcement describing an account/free-pool requirement; the browser tool could not access the page | Current authentication, returned formats, availability and Retrine access remain unverified |
 | Unified addon | User supplied several setup URLs and announcements about Tidal account/pool requirements, CJK matching fixes, Atmos and client-version restrictions; the browser tool could not inspect the pages | Do not infer the current host, access requirements, matching quality or third-party-client eligibility from old announcements |
-| NullBeat | User supplied an announcement naming paid TorBox access, 5 requests/minute and 60 TorBox caches/hour | Treat these as announced limits for this provider, not verified current limits or global addon defaults; operator permission for BitChord does not establish permission for Vitrine |
+| NullBeat | User supplied an announcement naming paid TorBox access, 5 requests/minute and 60 TorBox caches/hour | Treat these as announced limits for this provider, not verified current limits or global addon defaults; operator permission for BitChord does not establish permission for Retrine |
 | [Amazon Music API](https://github.com/itsmeadarsh2008/amazon-music-api), [HiFi API](https://github.com/binimum/hifi-api) | Public repositories describe backend APIs, not proof of the BitChord manifest/search/stream contract | Backend building blocks only; need a separately maintained adapter and supported access. They are not paste-and-play addons |
 
 The Unified locations supplied were `https://addon.unified.dpdns.org/pages/setup.html`,
@@ -56,7 +56,7 @@ The [Eclipse guide](https://eclipsemusic.app/docs) shares the basic JSON contrac
 `isrc` capability: `/resolve-isrc?isrc=…` returns `trackId` (or `id`), then the client resolves the stream;
 404 or a null ID means no match. It also describes `expiresAt` as a Unix timestamp and settings passed
 as query parameters, with `perNetwork` selecting the active network's value. These extensions can fit
-the Vitrine client without embedding provider code. Retain Vitrine's duration/edition validation even
+the Retrine client without embedding provider code. Retain Retrine's duration/edition validation even
 after an ISRC lookup; do not inherit a provider's certainty without checking the actual media.
 
 1. **Import the generated addon link.** A setup page, GitHub repository and JSON index are distinct
@@ -64,8 +64,8 @@ after an ISRC lookup; do not inherit a provider's certainty without checking the
    turn an HTML setup URL into a guessed API root. Preserve path secrets and server slugs, including
    case and encoding, when appending endpoints. Store secret-bearing URLs in Keychain, with a separate
    opaque source ID for preferences; redact them from diagnostics and settings exports.
-2. **Identify the client honestly.** Use Vitrine's own user agent/version. A BitChord-only or
-   version-restricted service needs operator-supported Vitrine access; do not masquerade as BitChord
+2. **Identify the client honestly.** Use Retrine's own user agent/version. A BitChord-only or
+   version-restricted service needs operator-supported Retrine access; do not masquerade as BitChord
    to pass its checks. Expose a useful unsupported-client reason and leave Spotify playing.
 3. **Enforce a budget per provider.** Share manifest and lookup work; avoid automatic multi-query,
    whole-queue or playlist prefetch. A 5-request/minute service may spend several requests on one

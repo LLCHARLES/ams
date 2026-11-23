@@ -1,4 +1,5 @@
-// Polls the player and sends the activity a new state only when what its view shows changes: the
+// Polls the player at most once a second, waking sooner for a lyric boundary, and sends a new state only when
+// what its view shows changes: the
 // lyrics' line, what is up next, the control menu's tab, track, shuffle, repeat or sleep timer, or a
 // pause. The view is read on every tick, so picking another one shows within a tick. Spotify keeps
 // playing in the background, so the timer keeps running there too. The sleep timer is
@@ -47,14 +48,9 @@ typedef NS_ENUM(NSInteger, SGLiveActivityTab) {
     SGLiveActivityTabTimer,
 };
 
-static const NSTimeInterval kTick = 0.25;
-// Paused, or in a view without lyrics, the only thing on the card that moves by itself is the sleep timer
-// (the bar runs from its dates), and a slower tick shows
-// its end well within the second the card shows. Four ticks a second for a still card is a wake up
-// eighty times a minute for a picture that does not change.
-static const NSTimeInterval kPausedTick = 1;
-// Past a line's sung end by this much, with the next line at least this far off, the line gives way to a note.
-static const NSInteger kBreakMs = 4000;
+// Bounds discovery of seeks, settings and metadata that have no activity notification.
+// Known lyric boundaries wake earlier rather than repeatedly rebuilding the same card at 4 Hz.
+static const NSTimeInterval kPoll = 1;
 // Seconds between attempts to start one, so a refused request (activities turned off) is not retried every tick.
 static const NSTimeInterval kStartRetry = 10;
 // A card that has not changed for this long is sent again, so its stale date (the bridge's staleAfter,
@@ -86,7 +82,6 @@ static const double kTintLuminance = 0.04;
 static const double kAccentLuminance = 0.48;
 
 static dispatch_source_t sg_timer;
-static NSTimeInterval sg_tickEvery;
 static NSString *sg_shown;
 static NSString *sg_missingLyrics;
 // The tracks whose look for lyrics ended (SGKaraokeLinesKeptNotification), with lines or without: a set, since
@@ -106,6 +101,14 @@ static void tick(void) API_AVAILABLE(ios(17.0));
 // When ActivityKit last said none is showing, with the app in the background; until kRefresh on, nothing is sent.
 static NSDate *sg_noneAt;
 
+BOOL SGLiveActivityLyricsActive(void) {
+    if (@available(iOS 17.0, *)) {
+        return sg_timer && SGInt(SGKeyLiveActivityView, SGLiveActivityLyrics) == SGLiveActivityLyrics
+            && !SGLyricsPiPActive() && SGLiveActivityBridge.isShowing;
+    }
+    return NO;
+}
+
 // In the background with none showing, as ActivityKit said within kRefresh: send() sends nothing.
 static BOOL heldBack(void) {
     return sg_noneAt && -sg_noneAt.timeIntervalSinceNow < kRefresh
@@ -121,16 +124,15 @@ static void startTimer(NSTimeInterval every) API_AVAILABLE(ios(17.0)) {
         dispatch_source_set_event_handler(sg_timer, ^{ tick(); });
         dispatch_resume(sg_timer);
     }
-    sg_tickEvery = every;
     uint64_t interval = (uint64_t)(every * NSEC_PER_SEC);
-    dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, 0);
+    dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
 }
 
 // Sends `shown`, what the activity is to show as one string, unless it is showing that already and was
 // sent within kRefresh; starts the activity when there is none and the app is in front.
 static void send(NSString *shown, void (^show)(void)) API_AVAILABLE(ios(17.0)) {
     // ActivityKit is asked only when there is something to send: each question is a round trip to the system,
-    // and this runs four times a second. An activity ended from outside is started again within kRefresh.
+    // and polling usually finds the same card. An activity ended from outside is started again within kRefresh.
     if ([shown isEqualToString:sg_shown] && -sg_lastSent.timeIntervalSinceNow < kRefresh) return;
     if (heldBack()) return;
     sg_noneAt = nil;
@@ -210,8 +212,8 @@ static NSString *lyricsLine(NSString *trackID, NSString **next, NSString **trans
     *next = index + 1 < (NSInteger)lines.count ? SGKaraokeLineText(SGLyricsShownLine(trackID, lines, index + 1, NULL)) : @"";
     if (index < 0) return @"♪";
     SGKaraokeLine *current = lines[index];
-    BOOL nextFarOff = index + 1 == (NSInteger)lines.count || lines[index + 1].start - position > kBreakMs;
-    if (position > current.end + kBreakMs && nextFarOff) return @"♪";
+    BOOL nextFarOff = index + 1 == (NSInteger)lines.count || lines[index + 1].start - position > SGKaraokeBreakMs;
+    if (position > current.end + SGKaraokeBreakMs && nextFarOff) return @"♪";
     // Under it the translation, when the card is set to show one and the line has it; else the other of the two.
     SGKaraokeLine *under = nil;
     SGKaraokeLine *shown = SGLyricsShownLine(trackID, lines, index, &under);
@@ -301,6 +303,8 @@ static void readArtwork(SPTPlayerState *state, NSString *trackID) {
 }
 
 static void tick(void) API_AVAILABLE(ios(17.0)) {
+    // Rearm even when the player has not produced a track yet.
+    if (sg_timer) startTimer(kPoll);
     if (SGLyricsPiPActive()) return;
     id<SPTPlayer> player = SGKaraokePlayer();
     SPTPlayerState *state = player.state;
@@ -315,8 +319,15 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
     NSInteger view = SGInt(SGKeyLiveActivityView, SGLiveActivityLyrics);
     BOOL paused = state.isPaused;
     // Only the lyrics follow the song line by line; the other views' bar runs by itself from its dates.
-    NSTimeInterval every = paused || view != SGLiveActivityLyrics ? kPausedTick : kTick;
-    if (sg_timer && sg_tickEvery != every) startTimer(every);
+    if (!paused && view == SGLiveActivityLyrics) {
+        NSInteger position = SGKaraokePositionMs();
+        NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
+        double speed = state.playbackSpeed;
+        if (position >= 0 && isfinite(speed) && speed > 0 && SGKaraokeLinesTiming(lines) != SGKaraokeTimingNone) {
+            NSInteger until = SGKaraokeMsToChange(lines, position + kRenderLeadMs - SGKaraokeDelayMs(), -1);
+            if (until > 0 && sg_timer) startTimer(MIN(kPoll, until / (1000.0 * speed)));
+        }
+    }
     // send() would send nothing yet, so nothing is worked out for it.
     // The lyrics are still asked for, so they are there when it sends again.
     if (heldBack()) {
@@ -360,8 +371,7 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
     NSMutableArray<NSString *> *titles = [NSMutableArray array], *artists = [NSMutableArray array], *uris = [NSMutableArray array];
     if (view != SGLiveActivityLyrics) {
         NSUInteger limit = view == SGLiveActivityQueue ? kUpNextQueue : kUpNextPanel;
-        for (SPTPlayerTrack *upcoming in SGPlayerUpcomingTracks(state, NSUIntegerMax)) {
-            if (titles.count == limit) break;
+        for (SPTPlayerTrack *upcoming in SGPlayerUpcomingTracks(state, limit)) {
             [titles addObject:upcoming.trackTitle];
             [artists addObject:upcoming.artistName ?: @""];
             [uris addObject:SGURIString(upcoming.URI)];
@@ -551,7 +561,7 @@ void SGSetLiveActivityEnabled(BOOL on) {
                 [SGLiveActivityBridge endBeforeExit];
             }];
         });
-        startTimer(kTick);
+        startTimer(kPoll);
         SGLog(@"live activity: on");
     }
 }

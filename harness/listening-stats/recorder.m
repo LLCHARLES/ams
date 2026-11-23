@@ -273,7 +273,7 @@ int main(void) { @autoreleasepool {
     setElapsed(1340);
     SGRestartPrepareExit();
     NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-    SGPlayLog *reopened = [[SGPlayLog alloc] initWithPath:[support stringByAppendingPathComponent:@"Vitrine/Listening.tsv"]];
+    SGPlayLog *reopened = [[SGPlayLog alloc] initWithPath:[support stringByAppendingPathComponent:@"Retrine/Listening.tsv"]];
     __block BOOL loaded = NO;
     [reopened loadWithCompletion:^{ loaded = YES; }];
     NSDate *loadDeadline = [NSDate dateWithTimeIntervalSinceNow:10];

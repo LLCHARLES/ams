@@ -7,7 +7,7 @@ way an agent drives the phone. Simulator apps share the Mac's loopback, so no ip
 
     THEOS=$HOME/theos ./build.sh
     xcrun simctl install <udid> build/DriverHarness.app
-    xcrun simctl launch <udid> com.vitrine.driverharness
+    xcrun simctl launch <udid> com.retrine.driverharness
     ./proof.py
 
 The mock (`main.m`): a tab bar (Home, Search); on Home a button with a touch-up-inside action, a view with a

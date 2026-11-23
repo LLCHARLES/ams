@@ -4,7 +4,7 @@ Run from the Project root:
 
 ```sh
 HARNESS_BUILD_DIR=$(mktemp -d /tmp/fix-offline-lyrics.XXXXXX) sh harness/lyrics-store/build.sh
-VITRINE_STORE_ONLY=1 sh harness/lyrics-sources/state-build.sh
+RETRINE_STORE_ONLY=1 sh harness/lyrics-sources/state-build.sh
 ```
 
 The Mac Catalyst command-line harness runs without a simulator or network. It links

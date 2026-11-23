@@ -95,7 +95,7 @@ void SGRHarnessRunShare(UIWindow *window, BOOL systemOnly) {
     }), method_getTypeEncoding(appeared));
     dispatch_async(dispatch_get_main_queue(), ^{
         if (systemOnly) {
-            UIActivityViewController *sheet = [[UIActivityViewController alloc] initWithActivityItems:@[@"Vitrine"] applicationActivities:nil];
+            UIActivityViewController *sheet = [[UIActivityViewController alloc] initWithActivityItems:@[@"Retrine"] applicationActivities:nil];
             [window.rootViewController presentViewController:sheet animated:YES completion:nil];
         } else {
             SGRShareSongCard(window.rootViewController.view);

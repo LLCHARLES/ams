@@ -4,8 +4,33 @@
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Shared/LiveActivity/LiveActivity.h"
+#import "Shared/LiveActivity/SGLiveActivityPreview.h"
+#import "../timer-lifecycle.h"
 
 extern BOOL HarnessActivityEnabled;
+
+static void previewBackgroundChecks(UIWindow *window) {
+    SGHarnessBeginTimerCapture();
+    SGLiveActivityPreview *preview = [SGLiveActivityPreview new];
+    [window addSubview:preview];
+    preview.running = YES;
+    HARNESS_CHECK(SGHarnessLiveTimers() == 1);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    HARNESS_CHECK(SGHarnessLiveTimers() == 0);
+    sg_testAppState = UIApplicationStateBackground;
+    [preview reload];
+    HARNESS_CHECK(SGHarnessLiveTimers() == 0);
+    sg_testAppState = UIApplicationStateActive;
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    HARNESS_CHECK(SGHarnessLiveTimers() == 1);
+    [preview removeFromSuperview];
+    HARNESS_CHECK(SGHarnessLiveTimers() == 0);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    HARNESS_CHECK(SGHarnessLiveTimers() == 0);
+    preview.running = NO;
+    SGHarnessEndTimerCapture();
+    puts("PASS activity preview stops in background and off-window");
+}
 
 static SGModRow *row(SGModPage *page, NSString *title) {
     for (SGModSection *section in page.sections)
@@ -20,6 +45,16 @@ static SGModRow *row(SGModPage *page, NSString *title) {
 
 @implementation AppDelegate
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"background-check"]) {
+        self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+        self.window.rootViewController = [UIViewController new];
+        [self.window makeKeyAndVisible];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            previewBackgroundChecks(self.window);
+            exit(0);
+        });
+        return YES;
+    }
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     for (NSString *key in store.dictionaryRepresentation)
         if ([key hasPrefix:@"spotifyglass.liveActivity"]) [store removeObjectForKey:key];

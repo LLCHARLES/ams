@@ -23,10 +23,18 @@ NSIndexSet *SGRDigitsRolled(NSString *before, NSString *after) {
 
 #pragma mark - the add button's glyph
 
-SGRAddGlyph SGRAddGlyphFor(BOOL saved, BOOL enabled, BOOL inPlayer, BOOL starOn, BOOL plainCheckOn) {
+SGRSavedMark SGRSavedMarkFrom(NSInteger stored, BOOL plainCheckOn) {
+    if (stored == SGRSavedMarkSpotify || stored == SGRSavedMarkPlainCheck || stored == SGRSavedMarkDot) return stored;
+    return plainCheckOn ? SGRSavedMarkPlainCheck : SGRSavedMarkSpotify;
+}
+
+SGRAddGlyph SGRAddGlyphFor(BOOL saved, BOOL enabled, BOOL inPlayer, BOOL starOn, SGRSavedMark savedMark) {
     if (inPlayer && starOn) {
         if (!enabled) return SGRAddGlyphSpotify;
         return saved ? SGRAddGlyphStarFilled : SGRAddGlyphStarOutline;
     }
-    return saved && plainCheckOn ? SGRAddGlyphPlainCheck : SGRAddGlyphSpotify;
+    if (!saved) return SGRAddGlyphSpotify;
+    if (savedMark == SGRSavedMarkPlainCheck) return SGRAddGlyphPlainCheck;
+    if (savedMark == SGRSavedMarkDot) return SGRAddGlyphDot;
+    return SGRAddGlyphSpotify;
 }

@@ -90,10 +90,13 @@ UIViewController *SGAutoMixSettingsPage(void) {
         playerOption(SGL(@"settings.automix.artwork.title", @"Artwork moves with the mix"), SGKeyAutoMixArtwork),
     ];
 
-    NSString *note = SGAutoMixAccountAllows() ? nil : SGL(@"settings.automix.footer.note", @"AutoMix needs Premium, or Spoof Premium under Premium, ads & privacy.");
+    // Spotify's Automix covers only some playlists Spotify made; the user's own need its Mix button in the queue (#52).
+    NSString *note = SGL(@"settings.automix.footer.style", @"Beat-matched works only on some playlists Spotify made. For your own playlists, also turn on Mix, left of Shuffle in the queue.");
+    if (!SGAutoMixAccountAllows())
+        note = [NSString stringWithFormat:@"%@ %@", SGL(@"settings.automix.footer.note", @"AutoMix needs Premium, or Spoof Premium under Premium, ads & privacy."), note];
     SGAutoMixPage *page = [[SGAutoMixPage alloc] initWithTitle:SGL(@"settings.automix.title", @"AutoMix") intro:nil sections:@[
         SGNotedSection(nil, @[toggle, style, blend], note),
-        SGNotedSection(nil, player, SGL(@"settings.automix.player.footer", @"In the redesigned player.")),
+        SGNotedSection(nil, player, SGL(@"settings.automix.player.footer", @"In the redesigned player. The progress bar and the cover show crossfades only, as Spotify gives no times for a beat-matched blend.")),
     ] footer:nil];
     page.preview = preview;
     return page;

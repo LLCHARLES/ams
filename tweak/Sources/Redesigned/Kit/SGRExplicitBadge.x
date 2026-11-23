@@ -5,24 +5,27 @@
 
 static NSHashTable<UIView *> *badges;
 static char originalMaskKey, hiddenMaskKey;
-static BOOL applying;
+static BOOL applying, enabled;
 
 static BOOL explicitBadge(UIView *view) {
     if ([view.accessibilityIdentifier isEqualToString:@"Components.UI.ExplicitIcon"]) return YES;
-    Class retrieval = NSClassFromString(@"_TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_9D5FF3EB21C9757CC8B47C2445B48C7B13ExplicitBadge");
+    static Class retrieval;
+    if (!retrieval) retrieval = NSClassFromString(@"_TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_9D5FF3EB21C9757CC8B47C2445B48C7B13ExplicitBadge");
     return retrieval && [view isKindOfClass:retrieval];
 }
 
 static void applyBadge(UIView *view) {
     id original = objc_getAssociatedObject(view, &originalMaskKey);
-    BOOL hide = explicitBadge(view) && SGFlag(SGRKeyHideExplicit, NO);
+    BOOL hide = enabled && explicitBadge(view);
     if (hide && !original) {
         original = view.layer.mask ?: NSNull.null;
         objc_setAssociatedObject(view, &originalMaskKey, original, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (!badges) badges = [NSHashTable weakObjectsHashTable];
-    if (explicitBadge(view)) [badges addObject:view];
     if (!original) return;
+    if (hide) {
+        if (!badges) badges = [NSHashTable weakObjectsHashTable];
+        [badges addObject:view];
+    }
     CALayer *mask = objc_getAssociatedObject(view, &hiddenMaskKey);
     if (hide && !mask) {
         mask = [CALayer layer];
@@ -32,31 +35,44 @@ static void applyBadge(UIView *view) {
     view.layer.mask = hide ? mask : original == NSNull.null ? nil : original;
     applying = NO;
     if (!hide) {
+        [badges removeObject:view];
         objc_setAssociatedObject(view, &originalMaskKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         objc_setAssociatedObject(view, &hiddenMaskKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
 
 void SGRRefreshExplicitBadges(void) {
-    for (UIView *view in badges.allObjects) applyBadge(view);
+    BOOL next = SGFlag(SGRKeyHideExplicit, NO);
+    if (next == enabled) return;
+    enabled = next;
+    if (!enabled) {
+        for (UIView *view in badges.allObjects) applyBadge(view);
+        return;
+    }
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if ([scene isKindOfClass:UIWindowScene.class])
+            for (UIWindow *window in ((UIWindowScene *)scene).windows) SGForEachView(window, ^(UIView *view) { applyBadge(view); });
 }
 
 %hook UIView
+- (void)didMoveToWindow {
+    %orig;
+    if (enabled && self.window) applyBadge(self);
+}
 - (void)layoutSubviews {
     %orig;
-    if (explicitBadge(self) || objc_getAssociatedObject(self, &originalMaskKey)) applyBadge(self);
+    if (enabled) applyBadge(self);
 }
 - (void)setAccessibilityIdentifier:(NSString *)identifier {
     %orig;
-    if (explicitBadge(self) || objc_getAssociatedObject(self, &originalMaskKey)) applyBadge(self);
+    if (enabled) applyBadge(self);
 }
 %end
 
 %hook CALayer
 - (void)setMask:(CALayer *)mask {
-    id delegate = self.delegate;
-    if (!applying && [delegate isKindOfClass:UIView.class] && ((UIView *)delegate).layer == self &&
-        explicitBadge(delegate) && SGFlag(SGRKeyHideExplicit, NO)) {
+    id delegate = enabled && !applying ? self.delegate : nil;
+    if (delegate && [delegate isKindOfClass:UIView.class] && ((UIView *)delegate).layer == self && explicitBadge(delegate)) {
         objc_setAssociatedObject(delegate, &originalMaskKey, mask ?: NSNull.null, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         applyBadge(delegate);
         return;
@@ -67,6 +83,7 @@ void SGRRefreshExplicitBadges(void) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    enabled = SGFlag(SGRKeyHideExplicit, NO);
     %init;
     [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         dispatch_async(dispatch_get_main_queue(), ^{ SGPrefsChanged(); SGRRefreshExplicitBadges(); });

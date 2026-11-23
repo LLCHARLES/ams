@@ -2,7 +2,7 @@
 //
 //     the player's time labels roll only the characters that changed (SGRRollingDigits.m, over SGRRestyle.m's
 //     monospaced labels; PlayerControls.x marks the two labels),
-//     the player's add button as a star (SGRPlainCheck.x, which owns the add button's glyph, Plain checkmark's too).
+//     the player's add button as a star (SGRPlainCheck.x, which owns the add button's glyph, Saved mark's too).
 //
 // The decisions are plain functions (SGRRefinements.m, Foundation only) so harness/player-refinements runs them as
 // they are; the views follow them.
@@ -45,17 +45,32 @@ BOOL SGRRollingDigitsWatched(UILabel *label);
 
 #pragma mark - the add button's glyph
 
-// Off until switched on (the Player page). Wins over Plain checkmark in the player; Plain checkmark keeps the rest.
+// Off until switched on (the Player page). Wins over Saved mark in the player; Saved mark keeps the rest.
 #define SGRKeyPlayerStarAdd @"spotifyglass.redesign.player.starAdd"
 BOOL SGRStarAddOn(void);
+
+// Saved mark (Appearance): what a saved song's add button shows, stored as the index. The unsaved plus stays Spotify's.
+#define SGRKeySavedMark @"spotifyglass.redesign.savedMark"
+typedef NS_ENUM(NSInteger, SGRSavedMark) {
+    SGRSavedMarkSpotify,       // Spotify's circled tick
+    SGRSavedMarkPlainCheck,    // a plain checkmark in the accent
+    SGRSavedMarkDot,           // a filled dot in the accent
+};
+// The mark from what is stored under SGRKeySavedMark (`stored`, -1 when nothing is) and Plain checkmark's switch of
+// before (SGRKeyPlainCheck, read and never written): a stored mark wins, and nothing stored or a value that is none of
+// the marks keeps the old switch's choice, a plain checkmark when it was on and Spotify's when it was not.
+SGRSavedMark SGRSavedMarkFrom(NSInteger stored, BOOL plainCheckOn);
+// The mark the launch started with (SGRPlainCheck.x).
+SGRSavedMark SGRSavedMarkChosen(void);
 
 typedef NS_ENUM(NSInteger, SGRAddGlyph) {
     SGRAddGlyphSpotify,       // Spotify's own plus or circled tick
     SGRAddGlyphPlainCheck,    // a plain checkmark in the accent
+    SGRAddGlyphDot,           // a filled dot in the accent
     SGRAddGlyphStarOutline,   // a star outline in the primary color
     SGRAddGlyphStarFilled,    // a filled star in the accent
 };
 // The glyph of an add button: `saved` is the button's own selected state, `enabled` its enabled state, `inPlayer`
 // whether it is the player's. A disabled button the star would take is left to Spotify, whose own glyph shows it
 // disabled.
-SGRAddGlyph SGRAddGlyphFor(BOOL saved, BOOL enabled, BOOL inPlayer, BOOL starOn, BOOL plainCheckOn);
+SGRAddGlyph SGRAddGlyphFor(BOOL saved, BOOL enabled, BOOL inPlayer, BOOL starOn, SGRSavedMark savedMark);

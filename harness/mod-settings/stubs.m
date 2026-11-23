@@ -29,7 +29,17 @@ static UIViewController *blank(NSString *title) {
 }
 
 #define PAGE(name) UIViewController *name(void) { return blank(@#name); }
-PAGE(SGAdsSettingsPage) PAGE(SGAllFlagsPage) PAGE(SGDSPSettingsPage) PAGE(SGAutoMixSettingsPage)
+PAGE(SGAdsSettingsPage) PAGE(SGAutoMixSettingsPage)
+UIViewController *SGDSPSettingsPage(void) {
+    SGPage *page = [SGPage new];
+    page.title = @"Audio effects";
+    return page;
+}
+UIViewController *SGAllFlagsPage(void) {
+    SGPage *page = [SGPage new];
+    page.title = @"All flags";
+    return page;
+}
 PAGE(SGGesturesSettingsPage) PAGE(SGHeadGesturesSettingsPage) PAGE(SGHomeSettingsPage) PAGE(SGLabsPage)
 PAGE(SGListeningStatsPage) PAGE(SGLiveActivitySettingsPage) PAGE(SGLockScreenWidgetPage) PAGE(SGNavbarSettingsPage)
 PAGE(SGNowPlayingBarSettingsPage) PAGE(SGQueueSettingsPage) PAGE(SGRAlbumSettingsPage) PAGE(SGRArtistSettingsPage)
@@ -62,6 +72,9 @@ void SGLosslessLowerQuality(BOOL lower) {}
 void SGAudioQualitySettingChanged(void) {}
 BOOL SGGeminiForgetKey(void) { return YES; }
 BOOL SGClaudeForgetKey(void) { return YES; }
+NSURL *SGHarnessStorageURI;
+BOOL SGOpenSpotifyURI(NSURL *uri) { SGHarnessStorageURI = uri; return YES; }
+SGModRow *SGNativeVideoSwitchRow(void) { return SGHideRow(@"Switch to video", nil, @"spotifyglass.hideVideoSwitch"); }
 BOOL SGOpenAIForgetKeys(void) { return YES; }
 BOOL SGDeepLForgetKey(void) { return YES; }
 BOOL SGSpicyLyricsForgetKey(void) { return YES; }
@@ -76,7 +89,7 @@ ROW(SGLyricsTranslationLanguageRow) ROW(SGLyricsWordTimingRow) ROW(SGRLyricsText
 ROW(SGBingTranslateRow) ROW(SGDeepLKeyRow) ROW(SGGoogleTranslateRow) ROW(SGLyricsCulturalNotesRow)
 ROW(SGLyricsFuriganaRow) ROW(SGLyricsJapaneseReadingRow) ROW(SGLyricsLanguageRulesRow) ROW(SGLyricsPiPRow)
 ROW(SGLyricsPronunciationNotationRow) ROW(SGRAutoTranslationOrderRow) ROW(SGRAutoTranslationRow)
-ROW(SGRLyricsKeepAwakeRow) ROW(SGSavedTranslationsRow) ROW(SGSimplifyTitlesRow) ROW(SGTranslateEverySongRow)
+ROW(SGRLyricsKeepAwakeRow) ROW(SGRLyricsFullRateRow) ROW(SGSavedTranslationsRow) ROW(SGSimplifyTitlesRow) ROW(SGTranslateEverySongRow)
 ROW(SGRLyricsHideRow)
 ROW(SGTranslateTitlesRow)
 NSString *SGLyricsAIName(SGLyricsAI service) { return @[@"Gemini", @"Claude", @"OpenAI"][service]; }
@@ -91,6 +104,7 @@ NSArray<SGModRow *> *SGOnDeviceTranslatorRows(void) {
     return rows;
 }
 SGModSection *SGSleepTimerSettingsSection(void) { return SGSection(nil, @[]); }
+SGModSection *SGSponsorBlockSettingsSection(void) { return SGSection(nil, @[]); }
 SGModSection *SGRPlayerButtonsSection(void) { return SGSection(nil, @[]); }
 void SGMotionCacheBytes(void (^done)(uint64_t bytes)) { done(0); }
 void SGMotionCacheClear(void (^done)(BOOL complete)) { done(YES); }

@@ -21,6 +21,53 @@
 
 static char kPageGlassKey;
 
+@interface SGLyricsFailureButton : UIButton
+@end
+@implementation SGLyricsFailureButton
+- (instancetype)initWithFrame:(CGRect)frame {
+    if (!(self = [super initWithFrame:frame])) return nil;
+    [self setTitle:SGL(@"settings.lyrics.load_failed", @"Couldn't load lyrics · Retry") forState:UIControlStateNormal];
+    self.titleLabel.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
+    self.titleLabel.adjustsFontForContentSizeCategory = YES;
+    self.titleLabel.numberOfLines = 0;
+    self.titleLabel.textAlignment = NSTextAlignmentCenter;
+    [self setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    self.backgroundColor = [UIColor.blackColor colorWithAlphaComponent:0.85];
+    self.layer.cornerRadius = 16;
+    [self addTarget:self action:@selector(retryLyrics) forControlEvents:UIControlEventTouchUpInside];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refresh) name:SGKaraokeLinesKeptNotification object:nil];
+    [self refresh];
+    return self;
+}
+- (void)refresh {
+    NSString *track = SGKaraokePlayingTrack();
+    self.hidden = !SGLyricsLoadFailed(track);
+    self.enabled = !SGKaraokeLooking(track);
+}
+- (void)retryLyrics { SGLyricsRetry(SGKaraokePlayingTrack()); [self refresh]; }
+- (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
+@end
+
+static char kFailureButtonKey;
+static void addFailureButton(UIView *page) {
+    if (!page.window) return;
+    SGLyricsFailureButton *button = objc_getAssociatedObject(page, &kFailureButtonKey);
+    if (!button) {
+        button = [[SGLyricsFailureButton alloc] initWithFrame:CGRectZero];
+        button.translatesAutoresizingMaskIntoConstraints = NO;
+        [page addSubview:button];
+        [NSLayoutConstraint activateConstraints:@[
+            [button.centerYAnchor constraintEqualToAnchor:page.centerYAnchor],
+            [button.leadingAnchor constraintEqualToAnchor:page.safeAreaLayoutGuide.leadingAnchor constant:24],
+            [button.trailingAnchor constraintEqualToAnchor:page.safeAreaLayoutGuide.trailingAnchor constant:-24],
+            [button.heightAnchor constraintGreaterThanOrEqualToConstant:64]
+        ]];
+        objc_setAssociatedObject(page, &kFailureButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [button refresh];
+    [page bringSubviewToFront:button];
+}
+
 // Our own control, below Spotify's header controls, not an arranged subview of an Encore stack.
 @interface SGLyricsPiPButton : UIButton
 @end
@@ -87,6 +134,7 @@ static UIView *clearAncestors(UIView *view) {
 - (void)layoutSubviews {
     %orig;
     addPiPButton((UIView *)self);
+    addFailureButton((UIView *)self);
     if (!SGFlag(SGKeyLyricsCard, NO)) return;
     UIView *page = (UIView *)self;
     if (page.bounds.size.height < 200) return;

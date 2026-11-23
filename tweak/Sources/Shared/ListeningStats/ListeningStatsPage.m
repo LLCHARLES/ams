@@ -801,7 +801,7 @@ static UIButton *stepButton(NSString *symbol) {
             if (!result.files) {
                 sg_importing = NO;
                 [page.tableView reloadData];
-                showAlert(SGL(@"settings.stats.alert.no_history_found.title", @"No listening history found"), SGL(@"settings.stats.alert.no_history_found.message", @"Choose a Vitrine history export, Spotify StreamingHistory_music or Streaming_History_Audio JSON files, their ZIP, or a folder containing JSON files. Unreadable, unsupported or oversized files are skipped."));
+                showAlert(SGL(@"settings.stats.alert.no_history_found.title", @"No listening history found"), SGL(@"settings.stats.alert.no_history_found.message", @"Choose a Retrine history export, Spotify StreamingHistory_music or Streaming_History_Audio JSON files, their ZIP, or a folder containing JSON files. Unreadable, unsupported or oversized files are skipped."));
                 return;
             }
             [SGListeningLog() merge:result.plays completion:^(NSUInteger added, NSError *error) {
@@ -824,7 +824,7 @@ static SGHistoryPicker *historyPicker(void) {
     return delegate;
 }
 static BOOL busy(SGListeningPage *page) {
-    return !page || sg_importing || sg_exporting || sg_picking || page.loading || SGListeningLog().loadError;
+    return !page || sg_importing || sg_exporting || sg_picking || page.loading || !SGListeningLog() || SGListeningLog().loadError;
 }
 static void pickExport(SGListeningPage *page, BOOL folder) {
     if (busy(page)) return;
@@ -848,7 +848,7 @@ static void exportHistory(SGListeningPage *page) {
         NSError *error;
         NSData *data = SGHistoryJSON(snapshot, &error);
         NSURL *directory = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES] URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
-        NSURL *url = [directory URLByAppendingPathComponent:@"Vitrine-listening-history.json"];
+        NSURL *url = [directory URLByAppendingPathComponent:@"Retrine-listening-history.json"];
         BOOL saved = data && [NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:&error]
                           && [data writeToURL:url options:NSDataWritingAtomic error:&error];
         if (!saved) [NSFileManager.defaultManager removeItemAtURL:directory error:nil];
@@ -926,10 +926,10 @@ UIViewController *SGListeningStatsPage(void) {
     NSString *allTimeTitle = SGL(@"settings.stats.period.all_time", @"All time");
     SGModRow *allTime = SGPageRow(allTimeTitle, ^UIViewController *{ return periodPage(allTimeTitle, 0); });
     allTime.value = ^NSString *{ return read(@"allTime"); };
-    SGModRow *import = SGWithSymbol(SGStatActionRow(SGL(@"settings.stats.action.import", @"Import history"), SGL(@"settings.stats.action.import.subtitle", @"Vitrine JSON or Spotify JSON/ZIP"),
+    SGModRow *import = SGWithSymbol(SGStatActionRow(SGL(@"settings.stats.action.import", @"Import history"), SGL(@"settings.stats.action.import.subtitle", @"Retrine JSON or Spotify JSON/ZIP"),
         ^NSString *{ return sg_importing ? SGL(@"settings.stats.status.importing", @"Importing…") : nil; }, nil), @"square.and.arrow.down");
     SGModRow *folder = SGActionRow(SGL(@"settings.stats.action.import_folder", @"Import a folder"), SGL(@"settings.stats.action.import_folder.subtitle", @"JSON files in the selected folder and its subfolders"), nil);
-    SGModRow *export = SGWithSymbol(SGStatActionRow(SGL(@"settings.stats.action.export", @"Export history"), SGL(@"settings.stats.action.export.subtitle", @"Vitrine JSON, ready to import again"),
+    SGModRow *export = SGWithSymbol(SGStatActionRow(SGL(@"settings.stats.action.export", @"Export history"), SGL(@"settings.stats.action.export.subtitle", @"Retrine JSON, ready to import again"),
         ^NSString *{ return sg_exporting ? SGL(@"settings.stats.status.exporting", @"Exporting…") : nil; }, nil), @"square.and.arrow.up");
     SGModRow *erase = SGWithSymbol(SGActionRow(SGL(@"settings.stats.action.erase", @"Erase listening history"), nil, nil), @"trash");
     erase.color = SGRed();
@@ -942,7 +942,7 @@ UIViewController *SGListeningStatsPage(void) {
             allTime,
             SGStatRow(SGL(@"settings.stats.row.plays", @"Plays"), ^NSString *{ return read(@"plays"); }),
             SGStatRow(SGL(@"settings.stats.row.history", @"History"), ^NSString *{ return read(@"status"); }),
-        ], SGL(@"settings.stats.section.history.footer", @"Streaks use local calendar days when plays ended. A current streak can end yesterday until you listen today. Import Spotify's account or extended streaming history, or Vitrine's own versioned history export. Duplicate plays are skipped. Large selections may need to be imported in smaller batches.")),
+        ], SGL(@"settings.stats.section.history.footer", @"Streaks use local calendar days when plays ended. A current streak can end yesterday until you listen today. Import Spotify's account or extended streaming history, or Retrine's own versioned history export. Duplicate plays are skipped. Large selections may need to be imported in smaller batches.")),
         SGNotedSection(nil, @[SGSwitchRow(SGL(@"settings.stats.record.title", @"Record plays"), nil, SGKeyListeningStats)],
             SGL(@"settings.stats.record.footer", @"A play counts once it has run 30 seconds, or half of a shorter track. History stays on this phone unless you export it.")),
         SGSection(nil, @[import, folder, export]),
@@ -969,6 +969,13 @@ UIViewController *SGListeningStatsPage(void) {
         NSUInteger generation = ++page.generation;
         page.loading = YES;
         values[@"status"] = SGL(@"settings.stats.status.loading", @"Loading…");
+        if (!SGListeningLog()) {
+            page.loading = NO;
+            [page showSummaryError];
+            values[@"status"] = SGL(@"settings.stats.status.error_retry", @"Could not load history. Reopen to retry.");
+            [page.tableView reloadData];
+            return;
+        }
         [SGListeningLog() loadWithCompletion:^{
             SGListeningPage *page = weakPage;
             if (!page || page.generation != generation) return;

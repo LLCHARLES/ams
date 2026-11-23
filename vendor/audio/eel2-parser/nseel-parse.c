@@ -2,6 +2,7 @@
    nseel-compiler.c. Also rand() and __clear_cache, which the vendored EEL2 files call and do not define.
    spoti.pw's own code (../README.md). */
 #include <math.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include "ns-eel-int.h"
 
@@ -180,7 +181,9 @@ static opcodeRec *subscripts(Parser *p, opcodeRec *value, int *assignable) {
         advance(p);
         opcodeRec *index = NULL;
         if (p->token != ']') {
+            if (!enter(p)) return NULL;
             index = expression(p);
+            p->depth--;
             if (p->failed) return NULL;
             if (p->token != ']') return fail(p, &p->location);
         }
@@ -217,7 +220,9 @@ static opcodeRec *assignment(Parser *p) {
         if (p->token == '=' || p->token == TOKEN_ADD_OP) {
             const char *function = p->token == '=' ? "strcpy" : "strcat";
             advance(p);
+            if (!enter(p)) return NULL;
             opcodeRec *source = ifElse(p);
+            p->depth--;
             return p->failed ? NULL : nseel_createFunctionByName(p->context, function, 2, target, source, NULL);
         }
     } else {
@@ -229,7 +234,9 @@ static opcodeRec *assignment(Parser *p) {
     int function = assignFunction(p->token);
     if (!assignable || function < 0) return target;
     advance(p);
+    if (!enter(p)) return NULL;
     opcodeRec *source = ifElse(p);
+    p->depth--;
     return p->failed ? NULL : nseel_createSimpleCompiledFunction(p->context, function, 2, target, source);
 }
 
@@ -323,12 +330,16 @@ int nseelparse(compileContext *context) {
     return 0;
 }
 
-/* rand(x): uniform in [0, x), x at least 1. xorshift64*, its state the process's like upstream's. */
+/* rand(x): uniform in [0, x), x at least 1. xorshift64*, its state the process's like upstream's. Scripts on
+   two threads (a crossfade's old and new engine) may draw at once: a step one of them loses only repeats a
+   draw, but the state itself is never torn. */
 EEL_F NSEEL_CGEN_CALL nseel_int_rand(EEL_F f) {
-    static uint64_t state = 0x9e3779b97f4a7c15ull;
+    static _Atomic uint64_t shared = 0x9e3779b97f4a7c15ull;
+    uint64_t state = atomic_load_explicit(&shared, memory_order_relaxed);
     state ^= state >> 12;
     state ^= state << 25;
     state ^= state >> 27;
+    atomic_store_explicit(&shared, state, memory_order_relaxed);
     EEL_F x = floor(f);
     if (x < 1) x = 1;
     return (EEL_F)((state * 0x2545f4914f6cdd1dull) >> 11) * (1.0 / 9007199254740992.0) * x;

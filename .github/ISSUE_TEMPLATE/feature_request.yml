@@ -1,36 +1,36 @@
-name: Feature request
-description: Something the mod could do or look like
+name: 기능 제안 / Feature request
+description: 모드에 있었으면 하는 기능이나 디자인 / Something the mod could do or look like
 title: "[Feature Request] "
 labels: ["enhancement"]
 body:
   - type: checkboxes
     id: checks
     attributes:
-      label: Before you file
+      label: 작성 전 확인 / Before you file
       options:
-        - label: I searched the open and closed issues and this isn't requested yet.
+        - label: 열린 이슈와 닫힌 이슈를 검색했고, 아직 제안되지 않았습니다. / I searched the open and closed issues and this isn't requested yet.
           required: true
   - type: dropdown
     id: look
     attributes:
-      label: Which look is this for?
+      label: 어떤 화면에 대한 제안인가요? / Which look is this for?
       options:
-        - Redesign
-        - Spotify's own look
-        - Both
+        - 재설계 / Redesign
+        - Spotify 기본 화면 / Spotify's own look
+        - 둘 다 / Both
     validations:
       required: true
   - type: textarea
     id: what
     attributes:
-      label: What you'd like, and why
-      description: What would you use it for? If it's from Apple Music or another app, say which screen.
+      label: 원하는 기능과 이유 / What you'd like, and why
+      description: 어디에 쓰고 싶은가요? Apple Music이나 다른 앱에서 본 기능이라면 어느 화면인지 적어 주세요. / What would you use it for? If it's from Apple Music or another app, say which screen.
     validations:
       required: true
   - type: textarea
     id: media
     attributes:
-      label: Screenshots or mockups
-      description: Of Spotify today, and of the app you're comparing to.
+      label: 스크린샷 또는 목업 / Screenshots or mockups
+      description: 현재 Spotify 화면과 비교 대상 앱의 화면 / Of Spotify today, and of the app you're comparing to.
     validations:
       required: false

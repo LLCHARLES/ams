@@ -74,6 +74,11 @@ static UIButton *lyricsMenuIn(UIView *stage) {
 }
 
 - (void)runAdaptiveChecks {
+    BOOL checkCompactHeader = !getenv("HARNESS_NO_LYRICS");
+    BOOL checkLandscapeBadge = getenv("HARNESS_LANDSCAPE") != NULL;
+    __block CGRect originalHost, originalBand;
+    __block UIUserInterfaceSizeClass originalWidthClass;
+    __block UIView *compactOverlay;
     runScript(@[
         @[^BOOL {
             return SGRNowPlayingArtwork(NULL, NULL) != nil;
@@ -104,19 +109,35 @@ static UIButton *lyricsMenuIn(UIView *stage) {
                 HARNESS_CHECK(CGRectContainsRect(self.window.rootViewController.view.bounds, self->_host.frame));
                 HARNESS_CHECK([self->_host.accessibilityElements indexOfObject:bottom] <
                               [self->_host.accessibilityElements indexOfObject:overlay]);
-                SGRGlyphButton *queue = (id)SGRFindByIdentifier(self->_host, @"vitrine.player.queue", NULL);
+                SGRGlyphButton *queue = (id)SGRFindByIdentifier(self->_host, @"retrine.player.queue", NULL);
                 HARNESS_CHECK(queue && queue.accessibilityLabel.length && queue.bounds.size.width >= 44);
                 queue.onTap();
                 HARNESS_CHECK(SGRPlayerQueueSideShown());
-                UITableView *list = (id)SGRFindByIdentifier(stage, @"vitrine.queue", NULL);
+                UITableView *list = (id)SGRFindByIdentifier(stage, @"retrine.queue", NULL);
                 HARNESS_CHECK(list && list.window && list.bounds.size.height > 100);
                 HARNESS_CHECK([list numberOfSections] > 0);
                 SGRPlayerToggleLyrics();
                 HARNESS_CHECK(getenv("HARNESS_NO_LYRICS") ? SGRPlayerQueueSideShown() : SGRPlayerLyricsOpen());
+                // Spotify hides the outgoing cover cell while rebuilding a resized page.
+                // Restoration must not depend on finding that hidden page again.
+                self->_tilt.hidden = YES;
                 self.window.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
                 [self layOut];
                 HARNESS_CHECK(!SGRPlayerTwoColumns() && !overlay.superview);
+                HARNESS_CHECK(self->_covers.alpha == 1);
                 HARNESS_CHECK(fabs(bottom.frame.size.width - self->_host.bounds.size.width) < 1);
+                self->_tilt.hidden = NO;
+                [self layOut];
+                CGRect fullHost = self->_host.frame;
+                CGRect resizedHost = fullHost;
+                resizedHost.size.width += 40;
+                self->_host.frame = resizedHost;
+                CGRect band = SGRPlayerArtworkAreaIn(self->_host);
+                CGRect header = [self->_units[0].view convertRect:self->_units[0].view.bounds toView:self->_host];
+                HARNESS_CHECK(!CGRectIsNull(band) && CGRectGetMinY(band) >= CGRectGetMaxY(header));
+                HARNESS_CHECK(SGRFindByIdentifier(self->_units[0].view, @"now-playing-minimize-button", NULL).alpha == 0);
+                HARNESS_CHECK(SGRFindByIdentifier(self->_units[0].view, @"Context menu", NULL).alpha == 0);
+                self->_host.frame = fullHost;
                 CGRect singleControls = bottom.frame;
                 self.window.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassRegular;
                 [self layOut];
@@ -148,6 +169,99 @@ static UIButton *lyricsMenuIn(UIView *stage) {
                 NSLog(@"[harness] adaptive frames: artwork %@ controls %@ side %@", NSStringFromCGRect(art),
                       NSStringFromCGRect(controls), NSStringFromCGRect(side));
             }
+        }],
+        // Issue #24: turned to landscape, the iPad player keeps its time row, and the audio quality badge for a song
+        // Spotify reports High shows between the times, apart from the tap to seek, and opens its details.
+        @[@0, ^{
+            if (!checkLandscapeBadge) return;
+            HARNESS_CHECK(UIInterfaceOrientationIsLandscape(self.window.windowScene.interfaceOrientation));
+            UIViewController *durationUnit = self->_units[2];
+            UIView *unit = durationUnit.view;
+            NSArray<UILabel *> *labels;
+            UISlider *slider = spotifyBar(unit, &labels);
+            [NSUserDefaults.standardUserDefaults setBool:YES forKey:SGKeyPlayerAudioQuality];
+            SGAudioQualitySettingChanged();
+            SPTPlayerState *state = SGPlayerState();
+            SGRHarnessQuality *quality = [SGRHarnessQuality new];
+            quality.bitrateLevel = 3;
+            quality.strategy = 1;
+            [state setValue:quality forKey:@"playbackQuality"];
+            extern void SGRHarnessReport(SPTPlayerState *state);
+            SGRHarnessReport(state);
+            [durationUnit viewDidLayoutSubviews];
+            UIView *badge = SGAudioQualityShownBadge(unit);
+            if (!badge) HARNESS_FAIL(@"no audio quality badge in the landscape %.0fpt time row", unit.bounds.size.width);
+            CGRect take = labels.firstObject.superview.frame, remaining = labels.lastObject.superview.frame;
+            HARNESS_CHECK(CGRectGetMinX(badge.frame) - CGRectGetMaxX(take) >= 7.5 && CGRectGetMinX(remaining) - CGRectGetMaxX(badge.frame) >= 7.5);
+            // The badge reaches below the unit, over the controls' unit: its tap is on the view holding both, which a
+            // touch on the badge reaches, and the top of the badge, inside the unit, does not seek while beside it does.
+            UIGestureRecognizer *tap = [badge valueForKey:@"tap"];
+            CGPoint onBadge = [self.window convertPoint:badge.center fromView:unit];
+            HARNESS_CHECK(tap.view == unit.superview && [[self.window hitTest:onBadge withEvent:nil] isDescendantOfView:tap.view]);
+            CGFloat top = CGRectGetMinY(badge.frame) + 2;
+            HARNESS_CHECK(top < CGRectGetMaxY(unit.bounds));
+            HARNESS_CHECK(!SGRSeekTapLands(unit, slider, CGPointMake(badge.center.x, top)));
+            HARNESS_CHECK(SGRSeekTapLands(unit, slider, CGPointMake(CGRectGetMinX(badge.frame) - 6, top)));
+            NSLog(@"[harness] landscape badge %@ (%@) between times %@ and %@", NSStringFromCGRect(badge.frame), badge.accessibilityLabel,
+                  NSStringFromCGRect(take), NSStringFromCGRect(remaining));
+            HARNESS_CHECK([badge accessibilityActivate]);
+        }],
+        @[^BOOL {
+            return !checkLandscapeBadge
+                || [self.window.rootViewController.presentedViewController isKindOfClass:NSClassFromString(@"SGAudioQualityPanel")];
+        }, ^{
+            if (!checkLandscapeBadge) return;
+            [self.window.rootViewController dismissViewControllerAnimated:NO completion:nil];
+            [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyPlayerAudioQuality];
+            SGAudioQualitySettingChanged();
+        }],
+        @[@0, ^{
+            if (!checkCompactHeader) return;
+            originalHost = self->_host.frame;
+            UIView *band = self->_tilt.superview.superview;
+            originalBand = band.frame;
+            originalWidthClass = self.window.traitCollection.horizontalSizeClass;
+            self.window.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassCompact;
+            CGRect compact = originalHost;
+            compact.size.width = MIN(compact.size.width, 375);
+            self->_host.frame = compact;
+            // During resizing the artwork band can still begin above the stationary header.
+            CGRect staleBand = originalBand;
+            staleBand.origin.y = 0;
+            band.frame = staleBand;
+            [self layOut];
+            HARNESS_CHECK(!SGRPlayerTwoColumns() && !SGRPlayerLyricsOpen());
+            SGRPlayerToggleLyrics();
+            compactOverlay = firstOfClass(self->_host, @"SGRPlayerLyricsOverlay");
+            HARNESS_CHECK(SGRPlayerLyricsOpen() && compactOverlay.superview == self->_host);
+        }],
+        @[^BOOL {
+            if (!checkCompactHeader) return YES;
+            UIView *thumb = [compactOverlay valueForKey:@"thumb"], *stage = [compactOverlay valueForKey:@"stage"];
+            return thumb.layer.presentationLayer && !thumb.layer.animationKeys.count &&
+                   stage.layer.presentationLayer.opacity > 0.99;
+        }, ^{
+            if (!checkCompactHeader) return;
+            UIView *thumb = [compactOverlay valueForKey:@"thumb"];
+            CALayer *drawn = thumb.layer.presentationLayer, *host = self->_host.layer.presentationLayer;
+            HARNESS_CHECK(drawn && host && drawn.opacity > 0.99);
+            CGRect thumbnail = [drawn convertRect:drawn.bounds toLayer:host];
+            UIView *header = self->_units[0].view;
+            CGRect headerFrame = [header convertRect:header.bounds toView:self->_host];
+            if (CGRectGetMinY(thumbnail) < CGRectGetMaxY(headerFrame))
+                HARNESS_FAIL(@"compact lyrics thumbnail %@ overlaps header %@", NSStringFromCGRect(thumbnail), NSStringFromCGRect(headerFrame));
+            NSLog(@"[harness] rendered compact lyrics thumbnail %@ below header %@", NSStringFromCGRect(thumbnail), NSStringFromCGRect(headerFrame));
+            SGRPlayerToggleLyrics();
+        }],
+        @[^BOOL {
+            return !checkCompactHeader || !compactOverlay.superview;
+        }, ^{
+            if (!checkCompactHeader) return;
+            self->_host.frame = originalHost;
+            self->_tilt.superview.superview.frame = originalBand;
+            self.window.traitOverrides.horizontalSizeClass = originalWidthClass;
+            [self layOut];
+            [self layOut];
         }],
         @[^BOOL {
             if (!SGRPlayerTwoColumns() || SGRPlayerQueueSideShown()) return YES;

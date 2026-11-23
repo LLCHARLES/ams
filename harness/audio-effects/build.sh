@@ -33,7 +33,7 @@ if [ "$1" = presets ]; then
     mkdir -p "$(dirname "$OUT")"
     xcrun clang -fobjc-arc -O0 -g -Wall -Werror -target arm64-apple-macos13.0 -I ../autoeq/shim -I "$SRC" -I "$FX" \
         preset-files.m "$FX"/AudioEffectsPresets.m "$FX"/AutoEq.m "$FX"/AudioEffectsSettings.m "$FX"/AudioEffectsFiles.m "$SRC"/Core/SGPrefs.m \
-        "$SRC"/Core/SGLocalize.m -framework Foundation -o "$OUT"
+        "$SRC"/Core/SGLocalize.m -framework Foundation "$SRC/Core/SGDataRoot.m" -o "$OUT"
     echo "built $OUT"
     exit
 fi
@@ -44,7 +44,7 @@ if [ "$1" = route ]; then
     mkdir -p "$(dirname "$OUT")"
     xcrun clang -fobjc-arc -O0 -g -Wall -Werror -target arm64-apple-macos13.0 -I ../autoeq/shim -I "$SRC" -I "$FX" \
         route.m "$FX"/AudioEffectsPresets.m "$FX"/AutoEq.m "$FX"/AudioEffectsSettings.m "$FX"/AudioEffectsFiles.m "$SRC"/Core/SGPrefs.m \
-        "$SRC"/Core/SGLocalize.m -framework Foundation -o "$OUT"
+        "$SRC"/Core/SGLocalize.m -framework Foundation "$SRC/Core/SGDataRoot.m" -o "$OUT"
     echo "built $OUT"
     exit
 fi

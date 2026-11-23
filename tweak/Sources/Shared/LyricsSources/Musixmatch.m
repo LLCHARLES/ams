@@ -6,22 +6,31 @@
 // no id, so for one the matcher searches by its names and length (q_track, q_artist, q_album, q_duration).
 #import "Core/SGCore.h"
 #import "LyricsSources.h"
+#import "LyricsHosts.h"
 #import "Shared/LocalFiles/LocalFiles.h"
 
 static NSString *const kAPI = @"https://apic-appmobile.musixmatch.com/ws/1.1/";
 static NSString *const kAppID = @"mac-ios-v2.0";
 static NSString *const kTokenKey = @"spotifyglass.musixmatch.token";
-static const NSTimeInterval kTimeout = 5;
+static const NSTimeInterval kTimeout = SGLyricsRequestTimeoutSeconds;
 // After Musixmatch refused a token, typically with a captcha, it is not asked again for this long.
-static const NSTimeInterval kTokenPause = 600;
+static const NSTimeInterval kTokenPause = SGLyricsCredentialPauseSeconds;
 // A pause this long between two richsync lines gets a ♪ line, so Spotify's page does not hold the last one.
 static const NSInteger kBreakMs = 3000;
 static const NSUInteger kKeptTracks = 40;
 
 // Main queue only. NSNull is kept for a track Musixmatch has nothing for.
+@interface SGMusixmatchLookup : NSObject
+@property (nonatomic, strong) SGLyricsRequestContext *transport;
+@property (nonatomic, strong) NSMutableArray *subscribers;
+@end
+@implementation SGMusixmatchLookup
+@end
+
 static NSMutableDictionary<NSString *, id> *sg_kept;
-static NSMutableDictionary<NSString *, NSMutableArray *> *sg_waiting;
+static NSMutableDictionary<NSString *, SGMusixmatchLookup *> *sg_waiting;
 static NSMutableArray<void (^)(NSString *, BOOL)> *sg_tokenWaiting;
+static SGLyricsRequestContext *sg_tokenRequest;
 static NSDate *sg_tokenRefused;
 static BOOL sg_tokenFailed;
 // Musixmatch's own id of a track, by Spotify's, as the lyrics call matched it; translations go by it.
@@ -81,6 +90,7 @@ static NSURLRequest *requestFor(NSString *method, NSDictionary<NSString *, NSStr
     }];
     url.queryItems = items;
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url.URL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:kTimeout];
+    SGLyricsMarkRequest(request);
     [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
     [request setValue:@"10.1.1" forHTTPHeaderField:@"x-mxm-app-version"];
     [request setValue:@"Musixmatch/2025120901 CFNetwork/3860.300.31 Darwin/25.2.0" forHTTPHeaderField:@"X-User-Agent"];
@@ -88,15 +98,20 @@ static NSURLRequest *requestFor(NSString *method, NSDictionary<NSString *, NSStr
 }
 
 static void call(SGLyricsRequestContext *context, NSString *method, NSDictionary<NSString *, NSString *> *query, void (^done)(NSDictionary *message)) {
-    [[NSURLSession.sharedSession dataTaskWithRequest:requestFor(method, query) completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    if (context.cancelled) return;
+    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:requestFor(method, query) completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         SGLyricsNoteReply(response, error);
         [context noteResponse:response error:error];
         id message = dig(jsonOf(data), @"message");
         NSInteger status = integerOf(dig(message, @"header/status_code"));
-        [context noteFailure:status == 429 || status >= 500];
+        [context noteFailure:!message || (status != 200 && status != 404)];
         if (error || !message) SGLog(@"musixmatch: %@ failed: status %ld, error %@ (%ld)", method, (long)[(NSHTTPURLResponse *)response statusCode], error.domain, (long)error.code);
-        dispatch_async(dispatch_get_main_queue(), ^{ done([message isKindOfClass:NSDictionary.class] ? message : nil); });
-    }] resume];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!context.cancelled) done([message isKindOfClass:NSDictionary.class] ? message : nil);
+        });
+    }];
+    [context trackTask:task];
+    [task resume];
 }
 
 static void withToken(SGLyricsRequestContext *context, void (^use)(NSString *token)) {
@@ -110,20 +125,38 @@ static void withToken(SGLyricsRequestContext *context, void (^use)(NSString *tok
         use(nil);
         return;
     }
-    [sg_tokenWaiting addObject:^(NSString *token, BOOL failed) {
+    void (^waiter)(NSString *, BOOL) = ^(NSString *token, BOOL failed) {
         [context noteFailure:failed];
-        use(token);
+        if (!context.cancelled) use(token);
+    };
+    [sg_tokenWaiting addObject:waiter];
+    __weak id weakWaiter = waiter;
+    [context onCancel:^{
+        void (^detach)(void) = ^{
+            if (weakWaiter) [sg_tokenWaiting removeObjectIdenticalTo:weakWaiter];
+            if (!sg_tokenWaiting.count) {
+                SGLyricsRequestContext *request = sg_tokenRequest;
+                sg_tokenRequest = nil;
+                [request cancelRequests];
+            }
+        };
+        if (NSThread.isMainThread) detach();
+        else dispatch_async(dispatch_get_main_queue(), detach);
     }];
     if (sg_tokenWaiting.count > 1) return;
-    SGLyricsRequestContext *request = [SGLyricsRequestContext new];
+    SGLyricsRequestContext *request = sg_tokenRequest = [SGLyricsRequestContext new];
     call(request, @"token.get", @{}, ^(NSDictionary *message) {
+        if (sg_tokenRequest != request) return;
+        sg_tokenRequest = nil;
         id fresh = dig(message, @"body/user_token");
         BOOL usable = [fresh isKindOfClass:NSString.class] && [fresh length] && ![fresh isEqualToString:@"UpgradeRequired"];
+        [request noteFailure:!usable];
         SGLog(@"musixmatch: token %@ (status %@, hint %@)", usable ? @"received" : @"refused", dig(message, @"header/status_code"), dig(message, @"header/hint"));
         if (usable) [NSUserDefaults.standardUserDefaults setObject:fresh forKey:kTokenKey];
         else { sg_tokenRefused = NSDate.date; sg_tokenFailed = request.failed; }
         NSArray<void (^)(NSString *, BOOL)> *waiting = [sg_tokenWaiting copy];
         [sg_tokenWaiting removeAllObjects];
+        [request finishRequests];
         for (void (^waiter)(NSString *, BOOL) in waiting) waiter(usable ? fresh : nil, request.failed);
     });
 }
@@ -237,13 +270,17 @@ static void noteCommontrack(NSString *trackID, id commontrack) {
 }
 
 static void finish(SGLyricsRequestContext *context, NSString *trackID, SGLyricsResult *lyrics, BOOL answered) {
+    SGMusixmatchLookup *lookup = sg_waiting[trackID];
+    if (lookup.transport != context || context.cancelled) return;
     if (answered && !context.failed) {
         if (sg_kept.count >= kKeptTracks) [sg_kept removeAllObjects];
         sg_kept[trackID] = lyrics ?: NSNull.null;
     }
-    NSArray *waiting = sg_waiting[trackID];
+    NSArray *waiting = [lookup.subscribers copy];
+    [lookup.subscribers removeAllObjects];
     [sg_waiting removeObjectForKey:trackID];
     SGLyricsAsk emptyNameSearch = context.emptyNameSearch;
+    [context finishRequests];
     for (void (^done)(SGLyricsResult *, BOOL, SGLyricsAsk) in waiting) done(lyrics, context.failed, emptyNameSearch);
 }
 
@@ -284,6 +321,11 @@ static void ask(SGLyricsRequestContext *context, NSString *trackID, NSDictionary
                 ask(context, trackID, match, NO);
                 return;
             }
+            if (status == 401) {
+                [NSUserDefaults.standardUserDefaults removeObjectForKey:kTokenKey];
+                sg_tokenRefused = NSDate.date;
+                sg_tokenFailed = YES;
+            }
             id calls = dig(message, @"body/macro_calls");
             if (status != 200 || ![calls isKindOfClass:NSDictionary.class]) {
                 finish(context, trackID, nil, NO);
@@ -292,7 +334,7 @@ static void ask(SGLyricsRequestContext *context, NSString *trackID, NSDictionary
             BOOL emptyNameSearch = match[@"q_track"] && integerOf(dig(calls, @"matcher.track.get/message/header/status_code")) == 404;
             for (id reply in [calls allValues]) {
                 NSInteger substatus = integerOf(dig(reply, @"message/header/status_code"));
-                [context noteFailure:substatus == 429 || substatus >= 500];
+                [context noteFailure:substatus != 200 && substatus != 404];
                 if (substatus != 200 && substatus != 404) emptyNameSearch = NO;
             }
             if (emptyNameSearch) context.emptyNameSearch = ^(SGLyricsQuery *again, void (^done)(SGLyricsResult *)) {
@@ -337,18 +379,38 @@ SGLyricsAsk SGMusixmatchAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
         done(kept == NSNull.null ? nil : kept);
         return;
     }
-    NSMutableArray *waiting = sg_waiting[trackID];
+    if (query.requestContext.cancelled) return;
+    SGMusixmatchLookup *lookup = sg_waiting[trackID];
+    BOOL start = lookup == nil;
+    if (start) {
+        lookup = [SGMusixmatchLookup new];
+        lookup.transport = [SGLyricsRequestContext new];
+        lookup.subscribers = [NSMutableArray array];
+        sg_waiting[trackID] = lookup;
+    }
     void (^completed)(SGLyricsResult *, BOOL, SGLyricsAsk) = ^(SGLyricsResult *result, BOOL failed, SGLyricsAsk emptyNameSearch) {
+        if (query.requestContext.cancelled) return;
         [query.requestContext noteFailure:failed];
         query.requestContext.emptyNameSearch = emptyNameSearch;
         done(result);
     };
-    if (waiting) {
-        [waiting addObject:[completed copy]];
-        return;
-    }
-    sg_waiting[trackID] = [NSMutableArray arrayWithObject:[completed copy]];
-    ask(query.requestContext, trackID, match, YES);
+    [lookup.subscribers addObject:completed];
+    __weak SGMusixmatchLookup *weakLookup = lookup;
+    __weak id weakCompleted = completed;
+    [query.requestContext onCancel:^{
+        void (^retire)(void) = ^{
+            SGMusixmatchLookup *active = weakLookup;
+            if (!active || sg_waiting[trackID] != active) return;
+            if (weakCompleted) [active.subscribers removeObjectIdenticalTo:weakCompleted];
+            if (!active.subscribers.count) {
+                [sg_waiting removeObjectForKey:trackID];
+                [active.transport cancelRequests];
+            }
+        };
+        if (NSThread.isMainThread) retire();
+        else dispatch_async(dispatch_get_main_queue(), retire);
+    }];
+    if (start) ask(lookup.transport, trackID, match, YES);
 };
 
 #pragma mark - translations

@@ -26,5 +26,6 @@ UIViewController *SGRSearchSettingsPage(void);
 extern NSString *const SGRSearchListIdentifier;
 
 // SearchSections.x: measures how far the cards sit below the top of the list because of the sections collapsed above
-// them, and moves every cell of the list up by that much. Cheap to call on every layout pass of the page.
+// them, and moves every cell of the list up by that much and the end of its content with them. Cheap to call on every
+// layout pass of the page.
 void SGRSearchCloseGap(UICollectionView *list);

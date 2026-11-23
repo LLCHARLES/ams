@@ -12,11 +12,12 @@
 // clip comes, and for a track that has none, the lines are drawn as Lyrics draws them; the clip coming
 // changes every ID, so the line showing is offered again over it.
 #import <MediaPlayer/MediaPlayer.h>
+#import <stdatomic.h>
 #import <CommonCrypto/CommonDigest.h>
-#import <os/lock.h>
 #import <objc/runtime.h>
 #import "Core/SGCore.h"
 #import "Core/SGFileHash.h"
+#import "Core/SGDataRoot.h"
 #import "LockScreenLyrics.h"
 #import "SGLyricsClip.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
@@ -24,11 +25,11 @@
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 #import "Shared/Player/NowPlayingExtras.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/Player/SpeedPitch.h"
 #import "Shared/Player/SGLastTrack.h"
 #import "Shared/LyricsBackground/LyricsBackground.h"
 
-// How often to look while the line cannot be worked out yet.
-static const NSTimeInterval kTick = 0.25;
+extern NSTimeInterval SGLockLyricsRequestMissing(NSString *track);
 // A line's clip over moving artwork lasts from the line's start to the next one's, a second longer for the
 // lock screen showing it late, and between these: the cost of a clip is its length.
 static const double kShortest = 2, kLongest = 8;
@@ -53,10 +54,6 @@ static const double kShortest = 2, kLongest = 8;
 
 static dispatch_source_t sg_timer;
 static CFAbsoluteTime sg_due;
-// Where the song was, how fast it went and when, as the timer was armed: a report that strays from it is a seek.
-static NSInteger sg_armedMs;
-static double sg_armedSpeed;
-static CFAbsoluteTime sg_armedAt;
 // Lyrics are picked and the player is not paused: only then does the timer run.
 static BOOL sg_running;
 static void tick(void);
@@ -112,8 +109,7 @@ static BOOL sg_clipWorker;
 static dispatch_queue_t sg_previewQueue;
 
 static NSURL *folder(void) {
-    NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-    return [caches URLByAppendingPathComponent:@"Vitrine/Lyrics" isDirectory:YES];
+    return [SGDataRoot(NSCachesDirectory) URLByAppendingPathComponent:@"Lyrics" isDirectory:YES];
 }
 
 static BOOL currentLine(SGLockLine *line) {
@@ -162,7 +158,7 @@ static void enqueueClip(void (^job)(void), BOOL prefetch) {
 
 // The lock screen's last asks, as absolute times: lines are drawn ahead only while it is showing them, previews and
 // clips each by their own asks, as it asks for clips far less often.
-static CFAbsoluteTime sg_askedAt, sg_previewAskedAt;
+static _Atomic(CFAbsoluteTime) sg_askedAt, sg_previewAskedAt;
 // Previews drawn ahead, by artwork ID.
 static NSCache<NSString *, UIImage *> *sg_previews;
 // Keep the composed still with its animated offer. MediaPlayer falls back to the ordinary artwork
@@ -224,17 +220,19 @@ static UIImage *previewFor(NSString *artworkID, SGLockLine *line, CGSize size) {
 static BOOL writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
     if (!currentLine(line)) return NO;
     NSURL *file = clipFile(artworkID);
+    if (!file) return NO;
     if ([NSFileManager.defaultManager fileExistsAtPath:file.path]) return YES;
     CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
     BOOL tryMotion = line.motion && !motionFailed(line.motion);
     BOOL over = tryMotion && SGLyricsClipWriteOverMotion(file, line.motion, line.previous, line.line, line.translation, line.next, line.from,
-                                                         line.seconds, line.layout);
+                                                         line.seconds, line.layout, ^BOOL { return currentLine(line); });
+    if (!currentLine(line)) return NO;
     if (tryMotion && !over) markMotionFailed(line.motion, artworkID);
     BOOL ok = over;
     if (!ok) {
         CGImageRef backdrop = newBackdrop(line, size);
         ok =SGLyricsClipWriteWithLayout(file, backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
-                                         size, line.style, line.layout);
+                                         size, line.style, line.layout, ^BOOL { return currentLine(line); });
         CGImageRelease(backdrop);
     }
     // The first few of a launch of each kind, and any that fails: one a line would fill the log.
@@ -249,6 +247,7 @@ static BOOL writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
 // The next line's preview and clip, drawn while this one shows: a line change then hands both over at once, where
 // drawing them on request left the lock screen on the plain cover for half a second.
 static void drawAhead(NSString *artworkID, SGLockLine *line) {
+    if (NSProcessInfo.processInfo.lowPowerModeEnabled) return;
     CFAbsoluteTime time = CFAbsoluteTimeGetCurrent();
     CGSize size = line.size;
     if (time - sg_previewAskedAt <= 15) dispatch_async(sg_previewQueue, ^{ previewFor(artworkID, line, size); });
@@ -315,7 +314,7 @@ static MPMediaItemAnimatedArtwork *artworkFor(NSString *artworkID, SGLockLine *l
         return previous;
     }];
     sg_stillArtwork = still;
-    objc_setAssociatedObject(artwork, &sg_stillKey, still, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(artwork, &sg_stillKey, still, OBJC_ASSOCIATION_RETAIN);
     return artwork;
 }
 
@@ -345,7 +344,7 @@ static MPMediaItemAnimatedArtwork *artworkFor(NSString *artworkID, SGLockLine *l
     NSMutableDictionary *composed = [info mutableCopy];
     if (still) {
         // Artist-row ticks and Spotify/extras resends must not look like another still-artwork change.
-        objc_setAssociatedObject(still, &sg_nativeKey, native ?: NSNull.null, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(still, &sg_nativeKey, native ?: NSNull.null, OBJC_ASSOCIATION_RETAIN);
         composed[MPMediaItemPropertyArtwork] = still;
     } else if (native) {
         composed[MPMediaItemPropertyArtwork] = native;
@@ -470,7 +469,7 @@ static SGLockLine *lineAt(NSArray<SGKaraokeLine *> *lines, NSInteger index, BOOL
 }
 
 // Offers the artwork for where the song is, and says in how many seconds of the song's time to look again:
-// kTick while it cannot be worked out yet, negative for not until something else changes. Past a line's sung
+// negative for not until something else changes. Past a line's sung
 // end by SGKaraokeBreakMs, with the next line at least that far off, the line rests: it is let go and only the
 // next one shows, dimmed (as the artist row does in LockScreenLyrics.x).
 static NSTimeInterval update(void) {
@@ -480,7 +479,7 @@ static NSTimeInterval update(void) {
         NSString *trackID = SGKaraokePlayingTrack();
         if (!trackID || !state) {
             clear();
-            return kTick;
+            return -1;
         }
         if (![trackID isEqualToString:sg_track]) {
             sg_track = trackID;
@@ -493,8 +492,10 @@ static NSTimeInterval update(void) {
             invalidateRenders();
             // The worker owns cleanup too: no new-track request may overtake it.
             enqueueClip(^{
-                [NSFileManager.defaultManager removeItemAtURL:folder() error:nil];
-                [NSFileManager.defaultManager createDirectoryAtURL:folder() withIntermediateDirectories:YES attributes:nil error:nil];
+                NSURL *dir = folder();
+                if (!dir) return;
+                [NSFileManager.defaultManager removeItemAtURL:dir error:nil];
+                [NSFileManager.defaultManager createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:nil];
             }, NO);
         }
         NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
@@ -506,7 +507,7 @@ static NSTimeInterval update(void) {
                 invalidateRenders();
             }
         }
-        if (!lines) SGKaraokeRequestLyrics(trackID);
+        NSTimeInterval retry = lines ? -1 : SGLockLyricsRequestMissing(trackID);
         // Plain text has no line being sung, nor has a song whose lines are not in yet: the lock screen keeps the cover,
         // or under Moving artwork with lyrics shows the moving artwork plain (LockScreenMotion.x, which has it).
         if (!lines.count || SGKaraokeLinesTiming(lines) == SGKaraokeTimingNone) {
@@ -517,10 +518,10 @@ static NSTimeInterval update(void) {
             }
             clear();
             SGLockMotionShowPlain(YES);
-            return lines ? -1 : kTick;
+            return retry;
         }
         NSInteger position = SGKaraokePositionMs();
-        if (position < 0) return kTick;
+        if (position < 0) return -1;
         position -= SGKaraokeDelayMs();
         NSInteger index = SGKaraokeLeadLine(lines, position);
         BOOL translationOn = SGFlag(SGKeyLockScreenTranslation, NO);
@@ -656,10 +657,7 @@ static void tick(void) {
     }
     double speed = SGPlayerState().playbackSpeed;
     NSTimeInterval seconds = wait / (speed > 0 ? speed : 1);
-    sg_armedMs = SGKaraokePositionMs();
-    sg_armedSpeed = speed;
-    sg_armedAt = CFAbsoluteTimeGetCurrent();
-    sg_due = sg_armedAt + seconds;
+    sg_due = CFAbsoluteTimeGetCurrent() + seconds;
     dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
 }
 
@@ -678,20 +676,11 @@ static void tick(void) {
         clear();
     }
 }
-// A seek, or a new speed, moves the next change; a report where the song is where it was headed does not.
+// Even a small position-only seek can cross a deadline. Paused reports can carry late artwork.
 - (void)playerStateDidReport:(SPTPlayerState *)state {
-    // Metadata is absent from the change key; a paused report can carry a late cover URL.
-    if (state.isPaused) {
-        tick();
-        return;
-    }
-    if (!sg_running) return;
-    double speed = sg_armedSpeed > 0 ? sg_armedSpeed : 1;
-    double expected = sg_armedMs + (CFAbsoluteTimeGetCurrent() - sg_armedAt) * 1000 * speed;
-    // As SGKaraokePositionMs reads it, from the state reported.
-    double position = (state.isPaused ? state.positionAsOfTimestamp : state.position) * 1000;
-    // An unknown position is looked at kTick anyway.
-    if (!sg_timer || (sg_armedMs >= 0 && (state.playbackSpeed != sg_armedSpeed || fabs(position - expected) > 500))) tick();
+    if (!SGLockArtworkShowsLyrics(SGLockScreenArtwork())) return;
+    sg_running = !state.isPaused;
+    tick();
 }
 @end
 
@@ -708,17 +697,19 @@ static void tick(void) {
         static SGLyricsArtwork *observer;
         observer = [SGLyricsArtwork new];
         SGAddPlayerStateObserver(observer);
+        [NSNotificationCenter.defaultCenter addObserverForName:SGPlayerSpeedDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            [observer playerStateDidReport:SGPlayerState()];
+        }];
         [NSNotificationCenter.defaultCenter addObserverForName:SGNowPlayingInfoDidChangeNotification object:nil queue:nil
                                                     usingBlock:^(NSNotification *note) {
             if (SGLockArtworkShowsLyrics(SGLockScreenArtwork())) tick();
         }];
-        // Every write in the app posts this, so the settings are compared on the writing thread and handed to main
-        // without waiting only when one moved (AGENTS.md).
-        static SGLockArtwork choice;
+        // Main owns the applied settings snapshot, like the artwork it describes.
+        static _Atomic(SGLockArtwork) choice; // main is the sole writer
         static NSInteger style, layout, delay;
         static BOOL dim;
         choice = SGLockScreenArtwork();
-        __block NSString *background = SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
+        __block NSString *background = choice == SGLockArtworkOff ? nil : SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
         __block BOOL translation = SGFlag(SGKeyLockScreenTranslation, NO);
         __block NSString *reading = SGLyricsShownLineTag();
         // A translation saved while the player is paused has no tick to pick it up (Shared/LyricsTranslation).
@@ -746,39 +737,34 @@ static void tick(void) {
         // Dimming the whole artwork changes only Over the artwork's lines.
         dim = layout == SGLyricsClipOverArtwork && SGFlag(SGKeyLockScreenDimArtwork, NO);
         delay = SGKaraokeDelayMs();
-        // Writes arrive on any thread, so the snapshot is compared and moved under a lock.
-        static os_unfair_lock choiceLock = OS_UNFAIR_LOCK_INIT;
         [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil
                                                     usingBlock:^(NSNotification *note) {
             // The style, the layout and the lyrics' delay apply at once, and move the artwork or its next change.
             SGPrefsChanged();
-            NSInteger nowStyle = SGInt(SGKeyLockScreenLyricsStyle, SGLyricsClipStill), nowDelay = SGKaraokeDelayMs();
-            NSInteger nowLayout = SGInt(SGKeyLockScreenLyricsLayout, SGLyricsClipLeft);
-            BOOL nowDim = nowLayout == SGLyricsClipOverArtwork && SGFlag(SGKeyLockScreenDimArtwork, NO);
-            NSString *next = SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
-            BOOL nowTranslation = SGFlag(SGKeyLockScreenTranslation, NO);
-            NSString *nowReading = SGLyricsShownLineTag();
-            SGLockArtwork picked = SGLockScreenArtwork();
-            os_unfair_lock_lock(&choiceLock);
-            BOOL changed = ![next isEqual:background] || nowStyle != style || nowLayout != layout || nowDim != dim;
-            // The lyrics' pronunciation chosen or put away: the clips drawn and drawing ahead are of other words.
-            BOOL reread = ![nowReading isEqualToString:reading];
-            if (picked == choice && !changed && nowDelay == delay && nowTranslation == translation && !reread) {
-                os_unfair_lock_unlock(&choiceLock);
-                return;
-            }
-            background = next;
-            style = nowStyle;
-            layout = nowLayout;
-            dim = nowDim;
-            delay = nowDelay;
-            translation = nowTranslation;
-            reading = nowReading;
-            choice = picked;
-            os_unfair_lock_unlock(&choiceLock);
+            if (SGLockScreenArtwork() == SGLockArtworkOff && atomic_load(&choice) == SGLockArtworkOff) return;
             dispatch_async(dispatch_get_main_queue(), ^{
+                SGLockArtwork picked = SGLockScreenArtwork();
+                BOOL enabling = choice == SGLockArtworkOff;
+                if (enabling && picked == SGLockArtworkOff) return;
+                NSInteger nowStyle = SGInt(SGKeyLockScreenLyricsStyle, SGLyricsClipStill), nowDelay = SGKaraokeDelayMs();
+                NSInteger nowLayout = SGInt(SGKeyLockScreenLyricsLayout, SGLyricsClipLeft);
+                BOOL nowDim = nowLayout == SGLyricsClipOverArtwork && SGFlag(SGKeyLockScreenDimArtwork, NO);
+                NSString *next = SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
+                BOOL nowTranslation = SGFlag(SGKeyLockScreenTranslation, NO);
+                NSString *nowReading = SGLyricsShownLineTag();
+                BOOL changed = ![next isEqual:background] || nowStyle != style || nowLayout != layout || nowDim != dim;
+                BOOL reread = ![nowReading isEqualToString:reading];
+                if (picked == choice && !changed && nowDelay == delay && nowTranslation == translation && !reread) return;
+                background = next;
+                style = nowStyle;
+                layout = nowLayout;
+                dim = nowDim;
+                delay = nowDelay;
+                translation = nowTranslation;
+                reading = nowReading;
+                choice = picked;
                 if (reread) invalidateRenders();
-                if (changed && SGLockArtworkShowsLyrics(picked)) {
+                if (!enabling && changed && SGLockArtworkShowsLyrics(picked)) {
                     clear();
                     sg_settingsPending = YES;
                     NSUInteger revision = ++sg_settingsRevision;
@@ -797,7 +783,7 @@ static void tick(void) {
         }];
         // Lines kept for the track, or better timed ones in their place, are posted on main.
         for (NSNotificationName name in @[SGKaraokeLinesKeptNotification, SGLyricsReadingsDidChangeNotification,
-                                          SGLyricsLanguageDidChangeNotification]) {
+                                          SGLyricsLanguageDidChangeNotification, SGLyricsOffsetsDidChangeNotification]) {
         [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil
                                                     usingBlock:^(NSNotification *note) {
             if (SGLockArtworkShowsLyrics(SGLockScreenArtwork())

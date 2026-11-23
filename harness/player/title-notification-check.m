@@ -4,6 +4,8 @@
 #import "../harness-fail.h"
 #import "title-notification-stubs.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Player/Player.h"
+#import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 
 @interface SGRLandscapeLyricsController : UIViewController
@@ -131,6 +133,33 @@ static void runChecks(void) {
     textIs(@"Song A", @"Artist A", @"provider answer alone cannot update labels before notification");
     asyncTitle(@"A", ^{ afterVisibleCompletion(); });
 }
+static void coldPlayerTitle(void) {
+    SGTitleHarnessState(@"spotify:track:cold", @"Song - Live", @"Band", NO);
+    UILabel *title = [UILabel new];
+    title.accessibilityIdentifier = @"now-playing-title-label";
+    title.text = @"Song - Live";
+    UIView *unit = [UIView new];
+    [unit addSubview:title];
+    SGRShownTitleWatch(unit);
+    HARNESS_CHECK([title.text isEqual:@"Song - Live"]);
+    SGTitleHarnessSimplify(YES);
+    post(SGSimplifyTitlesDidChangeNotification, nil);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (![title.text isEqual:@"Song"]) HARNESS_FAIL(@"Enabling simplification did not refresh the player's title");
+        SGTitleHarnessSimplify(NO);
+        post(SGSimplifyTitlesDidChangeNotification, nil);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            HARNESS_CHECK([title.text isEqual:@"Song - Live"]);
+            SGTitleHarnessAnswer(@"cold", @"Translated song", @"Band");
+            SGTitleHarnessUseTranslations(YES);
+            post(SGTitleTranslationSettingsDidChangeNotification, nil);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                HARNESS_CHECK([title.text isEqual:@"Translated song"]);
+                runChecks();
+            });
+        });
+    });
+}
 @interface SGTitleCheckApp : UIResponder <UIApplicationDelegate>
 @end
 @implementation SGTitleCheckApp
@@ -139,7 +168,7 @@ static void runChecks(void) {
         fputs("FAIL landscape title checks timed out\n", stderr);
         exit(1);
     });
-    dispatch_async(dispatch_get_main_queue(), ^{ runChecks(); });
+    dispatch_async(dispatch_get_main_queue(), ^{ coldPlayerTitle(); });
     return YES;
 }
 @end

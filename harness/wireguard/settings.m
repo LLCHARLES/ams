@@ -4,9 +4,9 @@
 #import "Settings/SGPageStyle.h"
 #import "Core/SGGlass.h"
 #import "../harness-fail.h"
+#import "../timer-lifecycle.h"
 
-@implementation SGPage
-@end
+UIColor *SGPageBackground(void) { return UIColor.blackColor; }
 // Settings/SGPageStyle.m pulls in the whole prefs layer, so the fixture carries the few functions the page draws with.
 UIColor *SGGrey(void) { return [UIColor colorWithRed:0xEB / 255.0 green:0xEB / 255.0 blue:0xF5 / 255.0 alpha:0.6]; }
 UIColor *SGGreen(void) { return [UIColor colorWithRed:0x1E / 255.0 green:0xD7 / 255.0 blue:0x60 / 255.0 alpha:1]; }
@@ -63,29 +63,67 @@ void SGInsetForBars(UITableView *table) {}
 void SGPresentDark(UIViewController *page) { page.overrideUserInterfaceStyle = UIUserInterfaceStyleDark; }
 NSString *const SGWGKindWireGuard = @"wireguard", *const SGWGKindHTTP = @"http", *const SGWGKindHTTPS = @"https", *const SGWGKindSOCKS5 = @"socks5";
 static BOOL enabled;
+static BOOL recoveryFixture, readyFixture;
 BOOL SGWGSettingEnabled(void) { return enabled; }
 void SGWGSetSettingEnabled(BOOL value) { enabled = value; }
+static SGWGLyricsRoute lyricsRoute;
+SGWGLyricsRoute SGWGSettingLyricsRoute(void) { return lyricsRoute; }
+void SGWGSetSettingLyricsRoute(SGWGLyricsRoute value) { lyricsRoute = value; }
 NSString *SGWGSettingKind(void) { return @"wireguard"; }
 NSDictionary *SGWGSettingExternalProxy(void) { return @{}; }
 BOOL SGWGHasStoredProxyPassword(void) { return NO; }
 BOOL SGWGSaveConnection(NSString *k, NSString *h, NSString *p, NSString *u, NSString *pw, NSString **reason) { return YES; }
 NSString *SGWGActiveKind(void) { return @""; }
-BOOL SGWGActiveThisLaunch(void) { return NO; }
+BOOL SGWGActiveThisLaunch(void) { return recoveryFixture; }
 BOOL SGWGIsSupportedOS(void) { return YES; }
 BOOL SGWGIsSupportedVersion(void) { return YES; }
-BOOL SGWGReady(void) { return NO; }
+BOOL SGWGReady(void) { return readyFixture; }
 BOOL SGWGGuardsInstalled(void) { return NO; }
 SGWGState SGWGCurrentState(void) { return SGWGStateOff; }
 BOOL SGWGHasProfile(void) { return NO; }
 NSDictionary *SGWGStoredProfileSummary(void) { return nil; }
 BOOL SGWGImportProfile(NSString *text, NSString **reason) { return NO; }
 BOOL SGWGDeleteProfile(NSString **reason) { return YES; }
-NSDictionary *SGWGEngineStatus(void) { return @{}; }
+NSDictionary *SGWGEngineStatus(void) { HARNESS_CHECK(!recoveryFixture); return @{}; }
 void SGWGLookupInTunnel(NSString *host, void (^completion)(NSDictionary *)) { completion(@{@"ok":@NO}); }
 NSURLSession *SGWGTunnelSession(id<NSURLSessionDelegate> delegate) { return nil; }
 NSString *SGWGDiagnosticsReport(NSDictionary *checks) { return @"fixture"; }
 NSString *SGWGRedactText(NSString *text) { return text; }
 NSArray *SGWGScanTransportClasses(void) { return @[]; }
+
+static void checkPendingRecovery(void) {
+    SGHarnessBeginTimerCapture();
+    recoveryFixture = YES;
+    sg_testAppState = UIApplicationStateBackground;
+    __block NSUInteger alerts = 0;
+    Method present = class_getInstanceMethod(UIViewController.class, @selector(presentViewController:animated:completion:));
+    IMP original = method_getImplementation(present);
+    IMP capture = imp_implementationWithBlock(^(id owner, UIViewController *page, BOOL animated, void (^done)(void)) {
+        HARNESS_CHECK([page isKindOfClass:UIAlertController.class]);
+        alerts++;
+        if (done) done();
+    });
+    method_setImplementation(present, capture);
+    SGWGNotifyRecovery();
+    dispatch_async(dispatch_get_main_queue(), ^{
+        HARNESS_CHECK(alerts == 0);
+        sg_testAppState = UIApplicationStateActive;
+        [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            HARNESS_CHECK(alerts == 1);
+            SGWGNotifyRecovery();
+            [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                HARNESS_CHECK(alerts == 1);
+                method_setImplementation(present, original);
+                imp_removeBlock(capture);
+                SGHarnessEndTimerCapture();
+                puts("PASS background structural failure is presented once on foreground without status polling");
+                exit(0);
+            });
+        });
+    });
+}
 
 @interface WGSettingsApp : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
@@ -93,11 +131,29 @@ NSArray *SGWGScanTransportClasses(void) { return @[]; }
 @implementation WGSettingsApp
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     SGWGSettingsController *page = [SGWGSettingsController new];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"background-check"]) {
+        SGHarnessCheckPageBackground(page);
+        puts("PASS WireGuard status refresh stops in background and resumes only when visible");
+        exit(0);
+    }
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [[UINavigationController alloc] initWithRootViewController:page];
     [self.window makeKeyAndVisible];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"recovery-check"]) {
+        __block BOOL started = NO;
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if (started) return;
+            started = YES;
+            dispatch_async(dispatch_get_main_queue(), ^{ checkPendingRecovery(); });
+        }];
+        return YES;
+    }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        HARNESS_CHECK([page numberOfSectionsInTableView:page.tableView] == 5);
+        HARNESS_CHECK([page numberOfSectionsInTableView:page.tableView] == 6);
+        HARNESS_CHECK([page tableView:page.tableView numberOfRowsInSection:3] == 3);
+        [page tableView:page.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:3]];
+        HARNESS_CHECK(lyricsRoute == SGWGLyricsBlockedDirect);
+        HARNESS_CHECK([page tableView:page.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:3]].accessoryType == UITableViewCellAccessoryCheckmark);
         HARNESS_CHECK([page tableView:page.tableView numberOfRowsInSection:2] == 2);
         HARNESS_CHECK(((UITextField *)[page valueForKey:@"passField"]).secureTextEntry);
         HARNESS_CHECK(page.overrideUserInterfaceStyle == UIUserInterfaceStyleDark);

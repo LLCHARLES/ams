@@ -1,0 +1,9 @@
+{
+  "format" : "vitrine.audio-preset",
+  "name" : "Late night",
+  "values" : {
+    "spotifyglass.dsp.bass" : true,
+    "spotifyglass.dsp.bass.gain" : 9
+  },
+  "version" : 1
+}

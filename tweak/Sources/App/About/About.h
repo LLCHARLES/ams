@@ -1,7 +1,7 @@
 // About: where the build points its user, and whether GitHub has a newer release (Update.m,
 // UpdatePage.m). The status is a string for the Updates row; the page's ticker reads it, so the
 // check needs no callback, and a check that lands posts SGUpdateCheckedNotification for the page
-// that is open at the time. SGCheckForUpdate(NO) respects a six hour cache, SGCheckForUpdate(YES)
+// that is open at the time. SGCheckForUpdate(NO) respects a six hour cache for the same build, SGCheckForUpdate(YES)
 // always asks.
 #import <UIKit/UIKit.h>
 #import "Settings/SGModPage.h"
@@ -88,7 +88,7 @@ void SGExportDiagnosticsToURL(NSURL *url, void (^completion)(NSError *error));
 
 UIViewController *SGAboutPage(void);   // the Mod page
 
-// Report.m: "Report a problem". A report is kept in Application Support/Vitrine/Reports/<uuid>/ —
+// Report.m: "Report a problem". A report is kept in Application Support/Retrine/Reports/<uuid>/ —
 // report.json (created and shared dates, the text, the versions), diagnostics.txt (SGWriteDiagnosticsFile's
 // copy, refreshed each time the report is opened and before each send), and a .mov for each screen
 // recording. Send hands the text, the diagnostics and the recordings to the share sheet; the report

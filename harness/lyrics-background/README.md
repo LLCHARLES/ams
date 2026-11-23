@@ -1,6 +1,6 @@
 # Shared lyrics background harness
 
-`OUT=$(mktemp -d /tmp/vitrine-background.XXXXXX) sh harness/lyrics-background/build.sh`
+`OUT=$(mktemp -d /tmp/retrine-background.XXXXXX) sh harness/lyrics-background/build.sh`
 
 Runs the production Foundation/CoreGraphics-only renderer on macOS: default/clamped/finite preferences
 without persistent writes; all five modes; retained two-pixel detail; equal grayscale channels; actual

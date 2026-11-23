@@ -311,7 +311,12 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
 // The reach runs to the left instead: on a page laid out right to left, where ⋯ is pinned in the left corner and
 // download on its right (SGRPinnedDownload). Set by whoever places the pair, from the page's own direction.
 @property (nonatomic) BOOL sgr_glassReachesLeft;
+// The page whose pinned ⋯ this is (SGRPinnedMore), nil on every other button: its tap claims that page for the sheet
+// coming up, wherever the button is drawn (SGRHeaderInfo takes it beside the cover). Weak, as the page holds the button.
+@property (nonatomic, weak) UIView *sgr_pinnedPage;
 @end
+
+static void claimPinnedMore(SGRMirrorButton *button);
 
 @implementation SGRMirrorButton {
     UIImageView *_glyph;
@@ -322,6 +327,9 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     // Standing in for Spotify's download button: its state drawn, and read again while on screen.
     SGRDownloadGlyph *_download;
     NSTimer *_downloadTimer;
+    NSTimeInterval _downloadInterval;
+    BOOL _downloadInactive;
+    BOOL _downloadWatching;
     // A two-state glyph drawn for Spotify (add-to, readState): 1 on, 0 off, -1 none drawn.
     NSInteger _stateShown;
 }
@@ -339,6 +347,10 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     [self addTarget:self action:@selector(sgr_down) forControlEvents:UIControlEventTouchDown];
     [self addTarget:self action:@selector(sgr_up) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
     [self addTarget:self action:@selector(sgr_tap) forControlEvents:UIControlEventTouchUpInside];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    for (NSNotificationName name in @[UIApplicationWillResignActiveNotification, UIApplicationDidEnterBackgroundNotification])
+        [center addObserver:self selector:@selector(sgr_downloadResigned) name:name object:nil];
+    [center addObserver:self selector:@selector(sgr_downloadBecameActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     return self;
 }
 
@@ -387,15 +399,16 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
-    if (!_download && _stateShown < 0 && !self.readState) return;
     // Read again on the way in -- the state may have moved on while the page was away -- and not at all
     // while out of the window.
-    if (self.window && self.source) [self feedFrom:self.source];
-    else [self sgr_followDownload:0];
+    if ([self sgr_downloadVisible] && self.source && (_download || _stateShown >= 0 || self.readState))
+        [self feedFrom:self.source];
+    [self sgr_updateDownloadTimer];
 }
 
 - (void)dealloc {
     [_downloadTimer invalidate];
+    [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
 // Shows Spotify's download state; YES when `source` is a download button.
@@ -431,7 +444,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     // twice a second while one runs, for the ring, and now and then otherwise, for one started or removed
     // from elsewhere (the ⋯ sheet). Only while the button is on screen.
     BOOL running = state == SGRDownloadWaiting || state == SGRDownloadDownloading;
-    [self sgr_followDownload:self.window ? (running ? 0.5 : 2) : 0];
+    [self sgr_followDownload:running ? 0.5 : 2];
     return YES;
 }
 
@@ -457,7 +470,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     NSString *word = source.accessibilityLabel ?: wordIn(source);
     if (word && ![self.accessibilityLabel isEqualToString:word]) self.accessibilityLabel = word;
     // Nothing is laid out when it changes from elsewhere (the ⋯ sheet), so it is read again as download is.
-    [self sgr_followDownload:self.window ? 2 : 0];
+    [self sgr_followDownload:2];
 }
 
 // Shows whether Spotify's add-to button has its album or playlist saved; YES when `source` is one.
@@ -473,7 +486,37 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
 
 // Reads the state again every `interval` seconds; 0 stops.
 - (void)sgr_followDownload:(NSTimeInterval)interval {
-    if (interval <= 0) {
+    _downloadInterval = interval;
+    BOOL watch = interval > 0;
+    if (watch != _downloadWatching) {
+        _downloadWatching = watch;
+        __weak SGRMirrorButton *weakSelf = self;
+        SGRObserveVisibility(self, watch ? ^{ [weakSelf sgr_updateDownloadTimer]; } : nil);
+    }
+    [self sgr_updateDownloadTimer];
+}
+
+- (BOOL)sgr_downloadVisible {
+    if (!self.window || _downloadInactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
+    for (UIView *view = self; view; view = view.superview)
+        if (view.hidden || view.alpha <= 0.01) return NO;
+    return YES;
+}
+
+- (void)sgr_downloadResigned {
+    // WillResignActive can arrive before applicationState changes.
+    _downloadInactive = YES;
+    [self sgr_updateDownloadTimer];
+}
+
+- (void)sgr_downloadBecameActive {
+    _downloadInactive = NO;
+    [self sgr_updateDownloadTimer];
+}
+
+- (void)sgr_updateDownloadTimer {
+    NSTimeInterval interval = _downloadInterval;
+    if (interval <= 0 || ![self sgr_downloadVisible] || !self.source) {
         [_downloadTimer invalidate];
         _downloadTimer = nil;
         return;
@@ -483,7 +526,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     __weak SGRMirrorButton *weakSelf = self;
     _downloadTimer = [NSTimer scheduledTimerWithTimeInterval:interval repeats:YES block:^(NSTimer *timer) {
         SGRMirrorButton *button = weakSelf;
-        if (!button || !button.window || !button.source) {
+        if (!button || ![button sgr_downloadVisible] || !button.source) {
             [timer invalidate];
             return;
         }
@@ -502,7 +545,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     if (self.readState) {
         BOOL on = NO;
         if (self.readState(&on)) [self sgr_showOn:on off:self.stateOffSymbol on:self.stateOnSymbol source:source];
-        else [self sgr_followDownload:self.window ? 2 : 0];
+        else [self sgr_followDownload:2];
         BOOL known = _stateShown >= 0;
         if (_glyph.hidden == known) _glyph.hidden = !known;
         if (self.userInteractionEnabled != known) {
@@ -580,6 +623,7 @@ static BOOL indicatorOn(UIView *button, BOOL *found) {
     [self feedFrom:self.source];
     if (!SGRSourceEnabled(self.source)) return;
     if ([self.source.accessibilityIdentifier hasPrefix:SGAlbumQueueButtonPrefix]) SGAlbumQueueMarkSource(self.source);
+    if (self.sgr_pinnedPage) claimPinnedMore(self);
     SGRActivate(self.source);
     // The word is watched where Spotify writes it, but a button that rebuilds its content on the state it
     // just took writes the new word into a label the watch has never seen. So a tap, and only a tap, asks
@@ -608,13 +652,17 @@ static const CGFloat kCornerSide = 16;
 // page's menu it is. The same trick Shared/Player/SpeedPitchMenu.x plays on the player's more button, but
 // from this side of it, since this button is the redesign's own and knows its own page.
 //
-// Recorded on touch down rather than on touch up: the button's own -sgr_tap is registered first and fires
-// Spotify's ⋯ from the same event, so a sheet Spotify puts up in that same turn would ask which page it
-// belonged to before a target added after -sgr_tap had answered.
+// Claimed by the tap itself (-sgr_tap), just before it fires Spotify's ⋯, so a sheet Spotify puts up from that
+// call finds the claim; a press let go off the button, which fires nothing, claims nothing either.
 static __weak UIView *sg_morePage;
 static __weak SGRMirrorButton *sg_moreButton;
 static NSTimeInterval sg_moreTappedAt;
-static char kRecorderKey;
+
+static void claimPinnedMore(SGRMirrorButton *button) {
+    sg_morePage = button.sgr_pinnedPage;
+    sg_moreButton = button;
+    sg_moreTappedAt = CACurrentMediaTime();
+}
 
 UIView *SGRPinnedMoreRecentPage(void) {
     if (!sg_morePage || CACurrentMediaTime() - sg_moreTappedAt > SGRPinnedMoreWindow) return nil;
@@ -626,15 +674,9 @@ SGRMirrorButton *SGRPinnedMoreRecentButton(void) {
     return sg_moreButton;
 }
 
-@interface SGRPinnedMoreRecorder : NSObject
-@end
-@implementation SGRPinnedMoreRecorder
-- (void)sgr_moreTapped:(SGRMirrorButton *)button {
-    sg_morePage = button.superview;
-    sg_moreButton = button;
-    sg_moreTappedAt = CACurrentMediaTime();
+void SGRPinnedMoreTaken(void) {
+    sg_moreButton = nil;
 }
-@end
 
 // Over the page's list and its header both, and put back on top whenever Spotify adds to the page.
 static void keepOnTop(UIView *page, UIView *button) {
@@ -642,9 +684,12 @@ static void keepOnTop(UIView *page, UIView *button) {
     else if (page.subviews.lastObject != button) [page bringSubviewToFront:button];
 }
 
-// Level with the window's safe area at the top, kCornerSide in from the trailing edge of the page. The height is measured in the window and converted back, never from the page's own safe area: a
-// page under a navigation bar counts the bar into its inset, so the playlist's read 116 where the window's
-// reads 62 and the button sat a bar's height below the back button. The inset from the side is taken from
+// Level with the back button, at the top of the navigation bar shown over the page, kCornerSide in from the trailing
+// edge of the page. Not the window's safe area: on an iPhone the bar starts there (62), but on an iPad Spotify sets
+// its pages in a card inset from the window (40) with the bar 10 down inside it, and ⋯ sat 18pt above the back
+// button (issue #41). Without a bar shown, the window's safe area. Never the page's own safe area: a page under a
+// navigation bar counts the bar into its inset, so the playlist's read 116 where the window's reads 62 and the
+// button sat a bar's height below the back button. The inset from the side is taken from
 // the page's own bounds and not converted from the window: the swipe back slides the page across the
 // window, and a frame converted from the window's x would hold the button still while the page left under
 // it, over the screen below, until the page was gone and took it along.
@@ -657,13 +702,26 @@ static BOOL laidOutRightToLeft(UIView *page) {
     return page.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
 }
 
+// The navigation bar shown over `page` in its window, or nil.
+static UINavigationBar *shownBarOver(UIView *page) {
+    for (UIResponder *r = page.nextResponder; r; r = r.nextResponder) {
+        if (![r isKindOfClass:UIViewController.class]) continue;
+        UINavigationController *navigation = ((UIViewController *)r).navigationController;
+        UINavigationBar *bar = navigation.navigationBar;
+        return !navigation.navigationBarHidden && page.window && bar.window == page.window ? bar : nil;
+    }
+    return nil;
+}
+
 static void placeInCorner(UIView *page, UIView *button, CGFloat along) {
     UIWindow *window = page.window;
     UIView *space = window ?: page;
     CGFloat side = SGRGlassCircleSize;
     CGFloat x = laidOutRightToLeft(page) ? kCornerSide + along : page.bounds.size.width - kCornerSide - side - along;
+    UINavigationBar *bar = shownBarOver(page);
     CGFloat y = space.safeAreaInsets.top;
-    if (window) y = [page convertPoint:CGPointMake(0, y) fromView:nil].y;
+    if (bar) y = [page convertPoint:CGPointZero fromView:bar].y;
+    else if (window) y = [page convertPoint:CGPointMake(0, y) fromView:nil].y;
     CGRect frame = CGRectMake(x, y, side, side);
     if (!CGRectIsEmpty(frame) && !CGRectEqualToRect(button.frame, frame)) button.frame = frame;
 }
@@ -677,10 +735,7 @@ SGRMirrorButton *SGRPinnedMore(UIView *page, const void *key, UIView *source) {
         // ⋯ sits in an Encore Tertiary button in Spotify's own row, which draws it gray; in the corner of
         // the page it is the one control there and reads white, like the back button opposite it.
         button.glyphColor = SGRPrimary();
-        // Held by the button, which is held by the page, so the recorder lives exactly as long as both.
-        SGRPinnedMoreRecorder *recorder = [SGRPinnedMoreRecorder new];
-        objc_setAssociatedObject(button, &kRecorderKey, recorder, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [button addTarget:recorder action:@selector(sgr_moreTapped:) forControlEvents:UIControlEventTouchDown];
+        button.sgr_pinnedPage = page;
         objc_setAssociatedObject(page, key, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     BOOL inlineHeader = [button.superview isKindOfClass:SGRHeaderInfo.class];
@@ -713,7 +768,7 @@ SGRMirrorButton *SGRPinnedDownload(UIView *page, const void *key, UIView *source
     if (!button) {
         button = [[SGRMirrorButton alloc] initWithFrame:CGRectZero];
         button.fallbackGlyph = [UIImage systemImageNamed:@"arrow.down"];
-        button.accessibilityIdentifier = @"Vitrine.Album.Download";
+        button.accessibilityIdentifier = @"Retrine.Album.Download";
         objc_setAssociatedObject(page, key, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     BOOL inlineHeader = [button.superview isKindOfClass:SGRHeaderInfo.class];
@@ -724,7 +779,7 @@ SGRMirrorButton *SGRPinnedDownload(UIView *page, const void *key, UIView *source
     // for both, ⋯ none, and each keeps its own touch, press and glyph. Without download, ⋯ is its circle again.
     SGRMirrorButton *more = nil;
     for (UIView *view in (inlineHeader ? button.superview : page).subviews.reverseObjectEnumerator) {
-        if ([view isKindOfClass:SGRMirrorButton.class] && objc_getAssociatedObject(view, &kRecorderKey)) {
+        if ([view isKindOfClass:SGRMirrorButton.class] && ((SGRMirrorButton *)view).sgr_pinnedPage) {
             more = (SGRMirrorButton *)view;
             break;
         }

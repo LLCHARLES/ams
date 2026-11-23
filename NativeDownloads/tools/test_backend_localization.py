@@ -1,4 +1,4 @@
-"""Check real backend error/summary paths against Vitrine's Korean resources."""
+"""Check real backend error/summary paths against Retrine's Korean resources."""
 from pathlib import Path
 import plistlib
 import shutil
@@ -27,12 +27,12 @@ with tempfile.TemporaryDirectory(prefix="backend-localization-", dir=build) as t
             "CFBundleExecutable": binary.name, "CFBundlePackageType": "APPL",
             "CFBundleLocalizations": ["en"],
         }))
-        shutil.copytree(root.parent / "tweak/layout/Library/Application Support/Vitrine.bundle",
-                        contents / "Resources/Vitrine.bundle")
+        shutil.copytree(root.parent / "tweak/layout/Library/Application Support/Retrine.bundle",
+                        contents / "Resources/Retrine.bundle")
         run("xcrun", "clang", "-arch", "arm64", "-fobjc-arc", "-std=gnu11", "-O1", "-g",
             "-Isrc", "-DSAP_TESTING", "-fsanitize=address,undefined",
             "src/WireProto.m", "src/PlayerTrace.m", *sources, f"tests/{name}.m",
-            "src/Diagnostics.m", "src/Localization.m",
+            "src/Diagnostics.m", "src/Localization.m", "tests/admitted_host.c",
             "src/DiagnosticTrace.m", "src/NativeKeyTrace.m", "tests/trace_platform_stub.m",
             root.parent / "tweak/Sources/Core/SGLocalize.m",
             "-framework", "Foundation", "-o", binary)

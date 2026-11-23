@@ -302,6 +302,37 @@ static void afterFrames(void (^block)(void)) {
         [self protectedPathsCheck];
     });
 }
+- (void)backgroundCheck {
+    // Capture UIKit's link boundary; the transition fixture itself uses a property animator.
+    Method factory = class_getClassMethod(CADisplayLink.class, @selector(displayLinkWithTarget:selector:));
+    Method invalidation = class_getInstanceMethod(CADisplayLink.class, @selector(invalidate));
+    IMP originalFactory = method_getImplementation(factory), originalInvalidation = method_getImplementation(invalidation);
+    __block CADisplayLink *captured;
+    __block BOOL invalidated = NO;
+    IMP capture = imp_implementationWithBlock(^CADisplayLink *(id cls, id target, SEL selector) {
+        captured = ((id (*)(id, SEL, id, SEL))originalFactory)(cls, @selector(displayLinkWithTarget:selector:), target, selector);
+        return captured;
+    });
+    IMP invalidate = imp_implementationWithBlock(^(CADisplayLink *link) {
+        if (link == captured) invalidated = YES;
+        ((void (*)(id, SEL))originalInvalidation)(link, @selector(invalidate));
+    });
+    method_setImplementation(factory, capture);
+    method_setImplementation(invalidation, invalidate);
+    [self fixtureInteractive:YES opening:NO];
+    HARNESS_CHECK(captured && !invalidated && self.context.from.view.layer.mask);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    HARNESS_CHECK(invalidated && !self.context.from.view.layer.mask);
+    HARNESS_CHECK(!self.context.completed && self.context.containerView.layer.speed == 1);
+    method_setImplementation(factory, originalFactory);
+    method_setImplementation(invalidation, originalInvalidation);
+    imp_removeBlock(capture);
+    imp_removeBlock(invalidate);
+    [self.transition->animator stopAnimation:YES];
+    puts("PASS resign cancels the interactive morph follower without completing Spotify's transition");
+    exit(0);
+}
+
 - (void)offCheck {
     [self fixtureInteractive:YES opening:NO];
     HARNESS_CHECK(fabs(self.transition->animator.duration - 0.30) < 0.0001);
@@ -388,6 +419,7 @@ static void afterFrames(void (^block)(void)) {
     [self unsupportedOwnerCheck];
     return;
 #endif
+    if (getenv("MORPH_BACKGROUND")) { [self backgroundCheck]; return; }
     if (!SGHidden(@"spotifyglass.redesign.player.musicClose")) { [self offCheck]; return; }
     [self fixtureInteractive:YES opening:NO];
     HARNESS_CHECK(fabs(self.transition->animator.duration - 0.32) < 0.0001);

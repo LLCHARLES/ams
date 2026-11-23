@@ -1,0 +1,30 @@
+{
+  "minimum_tracks": 1000000,
+  "minimum_music_duration_seconds": 2147483647,
+  "cave_capacity": 512,
+  "quota_block_base": 688,
+  "wrapper_manager_offset": 8,
+  "queue_flags_offset": 544,
+  "provider_offset": 656,
+  "trace_owner_offset": 8,
+  "trace_descriptor_offset": 200,
+  "descriptor_file_offset": 4,
+  "dlsym_library": "/usr/lib/libSystem.B.dylib",
+  "objc_abi": [
+    ["SPTOfflineManagerImplementation","initWithScheduler:offlineManager:syncManager:metadataModel:","@48@0:8@16^{OfflineManager=^^?}24^{SyncManager=^^?^^?}32^v40",6],
+    ["SPTOfflineManagerImplementation","stateForTrackWithURL:","Q24@0:8@16",3],
+    ["SPTOfflineManagerImplementation","makeEntityAvailableOfflineWithURL:trackURLs:","v32@0:8@16@24",4],
+    ["SPTOfflineManagerImplementation","makeEntityAvailableOfflineWithURL:","v24@0:8@16",3],
+    ["SPTOfflineManagerImplementation","resetEntityOfflineAvailabilityWithURL:","v24@0:8@16",3],
+    ["SPTFreeTierOfflineStatusUpdatingContentOperation","offlineSyncStatusForURL:","q24@0:8@16",3],
+    ["SPTEsperantoTransportBridgeImpl","callSingle:method:payload:onResponse:","@48@0:8@16@24@32@?40",6],
+    ["SPTEsperantoTransportBridgeImpl","callStream:method:payload:onResponse:","@48@0:8@16@24@32@?40",6],
+    ["SPTEsperantoCosmosTransport","callSingle:method:payload:onResponse:","@48@0:8@16@24@32@?40",6],
+    ["SPTEsperantoCosmosTransport","callStream:method:payload:onResponse:","@48@0:8@16@24@32@?40",6],
+    ["SPTCoreProductState","stringForKey:","@24@0:8@16",3],
+    ["SPTCoreProductState","setOriginalValues:","v24@0:8@16",3],
+    ["SPTDataLoaderService","URLSession:task:didCompleteWithError:","v40@0:8@16@24@32",5],
+    ["Connectivity_HttpClientKit.HttpClientURLSession","URLSession:task:didCompleteWithError:","v40@0:8@16@24@32",5],
+    ["SPTCoreURLSessionDataDelegate","URLSession:task:didCompleteWithError:","v40@0:8@16@24@32",5]
+  ]
+}

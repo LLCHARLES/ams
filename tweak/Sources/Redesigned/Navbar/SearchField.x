@@ -13,6 +13,7 @@
 // so later. So the two setters are refused for as long as the field is a capsule.
 #import "Core/SGCore.h"
 #import "Diagnostics/Diagnostics.h"
+#import "Redesigned/Kit/SGRGlass.h"
 
 // Spotify's glyph view, resolved at runtime; declared on UIView so the call and the hook below
 // share one declaration.
@@ -20,7 +21,7 @@
 - (void)setForegroundColor:(UIColor *)color;
 @end
 
-static char kStyledKey;
+static char kStyledKey, kListenerGlassKey;
 static __weak UIView *sg_searchField;
 
 static BOOL isSearchField(UIView *button) {
@@ -106,6 +107,11 @@ static void styleSearchField(UIView *button) {
     button.layer.cornerCurve = kCACornerCurveContinuous;
 
     UIVisualEffectView *glass = SGGlassAt(button, 0);
+    // The listener's material, tint and touch response (Appearance), once per pane: a pass hands back the same one.
+    if (glass.effect && !objc_getAssociatedObject(glass, &kListenerGlassKey)) {
+        glass.effect = SGRGlassEffect();
+        objc_setAssociatedObject(glass, &kListenerGlassKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
     // Dark like every glass of the redesign's, rather than by grace of the navigation stack Spotify hosts
     // the page in (TabBar.x).
     if (glass.overrideUserInterfaceStyle != UIUserInterfaceStyleDark) glass.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;

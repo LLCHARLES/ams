@@ -762,6 +762,29 @@ static void checkLiveprog(void) {
     ok = SGDSPEngineSetLiveprog(engine, true, functions, error, sizeof error);
     measured = stepGain(engine, 440, 0.5, kRate, NULL);
     CHECK(ok && fabs(measured) < 0.001, "a function from @init called in @sample: %+.4f dB%s%s", measured, ok ? "" : ": ", ok ? "" : error);
+
+    // Chained assignments and nested subscripts recurse through the parser too: past its depth limit they are
+    // refused, not run until the stack is gone; a few levels still compile.
+    for (int deep = 0; deep < 2; deep++) {
+        for (int kind = 0; kind < 2; kind++) {
+            int levels = deep ? 100000 : 50;
+            NSMutableString *script = [NSMutableString stringWithString:@"@sample\n"];
+            if (kind == 0) {
+                for (int i = 0; i < levels; i++) [script appendString:@"a="];
+                [script appendString:@"spl0;\n"];
+            } else {
+                [script appendString:@"spl0 = "];
+                for (int i = 0; i < levels; i++) [script appendString:@"x["];
+                [script appendString:@"0"];
+                for (int i = 0; i < levels; i++) [script appendString:@"]"];
+                [script appendString:@" * 0 + spl0;\n"];
+            }
+            error[0] = 0;
+            ok = SGDSPEngineSetLiveprog(engine, true, script.UTF8String, error, sizeof error);
+            CHECK(ok == !deep, "%d chained %s: %s%s", levels, kind ? "subscripts" : "assignments",
+                  ok ? "compiled" : "refused", ok ? "" : error[0] ? "" : " (no message)");
+        }
+    }
     SGDSPEngineFree(engine);
 }
 

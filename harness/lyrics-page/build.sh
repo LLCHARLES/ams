@@ -5,8 +5,9 @@
 set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-APP=$HERE/build/LyricsPageHarness.app
-rm -rf "$HERE/build"; mkdir -p "$APP"
+OUT=${OUT:-$HERE/build}
+APP=$OUT/LyricsPageHarness.app
+rm -rf "$OUT"; mkdir -p "$APP"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_HARNESS_SETTINGS \

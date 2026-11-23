@@ -39,6 +39,15 @@ void SGResetAdBlock(void);
 // Premium account's. nil when the bytes do not parse.
 NSData *SGPatchCustomize(NSData *body);
 NSData *SGPatchBootstrap(NSData *body);
+// Spotify 9.2 has no v1/customize: the same two parts come on their own (EeveeSpotifyReincarnated 5f5c7ea,
+// 7a8c573). nebula/v1/configuration/attributes is the AccountAttributesResponse, rewritten to Premium's
+// attributes, and remote-config-resolver/v3/configuration the ResolveResponse, under the same flag rules.
+// nil when the bytes are not that message.
+NSData *SGPatchAccountAttributes(NSData *body);
+NSData *SGPatchRemoteConfiguration(NSData *body);
+// OfflineCompanion.m: Pixie's standalone nebula transformer; no envelope interception.
+BOOL SGOfflineCompanionLoaded(void);
+NSData *SGPatchOfflineAccountAttributes(NSData *body, BOOL *recognized);
 
 // Feeds.m: a browsita, casita or scrollsita feed with its ad sections taken out; nil when there
 // were none, or the bytes were not the shape expected.

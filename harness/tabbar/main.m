@@ -60,7 +60,7 @@ NSString *SGHarnessOwnTabSymbol(void) {
     return [NSProcessInfo.processInfo.arguments containsObject:@"hold"] ? @"house" : @"heart";
 }
 
-static BOOL sgJam, sgColorful, sgGlyphs, sgSwiftIcons;
+static BOOL sgJam, sgColorful, sgGlyphs, sgSwiftIcons, sgSearch;
 static __weak UIView *sgJamStrip;
 
 // `glyphs`: the tabs' icons are Encore's glyph view, SPTEncoreIconView, made at launch (main) on SGHarnessGlyphView with
@@ -283,6 +283,11 @@ static __weak UIView *sgJamStrip;
         }
     }
     for (UIView *v = tap.view; v; v = v.superview) [v setNeedsLayout];
+    // `search`: Spotify tells its container of the tab picked, which brings the minimized bar back (TabBar.x's hook).
+    if (!sgSearch) return;
+    for (UIResponder *r = tap.view; r; r = r.nextResponder) {
+        if ([r isKindOfClass:self]) [(_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl *)r setSelectedViewController:nil];
+    }
 }
 
 static UIView *tab(Class cls, NSString *title, UIView *icon, BOOL active) {
@@ -361,6 +366,7 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
     // `five` adds a fifth tab, `long` gives two tabs long names, as tabs of the user's own can have.
     NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
     BOOL longNames = [args containsObject:@"long"];
+    BOOL regular = [args containsObject:@"regular"];
     NSMutableArray<UIView *> *tabs = [NSMutableArray arrayWithArray:@[
         item(_TtC23NavigationUI_TabBarImpl21TabBarItemElementView.class, @"Home", @"house.fill", YES),
         item(_TtC23NavigationUI_TabBarImpl21TabBarItemElementView.class, @"Search", @"magnifyingglass", NO),
@@ -369,6 +375,18 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
     ]];
     if ([args containsObject:@"five"]) {
         [tabs addObject:item(_TtC23NavigationUI_TabBarImpl21TabBarItemElementView.class, longNames ? @"Discover Weekly" : @"Liked Songs", @"heart", NO)];
+    }
+    // `search` (search.m): Search the last of five tabs, as issue #34 keeps it, or with `middle` the third; with
+    // `nosearch` hidden, with `own` hidden and a tab of the mod's own of the same name after it.
+    if (sgSearch) {
+        UIView *search = tabs[1];
+        [tabs removeObjectAtIndex:1];
+        [tabs addObject:item(_TtC23NavigationUI_TabBarImpl21TabBarItemElementView.class, @"Liked Songs", @"heart", NO)];
+        [tabs insertObject:search atIndex:[args containsObject:@"middle"] ? 2 : tabs.count];
+        search.hidden = [args containsObject:@"nosearch"] || [args containsObject:@"own"];
+        if ([args containsObject:@"own"]) {
+            [tabs addObject:tab(SGRTabItemView.class, @"Search", SGTabIconView(@"magnifyingglass", YES, [UIColor colorWithWhite:0xB3 / 255.0 alpha:1]), NO)];
+        }
     }
     // `symbols`: a tab of the mod's own after Spotify's, under the class name Navbar.x gives one, with the SF Symbol
     // picked for it drawn as Navbar.x draws it (SGTabIconView).
@@ -388,9 +406,12 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
         [page.view.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
         [self.compactGuide.topAnchor constraintEqualToAnchor:view.safeAreaLayoutGuide.bottomAnchor constant:-49],
         [self.compactGuide.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
-        [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
+        // `regular`: Spotify's regular width bar, 8 pt in and 648 of the container's 1016 pt, leaving the rest to the
+        // now playing capsule (9.2.0, iPad Pro 13-inch), and 16 pt above the container's foot (iPad Pro 11-inch).
+        [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:regular ? 8 : 0],
+        regular ? [stack.widthAnchor constraintEqualToAnchor:view.widthAnchor multiplier:648.0 / 1016]
+                : [stack.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
+        [stack.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:regular ? -16 : 0],
         [stack.heightAnchor constraintEqualToAnchor:self.compactGuide.heightAnchor],
         [self.bar.leadingAnchor constraintEqualToAnchor:stack.leadingAnchor],
         [self.bar.trailingAnchor constraintEqualToAnchor:stack.trailingAnchor],
@@ -644,23 +665,28 @@ static void setFade(SGHarnessChrome *chrome, BOOL on) {
     [chrome.tabs.bar layoutIfNeeded];
 }
 
-// The fade there once, behind the glass, from SGRBarFadeAbovePt over the glass bar's top to its foot, taking no
-// touches; or no fade of the redesign's anywhere in the window. Either way Spotify's own stays clear, and a finger in
-// the fade's band over the now playing card lands on the page.
+// The fade there once, behind the glass, from SGRBarFadeAbovePt over the glass bar's top to the tab bar container's
+// foot (with `regular` 16 pt under the bar's) and across its whole width (with `regular` wider than Spotify's bar),
+// taking no touches; or no fade of the
+// redesign's anywhere in the window. Either way Spotify's own stays clear, and a finger in the fade's band over the
+// now playing card lands on the page.
 static void expectFade(SGHarnessChrome *chrome, BOOL on, NSString *moment) {
     UIWindow *window = chrome.view.window;
     UIView *stock = chrome.tabs.bar;
     NSArray<UIView *> *fades = viewsNamed(window, @"SGRBarFade");
     UIView *host = viewsNamed(stock, @"SGRTabBarHost").firstObject;
     CGRect glass = [host convertRect:host.bounds toView:window];
+    CGRect across = [chrome.tabs.view convertRect:chrome.tabs.view.bounds toView:window];
     if (on) {
         UIView *fade = fades.firstObject;
         CGRect frame = [fade convertRect:fade.bounds toView:window];
         if (fades.count != 1 || fade.superview != stock || stock.subviews.firstObject != fade || fade.userInteractionEnabled
-            || fabs(CGRectGetMinY(frame) - (CGRectGetMinY(glass) - SGRBarFadeAbovePt)) > 0.5 || fabs(CGRectGetMaxY(frame) - CGRectGetMaxY(glass)) > 0.5) {
-            HARNESS_FAIL(@"%@: %lu fades, the first %@ under %@ (first subview %d, touches %d), glass %@", moment, (unsigned long)fades.count,
-                         NSStringFromCGRect(frame), NSStringFromClass(fade.superview.class), stock.subviews.firstObject == fade,
-                         fade.userInteractionEnabled, NSStringFromCGRect(glass));
+            || fabs(CGRectGetMinY(frame) - (CGRectGetMinY(glass) - SGRBarFadeAbovePt)) > 0.5 || fabs(CGRectGetMaxY(frame) - MAX(CGRectGetMaxY(glass), CGRectGetMaxY(across))) > 0.5
+            || fabs(CGRectGetMinX(frame) - CGRectGetMinX(across)) > 0.5 || fabs(CGRectGetMaxX(frame) - CGRectGetMaxX(across)) > 0.5) {
+            HARNESS_FAIL(@"%@: %lu fades, the first %@ under %@ (first subview %d, touches %d), glass %@, container %@", moment,
+                         (unsigned long)fades.count, NSStringFromCGRect(frame), NSStringFromClass(fade.superview.class),
+                         stock.subviews.firstObject == fade, fade.userInteractionEnabled, NSStringFromCGRect(glass),
+                         NSStringFromCGRect(across));
         }
     } else if (fades.count) {
         HARNESS_FAIL(@"%@: %lu fades left with the fade off", moment, (unsigned long)fades.count);
@@ -679,7 +705,8 @@ static void expectFade(SGHarnessChrome *chrome, BOOL on, NSString *moment) {
 }
 
 // `fade toggle`: the switch flipped live, over and over, minimized and with the bar hidden; nothing kept from a
-// fade switched off. With `split` the bar has a split tab.
+// fade switched off. With `split` the bar has a split tab; with `regular` it is Spotify's regular width bar, which
+// never minimizes, so the minimized steps are left out.
 static void runFadeChecks(SGHarnessChrome *chrome) {
     expectFade(chrome, YES, @"on");
     __weak UIView *first = viewsNamed(chrome.tabs.bar, @"SGRBarFade").firstObject;
@@ -705,16 +732,18 @@ static void runFadeChecks(SGHarnessChrome *chrome) {
     if (alive) HARNESS_FAIL(@"%lu fades switched off are still alive", (unsigned long)alive);
     printf("PASS no fade kept after 20 turns\n");
 
-    SGRSetTabBarMinimized(YES, NO);
-    [chrome.view layoutIfNeeded];
-    if (!SGRTabBarMinimized()) HARNESS_FAIL(@"the bar did not minimize");
-    expectFade(chrome, YES, @"minimized");
-    setFade(chrome, NO);
-    expectFade(chrome, NO, @"minimized, switched off");
-    setFade(chrome, YES);
-    expectFade(chrome, YES, @"minimized, switched on");
-    SGRSetTabBarMinimized(NO, NO);
-    [chrome.view layoutIfNeeded];
+    if (chrome.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassCompact) {
+        SGRSetTabBarMinimized(YES, NO);
+        [chrome.view layoutIfNeeded];
+        if (!SGRTabBarMinimized()) HARNESS_FAIL(@"the bar did not minimize");
+        expectFade(chrome, YES, @"minimized");
+        setFade(chrome, NO);
+        expectFade(chrome, NO, @"minimized, switched off");
+        setFade(chrome, YES);
+        expectFade(chrome, YES, @"minimized, switched on");
+        SGRSetTabBarMinimized(NO, NO);
+        [chrome.view layoutIfNeeded];
+    }
 
     // A page that hides the bar: the switch still takes the fade away and brings it back.
     chrome.tabs.bar.hidden = YES;
@@ -730,7 +759,7 @@ static void runFadeChecks(SGHarnessChrome *chrome) {
 }
 
 // Every title the glass bars show, and whether UIKit cut it short: the width its text needs at the
-// smallest size the label may shrink to, against the width it was given.
+// smallest size the label may shrink to, against the width it was given. With `strict` a cut title fails the run.
 static void reportNames(SGHarnessChrome *chrome, NSString *moment) {
     NSMutableString *out = [NSMutableString stringWithFormat:@"[harness] %@ names", moment];
     NSUInteger cut = 0;
@@ -762,6 +791,7 @@ static void reportNames(SGHarnessChrome *chrome, NSString *moment) {
     }
     [out appendFormat:@" | %lu cut", (unsigned long)cut];
     NSLog(@"%@", out);
+    if (cut && [NSProcessInfo.processInfo.arguments containsObject:@"strict"]) HARNESS_FAIL(@"%@", out);
 }
 
 // Whether the bar and the card agree: minimized, the platter is the 62 pt circle 21 pt in and the card is in
@@ -993,25 +1023,239 @@ static NSString *const kWatched[4] = {@"platter", @"glyph", @"split platter", @"
 }
 @end
 
+#pragma mark - what an earlier state leaves
+
+static void after(double seconds, dispatch_block_t block);
+
+// `states`' verdict: PASS or FAIL and the line, then the end of the run; with `hold`, READY and four seconds first, for a
+// screenshot of what the screen shows either way.
+static void statesVerdict(BOOL passed, NSString *what) {
+    printf("%s %s\n", passed ? "PASS" : "FAIL", what.UTF8String);
+    if (passed) printf("PASS all states\n");
+    fflush(stdout);
+    if (![NSProcessInfo.processInfo.arguments containsObject:@"hold"]) exit(passed ? 0 : 1);
+    printf("READY\n");
+    fflush(stdout);
+    after(4.0, ^{ exit(passed ? 0 : 1); });
+}
+
+// The bar whose items' tab is `title` (labels hidden or not, an item reads its tab's name to VoiceOver).
+static UITabBar *barHolding(SGHarnessChrome *chrome, NSString *title) {
+    for (UITabBar *bar in systemBarsIn(chrome.tabs.bar)) {
+        if (bar.hidden) continue;
+        for (UITabBarItem *item in bar.items) if ([item.accessibilityLabel isEqualToString:title]) return bar;
+    }
+    return nil;
+}
+
+// Spotify's label of the tab `title` painted white: the tab Spotify is on.
+static BOOL stockLit(SGHarnessChrome *chrome, NSString *title) {
+    for (UIView *sub in stockItem(chrome, title).subviews) {
+        if (![sub isKindOfClass:UILabel.class]) continue;
+        CGFloat white = 0, alpha = 0;
+        return [((UILabel *)sub).textColor getWhite:&white alpha:&alpha] && white > 0.95;
+    }
+    return NO;
+}
+
+// `states` alone: the bar minimized in a compact width, then the window made regular (an iPad's narrow window widened)
+// with no tab changed: the whole row is back, not the two circles. With `split`: Search, the only split tab, picked on
+// its bar; Home chosen elsewhere (a link or the side drawer: Spotify repaints its labels and tells its container, with no
+// tap on the glass bar); the bar minimized; a finger on Search's circle: Spotify's Search is tapped, not only the bar
+// expanded.
+static void runStates(SGHarnessChrome *chrome) {
+    if (![NSProcessInfo.processInfo.arguments containsObject:@"split"]) {
+        SGRSetTabBarMinimized(YES, NO);
+        [chrome.view layoutIfNeeded];
+        if (!SGRTabBarMinimized()) HARNESS_FAIL(@"the bar did not minimize in a compact width");
+        chrome.traitOverrides.horizontalSizeClass = UIUserInterfaceSizeClassRegular;
+        [chrome updateTraitsIfNeeded];
+        // Spotify lays its bar out again for the new width.
+        [chrome.tabs.bar setNeedsLayout];
+        [chrome.view layoutIfNeeded];
+        UITabBar *bar = systemBarIn(chrome.tabs.bar);
+        NSUInteger tabs = SGRowIn(chrome.tabs.bar).arrangedSubviews.count;
+        BOOL whole = !SGRTabBarMinimized() && bar.items.count == tabs;
+        statesVerdict(whole, [NSString stringWithFormat:@"widened to a regular width: the bar %@, %lu of %lu tabs on it",
+                              SGRTabBarMinimized() ? @"still minimized" : @"expanded", (unsigned long)bar.items.count, (unsigned long)tabs]);
+        return;
+    }
+    UITabBar *apart = barHolding(chrome, @"Search");
+    UITabBarItem *search = apart.items.firstObject;
+    if (!search || apart.items.count != 1) HARNESS_FAIL(@"Search is not alone on a bar of its own: %@", apart.items);
+    apart.selectedItem = search;
+    [apart.delegate tabBar:apart didSelectItem:search];
+    after(0.5, ^{
+        if (!stockLit(chrome, @"Search")) HARNESS_FAIL(@"picking Search on its bar did not tap Spotify's Search");
+        UIView *home = stockItem(chrome, @"Home");
+        for (UIGestureRecognizer *r in home.gestureRecognizers) {
+            if ([r isKindOfClass:UITapGestureRecognizer.class]) [_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl tapped:(UITapGestureRecognizer *)r];
+        }
+        [chrome.tabs setSelectedViewController:nil];
+    });
+    after(1.0, ^{
+        UITabBar *main = barHolding(chrome, @"Home");
+        if (![main.selectedItem.accessibilityLabel isEqualToString:@"Home"] || apart.selectedItem) {
+            HARNESS_FAIL(@"Home chosen elsewhere: the main bar selects %@, Search's bar %@", main.selectedItem.accessibilityLabel, apart.selectedItem.accessibilityLabel);
+        }
+        SGRSetTabBarMinimized(YES, NO);
+        [chrome.view layoutIfNeeded];
+        UIView *platter = platterIn(apart);
+        UIWindow *window = chrome.view.window;
+        CGRect circle = [platter convertRect:platter.bounds toView:window];
+        if (!SGRTabBarMinimized() || apart.hidden || !platter) HARNESS_FAIL(@"the bar did not minimize to Search's circle");
+        SGHarnessTap(window, CGPointMake(CGRectGetMidX(circle), CGRectGetMidY(circle)));
+    });
+    after(1.8, ^{
+        BOOL tapped = stockLit(chrome, @"Search");
+        statesVerdict(tapped, [NSString stringWithFormat:@"a finger on Search's circle after Home was chosen elsewhere: Spotify's Search %@, the bar %@",
+                               tapped ? @"tapped" : @"not tapped", SGRTabBarMinimized() ? @"minimized" : @"expanded"]);
+    });
+}
+
+#pragma mark - the listener's glass
+
+// `glass`: the listener's glass (Redesigned/Kit/SGRGlass.h) on the platter of every bar shown and on the now playing
+// card, expanded and then minimized, each held for a screenshot (a SHOT line, with AREA lines naming the glass in
+// points); then real taps on Your Library's tab and on the card's play button, which must work whatever touch response
+// says. Every glass's tint and touch response are read here, and the platters' material; the card's material shows
+// only on the screen. What each glass should be is given as literals: -harness.wantMaterial (0 Regular, 1 Clear), -harness.wantTint
+// (0 none, 1 white at 30%, 2 black at 45%) and -harness.wantInteractive. UIKit's own platter glass is Regular,
+// untinted and interactive, so the defaults expect it as UIKit made it.
+static void expectGlass(NSInteger style, UIColor *tintColor, BOOL isInteractive, NSString *what, NSString *moment) {
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    NSInteger material = [store integerForKey:@"harness.wantMaterial"], tint = [store integerForKey:@"harness.wantTint"];
+    BOOL interactive = [store boolForKey:@"harness.wantInteractive"];
+    CGFloat white = -1, alpha = 0;
+    if (tintColor && ![tintColor getWhite:&white alpha:&alpha]) HARNESS_FAIL(@"%@: %@ tinted %@", moment, what, tintColor);
+    BOOL tintRight = tint == 0 ? tintColor == nil
+        : fabs(white - (tint == 1 ? 1 : 0)) < 0.01 && fabs(alpha - (tint == 1 ? 0.3 : 0.45)) < 0.01;
+    if ((style != NSNotFound && style != material) || !tintRight || isInteractive != interactive) {
+        HARNESS_FAIL(@"%@: %@ is style %ld, tint %@, interactive %d; want %ld, %ld, %d", moment, what, (long)style, tintColor,
+                     isInteractive, (long)material, (long)tint, interactive);
+    }
+}
+
+static void shotGlass(SGHarnessChrome *chrome, NSString *moment, NSString *shot) {
+    UIWindow *window = chrome.view.window;
+    NSUInteger platters = 0;
+    for (UITabBar *bar in systemBarsIn(chrome.tabs.bar)) {
+        UIView *platter = bar.hidden ? nil : platterIn(bar);
+        if (!platter.window) continue;
+        // A platter's glass is its own background, a _UIViewGlass; -_glassEffect reads its style back as Regular
+        // whatever it is, so the material and the touch response are read from the glass itself.
+        NSString *background = [[platter valueForKey:@"_background"] description];
+        NSInteger style = [background containsString:@"Configuration(clear)"] ? 1 : [background containsString:@"Configuration(regular)"] ? 0 : -1;
+        BOOL flexible = [background containsString:@"isFlexible: true"];
+        expectGlass(style, [[platter valueForKey:@"_glassEffect"] valueForKey:@"tintColor"], flexible,
+                    [NSString stringWithFormat:@"platter %lu (%@)", (unsigned long)platters, background], moment);
+        CGRect frame = [platter convertRect:platter.bounds toView:window];
+        printf("AREA platter%lu %.1f %.1f %.1f %.1f\n", (unsigned long)platters, frame.origin.x, frame.origin.y, frame.size.width, frame.size.height);
+        platters++;
+    }
+    if (platters == 0) HARNESS_FAIL(@"%@: no platter shown", moment);
+    CGRect card = SGRNowPlayingCardFrameIn(window, NULL);
+    UIVisualEffectView *pane = nil;
+    for (UIView *sub in chrome.npb.subviews.firstObject.subviews) {
+        if ([sub isKindOfClass:UIVisualEffectView.class] && CGRectEqualToRect([sub convertRect:sub.bounds toView:window], card)) pane = (UIVisualEffectView *)sub;
+    }
+    if (!pane) HARNESS_FAIL(@"%@: no glass under the card at %@", moment, NSStringFromCGRect(card));
+    if (![pane.effect isKindOfClass:NSClassFromString(@"UIGlassEffect")]) HARNESS_FAIL(@"%@: the card has %@, not glass", moment, pane.effect);
+    // An effect view hands back its glass rebuilt without its style (Regular for a Clear one, iOS 26.5): the card's
+    // material is judged from the screen (glass-check.py).
+    expectGlass(NSNotFound, [pane.effect valueForKey:@"tintColor"],
+                [[pane.effect valueForKey:@"interactive"] boolValue], @"the card's glass", moment);
+    printf("AREA card %.1f %.1f %.1f %.1f\nSHOT %s\n", card.origin.x, card.origin.y, card.size.width, card.size.height, shot.UTF8String);
+    fflush(stdout);
+    NSLog(@"[harness] PASS %@: %lu platters and the card in the glass asked for", moment, (unsigned long)platters);
+}
+
+static void runGlass(SGHarnessChrome *chrome) {
+    NSString *shot = [NSUserDefaults.standardUserDefaults stringForKey:@"harness.shot"] ?: @"glass";
+    NSLog(@"[harness] glass with Reduce Transparency %@", UIAccessibilityIsReduceTransparencyEnabled() ? @"on" : @"off");
+    shotGlass(chrome, @"expanded", [shot stringByAppendingString:@"-expanded"]);
+    after(3.0, ^{
+        SGRSetTabBarMinimized(YES, NO);
+        [chrome.view layoutIfNeeded];
+    });
+    after(3.5, ^{
+        if (!SGRTabBarMinimized()) HARNESS_FAIL(@"the bar did not minimize");
+        shotGlass(chrome, @"minimized", [shot stringByAppendingString:@"-minimized"]);
+    });
+    after(6.5, ^{
+        SGRSetTabBarMinimized(NO, NO);
+        [chrome.view layoutIfNeeded];
+    });
+    __block NSUInteger plays = 0;
+    after(7.0, ^{
+        UIWindow *window = chrome.view.window;
+        UITabBar *bar = barHolding(chrome, @"Your Library");
+        NSUInteger index = [bar.items indexOfObjectPassingTest:^BOOL(UITabBarItem *item, NSUInteger i, BOOL *stop) {
+            return [item.accessibilityLabel isEqualToString:@"Your Library"];
+        }];
+        // UIKit's tab buttons, left to right, in the platter's content (not the copy it lifts into the selection).
+        NSMutableArray<UIView *> *buttons = [NSMutableArray array];
+        SGForEachView(bar, ^(UIView *v) {
+            NSString *holder = NSStringFromClass(v.superview.class);
+            if ([v isKindOfClass:UIControl.class] && [holder hasSuffix:@"ContentView"] && ![holder hasSuffix:@"SelectedContentView"]) [buttons addObject:v];
+        });
+        [buttons sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+            return [@([a convertRect:a.bounds toView:window].origin.x) compare:@([b convertRect:b.bounds toView:window].origin.x)];
+        }];
+        UIView *tab = index < buttons.count && buttons.count == bar.items.count ? buttons[index] : nil;
+        if (!tab || stockLit(chrome, @"Your Library")) HARNESS_FAIL(@"Your Library's tab %@ of %@, already on: %d", tab, buttons, stockLit(chrome, @"Your Library"));
+        CGRect frame = [tab convertRect:tab.bounds toView:window];
+        SGHarnessTap(window, CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame)));
+    });
+    after(8.0, ^{
+        if (!stockLit(chrome, @"Your Library")) HARNESS_FAIL(@"a finger on Your Library's tab did not tap Spotify's");
+        UIWindow *window = chrome.view.window;
+        // The mock's own play button sits past the card's trailing edge (the mock's page is wider than the card), so
+        // one goes beside it where the card shows its play button, 16 pt in from the card's trailing edge.
+        CGRect card = SGRNowPlayingCardFrameIn(window, NULL);
+        UIButton *mock = (UIButton *)firstOf(chrome.npb, ^BOOL(UIView *v) {
+            return [v isKindOfClass:UIButton.class] && [((UIButton *)v).currentImage isEqual:[UIImage systemImageNamed:@"play.fill"]];
+        });
+        if (!mock) HARNESS_FAIL(@"no play button in the now playing bar");
+        UIButton *play = [UIButton systemButtonWithImage:[UIImage systemImageNamed:@"play.fill"] target:nil action:nil];
+        play.frame = [mock.superview convertRect:CGRectMake(CGRectGetMaxX(card) - 48, CGRectGetMidY(card) - 16, 32, 32) fromView:window];
+        [mock.superview addSubview:play];
+        [play addAction:[UIAction actionWithHandler:^(UIAction *action) { plays++; }] forControlEvents:UIControlEventTouchUpInside];
+        CGRect frame = [play convertRect:play.bounds toView:window];
+        CGPoint middle = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        UIView *hit = [window hitTest:middle withEvent:nil];
+        if (hit != play) HARNESS_FAIL(@"a finger on the card's play button at %@ lands on %@", NSStringFromCGPoint(middle), hit);
+        SGHarnessTap(window, middle);
+    });
+    after(9.0, ^{
+        if (plays != 1) HARNESS_FAIL(@"a finger on the card's play button played %lu times", (unsigned long)plays);
+        NSLog(@"[harness] PASS all glass: the tab and the card's play button took their taps");
+        exit(0);
+    });
+}
+
 #pragma mark - the app
 
 // Before every %ctor, so the redesign's gate reads on; the fade under the bars on unless the launch line says `off`;
-// Apple symbols off, as a run before may have left it (`symbols` sets it itself), and the tabs' names as the product's
-// default has them, hidden, but shown from the bar's first pass with `symbols` (not `symbols hold`), whose setting
-// outlives its run.
+// Apple symbols stored off (the product's default is on; `symbols` switches it itself), and the tabs' names stored
+// hidden (the product's default shows them), but shown from the bar's first pass with `names` and `symbols` (not `symbols hold`):
+// the glyph checks below compare Spotify's own glyphs on a bar of icons alone.
 __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
     [store setBool:YES forKey:@"spotifyglass.redesign"];
     if ([args containsObject:@"off"]) [store setBool:NO forKey:SGRKeyNavbarFade];
     else [store removeObjectForKey:SGRKeyNavbarFade];
-    [store removeObjectForKey:SGRKeyNavbarSymbols];
-    if (args.count > 1 && [args[1] isEqualToString:@"symbols"] && ![args containsObject:@"hold"]) [store setBool:NO forKey:SGRKeyNavbarHideLabels];
-    else [store removeObjectForKey:SGRKeyNavbarHideLabels];
+    [store setBool:NO forKey:SGRKeyNavbarSymbols];
+    BOOL names = (args.count > 1 && [args[1] isEqualToString:@"symbols"] && ![args containsObject:@"hold"])
+              || (args.count > 1 && [args[1] isEqualToString:@"search"] && [args containsObject:@"labels"])
+              || (args.count > 1 && [args[1] isEqualToString:@"names"]);
+    [store setBool:!names forKey:SGRKeyNavbarHideLabels];
 }
 
 void SGHarnessRunNavbarPage(SGHarnessChrome *chrome, void (^barChecked)(BOOL on));
 void SGHarnessRunSymbols(SGHarnessChrome *chrome);
+void SGHarnessRunSearch(UIView *stockBar);
 
 @interface SGHarnessApp : UIResponder <UIApplicationDelegate>
 @end
@@ -1039,6 +1283,50 @@ static void after(double seconds, dispatch_block_t block) {
     // `away` one there from the start sliding away at 1.5 s, `cycle` in at 1.5 s and out at 4.5 s.
     NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
     NSString *mode = args.count > 1 ? args[1] : @"none";
+    BOOL reparentFling = [mode isEqualToString:@"reparent-fling"];
+    if (reparentFling || [mode isEqualToString:@"reparent-drag"]) {
+        UIView *wrapper = [[UIView alloc] initWithFrame:CGRectMake(0, 100, 380, 560)];
+        UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:wrapper.bounds];
+        scroll.contentSize = CGSizeMake(380, 3000);
+        [wrapper addSubview:scroll];
+        [chrome.view addSubview:wrapper];
+        if (reparentFling) {
+            after(.7, ^{
+                fling(chrome, 250);
+                after(.22, ^{
+                    HARNESS_CHECK(scroll.isDecelerating && !SGRTabBarMinimized());
+                    [chrome.tabs.view addSubview:wrapper];
+                    CGFloat start = scroll.contentOffset.y;
+                    after(.6, ^{
+                        CGFloat travel = scroll.contentOffset.y - start;
+                        HARNESS_CHECK(travel > 24);
+                        if (!SGRTabBarMinimized()) HARNESS_FAIL(@"bar still expanded after %.1f pt on tab", travel);
+                        NSLog(@"[harness] PASS bar minimized after %.1f pt on tab during fling", travel);
+                        exit(0);
+                    });
+                });
+            });
+            return;
+        }
+        after(.7, ^{
+            scroll.contentOffset = CGPointMake(0, 1);
+            [chrome.tabs.view addSubview:wrapper];
+            fling(chrome, 250);
+        });
+        after(1.7, ^{
+            HARNESS_CHECK(scroll.contentOffset.y > 24 && SGRTabBarMinimized());
+            [scroll setContentOffset:CGPointZero animated:NO];
+            SGRSetTabBarMinimized(NO, NO);
+            [chrome.view addSubview:wrapper];
+            fling(chrome, 250);
+        });
+        after(2.8, ^{
+            HARNESS_CHECK(scroll.contentOffset.y > 24 && !SGRTabBarMinimized());
+            NSLog(@"[harness] PASS wrapper moved onto tab and off tab before drags");
+            exit(0);
+        });
+        return;
+    }
     if ([mode isEqualToString:@"audit"]) {
         after(1, ^{
             UIStackView *row = SGRowIn(chrome.tabs.bar);
@@ -1112,6 +1400,21 @@ static void after(double seconds, dispatch_block_t block) {
     // `symbols`: Apple symbols from the Tab bar page over the bar, a tab of the mod's own on it (navsettings.m).
     if ([mode isEqualToString:@"symbols"]) {
         after(1.0, ^{ SGHarnessRunSymbols(chrome); });
+        return;
+    }
+    // `search`: Search on the minimized bar's trailing circle (search.m).
+    if ([mode isEqualToString:@"search"]) {
+        after(1.0, ^{ SGHarnessRunSearch(chrome.tabs.bar); });
+        return;
+    }
+    // `glass`: the listener's glass on the bars and the card (runGlass).
+    if ([mode isEqualToString:@"glass"]) {
+        after(1.0, ^{ runGlass(chrome); });
+        return;
+    }
+    // `states`: what an earlier state leaves on the bar (runStates).
+    if ([mode isEqualToString:@"states"]) {
+        after(1.0, ^{ runStates(chrome); });
         return;
     }
     // `jam`: in a Jam from the start, and out of it at 3.5 s.
@@ -1272,7 +1575,14 @@ static void after(double seconds, dispatch_block_t block) {
             [chrome.tabs.bar setNeedsLayout];
             [chrome.tabs.bar layoutIfNeeded];
         });
-        after(7.5, ^{ reportNames(chrome, @"after Spotify lays out"); });
+        after(7.5, ^{
+            reportNames(chrome, @"after Spotify lays out");
+            if ([NSProcessInfo.processInfo.arguments containsObject:@"strict"]) {
+                printf("PASS all names\n");
+                fflush(stdout);
+                exit(0);
+            }
+        });
     }
     // `edges` (after `none`, `split`, `split2` or `jam`, with `regular` or `rtl` for Spotify's own edges): the card's
     // sides at rest, minimized and expanded with no animation, after a minimize turned back mid-spring, and minimized
@@ -1416,9 +1726,10 @@ static void after(double seconds, dispatch_block_t block) {
 
 int main(int argc, char *argv[]) {
     sgJam = argc > 1 && strcmp(argv[1], "jam") == 0;
-    sgColorful = argc > 1 && (strcmp(argv[1], "fade") == 0 || strcmp(argv[1], "navsettings") == 0);
+    sgColorful = argc > 1 && (strcmp(argv[1], "fade") == 0 || strcmp(argv[1], "navsettings") == 0 || strcmp(argv[1], "glass") == 0);
     sgGlyphs = argc > 1 && (strcmp(argv[1], "glyphs") == 0 || strcmp(argv[1], "symbols") == 0);
     sgSwiftIcons = sgGlyphs && argc > 2 && strcmp(argv[2], "swift") == 0;
+    sgSearch = argc > 1 && strcmp(argv[1], "search") == 0;
     Class glyphView = objc_allocateClassPair(SGHarnessGlyphView.class, "SPTEncoreIconView", 0);
     class_addIvar(glyphView, "icon", sizeof(void *), __builtin_ctz(sizeof(void *)), sgSwiftIcons ? "" : "@");
     objc_registerClassPair(glyphView);

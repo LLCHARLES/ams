@@ -47,6 +47,7 @@ UIFont *SGCategoryCappedFont(UIFontTextStyle style, UIFontWeight weight, UIConte
     return [UIFont systemFontOfSize:atLarge - (below ? 1 : 0) weight:weight];
 }
 void SGRShowGlass(UIView *shape, BOOL shown) {}
+UIVisualEffect *SGRGlassEffect(void) { return SGGlassEffect(); }
 void SGRPressWatch(UIView *view, SGRPressKind kind, BOOL (^begins)(UITouch *touch), void (^changed)(BOOL pressed, BOOL tapped)) {}
 BOOL SGRPressOnSmallControl(UITouch *touch, UIView *container) { return NO; }
 void SGRPressAnimateLayer(CALayer *layer, NSString *keyPath, id value, BOOL animated) {}

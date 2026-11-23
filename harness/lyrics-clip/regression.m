@@ -8,11 +8,18 @@
 
 static int failures;
 static BOOL renderingOnly;
+static NSUInteger refusedContextIndex;
+CGContextRef SGLyricsHarnessCreateContext(void *data, size_t width, size_t height, size_t bits, size_t stride,
+                                         CGColorSpaceRef space, uint32_t info) {
+    if (refusedContextIndex && !--refusedContextIndex) return NULL;
+    return CGBitmapContextCreate(data, width, height, bits, stride, space, info);
+}
 static CGFloat drawnColumnWidth, longestDrawnLine;
 static CFIndex drawnLineCount;
 // Interpose only the framework draw boundary in the harness. Measure the actual shaped CTLines
 // delivered by production, then call Core Text unchanged; no copy of the layout algorithm.
 void SGLyricsHarnessDrawFrame(CTFrameRef frame, CGContextRef context) {
+    if (!context) { fputs("FAIL: text drawn into a NULL context\n", stderr); exit(1); }
     drawnColumnWidth = CGRectGetWidth(CGPathGetBoundingBox(CTFrameGetPath(frame)));
     CFArrayRef lines = CTFrameGetLines(frame);
     drawnLineCount = CFArrayGetCount(lines);
@@ -109,6 +116,14 @@ int main(int argc, char **argv) {
         NSString *translation = @"네 브라운 슈가의 신봉자가 되었어, 이제 난 날 수 있어";
         CGImageRef black = solid(0), white = solid(1), cover = newCover();
         CGImageRef backdrop = SGLyricsClipBackdrop(cover, size);
+        if (!renderingOnly) {
+            for (NSUInteger index = 1; index <= 2; index++) {
+                refusedContextIndex = index;
+                CGImageRef frame = render(backdrop, cover, nil, @"Line", nil, size, SGLyricsClipCentered);
+                check(!frame, index == 1 ? @"missing required words returns no preview" : @"missing final context returns no preview");
+                CGImageRelease(frame);
+            }
+        }
         CGImageRef blank = SGLyricsBackgroundCreate(black, size, (SGLyricsBackgroundStyle){SGLyricsBackgroundCover, 0, 0, 0});
         for (SGLyricsClipLayout layout = SGLyricsClipLeft; layout <= SGLyricsClipPoster; layout++) {
             CGImageRef words = render(blank, black, previous, line, translation, size, layout);
@@ -147,7 +162,7 @@ int main(int argc, char **argv) {
 #ifdef SG_BASELINE
         BOOL written = SGLyricsClipWriteWithLayout(video, backdrop, nil, nil, nil, size, SGLyricsClipStill, SGLyricsClipLeft);
 #else
-        BOOL written = SGLyricsClipWriteWithLayout(video, backdrop, cover, nil, nil, nil, nil, size, SGLyricsClipStill, SGLyricsClipLeft);
+        BOOL written = SGLyricsClipWriteWithLayout(video, backdrop, cover, nil, nil, nil, nil, size, SGLyricsClipStill, SGLyricsClipLeft, nil);
 #endif
         check(written, @"motion fixture written");
         CGImageRef motion = written ? SGLyricsClipMotionFrame(video, previous, line, translation, nil, 0, 2, SGLyricsClipLeft) : NULL;
@@ -208,7 +223,7 @@ int main(int argc, char **argv) {
         CGImageRef patterned = render(NULL, cover, previous, line, translation, size, SGLyricsClipOverArtwork);
         save(patterned, dir, @"artwork-after.png", YES);
         for (SGLyricsClipStyle style = SGLyricsClipStill; style <= SGLyricsClipAnimated; style++) {
-            check(SGLyricsClipWriteWithLayout(video, NULL, cover, previous, line, translation, nil, size, style, SGLyricsClipOverArtwork),
+            check(SGLyricsClipWriteWithLayout(video, NULL, cover, previous, line, translation, nil, size, style, SGLyricsClipOverArtwork, nil),
                   @"OverArtwork encodes in both styles");
             AVURLAsset *asset = [AVURLAsset URLAssetWithURL:video options:nil];
             check(fabs(CMTimeGetSeconds(asset.duration) - (style == SGLyricsClipStill ? 2 : 4)) < .01,

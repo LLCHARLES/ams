@@ -1,6 +1,7 @@
 #include "JailbreakPatches.h"
-#include "NativeRestrictionsPatch.h"
-#include "NativeKeyModePatch.h"
+#include "NativeAdmission.h"
+#include <NativeRestrictionsPatch.h>
+#include <NativeKeyModePatch.h>
 #include "NativeKeyPatch.h"
 #include <mach-o/loader.h>
 #include <mach/machine.h>
@@ -10,6 +11,7 @@ static bool fail(const char **reason,const char *message) {if(reason)*reason=mes
 static bool zeroes(const uint8_t *bytes,size_t count) {for(size_t i=0;i<count;i++)if(bytes[i])return false;return true;}
 bool SAPJBApplyPatches(uint8_t *image,size_t textSize,SAPJBWrite writer,void *context,const char **reason) {
     if(reason)*reason="unsupported_image";
+    if(!SAPRuntimeProfileAdmitted())return false;
     if(!image||textSize<sizeof(struct mach_header_64))return false;
     const struct mach_header_64 *header=(const void *)image;
     if(header->magic!=MH_MAGIC_64||header->cputype!=CPU_TYPE_ARM64||header->filetype!=MH_EXECUTE||

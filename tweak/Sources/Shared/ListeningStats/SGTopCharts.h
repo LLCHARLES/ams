@@ -15,7 +15,7 @@ enum { SGChartLength = 50 };
 enum { SGChartRunTop = 5, SGChartRunShown = 2 };
 
 // Songs and local files, which is all the recorder writes down, and imported rows that carry no URI (a basic
-// Spotify export has none and leaves podcasts out); not an episode, a show or an audiobook a Vitrine backup holds.
+// Spotify export has none and leaves podcasts out); not an episode, a show or an audiobook a Retrine backup holds.
 BOOL SGPlayIsMusic(SGPlay *play);
 // An entry's identity. A song is SGTrackKey. A play has no artist or album URI, so an artist is its name and an
 // album its name with its artist, trimmed and compared without case or diacritics. Nil for a play without that

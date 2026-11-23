@@ -23,9 +23,11 @@ with open(path, "r+b") as f:
     off = 32
     for _ in range(ncmds):
         cmd, cmdsize = struct.unpack_from("<II", data, off)
-        if cmd in (0xC, 0x18, 0x1F) and data[off + 24:off + cmdsize].split(b"\0")[0] == name.encode():
-            print(f"    {name} already loaded")
-            sys.exit(0)
+        if (cmd & ~0x80000000) in (0xC, 0x18, 0x1F, 0x20, 0x23):
+            name_offset, = struct.unpack_from("<I", data, off + 8)
+            if data[off + name_offset:off + cmdsize].split(b"\0")[0] == name.encode():
+                print(f"    {name} already loaded")
+                sys.exit(0)
         if cmd == LC_SEGMENT_64:
             nsects = struct.unpack_from("<I", data, off + 64)[0]
             for s in range(nsects):

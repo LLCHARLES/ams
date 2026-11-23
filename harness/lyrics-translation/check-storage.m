@@ -10,6 +10,7 @@
 static NSString *flushFailureDirectory, *flushFailureTarget;
 static NSDictionary *flushFailureContents;
 static NSUInteger largestAliasLookup;
+BOOL SGLyricsTestProtectedDataAvailable(void) { return NSThread.isMainThread; }
 void SGLyricsTestAliasLookupSize(NSUInteger count) { largestAliasLookup = MAX(largestAliasLookup, count); }
 int SGLyricsTestFsync(int fd) {
     char path[PATH_MAX], actual[PATH_MAX], expected[PATH_MAX];
@@ -58,6 +59,14 @@ static void checkStorageLifecycle(void) {
     NSURL *root = storageFixture();
     SGTranslationFiles *store = fixtureStore(root);
     CHECK([store prepare:nil]);
+    // A directory in place of state.json is an I/O failure, not an absent file.
+    NSURL *state = [store.root URLByAppendingPathComponent:@"TranslationState/state.json"];
+    CHECK([NSFileManager.defaultManager createDirectoryAtURL:state withIntermediateDirectories:NO attributes:nil error:nil]);
+    CHECK(![store removeRecords:@[] all:YES error:NULL]);
+    BOOL unchanged = [[store importAuthority:nil] isEqual:@0];
+    BOOL refused = ![fixtureStore(root) prepare:NULL];
+    fprintf(stderr, "Failed deletion retained authority: %d; NULL-error read refused: %d\n", unchanged, refused);
+    CHECK(unchanged && refused);
     CHECK([NSFileManager.defaultManager removeItemAtURL:store.root error:nil]);
     NSError *error = nil;
     BOOL saved = [store save:@{@"line":@"durable after recreation"} space:@"Translations" key:@"recreated.json"
@@ -636,6 +645,24 @@ static void checkPreviewSurvivesUnlock(void) {
     clearFixture(root);
     SGLyricsDeleteSavedTranslations();
 }
+// Runs in its own process before anything opens the store: a failed startup pass leaves abandoned
+// import stages, and the next maintenance chance must still reclaim them.
+static void checkStartupReclaimRetry(void) {
+    NSURL *root = SGLyricsTestCacheRoot();
+    CHECK([[NSData data] writeToURL:root options:0 error:nil]);
+    __block BOOL listed = NO;
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(warning.length); listed = YES; });
+    waitFor(^BOOL { return listed; });
+    CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]);
+    NSURL *abandoned = [[root URLByAppendingPathComponent:@"TranslationImports"] URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    CHECK([NSFileManager.defaultManager createDirectoryAtURL:abandoned withIntermediateDirectories:YES attributes:nil error:nil]);
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationProtectedDataDidBecomeAvailable object:nil];
+    listed = NO;
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(!warning); listed = YES; });
+    waitFor(^BOOL { return listed; });
+    CHECK(![NSFileManager.defaultManager fileExistsAtPath:abandoned.path]);
+    clearFixture(root);
+}
 static void checkMigrationWarningPersists(void) {
     SGLyricsDeleteSavedTranslations();
     SGLyricsSavedAI(@"notes", @"barrier", @"ko");
@@ -690,6 +717,26 @@ static void checkManagementPagination(void) {
     SGLyricsDeleteSavedTranslations();
 }
 static void checkDurableStorage(void) {
+    // Startup maintenance can be the first reader, before main services queued work.
+    NSURL *root = storageFixture();
+    __block BOOL prepared;
+    dispatch_group_t startup = dispatch_group_create();
+    dispatch_group_async(startup, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        prepared = [fixtureStore(root) prepare:NULL];
+    });
+    dispatch_group_wait(startup, DISPATCH_TIME_FOREVER);
+    clearFixture(root);
+    CHECK(prepared);
+    root = storageFixture();
+    SGTranslationFiles *store = fixtureStore(root);
+    CHECK([store prepare:nil]);
+    flushFailureDirectory = [store.root URLByAppendingPathComponent:@"TranslationState"].path;
+    flushFailureTarget = [store.root URLByAppendingPathComponent:@"TranslationState/state.json"].path;
+    BOOL removed = [store removeRecords:@[] all:YES error:nil];
+    flushFailureDirectory = flushFailureTarget = nil;
+    NSNumber *version = [store importAuthority:nil];
+    clearFixture(root);
+    CHECK(!removed && [version isEqual:@1]);
     checkStorageLifecycle();
     checkStorageRetention();
     checkMigrationResume();

@@ -3,10 +3,10 @@
 set -eu
 cd "$(dirname "$0")"
 SRC=$(cd ../../tweak/Sources && pwd)
-OUT=$(mktemp -d /tmp/vitrine-adnetwork.XXXXXX)
+OUT=$(mktemp -d /tmp/retrine-adnetwork.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT HUP INT TERM
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${ADNETWORK_SOURCE:-$SRC/Shared/AdBlock/AdNetwork.x}" > "$OUT/AdNetwork.m"
-xcrun clang -fobjc-arc -fblocks -O0 -Wall -Werror -I "$OUT" -I shim -I ../shared/foundation -I "$SRC/Shared/AdBlock" \
+xcrun clang -fobjc-arc -fblocks -O0 -finstrument-functions -Wall -Werror -I "$OUT" -I shim -I ../shared/foundation -I "$SRC/Shared/AdBlock" \
     network-check.m -framework Foundation -o "$OUT/network-check"
 for ads in 0 1; do
     for premium in 0 1; do

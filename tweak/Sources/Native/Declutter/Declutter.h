@@ -4,6 +4,7 @@
 typedef struct {
     __unsafe_unretained NSString *title, *key;
     BOOL prefix;
+    BOOL suffix;
 } SGNativeSectionRule;
 
 typedef struct {

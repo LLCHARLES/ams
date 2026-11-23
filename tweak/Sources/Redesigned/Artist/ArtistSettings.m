@@ -79,7 +79,7 @@ static UIView *addCardRow(SGRPagePreview *card, UIView *leading) {
 static UIView *previewPlay(UIView *header) {
     __block UIView *controls = nil;
     SGForEachView(header, ^(UIView *view) {
-        if (!controls && [view.accessibilityIdentifier isEqualToString:@"vitrine.preview.header.controls"]) controls = view;
+        if (!controls && [view.accessibilityIdentifier isEqualToString:@"retrine.preview.header.controls"]) controls = view;
     });
     return controls.subviews.count == 3 ? controls.subviews[1] : nil;
 }
@@ -224,7 +224,7 @@ UIViewController *SGRArtistSettingsPage(void) {
         SGOptionRow(SGL(@"settings.artist.adaptive_photo.title", @"Picture-aware photo"),
             SGL(@"settings.artist.adaptive_photo.subtitle", @"Picks the page colour from the photo, leaving faces out"), SGRKeyArtistAdaptivePhoto),
         SGOptionRow(SGL(@"settings.artist.listeners_in_about.title", @"Monthly listeners in About"),
-            SGL(@"settings.artist.listeners_in_about.subtitle", @"Not under the name when the artist has About"), SGRKeyArtistListenersInAbout),
+            SGL(@"settings.artist.listeners_in_about.subtitle", @"Spotify’s About shows the count. Hide About to keep it under the artist’s name."), SGRKeyArtistListenersInAbout),
     ];
     // The card names what it shows by the rows' own titles, by their keys.
     NSMutableDictionary<NSString *, NSString *> *names = [NSMutableDictionary dictionary];

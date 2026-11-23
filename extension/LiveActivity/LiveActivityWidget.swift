@@ -282,8 +282,8 @@ private struct FamilyView: View {
 
 // The sleep timer's end while it is still ahead; nil once it is up or when none is set, so no countdown
 // is drawn from a range that runs backwards.
-private func runningTimer(_ state: State) -> Date? {
-    state.timerEnd.flatMap { $0 > Date() ? $0 : nil }
+private func runningTimer(_ state: State, at now: Date = Date()) -> Date? {
+    state.timerEnd.flatMap { $0 > now ? $0 : nil }
 }
 
 private struct Countdown: View {
@@ -291,7 +291,8 @@ private struct Countdown: View {
     @Environment(\.accent) private var accent
 
     var body: some View {
-        Text(timerInterval: Date()...end, countsDown: true)
+        let now = Date()
+        Text(timerInterval: now...max(now, end), countsDown: true)
             .monospacedDigit()
             .foregroundStyle(accent)
     }
@@ -534,6 +535,7 @@ private struct Summary: View {
     let state: State
 
     var body: some View {
+        let now = Date()
         Group {
             switch state.tab {
             case .controls:
@@ -541,8 +543,8 @@ private struct Summary: View {
             case .queue:
                 Text(state.tracks.first.map { "Next: \($0.title)" } ?? "Nothing up next")
             case .timer:
-                if let end = state.timerEnd, end > Date() {
-                    Text("Music stops in \(Text(timerInterval: Date()...end, countsDown: true))")
+                if let end = runningTimer(state, at: now) {
+                    Text("Music stops in \(Text(timerInterval: now...end, countsDown: true))")
                 } else if state.timerEndOfTrack {
                     Text("Music stops at the end of this track")
                 } else if state.timerEndOfAlbum == true {
@@ -736,15 +738,17 @@ private struct TimerPage: View {
     @Environment(\.accent) private var accent
 
     var body: some View {
+        let now = Date()
+        let end = runningTimer(state, at: now)
         Group {
-            if (state.timerEnd.map { $0 > Date() } ?? false) || state.timerEndOfTrack || state.timerEndOfAlbum == true {
+            if end != nil || state.timerEndOfTrack || state.timerEndOfAlbum == true {
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Music stops")
                             .font(.caption)
                             .foregroundStyle(.white.opacity(0.6))
-                        if let end = state.timerEnd {
-                            Text(timerInterval: Date()...end, countsDown: true)
+                        if let end {
+                            Text(timerInterval: now...end, countsDown: true)
                                 .font(.system(size: 34, weight: .bold).monospacedDigit())
                                 .foregroundStyle(accent)
                         } else {
@@ -755,12 +759,12 @@ private struct TimerPage: View {
                     }
                     Spacer(minLength: 0)
                     HStack(spacing: 8) {
-                        if state.timerEnd != nil {
+                        if end != nil {
                             ChipButton(action: "timer:add", symbol: "plus", label: "15m", spoken: "Add 15 minutes")
                         }
                         ChipButton(action: "timer:cancel", symbol: "xmark", label: "Cancel")
                     }
-                    .frame(width: state.timerEnd != nil ? 140 : 66)
+                    .frame(width: end != nil ? 140 : 66)
                 }
             } else {
                 HStack(spacing: 8) {

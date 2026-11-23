@@ -3,6 +3,7 @@
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Core/SGLog.h"
 #import "Core/SGFileHash.h"
+#import "Core/SGDataRoot.h"
 #import <math.h>
 
 // A corrupt/cyclic record cannot exhaust the stack. Real lyrics have at most a few
@@ -60,7 +61,7 @@ static NSArray<SGLyricsLink *> *decodeLinks(id records) {
 }
 
 static NSDictionary *encodeLine(SGKaraokeLine *line, NSUInteger depth) {
-    if (![line isKindOfClass:SGKaraokeLine.class] || depth > kStoreDepth) return nil;
+    if (![line isKindOfClass:SGKaraokeLine.class] || line.fileOwned || depth > kStoreDepth) return nil;
     NSMutableArray *words = [NSMutableArray array];
     for (SGKaraokeWord *word in line.words) {
         if (![word isKindOfClass:SGKaraokeWord.class] || ![word.text isKindOfClass:NSString.class]) return nil;
@@ -165,7 +166,7 @@ static dispatch_queue_t storeQueue(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        queue = dispatch_queue_create("app.vitrine.lyrics-store", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
+        queue = dispatch_queue_create("app.retrine.lyrics-store", dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_UTILITY, 0));
     });
     return queue;
 }
@@ -178,8 +179,7 @@ static NSTimeInterval sg_lastPrune, sg_pruneInterval = 60;
 
 static NSURL *directory(void) {
     if (!sg_storeDirectory) {
-        NSURL *library = [NSFileManager.defaultManager URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask].firstObject;
-        sg_storeDirectory = [library URLByAppendingPathComponent:@"Application Support/Vitrine/Lyrics" isDirectory:YES];
+        sg_storeDirectory = [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Lyrics" isDirectory:YES];
     }
     return sg_storeDirectory;
 }
@@ -263,6 +263,7 @@ void SGLyricsStoreSaveWithLease(NSString *track, NSArray<SGKaraokeLine *> *lines
     // The keeper calls on main, where the provider credit registry lives. Snapshot before
     // generated translations/pronunciation can be attached; serialization and I/O stay off main.
     NSMutableDictionary *record = [SGLyricsStoreEncode(lines, credit) mutableCopy];
+    if (!record) return;
     NSArray *links = encodeLinks(SGLyricsCreditLinks(credit));
     if (links) record[@"creditLinks"] = links;
     if (SGLyricsCreditRequired(credit)) record[@"creditRequired"] = @YES;
@@ -274,6 +275,7 @@ void SGLyricsStoreSaveWithLease(NSString *track, NSArray<SGKaraokeLine *> *lines
         // A single oversized track cannot be kept, even in an empty store.
         if (data.length > sg_byteCap || !sg_countCap) return;
         NSURL *url = fileFor(track);
+        if (!url) return;
         unsigned long long bytes;
         NSArray *files = inventory(&bytes);
         NSUInteger count = files.count + 1;

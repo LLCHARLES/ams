@@ -460,7 +460,7 @@ static NSString *trimmed(NSString *text) {
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
     if (section == 2 && _findInfoButton) return SGL(@"settings.edit_info.suggest.privacy", @"The song's name is sent to Apple's iTunes Search.");
-    return section == 0 ? SGL(@"settings.edit_info.footer", @"Kept by Vitrine for this file. The file itself is not changed.") : nil;
+    return section == 0 ? SGL(@"settings.edit_info.footer", @"Kept by Retrine for this file. The file itself is not changed.") : nil;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {

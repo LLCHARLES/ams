@@ -236,7 +236,7 @@ NSData *SGDSPPresetFileData(NSString *name, NSString **fileName) {
     if (fileName) *fileName = nil;
     NSDictionary *values = name ? userPresets()[name] : nil;
     if (![values isKindOfClass:NSDictionary.class]) return nil;
-    NSDictionary *file = @{@"format": @"vitrine.audio-preset", @"version": @1,
+    NSDictionary *file = @{@"format": @"retrine.audio-preset", @"version": @1,
                            @"name": name, @"values": presetFileValues(values, NO)};
     NSData *data = [NSJSONSerialization dataWithJSONObject:file
                          options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
@@ -246,7 +246,7 @@ NSData *SGDSPPresetFileData(NSString *name, NSString **fileName) {
     NSString *safe = [[name componentsSeparatedByCharactersInSet:unsafe] componentsJoinedByString:@"-"];
     safe = [safe stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
     safe = presetShortName(safe, 60);
-    if (fileName) *fileName = [(safe.length ? safe : @"Preset") stringByAppendingString:@".vitrine-preset.json"];
+    if (fileName) *fileName = [(safe.length ? safe : @"Preset") stringByAppendingString:@".retrine-preset.json"];
     return data;
 }
 
@@ -259,8 +259,10 @@ NSDictionary<NSString *, id> *SGDSPReadPresetFile(NSData *data, NSString *fallba
         return nil;
     }
     id file = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    if (![file isKindOfClass:NSDictionary.class] || ![file[@"format"] isEqual:@"vitrine.audio-preset"]) {
-        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.format", @"This file is not a Vitrine audio preset.");
+    // Files already shared under the old name are the same v1 format.
+    if (![file isKindOfClass:NSDictionary.class] ||
+        (![file[@"format"] isEqual:@"retrine.audio-preset"] && ![file[@"format"] isEqual:@"vitrine.audio-preset"])) {
+        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.format", @"This file is not a Retrine audio preset.");
         return nil;
     }
     id version = file[@"version"];
@@ -271,7 +273,7 @@ NSDictionary<NSString *, id> *SGDSPReadPresetFile(NSData *data, NSString *fallba
         return nil;
     }
     if ([version doubleValue] > 1) {
-        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.newer", @"This preset was made by a newer Vitrine. Update Vitrine to import it.");
+        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.newer", @"This preset was made by a newer Retrine. Update Retrine to import it.");
         return nil;
     }
     if (![file[@"values"] isKindOfClass:NSDictionary.class]) {
@@ -280,7 +282,7 @@ NSDictionary<NSString *, id> *SGDSPReadPresetFile(NSData *data, NSString *fallba
     }
     NSDictionary<NSString *, id> *values = presetFileValues(file[@"values"], YES);
     if (!values.count) {
-        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.empty", @"This preset has no settings this version of Vitrine can use.");
+        if (error) *error = SGL(@"settings.audioeffects.presetfile.error.empty", @"This preset has no settings this version of Retrine can use.");
         return nil;
     }
     NSString *title = [file[@"name"] isKindOfClass:NSString.class] ? file[@"name"] : @"";

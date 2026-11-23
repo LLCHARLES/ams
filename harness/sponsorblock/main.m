@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "Shared/SponsorBlock/SponsorBlock.h"
+#import "App/About/SGDiagnosticRedaction.h"
 #import <math.h>
 
 static NSString *const kEpisode = @"0123456789ABCDEFGHIJKL";
@@ -13,6 +14,14 @@ static NSData *fixture;
 @property (nonatomic, strong) NSMutableArray<NSNumber *> *seeks;
 @property (nonatomic, strong) NSMutableArray<NSString *> *requests;
 @property (nonatomic, copy) dispatch_block_t undo;
+@property (nonatomic, copy) dispatch_block_t ask;
+@property (nonatomic) double time, deadline;
+// The player's state can land before the observer gets another report.
+@property (nonatomic) double liveBase, liveStamp;
+@property (nonatomic) BOOL holdSeek;
+@property (nonatomic, copy) dispatch_block_t wake;
+@property (nonatomic, strong) NSUserDefaults *stats;
+@property (nonatomic, copy) NSString *suite;
 @property (nonatomic, copy) SGSponsorBlockReply pendingReply;
 @property (nonatomic) BOOL deferReply;
 - (instancetype)initWithStatus:(NSInteger)status categories:(NSSet *)categories body:(NSData *)body;
@@ -20,21 +29,55 @@ static NSData *fixture;
 @end
 @implementation SBProbe
 - (instancetype)initWithStatus:(NSInteger)status categories:(NSSet *)categories body:(NSData *)body {
+    NSMutableDictionary *rules = [NSMutableDictionary dictionary];
+    for (NSString *category in categories) rules[category] = @(SGBlockAuto);
+    return [self initWithStatus:status rules:rules minimum:1 respect:NO body:body];
+}
+- (instancetype)initWithStatus:(NSInteger)status rules:(NSDictionary *)rules minimum:(double)minimum
+                       respect:(BOOL)respect body:(NSData *)body {
     if ((self = [super init])) {
+        _suite = NSUUID.UUID.UUIDString;
+        _stats = [[NSUserDefaults alloc] initWithSuiteName:_suite];
         _seeks = [NSMutableArray array]; _requests = [NSMutableArray array];
         __weak SBProbe *weak = self;
-        _session = [[SGSponsorBlockSession alloc] initWithCategories:categories
+        _session = [[SGSponsorBlockSession alloc] initWithBehaviors:rules minimum:minimum respectManual:respect
             fetch:^(NSString *episode, NSSet *selected, SGSponsorBlockReply reply) {
                 SBProbe *probe = weak;
                 [probe.requests addObject:episode];
                 if (probe.deferReply) probe.pendingReply = reply;
                 else reply(SGSponsorBlockParse(body, status, episode));
-            } seek:^(double seconds) { [weak.seeks addObject:@(seconds)]; }
-            notice:^(SGSponsorBlockSegment *segment, dispatch_block_t undo) { weak.undo = undo; }];
+            } seek:^(double seconds) {
+                [weak.seeks addObject:@(seconds)];
+                if (!weak.holdSeek) [weak liveAt:seconds];
+            }
+            record:^dispatch_block_t(double seconds) { return SGSponsorBlockRecordSkip(weak.stats, seconds); }
+            notice:^(BOOL ask, SGSponsorBlockAction action) {
+                if (ask) weak.ask = action; else weak.undo = action;
+            }];
+        _session.now = ^{ return weak.time; };
+        _session.readLive = ^BOOL(NSString *episode, SGSponsorBlockReading *sample) {
+            if (![episode isEqual:kEpisode]) return NO;
+            double rate = weak.session.playbackRate;
+            *sample = (SGSponsorBlockReading){weak.liveBase + (weak.time - weak.liveStamp) * rate, weak.liveStamp, rate, YES};
+            return YES;
+        };
+        _session.schedule = ^dispatch_block_t(double delay, dispatch_block_t fire) {
+            weak.deadline = weak.time + delay;
+            weak.wake = fire;
+            return ^{ weak.wake = nil; };
+        };
     }
     return self;
 }
+- (void)dealloc { [_stats removePersistentDomainForName:_suite]; }
+- (void)liveAt:(double)position {
+    self.time = nextafter(self.time, INFINITY);
+    self.liveStamp = self.time;
+    self.liveBase = position;
+}
 - (void)at:(double)position {
+    [self liveAt:position];
+    self.session.reportTimestamp = self.liveStamp;
     [self.session observeURI:kURI position:position duration:120 playing:YES enabled:YES];
 }
 @end
@@ -67,7 +110,8 @@ static BOOL overlappingStaleReport(void) {
 static BOOL pendingSkipTarget(void) {
     SBProbe *p = probeWithRanges(@[@[@1, @8], @[@10, @30], @[@50, @60]]);
     [p at:16];
-    [p at:4];
+    // Replay the older sample, not a newly timestamped manual scrub.
+    [p.session observeURI:kURI position:4 duration:120 playing:YES enabled:YES];
     CHECK([p.seeks isEqual:@[@30.05]], "pending forward seek ignores stale positions in an older unhandled range");
     [p at:30.05];
     [p at:50];
@@ -190,8 +234,11 @@ static BOOL staleReplyAndUndo(void) {
     [p.session observeURI:@"spotify:track:abcdefghijklmnopqrstuv" position:10 duration:120 playing:YES enabled:YES];
     p.pendingReply(SGSponsorBlockParse(fixture, 200, kEpisode));
     CHECK(!p.seeks.count, "late episode response cannot seek music");
+    p.deferReply = NO;
     [p at:10];
     dispatch_block_t oldUndo = p.undo;
+    CHECK(oldUndo, "fresh episode reply provides Undo on return");
+    p.deferReply = YES;
     [p.session observeURI:@"spotify:episode:abcdefghijklmnopqrstuv" position:10 duration:120 playing:YES enabled:YES];
     oldUndo();
     [p at:10];
@@ -220,8 +267,278 @@ static BOOL requestPrivacy(void) {
     for (NSURLQueryItem *item in url.queryItems) query[item.name] = item.value;
     CHECK(([query isEqual:@{@"service": @"Spotify", @"categories": @"[\"sponsor\"]"}]), "request contains only required mapping and categories");
     CHECK(!request.HTTPShouldHandleCookies && request.HTTPBody == nil &&
-          [request.allHTTPHeaderFields isEqual:@{@"X-CLIENT-NAME": @"Vitrine-SponsorBlock/1"}],
+          [request.allHTTPHeaderFields isEqual:@{@"X-CLIENT-NAME": @"Retrine-SponsorBlock/1"}],
           "no account headers, cookies or request body");
+    return YES;
+}
+
+static BOOL customServer(void) {
+    NSString *key = @"spotifyglass.sponsorblock.serverURL";
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    id original = [store objectForKey:key];
+    @try {
+        for (NSString *value in @[@"https://example.org:444", @"http://example.org", @"https://", @"not a URL",
+                                  @"https://person:secret@example.org", @"https://example.org?tracking=1"]) {
+            [store setObject:value forKey:key];
+            NSURL *url = SGSponsorBlockRequest(kEpisode, [NSSet setWithObject:@"sponsor"]).URL;
+            NSString *address = [value isEqual:@"https://example.org:444"] ? @"example.org" : @"sponsor.ajay.app";
+            CHECK([url.scheme isEqual:@"https"] && [url.host isEqual:address] &&
+                  [url.path isEqual:@"/api/skipSegments/83fc0"], "use valid custom server; reject invalid stored server");
+        }
+    } @finally {
+        if (original) [store setObject:original forKey:key]; else [store removeObjectForKey:key];
+    }
+    return YES;
+}
+
+static BOOL migration(void) {
+    SBProbe *p = probe(200);
+    NSUserDefaults *store = p.stats;
+    for (NSString *category in SGSponsorBlockCategories()) {
+        NSString *old = SGSponsorBlockCategoryKey(category), *key = SGSponsorBlockBehaviorKey(category);
+        BOOL autoDefault = [@[@"sponsor", @"interaction", @"selfpromo"] containsObject:category];
+        CHECK(SGSponsorBlockReadBehavior(store, category) == (autoDefault ? SGBlockAuto : SGBlockOff),
+              "absent old and new keys keep the original defaults");
+        CHECK(![store objectForKey:old] && ![store objectForKey:key], "reading defaults does not write migration keys");
+        for (NSNumber *enabled in @[@YES, @NO]) {
+            [store setObject:enabled forKey:old];
+            CHECK(SGSponsorBlockReadBehavior(store, category) == (enabled.boolValue ? SGBlockAuto : SGBlockOff) &&
+                  ![store objectForKey:key], "read-only migration from old switch");
+            [store setInteger:SGBlockAsk forKey:key];
+            CHECK(SGSponsorBlockReadBehavior(store, category) == SGBlockAsk && [[store objectForKey:old] isEqual:enabled],
+                  "explicit behavior wins without changing old switch");
+            [store setObject:@"1" forKey:key];
+            CHECK(SGSponsorBlockReadBehavior(store, category) == SGBlockAsk && [[store objectForKey:key] isEqual:@"1"],
+                  "imported string choice remains Ask without rewriting it");
+            [store removeObjectForKey:key];
+        }
+    }
+    return YES;
+}
+
+static BOOL behaviorsAndMarkers(void) {
+    NSDictionary *rules = @{@"intro": @(SGBlockShowOnly), @"sponsor": @(SGBlockAsk), @"selfpromo": @(SGBlockOff)};
+    SBProbe *p = [[SBProbe alloc] initWithStatus:200 rules:rules minimum:2 respect:NO body:fixture];
+    __block NSUInteger changes = 0;
+    id observer = [NSNotificationCenter.defaultCenter addObserverForName:SGSponsorBlockSegmentsDidChangeNotification
+        object:p.session queue:nil usingBlock:^(NSNotification *note) { changes++; }];
+    @try {
+        [p at:0]; NSUInteger before = changes;
+        [p at:30]; [p at:60];
+        CHECK(([[p.session.visibleSegments valueForKey:@"uuid"] isEqual:@[@"sponsor", @"intro"]] &&
+               p.session.episodeDuration == 120 && changes == before && before > 0),
+              "eligible Ask and Show-only markers; no notification for position alone");
+        CHECK(!p.ask && !p.seeks.count, "Show only and Off never act");
+        [p at:12]; dispatch_block_t expired = p.ask;
+        CHECK(expired && !p.seeks.count, "Ask waits for Skip");
+        [p at:25]; expired();
+        CHECK(!p.seeks.count, "expired prompt cannot rewind");
+        [p at:13]; p.ask();
+        CHECK([p.seeks isEqual:@[@20.05]], "Skip button seeks on acceptance");
+        CHECK([p.stats integerForKey:SGKeySponsorBlockCount] == 1 && [p.stats doubleForKey:SGKeySponsorBlockSaved] == 7,
+              "record actual remaining seconds, without padding");
+        p.undo(); p.undo();
+        CHECK(([p.seeks isEqual:@[@20.05, @9.75]] && [p.stats integerForKey:SGKeySponsorBlockCount] == 0 &&
+               [p.stats doubleForKey:SGKeySponsorBlockSaved] == 0), "Undo rolls back count and seconds exactly once");
+        [p.session observeURI:@"spotify:track:other" position:0 duration:100 playing:YES enabled:YES];
+        CHECK(!p.session.visibleSegments.count && !p.session.episodeDuration && changes > before, "music clears markers");
+    } @finally { [NSNotificationCenter.defaultCenter removeObserver:observer]; }
+    return YES;
+}
+
+static BOOL manualAndOwnSeeks(void) {
+    NSDictionary *rules = @{@"sponsor": @(SGBlockAuto), @"intro": @(SGBlockAuto)};
+    SBProbe *p = [[SBProbe alloc] initWithStatus:200 rules:rules minimum:1 respect:YES body:fixture];
+    [p at:8]; [p at:14]; [p at:15];
+    CHECK(p.ask && !p.seeks.count, "jump into Auto remains Ask on following reports");
+    p.ask(); [p at:20.05]; p.undo(); [p at:9.75]; [p at:10];
+    CHECK(([p.seeks isEqual:@[@20.05, @9.75]]), "own skip and undo preserve playthrough");
+    SBProbe *resume = [[SBProbe alloc] initWithStatus:200 rules:rules minimum:1 respect:YES body:fixture];
+    resume.deferReply = YES;
+    [resume at:13]; resume.pendingReply(SGSponsorBlockParse(fixture, 200, kEpisode)); [resume at:13.5];
+    CHECK(resume.ask && !resume.seeks.count, "resuming inside a segment before fetch prompts instead");
+    SBProbe *shorts = [[SBProbe alloc] initWithStatus:200 rules:rules minimum:11 respect:NO body:fixture];
+    [shorts at:10];
+    CHECK(!shorts.session.visibleSegments.count && !shorts.seeks.count, "configured minimum excludes skips and markers");
+    return YES;
+}
+
+static BOOL resetStats(void) {
+    SBProbe *p = probe(200);
+    [p at:12]; SGSponsorBlockResetStats(p.stats);
+    CHECK(![p.stats integerForKey:SGKeySponsorBlockCount] && ![p.stats doubleForKey:SGKeySponsorBlockSaved],
+          "reset clears both persisted totals");
+    SGSponsorBlockRecordSkip(p.stats, 4);
+    p.undo();
+    CHECK([p.stats integerForKey:SGKeySponsorBlockCount] == 1 && [p.stats doubleForKey:SGKeySponsorBlockSaved] == 4,
+          "Undo from before reset cannot debit a new skip");
+    return YES;
+}
+
+static BOOL sparsePlayback(void) {
+    SBProbe *p = probe(200);
+    p.session.playbackRate = 2;
+    [p at:9];
+    CHECK(!p.seeks.count && p.wake && fabs(p.deadline - .5) < 1e-6, "one wake at segment start at 2x");
+    p.time = .5; p.wake();
+    CHECK([p.seeks isEqual:@[@20.05]], "wake skips at the boundary without another player report");
+    return YES;
+}
+
+static BOOL pauseCancelsWake(void) {
+    SBProbe *p = probe(200);
+    [p at:9];
+    dispatch_block_t queued = p.wake;
+    CHECK(queued, "playing ahead of a segment schedules its boundary");
+    [p.session observeURI:kURI position:9 duration:120 playing:NO enabled:YES];
+    p.time = 1; queued();
+    CHECK(!p.wake && !p.seeks.count, "pause cancels even a queued boundary");
+    return YES;
+}
+
+static BOOL delayedLanding(void) {
+    SBProbe *p = [[SBProbe alloc] initWithStatus:200 rules:@{@"sponsor": @(SGBlockAuto), @"intro": @(SGBlockAuto)}
+        minimum:1 respect:YES body:fixture];
+    [p at:10];
+    p.time = 12; [p at:32.05];
+    CHECK(([p.seeks isEqual:@[@20.05, @40.05]] && !p.ask), "delayed own landing advances at playback rate, not a manual seek");
+    return YES;
+}
+
+static BOOL promptPreservesUndo(void) {
+    NSData *body = [NSJSONSerialization dataWithJSONObject:@[@{@"videoID":kEpisode, @"segments":@[
+        @{@"segment":@[@10,@20], @"category":@"sponsor", @"UUID":@"a", @"actionType":@"skip"},
+        @{@"segment":@[@18,@30], @"category":@"intro", @"UUID":@"b", @"actionType":@"skip"}]}] options:0 error:nil];
+    SBProbe *p = [[SBProbe alloc] initWithStatus:200 rules:@{@"sponsor": @(SGBlockAuto), @"intro": @(SGBlockAsk)}
+        minimum:1 respect:YES body:body];
+    [p at:10]; dispatch_block_t undo = p.undo;
+    [p at:20.05]; CHECK(undo && p.ask, "own skip lands inside Ask");
+    undo(); p.ask();
+    CHECK(([p.seeks isEqual:@[@20.05, @9.75]]), "offering Ask does not invalidate dispatched Undo; Undo invalidates that Skip");
+    return YES;
+}
+
+static BOOL expiredUndoLanding(void) {
+    NSData *body = [NSJSONSerialization dataWithJSONObject:@[@{@"videoID":kEpisode, @"segments":@[
+        @{@"segment":@[@6,@9], @"category":@"sponsor", @"UUID":@"a", @"actionType":@"skip"},
+        @{@"segment":@[@10,@20], @"category":@"sponsor", @"UUID":@"b", @"actionType":@"skip"}]}] options:0 error:nil];
+    SBProbe *p = [[SBProbe alloc] initWithStatus:200 rules:@{@"sponsor": @(SGBlockAuto)} minimum:1 respect:YES body:body];
+    [p at:10]; p.undo();
+    p.time = 5; [p at:40]; // no report near the expected Undo landing
+    [p at:8];
+    CHECK((p.ask && [p.seeks isEqual:@[@20.05, @9.75]]), "a later manual seek near the expired Undo target must Ask");
+    return YES;
+}
+
+static BOOL privateServerDiagnostic(void) {
+    NSDictionary *store = @{SGKeySponsorBlockServer: @"https://private.example/podcasts"};
+    NSString *text = @"spotifyglass.sponsorblock.serverURL=https://private.example/podcasts\nkeep";
+    CHECK([SGRedactDiagnostics(text, store) isEqual:@"[redacted]=[redacted]\nkeep"], "server key and value redacted from diagnostic text");
+    return YES;
+}
+
+static BOOL responseCaps(void) {
+    NSMutableArray *rows = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 240; ++i) {
+        NSString *uuid = i ? @(i).stringValue : [@"x" stringByPaddingToLength:512 withString:@"x" startingAtIndex:0];
+        [rows addObject:@{@"segment":@[@1,@2], @"category":@"sponsor", @"UUID":uuid, @"actionType":@"skip"}];
+    }
+    NSData *body = [NSJSONSerialization dataWithJSONObject:@[@{@"videoID":kEpisode, @"segments":rows}] options:0 error:nil];
+    NSArray *parsed = SGSponsorBlockParse(body, 200, kEpisode);
+    CHECK(parsed.count == 200 && ![[parsed valueForKey:@"uuid"] containsObject:rows[0][@"UUID"]],
+          "responses bound retained segments and reject oversized UUIDs");
+    return YES;
+}
+
+static BOOL boundedRevisits(void) {
+    SBProbe *p = probe(200);
+    [p at:10];
+    for (NSUInteger i = 0; i < 8; ++i)
+        [p.session observeURI:[NSString stringWithFormat:@"spotify:episode:%022lu", (unsigned long)i]
+                     position:0 duration:120 playing:YES enabled:YES];
+    [p at:10];
+    CHECK((p.requests.count == 10 && [p.seeks isEqual:@[@20.05, @20.05]]), "evicted episode refetches without retaining old handled UUIDs");
+    return YES;
+}
+
+static BOOL staleReplyDropped(void) {
+    SBProbe *p = probe(200);
+    p.deferReply = YES; [p at:10];
+    SGSponsorBlockReply stale = p.pendingReply;
+    [p.session observeURI:nil position:0 duration:0 playing:NO enabled:YES];
+    [p at:10]; stale(SGSponsorBlockParse(fixture, 200, kEpisode)); [p at:10];
+    CHECK(p.requests.count == 2 && !p.seeks.count && !p.session.visibleSegments.count,
+          "previous visit's pending response cannot populate cache after revisiting");
+    return YES;
+}
+
+static SBProbe *autoThenAsk(double askStart, double askEnd) {
+    NSArray *segments = @[
+        @{@"segment":@[@10,@20], @"category":@"sponsor", @"actionType":@"skip", @"UUID":@"auto"},
+        @{@"segment":@[@(askStart),@(askEnd)], @"category":@"intro", @"actionType":@"skip", @"UUID":@"ask"}];
+    NSData *body = [NSJSONSerialization dataWithJSONObject:@[@{@"videoID":kEpisode, @"segments":segments}] options:0 error:nil];
+    return [[SBProbe alloc] initWithStatus:200 rules:@{@"sponsor":@(SGBlockAuto), @"intro":@(SGBlockAsk)}
+        minimum:1 respect:YES body:body];
+}
+
+static BOOL scrubBeforeLanding(void) {
+    SBProbe *p = probeWithRanges(@[@[@10,@20], @[@30,@40]]);
+    p.holdSeek = YES;
+    [p at:10]; p.time = .1; [p at:5];
+    p.time = 10.1;
+    if (p.wake && p.deadline <= p.time) p.wake();
+    CHECK([p.seeks isEqual:@[@20.05]], "scrub to 5 must not skip 30-40 while the listener is near 15");
+    CHECK(p.wake && fabs(p.deadline - 25.1) < 1e-6, "next start follows the reported scrub, not our requested target");
+    return YES;
+}
+
+static BOOL liveLandingInsideAsk(void) {
+    SBProbe *p = autoThenAsk(18, 25);
+    p.holdSeek = YES;
+    [p at:10];
+    p.time = .03; [p liveAt:20.08]; // live player advanced; no landing report
+    if (p.wake && p.deadline <= p.time) p.wake();
+    CHECK(p.ask && [p.seeks isEqual:@[@20.05]], "landing inside Ask offers Skip without a landing report");
+    p.ask();
+    CHECK(([p.seeks isEqual:@[@20.05, @25.05]]), "Skip tap uses the confirmed live landing, not the old report");
+    return YES;
+}
+
+static BOOL staleReportKeepsWake(void) {
+    SBProbe *p = probeWithRanges(@[@[@30,@40]]);
+    [p at:10];
+    double old = p.liveStamp;
+    p.time = 5; [p at:15];
+    p.session.reportTimestamp = old; // an older report reaches main after the newer one
+    [p.session observeURI:kURI position:10 duration:120 playing:YES enabled:YES];
+    CHECK(p.wake && fabs(p.deadline - 20) < 1e-3, "a rejected stale report keeps the wake for the next start");
+    return YES;
+}
+
+static BOOL landingVisibleAfterCheck(void) {
+    SBProbe *p = autoThenAsk(18, 25);
+    p.holdSeek = YES;
+    [p at:10];
+    p.time = .03;
+    if (p.wake && p.deadline <= p.time) p.wake(); // Spotify still shows the pre-seek state
+    p.time = .1; [p liveAt:20.12];               // the landing shows a moment later, with no report
+    p.time = .3;
+    if (p.wake && p.deadline <= p.time) p.wake();
+    CHECK(p.ask && [p.seeks isEqual:@[@20.05]], "landing inside Ask offers Skip once Spotify shows it");
+    return YES;
+}
+
+static BOOL promptRequiresFreshState(void) {
+    SBProbe *p = autoThenAsk(30, 50);
+    p.holdSeek = YES;
+    [p at:10];
+    p.time = 20.5; // even the pre-seek sample's running position now lies in Ask
+    if (p.wake) p.wake();
+    CHECK(!p.ask && !p.wake, "no post-seek timestamp: no speculative prompt or repeat wake");
+    [p at:30.5]; // fresh report restores evaluation
+    CHECK(p.ask, "fresh live position offers Ask");
+    p.ask();
+    CHECK(([p.seeks isEqual:@[@20.05, @50.05]]), "confirmed prompt's tap is accepted");
     return YES;
 }
 
@@ -233,7 +550,11 @@ int main(int argc, const char *argv[]) {
         BOOL (*tests[])(void) = {parsing, categories, segmentStart, undoOnce, staleReports, offAndMusic,
                                 failure, emptyResponse, staleReplyAndUndo, safetyBoundaries, requestPrivacy,
                                 overlappingStaleReport, pendingSkipTarget, mergedChain, adjacentChain,
-                                mergedUndo, laterSegmentAfterUndo};
+                                mergedUndo, laterSegmentAfterUndo, customServer, migration, behaviorsAndMarkers,
+                                manualAndOwnSeeks, resetStats, sparsePlayback, pauseCancelsWake, delayedLanding,
+                                promptPreservesUndo, responseCaps, boundedRevisits, staleReplyDropped, expiredUndoLanding,
+                                privateServerDiagnostic, scrubBeforeLanding, liveLandingInsideAsk, promptRequiresFreshState,
+                                staleReportKeepsWake, landingVisibleAfterCheck};
         NSUInteger failed = 0;
         for (NSUInteger i = 0; i < sizeof(tests) / sizeof(*tests); i++) if (!tests[i]()) failed++;
         NSLog(@"SponsorBlock: %lu checks, %lu failed", (unsigned long)(sizeof(tests) / sizeof(*tests)), (unsigned long)failed);

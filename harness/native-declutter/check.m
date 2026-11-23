@@ -20,6 +20,7 @@
 @implementation SecondMarker @end
 
 static NSDictionary<NSString *, NSNumber *> *switches;
+#include "album-rules.inc"
 BOOL SGHidden(NSString *key) { return [switches[key] boolValue]; }
 BOOL SGClassNamed(Class cls, NSString *marker) {
     return [NSStringFromClass(cls) containsString:marker];
@@ -42,8 +43,31 @@ static NSIndexPath *path(NSInteger item, NSInteger section) {
     return [NSIndexPath indexPathForItem:item inSection:section];
 }
 
+static void checkAlbumHeadings(void) {
+    for (NSArray *row in @[
+        @[@"The Weeknd의 곡 더 보기", SGHideAlbumMoreBy, SGRKeyAlbumHideMoreBy],
+        @[@"콘서트", SGHideAlbumConcerts, SGRKeyAlbumHideConcerts],
+        @[@"굿즈", SGHideAlbumMerch, SGRKeyAlbumHideMerch],
+        @[@"이건 어떠세요", SGHideAlbumYouMightLike, SGRKeyAlbumHideYouMightLike],
+        @[@"MORE BY The Weeknd", SGHideAlbumMoreBy, SGRKeyAlbumHideMoreBy],
+        @[@"의 곡 더 보기 extra", @"", SGRKeyAlbumHideOther],
+        @[@"굿즈 extra", @"", SGRKeyAlbumHideOther],
+        @[@"unknown", @"", SGRKeyAlbumHideOther],
+    ]) {
+        NSString *title = row[0];
+        NSInteger i = sectionTitled(title);
+        check([(i == kOther ? SGRKeyAlbumHideOther : kSections[i].key) isEqual:row[2]], title);
+        for (NSString *key in @[SGHideAlbumMoreBy, SGHideAlbumMerch, SGHideAlbumYouMightLike,
+                                SGHideAlbumVideos, SGHideAlbumConcerts]) {
+            switches = @{key: @YES};
+            check(SGNativeSectionHidden(title, sections, sizeof(sections)/sizeof(*sections)) == [key isEqual:row[1]], title);
+        }
+    }
+}
+
 int main(void) {
     @autoreleasepool {
+        checkAlbumHeadings();
         const SGNativeSectionRule sections[] = {
             {@"Popular", @"popular", NO},
             {@"Featuring ", @"featuring", YES},

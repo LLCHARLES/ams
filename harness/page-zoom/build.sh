@@ -14,7 +14,7 @@ cat > "$OUT/PageZoomHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleIdentifier</key><string>com.vitrine.pagezoomharness</string>
+<key>CFBundleIdentifier</key><string>com.retrine.pagezoomharness</string>
 <key>CFBundleExecutable</key><string>PageZoomHarness</string>
 <key>CFBundleName</key><string>PageZoomHarness</string>
 <key>CFBundleVersion</key><string>1</string>

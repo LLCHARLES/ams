@@ -1,0 +1,75 @@
+{
+  "id": "vitrine-b16-spotify-9.1.90-pixie-1.4",
+  "spotify_version": "9.1.90",
+  "spotify_build": "919002269",
+  "uuid": "fbce22c17e1b3e0d9be866ff9291943e",
+  "shared_uuid": "2e074234cfc63f0e9255c9881824167a",
+  "pixie_version": "1.4",
+  "primary": false,
+  "minimum_ios": "15.0",
+  "preferred_address": "0x100000000",
+  "provenance": {
+    "repository": "Glongq/Vitrine-Pixie",
+    "commit": "2632bdf9081665b9fd78e71cea2878edc6aae73c",
+    "license": "GPL-3.0",
+    "scope": "Target foundation; export points from patch_export14.py/patch_export15.py. Companion source manifest deferred to migration."
+  },
+  "runtime": "runtime-1.2.json",
+  "admission": {
+    "enabled": true,
+    "reservation_counters_verified": true,
+    "runtime_layout_verified": true,
+    "jailbreak": true
+  },
+  "native": {
+    "setter": "0x101d1debc",
+    "setter_cave": "0x100023f00",
+    "setter_original": "e6031eaa8f3ef495fe0306aafd7b11a9",
+    "manager_vtable": "0x10ca326c8",
+    "window": "0x103594f54",
+    "call_site": "0x103594f60",
+    "window_original": "e4e30191e5c30091e00317aa2200805220013fd6a18301d1",
+    "provider": "0x1083de7b0",
+    "provider_head": "ff0306d1fc6f12a9fa6713a9f85f14a9f65715a9f44f16a9fd7b17a9fdc30591f50305aaf40300aaf70308aa08404239",
+    "mapping": "0x1083de894",
+    "mapping_original": "f60301aa5f080071480080520815881a5f0000711c159f1a",
+    "selector_cave": "0x100023d00",
+    "dlsym_stub": "0x109b65b68",
+    "dlsym_stub_head": "70840190106a42f900021fd6",
+    "render_callback": "0x1076b9e2c",
+    "manager_field_shift": 0,
+    "provider_context_register": 23
+  },
+  "trace_points": [
+    {"name":"Request","address":"0x103594f60","cave":"0x100023700","original":"02008052","kind":0},
+    {"name":"Success","address":"0x106231e70","cave":"0x100023900","original":"ff4301d1f44f03a9fd7b04a9fd030191","kind":1},
+    {"name":"Failure","address":"0x100893730","cave":"0x100023b00","original":"ff4301d1f44f03a9fd7b04a9fd030191","kind":2}
+  ],
+  "export": {
+    "cave_base": "0x10001e000",
+    "cave_stride": 512,
+    "points": {
+      "CacheKey":{"address":"0x101daf0d0","original":"ff0301d1fd7b03a9fdc30091e20308aa","kind":0},
+      "StreamKey":{"address":"0x1012e2658","original":"ff0302d1f65705a9f44f06a9fd7b07a9","kind":1},
+      "CacheCipher":{"address":"0x1046ff01c","original":"f657bda9f44f01a9fd7b02a9fd830091","kind":2},
+      "CacheCipherApple":{"address":"0x1003dfb38","original":"fa67bba9f85f01a9f65702a9f44f03a9","kind":3},
+      "MediaKeyPath":{"address":"0x103594d70","original":"ff4305d1fc6f0fa9fa6710a9f85f11a9","kind":4},
+      "MediaKeyBlob":{"address":"0x1020fd560","original":"f657bda9f44f01a9fd7b02a9fd830091","kind":5},
+      "MediaContext":{"address":"0x107970fe8","original":"a15e4039","kind":6},
+      "MediaRecord":{"address":"0x1020fd5f0","original":"fd7b42a9","kind":7},
+      "UnsealedMediaKey":{"address":"0x103cc61f8","original":"e003803d","kind":10}
+    },
+    "windows": {
+      "layout0":{"address":"0x106231e80","bytes":"130040f92000c03de003803d20c0c03ce0c3803c688640f8000540f9ff2300b9e1030091a3eb0294"},
+      "layout1":{"address":"0x1062ecd54","bytes":"600e40f9686640f9090040f9290940f90111009120013fd6"},
+      "layout2":{"address":"0x109ab8744","bytes":"150040f9e00315aa130442f8"},
+      "layout3":{"address":"0x109ab8894","bytes":"a0220091614202917f4aee17"},
+      "cache_storage_owner":{"address":"0x1099bd66c","bytes":"e2b30291e01b40f9e1031caa45adb496e82340f9000140f91a77059492770594000340f9177705948f770594e02301914130199734008052b4831638e0230191a16302d1220080522ee54c96e0230191e1b30291820280522ae54c96e023019161c20891dcd45596"},
+      "share_wrapper_guard":{"address":"0x1037e3988","bytes":"e00314aa660d8e95010080d2f40318aab7404b97"},
+      "share_constructor_guard":{"address":"0x100ab3cd4","bytes":"e00314aae20313aae30316aa b1a2c795"},
+      "cache_key_body":{"address":"0x101daf0e0","bytes":"008cc03de003803d084042b9e81300b92000c03d"},
+      "unseal_guard":{"address":"0x103cc61f0","bytes":"857b7995c04af83ce003803d"},
+      "unseal_caller":{"address":"0x1020fd5c0","bytes":"000540f9080040f9081540f921510091e20313aa00013fd6"}
+    }
+  }
+}

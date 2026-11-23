@@ -97,7 +97,7 @@ static void *HookNWCreate(void *rawEndpoint, void *rawParameters) {
     typedef void (*AddProxy)(nw_privacy_context_t, nw_proxy_config_t);
     AddProxy add = (AddProxy)dlsym(RTLD_DEFAULT, "nw_privacy_context_add_proxy");
     nw_parameters_t copy = nw_parameters_copy(parameters);
-    nw_privacy_context_t context = nw_privacy_context_create("vitrine.spotify.experimental");
+    nw_privacy_context_t context = nw_privacy_context_create("retrine.spotify.experimental");
     if (!proxy || !add || !copy || !context) { atomic_fetch_add(&nwBlocked, 1); return NULL; }
     add(context, (nw_proxy_config_t)proxy);
     nw_parameters_set_privacy_context(copy, context);

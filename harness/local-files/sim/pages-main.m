@@ -77,7 +77,7 @@ static UICollectionView *albumCollection(UIView *view) {
     self.nav = [[UINavigationController alloc] initWithRootViewController:[[SGLocalMusicPage alloc] initWithIndex:self.index kind:@"library" key:nil]];
     self.window.rootViewController = self.nav;
     [self.window makeKeyAndVisible];
-    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge void *)self, advance, CFSTR("com.vitrine.localpages.next"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), (__bridge void *)self, advance, CFSTR("com.retrine.localpages.next"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
     return YES;
 }
 - (void)shot:(NSString *)name {

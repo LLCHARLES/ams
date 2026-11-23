@@ -62,11 +62,38 @@ final class SGRHomeFeed: NSObject {
         return parts(text: text, large: some(child(fields, "enrichedTextRange")) as? Range<String.Index>)
     }
 
-    // One entry per section of the list: [small line, title] of its heading, or NSNull where it has none. nil when
-    // the model is not where it was found. About 0.6 ms on 9.1.90 (30 sections).
-    @objc(headingsOf:) static func headings(of page: AnyObject?) -> NSArray? {
-        guard let page, let renderer = ivar(page, "collectionViewRenderer"), let source = ivar(renderer, "contentDataSource"),
-              let snapshot = child(source, "contentSnapshot"),
+    // One entry per section: [enum case, [small line, title]], with an empty heading where it has none.
+    // An unreadable item is NSNull; nil means the model is not where it was found.
+    @objc(sectionsOf:) static func sections(of page: AnyObject?) -> NSArray? {
+        sections(of: page, items: nil, generation: nil)
+    }
+
+    private static func generation(of snapshot: Any) -> NSObject? {
+        guard let dataSourceSnapshot = child(snapshot, "dataSourceSnapshot"),
+              let wrapper = child(dataSourceSnapshot, "_implWrapper"),
+              let impl = child(wrapper, "impl") as? NSObject else { return nil }
+        let stateSelector = NSSelectorFromString("state")
+        let generationSelector = NSSelectorFromString("generationID")
+        guard impl.responds(to: stateSelector),
+              let state = impl.perform(stateSelector)?.takeUnretainedValue() as? NSObject,
+              state.responds(to: generationSelector) else { return nil }
+        return state.perform(generationSelector)?.takeUnretainedValue() as? NSObject
+    }
+
+    // Identifiers can be reused with different props. Only the model that produced this snapshot may
+    // classify it; a leading model keeps the prior generation, while a trailing model is unavailable.
+    @objc(sectionsOf:items:generation:)
+    static func sections(of page: AnyObject?, items identifiers: NSArray?, generation wanted: NSObject?) -> NSArray? {
+        guard let page, let renderer = ivar(page, "collectionViewRenderer"),
+              let source = ivar(renderer, "contentDataSource") else { return nil }
+        let snapshot: Any?
+        if let wanted {
+            snapshot = ["contentSnapshot", "previousContentSnapshot"].compactMap { some(child(source, $0)) }
+                .first { generation(of: $0)?.isEqual(wanted) == true }
+        } else {
+            snapshot = child(source, "contentSnapshot")
+        }
+        guard let snapshot,
               let sections = child(snapshot, "sections"),
               let items = child(snapshot, "items") else { return nil }
         var byItem: [AnyHashable: Any] = [:]
@@ -74,12 +101,23 @@ final class SGRHomeFeed: NSObject {
             let both = Mirror(reflecting: pair.value).children.map(\.value)
             if both.count == 2, let item = both[0] as? AnyHashable { byItem[item] = both[1] }
         }
-        let headings = Mirror(reflecting: sections).children.map { section -> Any in
-            guard let first = child(section.value, "items").flatMap({ Mirror(reflecting: $0).children.first?.value as? AnyHashable }),
+        let firstItems: [Any?] = identifiers?.map { $0 } ?? Mirror(reflecting: sections).children.map {
+            child($0.value, "items").flatMap { Mirror(reflecting: $0).children.first?.value }
+        }
+        let headings = firstItems.map { identifier -> Any in
+            guard let first = identifier as? AnyHashable,
                   let entry = byItem[first], let item = child(entry, "item"),
                   let configuration = child(item, "configuration"), let props = child(configuration, "props") else { return NSNull() }
-            return parts(props: props) ?? NSNull()
+            return [Mirror(reflecting: props).children.first?.label ?? "", parts(props: props) ?? []] as [Any]
         }
         return headings as NSArray
+    }
+
+    @objc(headingsOf:) static func headings(of page: AnyObject?) -> NSArray? {
+        guard let sections = sections(of: page) else { return nil }
+        return sections.map { entry -> Any in
+            guard let fields = entry as? [Any], let heading = fields[1] as? [String], heading.count == 2 else { return NSNull() }
+            return heading
+        } as NSArray
     }
 }

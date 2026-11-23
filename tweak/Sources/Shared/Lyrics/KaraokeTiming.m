@@ -8,6 +8,7 @@
 @implementation SGKaraokeLine
 - (id)copyWithZone:(NSZone *)zone {
     SGKaraokeLine *copy = [SGKaraokeLine new];
+    copy.fileOwned = _fileOwned;
     copy.words = _words;
     copy.start = _start;
     copy.end = _end;

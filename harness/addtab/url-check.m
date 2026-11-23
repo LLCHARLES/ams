@@ -85,6 +85,7 @@ int main(void) {
         // Each row states the external-input contract, not the app's trusted tab-navigation grammar.
         NSArray *cases = @[
             @[@"url", @"vitrine:track:0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
+            @[@"url", @"retrine:track:0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
             @[@"url", @"vitrine://track/0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
             @[@"url", @"vitrine://https://open.spotify.com/album/4yP0hdKOZPNshxUOjY0cZj?si=x", @"spotify:album:4yP0hdKOZPNshxUOjY0cZj"],
             @[@"url", @"vitrine://open.spotify.com/track/0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
@@ -150,7 +151,7 @@ int main(void) {
             @[@"https", @"https://foo.open.spotify.com/x", @NO],
             @[@"https", @"https://foo.spotify.app.link/x", @NO],
             @[@"https", @"http://spotify.link/x", @NO],
-            @[@"handoff", @"https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB", @"vitrine://https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB"],
+            @[@"handoff", @"https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB", @"retrine://https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB"],
             @[@"handoff", [@"https://spotify.link/x?q=" stringByPaddingToLength:4096 withString:@"a" startingAtIndex:0], NSNull.null],
             @[@"trusted", @"spotify://collection/tracks", @"spotify:collection:tracks"],
             @[@"trusted", @"spotify:collection:tracks", @"spotify:collection:tracks"],
@@ -164,7 +165,7 @@ int main(void) {
             if ([test[0] isEqual:@"shared"]) actual = SGSpotifyLinkInSharedText(test[1]).absoluteString;
             else if ([test[0] isEqual:@"trusted"]) actual = SGSpotifyURIFromText(test[1]).absoluteString;
             else if ([test[0] isEqual:@"https"]) actual = @(SGIsSpotifyHTTPSURL([NSURL URLWithString:test[1]]));
-            else if ([test[0] isEqual:@"handoff"]) actual = SGVitrineURLForSpotifyURL([NSURL URLWithString:test[1]]).absoluteString;
+            else if ([test[0] isEqual:@"handoff"]) actual = SGRetrineURLForSpotifyURL([NSURL URLWithString:test[1]]).absoluteString;
             else actual = SGPublicSpotifyURLFromText(test[1]).absoluteString;
             id expected = test[2];
             if (![(actual ?: (id)NSNull.null) isEqual:expected]) {

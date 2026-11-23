@@ -76,7 +76,7 @@ void SGInstallVolumeFeedback(UISlider *slider);
 // In the Background reads off below iOS 18, which has no Music Haptics. Main thread.
 BOOL SGMusicHapticsOn(void);
 BOOL SGMusicHapticsInBackground(void);
-// Whether iOS lists this install for Music Haptics: MusicHapticsSupported, which only Vitrine's IPA build writes
+// Whether iOS lists this install for Music Haptics: MusicHapticsSupported, which only Retrine's IPA build writes
 // into Info.plist. Without it In the Background has nothing to hand the song to.
 BOOL SGMusicHapticsListedByInstall(void);
 // The choice of before moved to the switches, once: Generated turns Music Haptics on, Native iOS In the
@@ -108,7 +108,9 @@ extern NSNotificationName const SGSystemMusicHapticsChangedNotification;
 // Kept for the last 100 tracks; `tries` asks again 4 s apart when Spotify does not answer.
 void SGSpotifyISRC(NSString *uri, NSUInteger tries, void (^done)(NSString *isrc));
 // Same request/cache/retry policy, with failures distinguished from a definitive missing ISRC.
-void SGSpotifyISRCWithOutcome(NSString *uri, NSUInteger tries, void (^done)(NSString *isrc, BOOL failed));
+dispatch_block_t SGSpotifyISRCWithOutcome(NSString *uri, NSUInteger tries, void (^done)(NSString *isrc, BOOL failed));
+// `answered` means Spotify supplied the track, even if its metadata has no ISRC.
+dispatch_block_t SGSpotifyISRCAllowConstrained(NSString *uri, NSUInteger tries, BOOL allowConstrained, void (^done)(NSString *isrc, BOOL answered));
 
 // A strength key's percentage as a factor, 1 for 100%, kept within its range.
 double SGHapticsStrength(NSString *key);

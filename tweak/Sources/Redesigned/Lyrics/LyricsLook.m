@@ -8,7 +8,7 @@ NSNotificationName const SGRLyricsLookDidChangeNotification = @"spotifyglass.red
 static const SGRLyricsLook kLeast = {22, 12, 0, 0, 0}, kMost = {40, 40, 2, 2, 2};
 
 static SGRLyricsLook presets[] = {
-    {30, 24, 1, 1, 1},          // Apple Music: its 30 pt lines, 24 pt apart
+    {34, 24, 1, 1, 1},          // Apple Music: its 34 pt lines (iOS 26, design/applemusic-gap item 5), 24 pt apart
     {36, 28, 1, 1, 1},          // Large
     {25, 16, 1, 1, 1},          // Compact
     {30, 24, 0, 0, 0},          // Calm: every line sharp, and nothing held glows or waves
@@ -145,7 +145,6 @@ static const NSInteger kPlaceShareCount = sizeof(kPlaceShares) / sizeof(*kPlaceS
 
 static NSString *placeKey(SGRLyricsPlace place) {
     switch (place) {
-        case SGRLyricsPlaceUnderCover: return SGRKeyLyricsSizeUnderCover;
         case SGRLyricsPlacePlayer: return SGRKeyLyricsSizePlayer;
         case SGRLyricsPlaceFullScreen: return SGRKeyLyricsSizeFullScreen;
         case SGRLyricsPlaceNone: return nil;

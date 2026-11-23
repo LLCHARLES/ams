@@ -8,13 +8,14 @@
 // little more, with a blur, behind the lyrics.
 //
 // The photo is picked from the photo library (PHPicker, which needs no permission to the library), drawn at
-// kLongestSide pixels on its longer side at most, and kept as a JPEG in Library/Application Support/Vitrine. It is
+// kLongestSide pixels on its longer side at most, and kept as a JPEG in Library/Application Support/Retrine. It is
 // read once a launch, when first shown. Nothing is uploaded.
 //
 // Threading: views and the prepared cache are main-thread only. Reading, decoding and brightness
 // measurement run off main; import generations and file commits share one serial queue.
 #import <PhotosUI/PhotosUI.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Player.h"
 
@@ -23,8 +24,7 @@ static const CGFloat kLongestSide = 2048;
 static char kBackdropKey;
 
 static NSURL *photoURL(void) {
-    NSURL *library = [NSFileManager.defaultManager URLsForDirectory:NSLibraryDirectory inDomains:NSUserDomainMask].firstObject;
-    return [library URLByAppendingPathComponent:@"Application Support/Vitrine/PlayerPhoto.jpg"];
+    return [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"PlayerPhoto.jpg"];
 }
 
 static UIImage *sg_photo;
@@ -82,11 +82,18 @@ void SGRPlayerLoadPhoto(void (^done)(BOOL available)) {
     if (sg_photoLoading) return;
     sg_photoLoading = YES;
     dispatch_async(photoQueue(), ^{
-        UIImage *image = preparePhoto([UIImage imageWithContentsOfFile:photoURL().path]);
+        NSURL *file = photoURL();
+        UIImage *image = file ? preparePhoto([UIImage imageWithContentsOfFile:file.path]) : nil;
         CGFloat brightness = image ? SGRPlayerImageBrightEnd(image.CGImage) : 0;
         dispatch_async(dispatch_get_main_queue(), ^{
             // A prepared import can satisfy the pending read before its callback is delivered.
-            if (!sg_photoRead) publishPhoto(image, brightness);
+            if (!sg_photoRead && file) publishPhoto(image, brightness);
+            else if (!sg_photoRead) {
+                sg_photoLoading = NO;
+                NSArray *waiters = sg_photoWaiters;
+                sg_photoWaiters = nil;
+                for (void (^waiter)(BOOL) in waiters) waiter(NO);
+            }
         });
     });
 }
@@ -273,7 +280,7 @@ static SGRPlayerPhotoPicker *sg_picker;   // kept while the picker is up; its de
                 }
                 NSURL *url = photoURL();
                 NSError *failure = error;
-                BOOL stored = data && [NSFileManager.defaultManager createDirectoryAtURL:url.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:&failure]
+                BOOL stored = data && url && [NSFileManager.defaultManager createDirectoryAtURL:url.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:&failure]
                     && [data writeToURL:url options:NSDataWritingAtomic error:&failure];
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (stored) {

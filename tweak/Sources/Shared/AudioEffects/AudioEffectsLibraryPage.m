@@ -59,7 +59,6 @@ static UITableViewCell *tiledCell(UITableView *table, NSString *title, NSString 
 
 @implementation SGDSPErrorPage {
     NSString *_error;
-    NSTimer *_ticker;
 }
 
 - (void)viewDidLayoutSubviews {
@@ -71,14 +70,7 @@ static UITableViewCell *tiledCell(UITableView *table, NSString *title, NSString 
     [super viewWillAppear:animated];
     _error = SGDSPError(self.errorKey);
     [self.tableView reloadData];
-    [_ticker invalidate];
-    _ticker = [NSTimer scheduledTimerWithTimeInterval:1 target:self selector:@selector(showError) userInfo:nil repeats:YES];
-}
-
-- (void)viewDidDisappear:(BOOL)animated {
-    [super viewDidDisappear:animated];
-    [_ticker invalidate];
-    _ticker = nil;
+    self.refreshSelector = @selector(showError);
 }
 
 - (void)showError {

@@ -45,7 +45,7 @@ BOOL SGRLibraryCompact(void) {
 #pragma mark - Spotify's controls
 
 static UIView *filtersOf(UIView *page) {
-    return SGRChildNamed(SGRChildNamed(page, @"YourLibraryHeaderView"), @"YourLibraryHeaderContentFiltersView");
+    return SGRChildNamed(SGRLibraryRootHeaderIn(page), @"YourLibraryHeaderContentFiltersView");
 }
 
 static UICollectionView *chipsIn(UIView *filters) {
@@ -320,7 +320,7 @@ BOOL SGRLibraryMenuStandsIn(UIView *page, UIView *filters) {
     return canClear;
 }
 
-UIButton *SGRLibraryMenuButton(UIView *header, UIView *page) {
+UIButton *SGRLibraryMenuButton(UIView *header) {
     UIButton *button = objc_getAssociatedObject(header, &kButtonKey);
     if (!button) {
         button = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -338,10 +338,10 @@ UIButton *SGRLibraryMenuButton(UIView *header, UIView *page) {
         button.largeContentTitle = button.accessibilityLabel;
         button.largeContentImage = image;
         [button addInteraction:[UILargeContentViewerInteraction new]];
-        __weak UIView *weakPage = page;
+        __weak UIView *weakHeader = header;
         button.menu = [UIMenu menuWithChildren:@[[UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {
-            UIView *owner = weakPage;
-            completion(owner ? SGRLibraryMenuElements(owner) : @[]);
+            UIView *page = SGRLibraryPageAbove(weakHeader);
+            completion(page ? SGRLibraryMenuElements(page) : @[]);
         }]]];
         button.showsMenuAsPrimaryAction = YES;
         objc_setAssociatedObject(header, &kButtonKey, button, OBJC_ASSOCIATION_RETAIN_NONATOMIC);

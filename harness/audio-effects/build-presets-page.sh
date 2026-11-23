@@ -18,7 +18,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC"/Settings/SGPage.m "$SRC"/Settings/SGPageStyle.m "$SRC"/Settings/SGModPage.m "$SRC"/Settings/SGSettingsSearch.m "$SRC"/Settings/SGSettingsIndex.m "$SRC"/Settings/SGGlowSwitch.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLocalize.m "$SRC"/Core/SGGlass.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGFlagForce.m "$SRC"/Core/SGUIMode.m \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework UniformTypeIdentifiers -framework Accelerate -framework Foundation \
-    -o "$OUT/PresetsPageHarness.app/PresetsPageHarness"
+    "$SRC/Core/SGDataRoot.m" -o "$OUT/PresetsPageHarness.app/PresetsPageHarness"
 cat > "$OUT/PresetsPageHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

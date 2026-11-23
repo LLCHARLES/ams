@@ -1,5 +1,210 @@
 # Changelog
 
+## [1.0.0](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.42...v1.0.0) (2026-11-23)
+
+
+### Chores
+
+* 1.0.0 정식 출시 ([76145ff](https://github.com/oneulddu/Retrine/commit/76145ffda12ec73fa29f07007aade03166c77980))
+
+## [1.0.0-beta.42](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.41...v1.0.0-beta.42) (2026-11-23)
+
+
+### Features
+
+* SponsorBlock 종류별 동작·구간 표시·정시 건너뛰기 ([9a4d2db](https://github.com/oneulddu/Retrine/commit/9a4d2dba08f2e417d9d448192e5130ef9dc35fdb))
+* 아티스트 페이지 이름을 가운데 정렬 ([e70abd0](https://github.com/oneulddu/Retrine/commit/e70abd0fc48aa5773d7a40d36b51b9a8652948be))
+* 캐시 자동 정리(Spotify 캐시 한도·커버 클립 300MB) ([ac5b1fe](https://github.com/oneulddu/Retrine/commit/ac5b1fe8d77764d1e459fe50dcc4530b690681ad))
+
+
+### Fixes
+
+* Agent 입력 막대가 있어도 가사·대기열 버튼을 제 줄에 ([20e763f](https://github.com/oneulddu/Retrine/commit/20e763f5bf35d869c122103f801a48f0ee053efd))
+
+## [1.0.0-beta.41](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.40...v1.0.0-beta.41) (2026-11-22)
+
+
+### Features
+
+* LiveContainer에서도 Pixie 다운로드·내보내기 사용 ([60cb38e](https://github.com/oneulddu/Retrine/commit/60cb38e877018c5297209584fc2f94b416b12089))
+
+
+### Fixes
+
+* Apple Music이 ' - Single'을 붙인 싱글의 움직이는 커버 찾기 ([0c2612e](https://github.com/oneulddu/Retrine/commit/0c2612e761e249fba829cd9ebe63eed9d82a0b77))
+* 관성 스크롤 중 탭 페이지로 옮겨진 목록도 탭 막대를 줄임 ([ac5f9fb](https://github.com/oneulddu/Retrine/commit/ac5f9fbe2eead3f549114e41c465b2254218b40c))
+* 별 모양 추가 버튼을 켜면 설정 미리보기에도 별 표시 ([d91e94d](https://github.com/oneulddu/Retrine/commit/d91e94da8e89c7e54251e8a494cf1c5a2dc7f799))
+* 앨범 화면 곡 줄이 안 맞아도 움직이는 커버를 식별 코드로 찾기 ([fa7b57f](https://github.com/oneulddu/Retrine/commit/fa7b57f1e8e5d2cf55250be810bb4d7d5f20b8d0))
+* 앨범 화면에서 곡을 눌러도 내보내기가 대기 중에 멈추지 않게 ([9754792](https://github.com/oneulddu/Retrine/commit/9754792884547ac07efc45ba7352b8ab7b79fe6f))
+* 재연결된 트랙도 Pixie로 내보내기 ([be7bfda](https://github.com/oneulddu/Retrine/commit/be7bfda394232f31eeef8ff6bb97d8f19c4bbf6d))
+
+## [1.0.0-beta.40](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.39...v1.0.0-beta.40) (2026-11-22)
+
+
+### Fixes
+
+* LiveContainer에서 Pixie가 재생을 막던 문제 ([f2ed4b5](https://github.com/oneulddu/Retrine/commit/f2ed4b5f44bff4943551a11bd9f7be0db23348b1))
+
+## [1.0.0-beta.39](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.38...v1.0.0-beta.39) (2026-11-22)
+
+
+### Fixes
+
+* Apple Music이 ' - EP'를 붙인 앨범의 움직이는 커버 찾기 ([664b56c](https://github.com/oneulddu/Retrine/commit/664b56c70c8639f3a0b58651c04b0337217d0802))
+* iPad 재설계 화면에서 상단 ⋯ 버튼을 뒤로가기와 같은 높이로 ([5d94f86](https://github.com/oneulddu/Retrine/commit/5d94f86e441a66fbb6e356a3b178c6934da48a4c))
+* Spotify 9.2.0에서 Pixie 오디오 내보내기 복호화 키 캡처 복구 ([6748d16](https://github.com/oneulddu/Retrine/commit/6748d162ab65298492272373f6682295cdf6408e))
+* 가사 스타일 설정에서 프리셋이 한 박자 늦게 들어오던 문제 ([61be643](https://github.com/oneulddu/Retrine/commit/61be6430849e96b41125c1e25199cb83483511cb))
+* 라이브러리에 없는 앨범도 Pixie로 다운로드되게 ([2d6cb80](https://github.com/oneulddu/Retrine/commit/2d6cb8048551bee3a26c876a9a456139e3216e06))
+* 별 모양 추가 버튼을 켜면 제목 옆에 별 표시 ([a7c1fae](https://github.com/oneulddu/Retrine/commit/a7c1faeb4ab3f88b28b014a9514d00ee9c2562b7))
+* 앨범 곡 줄에서 재생 횟수가 좋아요 표시와 겹치던 문제 ([8dc539e](https://github.com/oneulddu/Retrine/commit/8dc539ed0c87ef12cba1486f0d569cadcc2937aa))
+* 탭 막대 펼칠 때 검색 원이 줄 위로 떠서 튀던 문제 ([c0f930b](https://github.com/oneulddu/Retrine/commit/c0f930b0ce38e11408c46a5af26fc9bae70c2740))
+
+## [1.0.0-beta.38](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.37...v1.0.0-beta.38) (2026-11-22)
+
+
+### Features
+
+* 가사 화면 120Hz를 끌 수 있는 옵션 추가 ([247dbeb](https://github.com/oneulddu/Retrine/commit/247dbeb779f2fc21e30f44e248e8a0ee9f281d6e))
+* 움직이는 커버 아래 색과 상단 띠를 Music 앱에 가깝게 ([86d2aac](https://github.com/oneulddu/Retrine/commit/86d2aacdfb1e877877595e50768a0c85c4a80f35))
+
+
+### Fixes
+
+* iPad 탭 막대 아래 검은 띠와 잘린 탭 이름 수정 ([8384c0c](https://github.com/oneulddu/Retrine/commit/8384c0c37505bab782f18e30c1fe3addae11fa95))
+* Premium 재생목록의 칩 줄이 곡 제목 위에 겹치던 문제 수정 ([6330524](https://github.com/oneulddu/Retrine/commit/63305246f2e3da47ae9f11b183fa5b7cdfe8931c))
+* 가사 미리보기 탭이 커버 뷰어를 열던 문제 수정 ([b1fbf7a](https://github.com/oneulddu/Retrine/commit/b1fbf7a319a7cfbc09551741b42df4428720840f))
+* 가사 화면의 번역·탭·여백 결함 수정 ([c5a523f](https://github.com/oneulddu/Retrine/commit/c5a523f38da910a13978b78d701ee9a1aadcb0d7))
+* 대기열 커버·제목 설정·앨범 커버의 갱신 누락 수정 ([9e4998e](https://github.com/oneulddu/Retrine/commit/9e4998e114fa520d5c3f63f2b1378424559136ce))
+* 앨범 카드 커버가 다운로드·더보기 캡슐에 가려지던 문제 수정 ([06a5d51](https://github.com/oneulddu/Retrine/commit/06a5d51271f68eadfaabe11dec97f6412d921623))
+* 앨범·재생목록·검색·라이브러리 페이지 배치 결함 수정 ([7d4ff68](https://github.com/oneulddu/Retrine/commit/7d4ff685224f214d10927e61e23a8333baa1665b))
+* 이름이 다르게 적힌 같은 음반의 움직이는 커버 찾기 ([a20f7cc](https://github.com/oneulddu/Retrine/commit/a20f7cc1a598863bfc25a97032f3addef7f311de))
+* 접힌 라이브러리 헤더가 safe area 변경을 따라가게 ([de1452c](https://github.com/oneulddu/Retrine/commit/de1452cd8fd2631aee0c4be351d8401870e2d049))
+* 탭 막대·미니 플레이어·고정 메뉴 결함 수정 ([12ae018](https://github.com/oneulddu/Retrine/commit/12ae018561e3b4f5a148ff7a7cd4ea141e9082ce))
+* 탭 막대를 펼칠 때 검색 원이 막대 위에 떠 보이던 문제 수정 ([7fb2428](https://github.com/oneulddu/Retrine/commit/7fb2428f2f462d997366e99c515fcc82c59c1cb7))
+* 팟캐스트 로딩 띠가 재생 바 위로 뜨던 문제 수정 ([0d50b65](https://github.com/oneulddu/Retrine/commit/0d50b65ba503e50f55a09fa2b27ce77512285cf2))
+* 플레이어 가사 미리보기와 제목 줄이 24pt에 남던 문제 수정 ([4a50168](https://github.com/oneulddu/Retrine/commit/4a50168042fbb3db88bb448b70542aec5d8574fa))
+* 플레이어 제목 줄이 여백 밖이나 안쪽으로 어긋나던 문제 수정 ([966b973](https://github.com/oneulddu/Retrine/commit/966b9731e7b7d74f63e63c5402291d29e092001a))
+* 플레이어의 가사·대기열 전환에서 남던 어긋남 수정 ([646b8c0](https://github.com/oneulddu/Retrine/commit/646b8c033ecce379e7788053592bbdf464370cf6))
+* 한국어 앨범 섹션 제목도 스위치로 숨김 ([befb87e](https://github.com/oneulddu/Retrine/commit/befb87e057d56b2e5c12dfd6a803a5012b64c344))
+* 한국어 콘서트 섹션도 앨범 스위치로 숨김 ([1ee9347](https://github.com/oneulddu/Retrine/commit/1ee934788aed6e606c17968e6d21932c8d250ac6))
+
+
+### Performance
+
+* 기기가 뜨거울 때 장식 모션을 멈춤 ([c6431e8](https://github.com/oneulddu/Retrine/commit/c6431e88989d36b4029f3a288930e8923560d6ce))
+* 보이지 않는 Spotify 진행 타이머를 멈추고 호출당 낭비를 정리 ([12b6a0f](https://github.com/oneulddu/Retrine/commit/12b6a0f6d3eeb230b22c22393f89239fc7246fbb))
+* 플레이어 색 배경의 GPU 사용을 절반 아래로 줄임 ([571ec87](https://github.com/oneulddu/Retrine/commit/571ec8723f979a9b43826342ea8a9a3a00342b00))
+* 화면이 안 바뀌는 동안의 갱신과 타이머를 줄임 ([db12c4d](https://github.com/oneulddu/Retrine/commit/db12c4d5d61cb9cfbb4cd91cb827f724a0395485))
+
+## [1.0.0-beta.37](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.36...v1.0.0-beta.37) (2026-11-21)
+
+
+### Features
+
+* IPA 빌드 워크플로의 기본 번들 ID를 app.retrine.player로 변경 ([a032e84](https://github.com/oneulddu/Retrine/commit/a032e84081c12886829de1e3c02088dc4cd8bf9c))
+* Pixie를 빌드 기본값으로 포함 ([3756c61](https://github.com/oneulddu/Retrine/commit/3756c61e60ca5dafc1b25be47fe6dbedd6e93a23))
+* 탭 막대가 줄어들면 검색을 미니 플레이어 오른쪽 원에 표시 ([17039e2](https://github.com/oneulddu/Retrine/commit/17039e260fd668664b322f368d3ea93585557d0e))
+
+
+### Fixes
+
+* 곡 제목 간단히·번역을 미니 플레이어에도 적용 ([f8f1d35](https://github.com/oneulddu/Retrine/commit/f8f1d35708006e93b602ea29f8570cd0169168c8))
+* 곡을 넘길 때 플레이어 커버·제목 줄·음량 바가 어긋나던 문제 수정 ([06d3ac9](https://github.com/oneulddu/Retrine/commit/06d3ac9236e89c99608f5e38af29779d590a83fe))
+* 컴필레이션·사운드트랙의 Apple Music 움직이는 커버 찾기 ([03a393b](https://github.com/oneulddu/Retrine/commit/03a393b6fded2d64446b7d16881558a22bca00d6))
+* 탭 막대를 펼칠 때 검색 아이콘이 유리에 덮여 흐려지던 문제 수정 ([a4d9292](https://github.com/oneulddu/Retrine/commit/a4d929240d647495314a84f45b5b2933c0227ec8))
+
+## [1.0.0-beta.36](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.35...v1.0.0-beta.36) (2026-11-20)
+
+
+### Features
+
+* 가사 한 줄 기본 크기를 키우고 플레이어 설정에 크기 항목 추가 ([9af3c5e](https://github.com/oneulddu/Retrine/commit/9af3c5ebd8002718e9bd7fb33b6d0c9b556e6178))
+* 가사 한 줄을 Spotify 가사 미리보기와 같은 모양으로 표시 ([c91abae](https://github.com/oneulddu/Retrine/commit/c91abae4436f9d289f741fc7692ba5d18f0be154))
+* 가사 한 줄을 제목 위 컴팩트 배치로 바꾸고 커버를 키움 ([99479d1](https://github.com/oneulddu/Retrine/commit/99479d1204a5c96f397a16dab927ff29dbc2cfd1))
+* 새 디자인에서 비디오로 전환 칩을 기본으로 숨김 ([d322721](https://github.com/oneulddu/Retrine/commit/d32272159994ce3c56e6f32d060337e179d91657))
+
+
+### Fixes
+
+* 가사 한 줄이 비디오로 전환 칩과 겹치지 않게 배치 ([d322721](https://github.com/oneulddu/Retrine/commit/d32272159994ce3c56e6f32d060337e179d91657))
+* 비디오로 전환 칩이 떠도 가사 한 줄 표시 ([4da0ff8](https://github.com/oneulddu/Retrine/commit/4da0ff86d172f7eaeefe9fb2bc1b36804cce9d52))
+* 업데이트 화면이 이전 버전 내용을 현재 빌드 것으로 보이던 문제 수정 ([1c6838f](https://github.com/oneulddu/Retrine/commit/1c6838f03854fd1d33b62b10d6e1b4fc795b2ab9)), closes [#26](https://github.com/oneulddu/Retrine/issues/26)
+* 영상 커버에서 가사 한 줄을 제목 위에 표시 ([858419a](https://github.com/oneulddu/Retrine/commit/858419affccd145c1f154d3157283dfa49af5331))
+* 재생 막대를 누를 때 렌즈 모양으로 그려지던 문제 수정 ([cdb6942](https://github.com/oneulddu/Retrine/commit/cdb6942139269a993885e3014f0089117f4090ed)), closes [#30](https://github.com/oneulddu/Retrine/issues/30)
+* 재질로 그려진 비디오로 전환 칩을 가사 한 줄이 인식 ([5e6623e](https://github.com/oneulddu/Retrine/commit/5e6623e36a940589be68ead487011f6188febba9))
+
+## [1.0.0-beta.35](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.34...v1.0.0-beta.35) (2026-11-20)
+
+
+### Features
+
+* 프로젝트 이름을 Retrine으로 바꾸기 ([397cf8d](https://github.com/oneulddu/Retrine/commit/397cf8dae077e0b78379a9ad1cb95566694bcae9))
+
+
+### Fixes
+
+* iPad 가로 플레이리스트 헤더 겹침 수정 ([00d61f6](https://github.com/oneulddu/Retrine/commit/00d61f636998986c6a19aab03138134eb5103cb8))
+* iPad 가로 플레이어에서 음질 표시 유지 ([f7ade11](https://github.com/oneulddu/Retrine/commit/f7ade119041f276853c6e393958a703aa9a9e430))
+* iPad 회전 후 홈 상단 버튼과 배경색이 어긋나는 문제 수정 ([aba6f33](https://github.com/oneulddu/Retrine/commit/aba6f33b959872b752e418ab806e2070a6229aa4)), closes [#28](https://github.com/oneulddu/Retrine/issues/28) [#24](https://github.com/oneulddu/Retrine/issues/24)
+* iPad에서 플레이어 ⋯ 메뉴가 로드 중에 멈추는 문제 수정 ([9e3fb8d](https://github.com/oneulddu/Retrine/commit/9e3fb8dea033ddcae593005b4d63ac44a82d70a8)), closes [#28](https://github.com/oneulddu/Retrine/issues/28)
+* Pixie 진단 알림이 메인 스레드를 기다리지 않게 ([a4c11da](https://github.com/oneulddu/Retrine/commit/a4c11dafa408c5bcad25eaf66e37b1ced33c90e1))
+* Spotify 9.2에서 Premium 흉내를 계정 상태에 적용 ([d013606](https://github.com/oneulddu/Retrine/commit/d013606b1e49ae9ca7e35bb4143ceed1bb0d0d1f))
+* 에피소드를 띄운 뒤 플레이어 하단 버튼이 안 눌리는 문제 수정 ([ab65b61](https://github.com/oneulddu/Retrine/commit/ab65b61286d2b05fab3a71328dd2a158bff68f3d))
+* 투어가 재시작으로 끝나도 번들 ID 안내 띄우기 ([1400b41](https://github.com/oneulddu/Retrine/commit/1400b41cd23480e99f09c3c318a6a4157c4f1732))
+* 팟캐스트 플레이어의 건너뛰기 겹침과 배속 표시 수정 ([3836a98](https://github.com/oneulddu/Retrine/commit/3836a983a606588f670fea8bc57af0e5431e373c)), closes [#28](https://github.com/oneulddu/Retrine/issues/28)
+* 플레이어 ⋯ 메뉴의 중복 항목 정리 ([5e74305](https://github.com/oneulddu/Retrine/commit/5e74305dc7801fe3c3062f4892c2f0a6d1ac8177)), closes [#27](https://github.com/oneulddu/Retrine/issues/27)
+* 플레이어 닫기 손잡이를 안전 영역 아래에 고정 ([3b34d5e](https://github.com/oneulddu/Retrine/commit/3b34d5e60a0f94cf5571ae1b88c5d52e061a80d6))
+* 플레이어 음질 배지와 커버를 Apple Music 배치에 맞춤 ([c04affb](https://github.com/oneulddu/Retrine/commit/c04affbfaa44c2583b8372a53624069af7d83267)), closes [#27](https://github.com/oneulddu/Retrine/issues/27)
+* 플레이어 제목 줄의 19 표시와 긴 제목 폭 조정 ([40f7da5](https://github.com/oneulddu/Retrine/commit/40f7da5352fee390a0faf40105a5625b77abb0d9)), closes [#27](https://github.com/oneulddu/Retrine/issues/27)
+
+## [1.0.0-beta.34](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.33...v1.0.0-beta.34) (2026-11-19)
+
+
+### Features
+
+* 9.2.0 계정 속성 응답에 Pixie 오프라인 값 적용 ([b20edfb](https://github.com/oneulddu/Retrine/commit/b20edfbf85cb3474d8c5f6d120a851cecf7e9976))
+* Pixie 1.4로 업데이트하고 Spotify 9.2.0 대상 추가 ([7f15eb9](https://github.com/oneulddu/Retrine/commit/7f15eb9e9dcf22d4f467a6059aa4269eb3f27b38))
+* Spotify 9.2.0 지원과 WireGuard 9.2.0 허용 ([b641f5c](https://github.com/oneulddu/Retrine/commit/b641f5cb2e4a552896558a4b7c0f26cdc7da0553))
+* Spotify 9.2.0에서 Pixie 동작 허용 ([abed844](https://github.com/oneulddu/Retrine/commit/abed84400d16910d4dbbd7a7be2773b62c673220))
+* WireGuard 사용 중에도 가사가 나오게 ([526dbdb](https://github.com/oneulddu/Retrine/commit/526dbdb3eed8841af42d20ee233ba8e38bfaa947))
+* 음량 바를 재생 바와 같은 모양으로 ([cbd0c17](https://github.com/oneulddu/Retrine/commit/cbd0c17b36dbf77cf8ce8bb9e03e6a7edf8ce95b))
+* 플레이어를 Apple Music처럼 다듬기 ([087cb82](https://github.com/oneulddu/Retrine/commit/087cb826cb52957bbc975e08666fceeee6647ef0))
+
+
+### Fixes
+
+* iPad 창 크기 전환 뒤 플레이어·캡슐 결함 ([5fe760a](https://github.com/oneulddu/Retrine/commit/5fe760a3042df47c809e98c8dd8bbfc5beb36e3c))
+* iPad 탭바 뒤 검은 사각형 없애기 ([01fec99](https://github.com/oneulddu/Retrine/commit/01fec9947c0baf53c47791075c55ea66054b63a2))
+* Spotify 9.2.0 보관함 머리글·작은 보관함 유지 ([69c9d33](https://github.com/oneulddu/Retrine/commit/69c9d33f257da5eebc528e9f9e4c6dec1962d3f9))
+* Spotify 9.2.0에서 광고 차단·팔로우·좋아요 훅 유지 ([6933b2e](https://github.com/oneulddu/Retrine/commit/6933b2e5fe61ffee1480baf8464df0fa539f5de5))
+* 같은 가사 교체에서 카라오케 줄 유지 ([2b9b827](https://github.com/oneulddu/Retrine/commit/2b9b827383158d2673f746abfbeabe2f245c9946))
+* 대기열 '다음 곡' 제목이 두 겹으로 보이던 문제 ([f1619e4](https://github.com/oneulddu/Retrine/commit/f1619e405ab9ffd1c96bee0161f2f981157f43f6))
+* 설정 검색에서 고른 페이지가 열리지 않던 문제 ([de6869a](https://github.com/oneulddu/Retrine/commit/de6869a4d2ad405a9e0890cdc53f90a4ac77cf8d))
+* 업데이트 확인과 GitHub 링크를 Retrine 저장소로 ([44096e9](https://github.com/oneulddu/Retrine/commit/44096e98eab8fe552f4be63c31682401cc8dd4bf))
+
+
+### Performance
+
+* 홈 선반을 숨기면 생기던 레이아웃 반복 없애기 ([127204d](https://github.com/oneulddu/Retrine/commit/127204d7513572c42862a7644de00b6db5628faf))
+
+## [1.0.0-beta.33](https://github.com/oneulddu/vitrine/compare/v1.0.0-beta.32...v1.0.0-beta.33) (2026-11-17)
+
+
+### Features
+
+* 페이지와 바를 Apple Music에 맞추기 ([279347a](https://github.com/oneulddu/vitrine/commit/279347ae8a0568ac9687e5a89161e31387bfa365))
+* 플레이어와 가사를 Apple Music에 맞추기 ([2a39f9d](https://github.com/oneulddu/vitrine/commit/2a39f9dfcc91d24aebdbcc754a6f22e884f69ca3))
+
+
+### Fixes
+
+* 확장만 빠진 IPA에 '앱 수정 사항 없이 설치됨' 경고 안 띄우기 ([a9c7ed2](https://github.com/oneulddu/vitrine/commit/a9c7ed27006ccd79584e35b28983da32c928db48))
+
+
+### Performance
+
+* 백그라운드 배터리 소모 줄이기 ([264e6e9](https://github.com/oneulddu/vitrine/commit/264e6e9ac5576b9b64ce34535c18f4855a2ab993))
+
 ## [1.0.0-beta.32](https://github.com/oneulddu/vitrine/compare/v1.0.0-beta.31...v1.0.0-beta.32) (2026-11-16)
 
 

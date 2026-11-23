@@ -3,7 +3,7 @@
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-update-check.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-update-check.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
@@ -15,7 +15,7 @@ xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
 "$OUT/check"
 APP="$OUT/Language.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp -R "$SRC/../layout/Library/Application Support/Vitrine.bundle" "$APP/Contents/Resources/"
+cp -R "$SRC/../layout/Library/Application Support/Retrine.bundle" "$APP/Contents/Resources/"
 xcrun clang -fobjc-arc -fblocks -I"$SRC" \
     "$SRC/Core/SGLocalize.m" "$HERE/language-check.m" \
     -framework Foundation -o "$APP/Contents/MacOS/Language"

@@ -87,6 +87,8 @@ def main():
                                 raise RuntimeError("missing screenshot: " + str(image))
                         if kind == "playlist":
                             scenario(device, bundle, common + [
+                                "tablet-entry", "-spotifyglass.redesign.playlist.fullCover", "NO"])
+                            scenario(device, bundle, common + [
                                 "card-cover", "-spotifyglass.redesign.playlist.fullCover", "NO"])
                     else:
                         for width in (430, 390, 320):

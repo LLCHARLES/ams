@@ -13,7 +13,7 @@ import shutil
 import sys
 
 IDENTITY = {'CFBundleExecutable': 'probe', 'CFBundleName': 'ATSProbe', 'CFBundlePackageType': 'APPL',
-            'CFBundleIdentifier': 'dev.vitrine.atsprobe', 'CFBundleShortVersionString': '1.0', 'CFBundleVersion': '1'}
+            'CFBundleIdentifier': 'dev.retrine.atsprobe', 'CFBundleShortVersionString': '1.0', 'CFBundleVersion': '1'}
 
 
 def bundle(build, name, info, binary):

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 SRC=$(cd "$(dirname "$0")/../../tweak/Sources" && pwd)
-OUT=${HARNESS_BUILD_DIR:-$(mktemp -d /tmp/vitrine-home-tiles.XXXXXX)}
+OUT=${HARNESS_BUILD_DIR:-$(mktemp -d /tmp/retrine-home-tiles.XXXXXX)}
 mkdir -p "$OUT/HomeTilesHarness.app"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
@@ -18,7 +18,7 @@ cat > "$OUT/HomeTilesHarness.app/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>HomeTilesHarness</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.hometilesharness</string>
+<key>CFBundleIdentifier</key><string>com.retrine.hometilesharness</string>
 <key>CFBundleName</key><string>HomeTilesHarness</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>

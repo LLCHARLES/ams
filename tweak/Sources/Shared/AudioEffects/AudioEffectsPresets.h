@@ -40,11 +40,11 @@ NSString *SGDSPValuesDigest(NSDictionary<NSString *, id> *values);
 
 #pragma mark - preset files
 
-// A preset as a file to share and import: {"format": "vitrine.audio-preset", "version": 1, "name": ...,
+// A preset as a file to share and import: {"format": "retrine.audio-preset", "version": 1, "name": ...,
 // "values": {key: value}}, the values being the preset's spotifyglass.dsp.* keys (never the master switch) as
 // they are stored: booleans, numbers and text. An impulse response, DDC or Liveprog file is named, not carried.
 //
-// The user's preset `name` as the file's bytes, and a file name for it ("Late night.vitrine-preset.json");
+// The user's preset `name` as the file's bytes, and a file name for it ("Late night.retrine-preset.json");
 // nil when there is no such preset.
 NSData *SGDSPPresetFileData(NSString *name, NSString **fileName);
 // A file's preset: its values, kept to the keys and types this build knows, and its name (`fallbackName` when
@@ -92,7 +92,7 @@ NSArray<SGAutoEqHeadphone *> *SGAutoEqFilterByForm(NSArray<SGAutoEqHeadphone *> 
 // The headphone a folder names, for the page's row: its last part, decoded.
 NSString *SGAutoEqNameOf(NSString *path);
 
-// The index, from Caches/Vitrine/AutoEq unless `refresh` or the copy is a month old, else from GitHub (the
+// The index, from Caches/Retrine/AutoEq unless `refresh` or the copy is a month old, else from GitHub (the
 // cached copy still answering when GitHub does not). `done` runs once on the main queue, with the
 // headphones, and why GitHub did not answer when it did not.
 void SGAutoEqLoadIndex(BOOL refresh, void (^done)(NSArray<SGAutoEqHeadphone *> *headphones, NSString *error));

@@ -9,12 +9,14 @@ from pathlib import Path
 import sys
 source = (Path(sys.argv[1]) / "PlayerFooter.x").read_text()
 constants = source[source.index("static const CGFloat kRowAboveSafeArea"):source.index('// "airplayaudio"')]
-layout = source[source.index("#pragma mark - lower down"):source.index("static void placeSideQueue(")]
+layout = source[source.index("#pragma mark - lower down"):source.index("static void placeQueueGlyph(")]
 header = (Path(sys.argv[1]) / "Player.h").read_text()
 safe = header[header.index("static inline CGRect SGRPlayerVisibleSafeArea"):header.index("#pragma mark - the lyrics")]
+margins = header[header.index("#pragma mark - the player's margins and rhythm"):header.index("#pragma mark - the cover")]
+(Path(sys.argv[2]) / "volume-margins-production.inc").write_text(margins)
 (Path(sys.argv[2]) / "volume-layout-production.inc").write_text(constants + "\n" + safe + "\n" + layout)
 source = (Path(sys.argv[1]) / "PlayerVolume.m").read_text()
-constants = source[source.index("static const CGFloat kRowHeight"):source.index("// iOS 26's thumbless")]
+constants = source[source.index("static const CGFloat kRowHeight"):source.index("// The slider is drawn as the progress bar")]
 placement = source[source.index("static char kVolumeKey"):]
 (Path(sys.argv[2]) / "volume-placement-production.inc").write_text(constants + "\n" + placement)
 PY

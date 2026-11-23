@@ -76,11 +76,14 @@ static void keepPlatform(id platform) {
     SGLog(@"head gestures: collection platform %@", name);
 }
 
+%group LegacyPlatform
 %hook SPTCollectionPlatformImplementation
 - (id)stateProvider {
     keepPlatform(self);
     return %orig;
 }
+%end
+
 %end
 
 %hook _TtC23Collection_PlatformImpl22CollectionPlatformImpl
@@ -90,11 +93,14 @@ static void keepPlatform(id platform) {
 }
 %end
 
+%group MigrationPlatform
 %hook _TtC23Collection_PlatformImpl27CollectionPlatformMigration
 - (id)stateProvider {
     keepPlatform(self);
     return %orig;
 }
+%end
+
 %end
 
 %hook _TtC26AlignedCuration_CommonImpl21ACUCollectionPlatform
@@ -322,9 +328,10 @@ static void resetDetector(void) {
 static void updateListening(void) {
     // isPlaying stays on while a track is loaded and paused; isPaused is what tells.
     SPTPlayerState *state = SGPlayerState();
-    BOOL resumes = SGHeadGestureAction(SGHeadGestureDoubleNod) == SGHeadActionPlayPause
-                   || SGHeadGestureAction(SGHeadGestureShake) == SGHeadActionPlayPause;
-    BOOL wanted = state.isPlaying && (!state.isPaused || resumes);
+    SGHeadAction nod = SGHeadGestureAction(SGHeadGestureDoubleNod), shake = SGHeadGestureAction(SGHeadGestureShake);
+    BOOL assigned = nod != SGHeadActionNothing || shake != SGHeadActionNothing;
+    BOOL resumes = nod == SGHeadActionPlayPause || shake == SGHeadActionPlayPause;
+    BOOL wanted = assigned && state.isPlaying && (!state.isPaused || resumes);
     BOOL detect = sg_recording || sg_trying || sg_held || (SGFlag(SGKeyHeadGestures, NO) && wanted);
     if (detect != sg_detecting) {
         sg_detecting = detect;
@@ -376,7 +383,8 @@ void SGHeadMotionAskPermission(void) {
 void SGHeadGesturesSettingsChanged(void) {
     if (sg_manager) resetDetector();
     updateListening();
-    if (SGFlag(SGKeyHeadGestures, NO)) SGHeadMotionAskPermission();
+    if (SGFlag(SGKeyHeadGestures, NO) && (SGHeadGestureAction(SGHeadGestureDoubleNod) != SGHeadActionNothing
+                                         || SGHeadGestureAction(SGHeadGestureShake) != SGHeadActionNothing)) SGHeadMotionAskPermission();
 }
 
 BOOL SGHeadGesturesAvailable(void) {
@@ -525,8 +533,14 @@ SGHeadTeachingResults SGHeadGesturesFinishTeaching(NSArray<NSData *> *nods, NSAr
 @end
 
 %ctor {
+    if (class_getInstanceMethod(objc_getClass("SPTCollectionPlatformImplementation"), @selector(stateProvider))) {
+        %init(LegacyPlatform);
+    }
+    if (class_getInstanceMethod(objc_getClass("_TtC23Collection_PlatformImpl27CollectionPlatformMigration"), @selector(stateProvider))) {
+        %init(MigrationPlatform);
+    }
     %init;
-    SGRequireClasses(@[@"SPTCollectionPlatformImplementation", @"_TtC23Collection_PlatformImpl22CollectionPlatformImpl"]);
+    SGRequireClasses(@[@"_TtC23Collection_PlatformImpl22CollectionPlatformImpl"]);
     static SGHeadGesturesObserver *observer;
     observer = [SGHeadGesturesObserver new];
     SGAddPlayerStateObserver(observer);

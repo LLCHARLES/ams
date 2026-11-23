@@ -13,10 +13,10 @@ def run(*args, **kwargs):
     return subprocess.run(args, check=True, text=True, **kwargs)
 
 
-with tempfile.TemporaryDirectory(prefix="vitrine-head-teaching-") as output:
+with tempfile.TemporaryDirectory(prefix="retrine-head-teaching-") as output:
     env = dict(os.environ, OUT=output)
     run("sh", str(HERE / "build.sh"), env=env)
-    device = run("xcrun", "simctl", "create", "Vitrine teaching check",
+    device = run("xcrun", "simctl", "create", "Retrine teaching check",
                  "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
                  "com.apple.CoreSimulator.SimRuntime.iOS-26-5", capture_output=True).stdout.strip()
     try:
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix="vitrine-head-teaching-") as output:
         run("xcrun", "simctl", "install", device, output + "/HeadGesturesSim.app")
         for arguments, expected in [((), 0), (("fail-exit",), 1)]:
             launch = run("xcrun", "simctl", "launch", "--wait-for-debugger", device,
-                         "com.vitrine.headgesturessim", *arguments, capture_output=True)
+                         "com.retrine.headgesturessim", *arguments, capture_output=True)
             pid = launch.stdout.strip().split(":")[-1].strip()
             result = run("xcrun", "lldb", "--batch", "-p", pid, "-o", "continue",
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=420)

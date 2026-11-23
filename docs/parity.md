@@ -1,6 +1,6 @@
 # Parity with spoti.pw 0.50.0
 
-Every line of upstream's 0.22.0, 0.23.0-beta and 0.50.0 release notes, and where Vitrine stands on it.
+Every line of upstream's 0.22.0, 0.23.0-beta and 0.50.0 release notes, and where Retrine stands on it.
 Each feature is written from its release note and public APIs, never from upstream's code after
 `c790445`, which is PolyForm Strict.
 
@@ -9,7 +9,7 @@ Numbers are the line's position in the three release notes, in order. Status:
 - **done**: built and on main. "Device" means it still needs a check on a phone inside Spotify.
 - **in progress**: being built on its own branch
 - **todo**: to build
-- **n/a**: depends on upstream's account site, Plus or the upstream server, so Vitrine leaves it out
+- **n/a**: depends on upstream's account site, Plus or the upstream server, so Retrine leaves it out
 
 A completeness audit on 2026-10-05 checked every done item below against its release note. Its gaps were
 fixed in the commits that follow `956e65c`.
@@ -19,7 +19,17 @@ fixed in the commits that follow `956e65c`.
 | Source commits | Scoped port |
 |---|---|
 | `5f7b82e` | NativeDownloads offline-device manager: opaque device/cache selection tokens, current/other/unregistered-copy visibility and credential-free failure snapshots, adapted from `OfflineDeviceManager.m:147–251,275–306`. Confirmation, fresh-state checks and 9.1.90 routes/profile retained; companion-owned Korean/English strings. Fixture tests only; real-account registration/disable behavior remains unverified. Eevee's quality UI, 9.2.0 profile and other download features excluded. |
+| `5f5c7ea`, `7a8c573` | Spotify 9.2 Spoof Premium: nebula account attributes and the signed-in remote config rewritten with Retrine's existing attribute and flag rules (crossfade included), their validators stripped, composed after Pixie's offline values. Version split by `CFBundleShortVersionString` ≥ 9.2 so 9.1.x keeps customize. Eevee's token bridge rename has no Retrine counterpart, and `AdsBaseImpl` was already covered. Harness only; on-device 9.2 queue, on-demand and crossfade unverified. |
 | `43b9ca3`, `350aa15`, `d4daa49`; audit ideas `1010573`, `7a617a7`, `e2abe5a` | Terminal `/ads` and pre-send ad cancellation under Hide ads; six 9.1.90-verified service selectors with individual runtime guards; binary coverage audit with explicit DI/regulatory and missing-selector exemptions. `2a9d4ae` shuffle/full-song hooks and d4daa49 realtime/instrumentation/element/native-element hooks were not ported: no Objective-C `load` in 9.1.90. CTA cards keep `registerScrollProviderIn:`. Static 9.1.90 proof and Foundation harnesses only; no 9.1.78/9.1.88 binary or device verification. |
+
+Not yet ported, checked against upstream `f6a3403` (2026-11-17):
+
+| Source commits | To build | Before building |
+|---|---|---|
+| `f6a3403` | Pixie's local track quota from 1,000,000 to Spotify's 10,000: `SAPMinimumTrackLimit` in `NativeDownloads/src/Generated/OfflineLimits.h`, the 9.2.0 `SAPRestrictionTrampoline` bytes in `NativeRestrictionsPatch.h`, and `SAPPrepareNativeOffline` (`NativeOfflineAdapter.m`) setting the quota to exactly 10,000, lowering a higher value an older build left. Also drop `SAPInstallAVHooks()` from `PixieBootstrap.m` and add `SAPStartupReport` for a one-line startup state in the log. | Upstream gives no reason for the lower quota. Commit the uncommitted Pixie work first: `PixieManagerActions.m` and `PixieManagerSettings.m` are changed by both. Needs a download check on a phone, 9.1.90 and 9.2.0. |
+| `ddcdada` | Nothing to copy: upstream's glass tab bar grew to 62 pt, upward, and lifted the mini player when Spotify shrinks its tab strip under a banner (offline, data saver). | Check on a phone whether the redesign's tab bar and now playing bar overlap under such a banner first. |
+| `838c5d5` | A new feature, not a version fix: download a local playlist over Wi-Fi, with a setting, the `offline` attribute forced while it is on and the playlist page's Download button kept. | Decide whether Retrine wants it; Spotify's `ActionView` class and the offlining helper's selector need checking in 9.1.90 and 9.2.0. |
+| `5f5c7ea`, `7a8c573` (ported above) | On-device check of the 9.2.0 port: queue, add to queue, picking any track, seeking and crossfade on a free account with Spoof Premium. | A phone with Spotify 9.2.0. |
 
 ## Done
 
@@ -52,7 +62,7 @@ fixed in the commits that follow `956e65c`.
 | 111, 88, 124 | Landscape lyrics, with the meanings sheet |
 | 94 | Translation: Musixmatch's community translations, or Gemini with your own key |
 | 31, 138 | Spicy Lyrics with your own Developer Platform key |
-| — | PetitLyrics: request and response knowledge from EeveeSpotifyReincarnated (GPL-3, `0d9feaa`); asynchronous matching and retained word timing in Vitrine |
+| — | PetitLyrics: request and response knowledge from EeveeSpotifyReincarnated (GPL-3, `0d9feaa`); asynchronous matching and retained word timing in Retrine |
 | 82, 93, 125, 60 | Lock screen lyrics as full-screen artwork, a clip per line, Still by default, no progress jump |
 
 ### Player and audio
@@ -65,7 +75,7 @@ fixed in the commits that follow `956e65c`.
 | 80, 83 | Presets, and AutoEq headphone corrections from AutoEq's public data |
 | 27, 28, 29, 20, 103, 87, 55, 130, 53, 56 | Sing: model download, vocals slider, mic button, heat switch, iOS 18 floor |
 | 81, 92 | Local files: Edit Info and lyrics |
-| — | SponsorBlock podcast skipping in both looks, off by default, category switches and Spotify's Undo snackbar; adapted from EeveeSpotifyReincarnated (GPL-3, `0d9feaa` / `51cb2dc`). Reporting and voting excluded; real-Spotify playback validation outstanding. |
+| — | SponsorBlock for podcasts in both looks: opt-in tour switch, per-category Auto-skip / Ask / Show only / Off, native Skip and Undo snackbar, manual-seek and duration rules, local statistics, optional haptics, HTTPS server choice and progress-bar segment data. Report-driven; no polling, mute, submission or voting. Adapted from EeveeSpotifyReincarnated (GPL-3, `0d9feaa` / `51cb2dc`) and upstream Vitrine `d48c5f3b`. Real-Spotify playback validation outstanding. |
 
 ### System
 
@@ -83,7 +93,7 @@ fixed in the commits that follow `956e65c`.
 | # | Item |
 |---|---|
 | 85 | Sing's spatial voice with AirPods |
-| 22, 123 | App icons: the picker, `icons/`, and Vitrine's own icon |
+| 22, 123 | App icons: the picker, `icons/`, and Retrine's own icon |
 | 42, 137 | Cover size fixes (the cover fills the lyric preview's room, under either look) |
 | 112, 38 | Player page led by a showcase of the player, its background as a menu |
 | 39, 40, 49, 61, 64, 136 | Player ⋯ opens the system menu, with speed, pitch, reverb and Animated artwork |
@@ -112,7 +122,7 @@ fixed in the commits that follow `956e65c`.
 
 ### Beta gaps (0.23.0-beta, described by behavior)
 
-A separate describer compared upstream's beta branch with Vitrine by behavior only (local notes, not in the
+A separate describer compared upstream's beta branch with Retrine by behavior only (local notes, not in the
 repo). Rounds 3 and 4 closed most of it: Spicy Lyrics' key, credit, pronunciations and back-off; the paused cover;
 the clip's pause, Spotify's video, late Canvas, next-track fetch and give-up; the lyrics left alone; tap to seek;
 the lock screen's Canvas shape, late Canvas and Canvas service; the lit custom tab; the update check; EeveeSpotify
@@ -157,9 +167,9 @@ Rebuilt from behavior-only descriptions; each commit credits the PR's author.
 ### Upstream 1.0.0-beta.1 and 0.51.0 (described by behavior)
 
 A describer read the two release notes, the open issues and upstream's site (behavior only, no code); the notes
-give no numbers, so the limits below are Vitrine's own.
+give no numbers, so the limits below are Retrine's own.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | The player grows out of the mini player and follows the finger | Already done (PlayerMorph.x) |
 | Square animated covers play inside the cover | Done (PlayerMotion.x); device check outstanding |
@@ -174,17 +184,17 @@ give no numbers, so the limits below are Vitrine's own.
 
 ### Upstream 1.0.0-beta.4 (described by behavior)
 
-The first batch taken from beta.4, described by behavior only and built against Vitrine's own code, and the second
+The first batch taken from beta.4, described by behavior only and built against Retrine's own code, and the second
 round under it: per-song speed and pitch, the player's line under the cover, album notes, artist artwork, the player
 refinements and the page previews.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Lyrics pronunciation in Hangul: Japanese and Chinese lines read in Hangul, every other script in Latin | Done (Romanise.m): offline kana and pinyin to Hangul, under Pronunciation alphabet; harness/hangul-pronunciation/ |
 | Teaching gestures checked against 20 seconds of ordinary movement, a threshold stored only if it never fires there | Done (HeadGesturesTeach.m, SGHeadEvaluate): the harness covers rejection, a kept previous threshold and Cancel |
 | Hardware keyboard: ⌘↑ / ⌘↓ volume, ⌘1 / ⌘2 / ⌘3 Home, Search and Library, ⌘F Search with its field focused, Esc and ⌘W the player closed | Done (Shared/Keyboard, Core/SGTopController.h); harness/keyboard-commands/ and harness/keyboard-top-controller/; the keys themselves are a device check |
 | Hold a lyrics line for Copy, Share and, where it has one, Meaning | Done (Redesigned/Lyrics/SGRKaraokeView.m); harness/lyrics-hold/; the press itself is a device check |
-| Own lyrics as TTML, LRC or plain text, pasted too, the same 1 MB and content rules, replaced files deleted at the next launch | Done (Shared/LocalFiles/LocalLyrics.m and its page in both looks); harness/local-files/ |
+| Own lyrics as TTML, LRC or plain text, pasted too, the same 1 MB and content rules, replaced files deleted at the next launch | Shared import page links any song URI; only local files also match by name. The shared lyrics engine checks the link, then local ID3/FLAC/M4A tags, before ordinary lyrics. `harness/local-files/`, `harness/lyrics-sources/` |
 | Advance work (the next track's lyrics and artwork) stands down on Low Power Mode, serious or critical heat, an unavailable network, Low Data Mode and the Load ahead switch | Done (Core/SGOptionalWork.h, asked by KaraokeSource.x's track watcher and SGMotionFollower.m's fetch ahead, both re-aimed when the up-next track changes) |
 | With shuffle and repeat both hidden, previous and next move out to where the Music app keeps them | Done (Redesigned/Player/PlayerControls.x); a device check on a narrow and a wide iPhone is outstanding |
 | Recent accent colors, up to 8, each look keeping its own | Done (Native/Appearance/AccentHistory.m, Redesigned/Kit/SGRAccentHistory.m); harness/appearance-page/ (rows) |
@@ -193,6 +203,7 @@ refinements and the page previews.
 | The line being sung under the cover: a long line shrinks and then splits into portions of whole words, read on a one-shot timer aimed at the next portion or line, and standing down where Spotify's own lyric preview shows | Done (Redesigned/Player/PlayerLyricFit.m, PlayerLyricLine.x); harness/player-lyric-line/ |
 | Album editorial notes from Apple Music's catalog, under Play, under the tracks or off | Done (Redesigned/Album/AlbumNotes.m, AlbumSections.x; SGMotionCatalog.m's SGMotionAlbumNotesIn): exact artist, edition, count, year and rating only; harness/album-notes/ |
 | Artist page: Apple Music's artist photo and animated artist artwork | Done (Redesigned/Artist/ArtistArtwork.m, ArtistHeader.x; SGMotionArtistMatch): two agreeing releases and one namesake only; harness/artist-artwork/ |
+| Hold Play to shuffle the displayed artist | Done (Redesigned/Artist/ArtistHeader.x, ArtistShuffleHold.h); Spotify artist-context playback checked on 9.1.90 and 9.2.0. |
 | The player's time digits rolling only the characters that changed, and the add button as a star | Done (Redesigned/Kit/SGRRefinements.m, SGRRollingDigits.m, SGRPlainCheck.x, PlayerControls.x, PlayerSettings.m); harness/player-refinements/ |
 | A live preview at the top of the redesign's page settings, following the switches as they are flipped | Done (Redesigned/Kit/SGRPagePreview.m in the Playlists, Home, Search, Albums and Artists pages); harness/page-previews/ |
 
@@ -200,7 +211,7 @@ Judged equal, already there, or not taken, from the same beta.4 round:
 
 | Item | Why |
 |---|---|
-| Lyric-layer ordering, the two-column lyrics and the press highlight | Already in Vitrine: the lines sung over each other are lit together and the stack moves on in order (Redesigned/Lyrics), and a press on a line opens the edit menu (harness/lyrics-hold/) |
+| Lyric-layer ordering, the two-column lyrics and the press highlight | Already in Retrine: the lines sung over each other are lit together and the stack moves on in order (Redesigned/Lyrics), and a press on a line opens the edit menu (harness/lyrics-hold/) |
 | Glass on the full-height Queue and Connect sheets | Tried and dropped: on the iPhone 13 Pro (iOS 27.2) UIKit's `_nonLargeBackground` is nil for Spotify's sheet, so there was no material to carry to the large detent, and Spotify paints its own content opaque (#1F1F1F) there over a #1C1C1E drop shadow view; kept as a follow-up |
 | A translucent download badge | Not built: the download state is not readable from Objective-C, so only a color heuristic was possible, and a wrong badge is worse than none |
 | The iPad full-screen player | Not adopted: no iPad was available to verify it |
@@ -213,13 +224,13 @@ Judged not better, or not ours to take:
 | Rewriting an MP3's metadata tags | Left out for its data-loss risk: it edits the user's own files, and the gain is cosmetic |
 | Account, Plus, server and telemetry features | Out of scope, as in Leave out: no account, no paid tier, no upstream server |
 
-### Upstream 1.0.0-beta.4, the whole feature set (compared with Vitrine's code)
+### Upstream 1.0.0-beta.4, the whole feature set (compared with Retrine's code)
 
-The earlier rounds took what was new in beta.4 and judged the older features from Vitrine's documentation. This round
-compared the whole feature set with Vitrine's code at the logic level (upstream's side by static reading only, behavior
+The earlier rounds took what was new in beta.4 and judged the older features from Retrine's documentation. This round
+compared the whole feature set with Retrine's code at the logic level (upstream's side by static reading only, behavior
 described and no code taken): edge cases, limits, retries, caching and where work runs.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Artwork transfers owned by their consumers: a request hands back a ticket, a shared transfer stops when its last consumer leaves unless more than half of a known size is in, and only transient failures (timeout, lost connection, DNS, HTTP 408, 429, 5xx) are tried again | Done (Shared/AnimatedArtwork/SGMotionTicket.*, SGMotionStore.m, MotionSources.m, SGMotionCatalog.m, SGMotionFollower.m); harness/motion/ |
 | A change of the up-next track re-targets the next track's artwork and lyric prefetch | Done (Shared/Player/PlayerState.x's SGPlayerUpNextIn and playerUpNextDidChange:, Shared/Lyrics/KaraokeSource.x, SGMotionFollower.m, which cancels the old target's artwork fetch) |
@@ -235,16 +246,19 @@ described and no code taken): edge cases, limits, retries, caching and where wor
 | Animated artwork's clip recovery | Done (Redesigned/Player/PlayerMotion.x): a clip that has drawn and then fails is played again from its local file, 3 rebuilds, then given up; harness/fluid-clip/ |
 | Automatic accent | Done (Redesigned/Kit/SGRAccent.x, SGRAccentContext.m, Player/PlayerCoverAccent.x): Accent source, `spotifyglass.redesign.accent.auto`, Picked until switched; the page in front, then the cover; recolors by token provenance, never by a similar hue; harness/appearance-accent/ |
 | Explicit badge hiding, in each look | Done (Native/Appearance/ExplicitBadge.x, Redesigned/Kit/SGRExplicitBadge.x): `spotifyglass.hideExplicit` and `spotifyglass.redesign.hideExplicit`, off; a transparent mask on Spotify's own badge views; harness/ui-refinements/ |
+| Glass material, tint and touch response in the redesign | Done (Redesigned/Kit/SGRGlass.m, SGRAppearanceSettings.m; the glass tab bar, the now playing card and the bars' stand-ins through SGRGlassEffect/SGRGlassRestyle): `spotifyglass.redesign.glass.material` (Regular or Clear), `spotifyglass.redesign.glass.tint` (None, Light or Dark) and `spotifyglass.redesign.glass.interactive` (on), read as the redesign starts; iOS 26 glass only, Reduce Transparency still solid, the control always takes the touch, including Home's Filter beside its pill's glass (SGRGlassBacks); harness/appearance-page/, harness/glass-choices/, harness/tabbar/glass-check.py. Also the search field; the full screen lyrics page keeps its own glass under the words. Checked on an iPhone 13 Pro (9.2.0): Clear + Dark on the tab bar, the now playing bar and the search field, controls working with touch response off |
+| A saved song shown as a dot | Done (Redesigned/Kit/SGRPlainCheck.x, SGRRefinements.m): Saved mark, `spotifyglass.redesign.savedMark`, Spotify's, Plain checkmark or Dot, in Plain checkmark's place, carrying `spotifyglass.redesign.plainCheck` over while unset and never writing it; harness/appearance-page/, harness/player-refinements/, harness/glass-choices/. Checked on an iPhone 13 Pro (9.2.0): the dot on saved album and search rows, unsaved rows keeping Spotify's plus |
 | Separate album and playlist cover settings (the global Full bleed row removed) | Done (Redesigned/Kit/SGRHeaderInfo.m's SGRPageFullCover, Album/AlbumSettings.m, Playlist/PlaylistSettings.m): Cover layout, Card or Full screen, `spotifyglass.redesign.album.fullCover` and `spotifyglass.redesign.playlist.fullCover`, Full screen unless set; the old `spotifyglass.redesign.fullBleedCovers` is carried over once and kept; harness/album/, harness/page-previews/ |
 | Compact library and the Library settings page | Done (Redesigned/Library/LibraryMenu.m, LibrarySettings.m, LibraryHeader.x): `spotifyglass.redesign.library.hideChips`, off; a menu of Spotify's own sort, list or grid and clear filter, the chips staying where the menu cannot reach them; a preview leads the page; harness/library/ |
 | Tab bar fade switch | Done (Redesigned/Navbar/TabBar.x, NavbarSettings.m): `spotifyglass.redesign.navbar.fade`, on, with the fade in the page's preview; harness/tabbar/ |
 | Spotify plays as a play count source | Done (Redesigned/Album/AlbumSpotifyCounts.*, AlbumPlaysText.m, AlbumRows.x, Shared/SpotifyMetadata/): `spotifyglass.redesign.album.playCounts.source`, Your plays unless set; one JSON GET and one batched POST per album, no automatic retry, 500 tracks an album, 64 albums and 2 MiB kept, 24 hours (five minutes after a failure); an unknown count is nothing, never 0; harness/album-counts/ |
+| Per-disc album track numbers | Done (Redesigned/Album/AlbumRows.x, AlbumSpotifyCounts.m): Track numbers, `spotifyglass.redesign.album.trackNumbers`, off; each row's position within its disc from Spotify's album metadata, matched by the row's track URI (a title only when unique on the album), never by index; harness/album/, harness/album-counts/. Checked on an iPhone 13 Pro (9.2.0): disc 2 restarting at 1, no overlap with or without in-row plays, rows on screen numbered once the album's metadata arrives |
 
 Judged equal, already there, or not taken, from the same round:
 
 | Item | Why |
 |---|---|
-| Search short-video carousels | Already in Vitrine: the redesign's watch feed carousels collapse with the Search page's watch feed switch (on) and come back when it is off (Redesigned/Search/SearchSections.x) |
+| Search short-video carousels | Already in Retrine: the redesign's watch feed carousels collapse with the Search page's watch feed switch (on) and come back when it is off (Redesigned/Search/SearchSections.x) |
 | The iPad full-screen player and the beside-cover lyrics opt-out | Not adopted: no iPad to verify them |
 | Writing an MP3's metadata tags | Left out: data loss in the user's own files |
 | A translucent download badge | Not built: there is no reliable download state to read |
@@ -260,9 +274,9 @@ title row's sizes).
 
 ### Upstream 1.0.0-beta.5 (described by behavior)
 
-What beta.5 adds over beta.4, compared with Vitrine's code and built from behavior specs only.
+What beta.5 adds over beta.4, compared with Retrine's code and built from behavior specs only.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | The artist under the title in the minimized mini player | Done (Redesigned/NowPlayingBar/NowPlayingBar.x): `spotifyglass.redesign.inlinePlayer.artist`, off; only when both lines fit with 6 pt to spare; harness/now-playing-bar/ |
 | Clear downloaded covers and artist photos | Done (Shared/AnimatedArtwork/SGMotionStore.m, SGMotionCatalog.m, AnimatedArtworkSettings.m): the store's own clips and the album answers only, leased clips kept, pre-clear work keeps and starts nothing; harness/artwork-clear/ |
@@ -274,24 +288,24 @@ What beta.5 adds over beta.4, compared with Vitrine's code and built from behavi
 
 ### Upstream 1.0.0-beta.6 (described by behavior)
 
-What beta.6 adds over beta.5, compared with Vitrine's code and built from behavior specs only. Every new switch is off.
+What beta.6 adds over beta.5, compared with Retrine's code and built from behavior specs only. Every new switch is off.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Album pages coloured from what the cover is, the cover sharp under the title | Done (Redesigned/Kit/SGRCoverRead.m, Album/AlbumHeader.x): Picture-aware cover, `spotifyglass.redesign.album.adaptiveCover`; harness/album/cover-check.sh |
-| Artist pages coloured from the photo with faces left out | Done for the colour (Kit/SGRCoverRead.m, Artist/ArtistHeader.x): `spotifyglass.redesign.artist.adaptivePhoto`. Upstream's extension under the photo is not taken: Vitrine's photo fills the hero |
+| Artist pages coloured from the photo with faces left out | Done for the colour (Kit/SGRCoverRead.m, Artist/ArtistHeader.x): `spotifyglass.redesign.artist.adaptivePhoto`. Upstream's extension under the photo is not taken: Retrine's photo fills the hero |
 | Round artist Play with its triangle cut out, white or in the accent | Done (Kit/SGRActionRow.m, SGRHeaderInfo.m): `spotifyglass.redesign.artist.cutOutPlay`, `spotifyglass.redesign.accentPlay`; Play in the page's color is kept for every other Play; Round artist Play moved to the Artists page; harness/artist/cutout-check.sh |
-| Monthly listeners in About | Done (Artist/ArtistSections.x): `spotifyglass.redesign.artist.listenersInAbout` only takes the line off the header, since Spotify's About card and page already show the count (seen on a 9.1.90 phone); harness/artist/listeners-check.py |
+| Monthly listeners in About | Done (Artist/ArtistSections.x): `spotifyglass.redesign.artist.listenersInAbout` omits the header line from the first layout unless Hide About is on. Spotify's About card and page already show the count (seen on a 9.1.90 phone) and are unchanged by this switch; harness/artist/listeners-check.py |
 | A pinned whole-player preview, one Song without a clip choice, Buttons chips | Done (Redesigned/Player/PlayerSettings.m): over the existing keys; the preview shows the current song, not demo songs; harness/player/settings-check.sh |
-| Music app icons folded into Music app style | Not taken: Vitrine keeps the two switches apart |
+| Music app icons folded into Music app style | Not taken: Retrine keeps the two switches apart |
 | Visualizer shaders, motion presets | Not taken: paid upstream |
 
 ### Upstream 1.0.0 (described by behavior)
 
-What 1.0.0 adds over beta.6, compared with Vitrine's code and built from behavior specs only. Every new switch keeps
+What 1.0.0 adds over beta.6, compared with Retrine's code and built from behavior specs only. Every new switch keeps
 today's look until it is changed.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Album artist picture, a choice and up to three faces | Done (Redesigned/Kit/SGRHeaderInfo.m, Album/AlbumHeader.x): `spotifyglass.redesign.album.artistPicture`, on; the faces come from Spotify's own artist line, nothing fetched; harness/album/faces-more-check.sh |
 | Album track rows' ⋯ in the page color | Done (Redesigned/Album/AlbumRows.x): no switch; a glyph with its color baked in gets a layer masked by its own picture; harness/album/faces-more-check.sh |
@@ -300,81 +314,82 @@ today's look until it is changed.
 | Apple Music's AutoMix planning the transitions | Not taken: on a 9.1.90 phone Spotify accepted a queue write but dropped the transition fields written into it and played its own timing, so a plan has no way into the player |
 | Spotify's DJ loops, spinbacks and stops; Apple's curve effects | Not taken: both only reach the player through the same written transitions |
 | iPhone Duo layout | Not taken: no device or simulator to check it on, and it reworks the tab bar every phone uses |
-| The album blur running to the foot | Not taken: Vitrine's 40 pt ramp was measured against the scanner-border seam |
+| The album blur running to the foot | Not taken: Retrine's 40 pt ramp was measured against the scanner-border seam |
 | Shake to report | Not taken: upstream telemetry |
 
 ### Upstream 1.0.1 and 1.1.0-beta.1 (described by behavior)
 
 1.0.1 showed no user-facing change beyond its version. What 1.1.0-beta.1 adds, built from behavior specs only:
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Lyric line views built on a time budget | Done (Redesigned/Lyrics/SGRKaraokeView.m, `showLinesInSight`): four a pass as before, none after the first once 1 ms is spent, the next pass resuming; harness/lyrics/model-budget-check.inc |
 | Backing vocals in machine-made TTML | Done (Shared/LyricsSources/SGTTML.m): with `byModel="true"` on the root, a line's parenthesised runs become its backing row; explicit x-bg wins; harness/lyrics/model-budget-check.inc |
 | Comparative charts in listening stats | Done (Shared/ListeningStats/SGTopCharts.m, TopChartPage.m): each top list's heading opens up to 50 ranked entries with moves, NEW, runs in the top 5, played and discovered counts; harness/listening-stats/ |
-| A year's recap | Done (Shared/ListeningStats/SGRecap.m, RecapStory.m): free and on the phone, seven shareable cards for a year with 30 days with plays, announced from 1 to 14 January in Vitrine Settings by default; harness/listening-stats/ |
-| Local artist, album and folder pages | Done (Shared/LocalFiles/LocalMusicPages.m, LocalMusicPlayback.m): for the files Vitrine imported; Play, Shuffle, Play Next and Add to Queue on Spotify 9.1.90 for files Spotify has been seen playing, browse only elsewhere; several songs at once to Play Next left out, Spotify answering Conflict to the second; harness/local-files/pages-check.m |
+| A year's recap | Done (Shared/ListeningStats/SGRecap.m, RecapStory.m): free and on the phone, seven shareable cards for a year with 30 days with plays, announced from 1 to 14 January in Retrine Settings by default; harness/listening-stats/ |
+| Local artist, album and folder pages | Done (Shared/LocalFiles/LocalMusicPages.m, LocalMusicPlayback.m): for the files Retrine imported; Play, Shuffle, Play Next and Add to Queue on Spotify 9.1.90 for files Spotify has been seen playing, browse only elsewhere; several songs at once to Play Next left out, Spotify answering Conflict to the second; harness/local-files/pages-check.m |
 | Weekly and monthly recaps | Not taken: upstream's paid tier |
 | Animated cover geometry, edition-safe animated covers, header creator fades, profile avatar, DJ visualization, AutoMix changes | Not taken: the behavior could not be read completely enough to specify |
 
 ### Chroma 1.1.0-beta.2 (clean-room behavior)
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | AI-content badges | Labs: AI badges and dependent Likely AI badges force only Spotify's specified classification flags; both default off, unlike Chroma, leaving Spotify's values alone until enabled. |
 | Karaoke first placement | Newly measured layouts compute the current sung/active state before placement; demo/plain lyrics and invalid positions are excluded, with no new timer. |
 | Hide playlist recommendations | Redesign → Playlists → Recommended songs; off by default (Chroma: on), applies when the playlist reopens. |
+| Playlist header details | Redesigned → Playlists: creator and length, creator picture, and description; all shown unless switched off. |
 | Hide the scrolled page title | Redesign → Appearance → Page title when scrolled; shown by default (Chroma hides it), live. |
 | Inline Up Next, Track Info, page snapshots, search-ahead warming, cover-look backgrounds, stand-in mask reveal | Not taken: the behavior could not be read completely enough to specify, or it adds unannounced Spotify traffic |
 
 ### Chroma 1.1.0-beta.3 (clean-room behavior)
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
-| Hide the playback-context title, SF Symbols for Spotify's tabs, a separate tweak-language page | Already in Vitrine (Redesigned/Player/PlayerHeader.x, Redesigned/Navbar/TabBar.x, App/About/AboutSettings.m), defaults unchanged |
-| iPad: lyrics or queue beside the artwork, mini-player capsule controls, side-by-side album and playlist headers | Already in Vitrine (see the iPad entries in docs/tweaks.md) |
-| Spotify 9.1.98 | Not taken: only the target version changed in what could be read; supporting it needs Vitrine's own Spotify inspection and regression runs on every supported build |
-| Nine more interface languages, artwork-origin page transitions, reset to defaults, Live Activity countdown wording | Not taken: coverage, timings or resulting state could not be read; Vitrine's reset stays stock-off and its countdown already shows |
+| Hide the playback-context title, SF Symbols for Spotify's tabs, a separate tweak-language page | Already in Retrine (Redesigned/Player/PlayerHeader.x, Redesigned/Navbar/TabBar.x, App/About/AboutSettings.m), defaults unchanged |
+| iPad: lyrics or queue beside the artwork, mini-player capsule controls, side-by-side album and playlist headers | Already in Retrine (see the iPad entries in docs/tweaks.md) |
+| Spotify 9.1.98 | Not taken: only the target version changed in what could be read; supporting it needs Retrine's own Spotify inspection and regression runs on every supported build |
+| Nine more interface languages, artwork-origin page transitions, reset to defaults, Live Activity countdown wording | Not taken: coverage, timings or resulting state could not be read; Retrine's reset stays stock-off and its countdown already shows |
 
-### Upstream Plus features, Vitrine's own versions (described by behavior)
+### Upstream Plus features, Retrine's own versions (described by behavior)
 
-Vitrine has no paid tier, so where a Plus feature could be built from its behavior alone it now has one of its own,
+Retrine has no paid tier, so where a Plus feature could be built from its behavior alone it now has one of its own,
 with no gate and nothing from upstream's code, server or content.
 
-| Item | Where Vitrine stands |
+| Item | Where Retrine stands |
 |---|---|
 | Visualizer when there's no clip, shuffle styles, ignore heat | Done (Redesigned/Player/PlayerMotion.x, PlayerVisualiser.m): `spotifyglass.redesign.player.animatedVisualizer`, `spotifyglass.visualizer.shuffle`, `.ignoreHeat`, all off; the full-screen cover and the Visualizer fallback exclude each other; harness/player/ `autoviz`, `shuffle`, `heat` |
 | Hold edge speed | Done (Shared/Gestures/GestureHold.m): `spotifyglass.gestures.hold`, on, and `.hold.speed`, 1.5×, 2× or 3×; the speed from before the hold comes back, not 1×; harness/gesture-hold/ |
 | Lock screen lyric styles Messages and Vinyl | Done (Shared/LockScreenLyrics/SGLyricsClip.m): two more Layout choices, kept between 17% and 65% of the screen; harness/lyrics-clip/ |
-| Suggested tags for local files | Done as Find Info (Shared/LocalFiles/LocalInfoLookup.m, LocalInfoReview.m): iTunes Search, reviewed field by field, saved only through Vitrine's overlay; the audio file is never written, unlike upstream's tag rewriting; harness/local-files/ |
+| Suggested tags for local files | Done as Find Info (Shared/LocalFiles/LocalInfoLookup.m, LocalInfoReview.m): iTunes Search, reviewed field by field, saved only through Retrine's overlay; the audio file is never written, unlike upstream's tag rewriting; harness/local-files/ |
 | Effects preset per output, headphone form filter | Done (Shared/AudioEffects/AutoEq.m): a baseline stored before applying and restored only while unchanged, both directions crash-safe; harness/audio-effects/ `route`, harness/autoeq/ |
 | Liveprog CPU budget | Done (Shared/AudioEffects/SGDSPEngine.m): half of real time, a click-free bypass and a quarantine, a 2 s start deadline; harness/liveprog-guard/ |
-| Audio import | Done (Shared/LocalFiles/LocalAudioImport.m, LocalAudioPage.m): Player › Local files copies picked audio into Documents, which Spotify's own Local Files page scans and plays (seen on a 9.1.90 phone), never overwriting; Imported files lists and deletes only what Vitrine copied, checked by file identity, never recursively; harness/local-files/audio.m |
-| Your Files page, folders, offline animated covers for local albums | Not built yet: a phone trace showed Spotify's Local Files rows start playback by a path outside SPTEsperantoPlayer's play methods, so Vitrine's own page has no proven command; moving files risks the user's data |
+| Audio import | Done (Shared/LocalFiles/LocalAudioImport.m, LocalAudioPage.m): Player › Local files copies picked audio into Documents, which Spotify's own Local Files page scans and plays (seen on a 9.1.90 phone), never overwriting; Imported files lists and deletes only what Retrine copied, checked by file identity, never recursively; harness/local-files/audio.m |
+| Your Files page, folders, offline animated covers for local albums | Not built yet: a phone trace showed Spotify's Local Files rows start playback by a path outside SPTEsperantoPlayer's play methods, so Retrine's own page has no proven command; moving files risks the user's data |
 | AutoMix per context and its info line | Not built yet: when Spotify reads the transition preferences must be shown on a phone first; upstream's rewriting of Spotify's remote-config files is not taken |
 | Poster and Cut lyric visualizers | Done (Redesigned/Player/PlayerLyricStages.m, PlayerVisualiser.m): layers and text, no Metal; the halftone made once per artwork off the main queue; parameters in `spotifyglass.visualizer.params`, rows only for the chosen style; harness/player-visualiser/ |
 | Lock screen style templates with a clock, lyrics shaders | Not taken: a template language for little gain over iOS's own clock; lyrics shaders exist only as downloads from upstream |
-| DSP suite, AutoEq, AutoMix styles | Already in Vitrine (Shared/AudioEffects, Shared/AutoMix) |
+| DSP suite, AutoEq, AutoMix styles | Already in Retrine (Shared/AudioEffects, Shared/AutoMix) |
 | Bundled DDC and EEL example files | Not taken: each file's source and license would have to be checked first |
 
 ### Ported from GPL-3 forks
 
-| Source | Item | Where Vitrine stands |
+| Source | Item | Where Retrine stands |
 |---|---|---|
 | SUB2-8687 `3bf218e9` / `8191c859` | Korean UI localization and permission prompts; optional extension removal | Remaining English UI literals use SGL with unchanged English, Korean wording is revised, and the IPA pipeline updates Korean motion permission text without dropping Spotify's other entries. `NO_PLUGINS=1` optionally removes app extensions; default builds retain them. No WireGuard or CI cache changes included. |
 | kes158 `efb9dd02` / `1fbd7d15` / `9f44ee7c` (`codex/spotify-9.1.90-wireguard`); SUB2-8687 `3bf218e9` / `8191c859` | App-local WireGuard / proxy | Included in IPA builds by default; off until a profile is imported or a proxy saved, enabled and the app restarted (docs/wireguard.md). `WIREGUARD=0` excludes it and drops enforcement. Hardened after security review: armed fail-closed state on the inspected paths, slot-complete import accounting, build and Mach-O UUID admission, initializer and ABI checks, engine-side destination validation. The forks' in-place SOCKS handshake on caller sockets is not taken; remote BSD TCP/UDP is denied while armed. Not a leak-proof or device-wide VPN. No CI tweak cache. |
 | jadetheda `9c3c3f5` (`feat/connect-volume`); hardware follow-ups `7fd8ee2` / `6e71450`, `43f7b07` / `8bcaa88` not ported | Connect volume bar only | Adapted in Redesigned/Player/PlayerConnectVolume.x and PlayerVolume.m: active remote state and volume API, return/argument signature gating, current-service reads rather than stale callback values. Hardware buttons stay Spotify's: local-volume deltas fail at phone limits, change local volume during remote playback, and suppression can double-handle off-main callbacks. No forwarding or suppression. Local MPVolumeView and Native retained; real Connect delivery still needs hardware. |
 | michaelmelita1 `29ace72` (volume portion only) | Volume bar Vibrations | Shared/Haptics/SGFeedback.m attaches sixteen-step ticks, firmer ends and grab/release feedback to local and Connect sliders. Existing Controls default and strength, no additional switch; no Top picks or replacement player port. |
-| upstream `e033415` (#147, volume portion only) | Volume stays hidden while lyrics are alone | Replaced Vitrine's partial fade-set guard with fitting-row registration/removal in PlayerLyrics.x and PlayerVolume.m, including newly created rows and no-room wakeups; harness/player/lyrics-layout-check.sh. |
+| upstream `e033415` (#147, volume portion only) | Volume stays hidden while lyrics are alone | Replaced Retrine's partial fade-set guard with fitting-row registration/removal in PlayerLyrics.x and PlayerVolume.m, including newly created rows and no-room wakeups; harness/player/lyrics-layout-check.sh. |
 | jadetheda `6c619c3` (`feat/apple-music-queue`), `e804f6b`; michaelmelita1 `7df9b5e`, `3163c8a` / `6491011` | Read-only queue History | Redesigned/Player/PlayerQueue.m: Spotify's recent songs above Now Playing, with app-font rows. Editing and History replay are not shipped: the forks' same mutation/direct replay APIs did not take effect in the tested 9.1.90 context, including with Spoof Premium. No fork player removals or retry/reinsert fallbacks; Native retains Spotify's queue. |
-| jadetheda `d10fb43`, `6e9056b` (with `af6e54e`, `181a58f`); upstream `69730d1` (#150) | Mini player Next button and artwork shape; a tap on the player's cover opening the full screen cover as a switch of its own | Done (Redesigned/NowPlayingBar/NowPlayingBar.x, Redesigned/Player/PlayerMorph.x, each look's PlayerGestures.x): `spotifyglass.redesign.nowPlayingBar.nextButton`, off; `spotifyglass.redesign.nowPlayingBar.artworkShape`, Circle (the fork's default was Rounded square, and its smaller cover for a 56 pt capsule is not needed on Vitrine's 24 pt corners); `spotifyglass.hide.fullScreenCover`, shown; harness/now-playing-bar/ |
+| jadetheda `d10fb43`, `6e9056b` (with `af6e54e`, `181a58f`); upstream `69730d1` (#150) | Mini player Next button and artwork shape; a tap on the player's cover opening the full screen cover as a switch of its own | Done (Redesigned/NowPlayingBar/NowPlayingBar.x, Redesigned/Player/PlayerMorph.x, each look's PlayerGestures.x): `spotifyglass.redesign.nowPlayingBar.nextButton`, off; `spotifyglass.redesign.nowPlayingBar.artworkShape`, Circle (the fork's default was Rounded square, and its smaller cover for a 56 pt capsule is not needed on Retrine's 24 pt corners); `spotifyglass.hide.fullScreenCover`, shown; harness/now-playing-bar/ |
 | upstream `9221256` | ElleKit/Substrate inline audio hooks on jailbreaks | Core/SGRebind.m and SpeedPitch.x: Start/Stop/Dispose installed inline all-or-none at tweak load, optional speed hook last, Spotify-__TEXT caller filter, canonicalized jailbreak paths; sideloaded installs keep the rebind path; harness/prefs/rebind.m. Not run on a real jailbreak. The SGPrefs per-key invalidation of `430766c` is not taken: nested writes needed app-wide notification interception for a small gain. |
-| ciowfreshh `d829851` (archive codec only) | Saved lyric translations export/import | Core/TranslationStore: the ZIP field codec; storage, migration, recovery and the management page are Vitrine's own (Shared/LyricsTranslation/SavedTranslations.m, TranslationLibrary.m); harness/lyrics-translation/check-storage.m. |
+| ciowfreshh `d829851` (archive codec only) | Saved lyric translations export/import | Core/TranslationStore: the ZIP field codec; storage, migration, recovery and the management page are Retrine's own (Shared/LyricsTranslation/SavedTranslations.m, TranslationLibrary.m); harness/lyrics-translation/check-storage.m. |
 | Shilog62 `814d12460c`, `3a685eb69a` | Canvas with late authentication headers; lock-screen artwork from the track already playing | Shared/AnimatedArtwork/MotionSources.m waits for Spotify's asynchronously delivered headers with cancellation-aware waiters, not the fork's fixed eight-second timer; LockScreenMotion.x starts its follower from the current state without a second lookup; harness/motion/, harness/now-playing/ |
-| Shilog62 `cf9d77ee17`, `8a75b08de6`, `caa81f0c60` | Spotify's syllable-synced lyrics; the lyric clock from the published player state | Shared/Lyrics/KaraokeTiming.m reads `SYLLABLE_SYNCED` through Vitrine's strict time parsing (the fork's lenient integer parsing is not taken) and keeps line timing where syllable clocks are incomplete; KaraokeSource.x prefers `SGPlayerState()`; harness/lyrics-sources/ |
+| Shilog62 `cf9d77ee17`, `8a75b08de6`, `caa81f0c60` | Spotify's syllable-synced lyrics; the lyric clock from the published player state | Shared/Lyrics/KaraokeTiming.m reads `SYLLABLE_SYNCED` through Retrine's strict time parsing (the fork's lenient integer parsing is not taken) and keeps line timing where syllable clocks are incomplete; KaraokeSource.x prefers `SGPlayerState()`; harness/lyrics-sources/ |
 | upstream `910823a0`; jadetheda `b82cfbaeb6` | Gemini model guidance | Shared/LyricsTranslation/LyricsTranslation.m: 404 and timeouts point to the model setting; the unset default is `gemini-4-hydrogen`, a saved model stays the user's; no model rankings or quota claims; harness/lyrics-translation/ |
 | upstream `87adc60c`; jadetheda `a56b51c018` | SF Symbol custom tabs | Redesigned/Navbar/TabBar.x hands UIKit the real symbol and its `.fill` selected variant for custom and Apple-symbol tabs, previews included; Native unchanged; harness/tabbar/ |
-| Mate5000 `d666f10def`–`9eb0064c7d` (access only) | Quick EQ | Redesigned/Player/PlayerMenu.m: Audio effects in the player's ⋯ opens Vitrine's existing Audio effects page in a sheet; the fork's second equalizer engine is not taken (it would stack on the existing effects on the render thread); Native keeps Spotify's sheet; harness/system-menu/ `effects` |
+| Mate5000 `d666f10def`–`9eb0064c7d` (access only) | Quick EQ | Redesigned/Player/PlayerMenu.m: Audio effects in the player's ⋯ opens Retrine's existing Audio effects page in a sheet; the fork's second equalizer engine is not taken (it would stack on the existing effects on the render thread); Native keeps Spotify's sheet; harness/system-menu/ `effects` |
 
 ### Before the fork point, or not needed any more
 

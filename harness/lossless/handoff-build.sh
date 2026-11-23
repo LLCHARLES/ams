@@ -21,7 +21,7 @@ python3 - "$APP" <<'PY'
 from pathlib import Path
 import plistlib,sys
 p=Path(sys.argv[1])
-info={'CFBundleExecutable':'LosslessHandoff','CFBundleIdentifier':'dev.vitrine.lossless-handoff',
+info={'CFBundleExecutable':'LosslessHandoff','CFBundleIdentifier':'dev.retrine.lossless-handoff',
  'CFBundleName':'LosslessHandoff','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','UILaunchScreen':{},
  'UIApplicationSceneManifest':{'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[
  {'UISceneConfigurationName':'Default','UISceneDelegateClassName':'SGRHarnessScene'}]}}}

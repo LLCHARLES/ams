@@ -4,7 +4,7 @@
 //     SGSwitchRow(SGL(@"settings.player.gestures.title", @"Gestures"), nil, SGKeyGestures)
 //     [NSString stringWithFormat:SGL(@"settings.stats.songs.format", @"%ld songs"), count]
 //
-// Vitrine.bundle holds <language>.lproj/Localizable.strings. It is looked for in the app first, where the IPA build
+// Retrine.bundle holds <language>.lproj/Localizable.strings. It is looked for in the app first, where the IPA build
 // puts it (cyan copies it out of the .deb), then where a jailbreak installs it, /var/jb/Library/Application Support or
 // /Library/Application Support. English, a language without a table, a missing bundle, a missing key and a translation
 // whose format specifiers differ from the English all give the English passed in, so nothing a page shows depends on the

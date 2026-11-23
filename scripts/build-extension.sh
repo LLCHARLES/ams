@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Builds the Live Activity and Open in Vitrine extensions without an Xcode project, and the App Intents metadata
+# Builds the Live Activity and Open in Retrine extensions without an Xcode project, and the App Intents metadata
 # the host app needs for the widget's taps.
 #
 #   scripts/build-extension.sh <host Info.plist> <out dir>
 #
-# Writes <out dir>/{SpotifyGlassLiveActivity,OpenInVitrine}.appex and <out dir>/app/Metadata.appintents,
+# Writes <out dir>/{SpotifyGlassLiveActivity,OpenInRetrine}.appex and <out dir>/app/Metadata.appintents,
 # whose actions pipeline.sh merges into Spotify's own. Needs Xcode (xcode-select or DEVELOPER_DIR): the metadata
 # processor ships only with it.
 set -euo pipefail
@@ -63,23 +63,23 @@ metadata spotifyglass 16.0 "$OUT/app" "$SHARED" "$SHORTCUTS"
 
 codesign -f -s - "$APPEX" >/dev/null 2>&1
 
-ACTION_OUTPUT="$OUT/OpenInVitrine.appex"
-rm -rf "$ACTION_OUTPUT"
-ACTION_WORK="$(mktemp -d "$OUT/.open-in-vitrine.XXXXXX")"
+ACTION_OUTPUT="$OUT/OpenInRetrine.appex"
+rm -rf "$ACTION_OUTPUT" "$OUT/OpenInVitrine.appex"
+ACTION_WORK="$(mktemp -d "$OUT/.open-in-retrine.XXXXXX")"
 trap 'rm -rf "$ACTION_WORK"' EXIT
-ACTION="$ACTION_WORK/OpenInVitrine.appex"
+ACTION="$ACTION_WORK/OpenInRetrine.appex"
 mkdir -p "$ACTION"
-echo "==> building OpenInVitrine.appex"
+echo "==> building OpenInRetrine.appex"
 xcrun --sdk iphoneos clang -target arm64-apple-ios16.1 -fobjc-arc -fapplication-extension -Os \
   -I"$ROOT/tweak/Sources/Shared/Navigation" -framework UIKit -framework UniformTypeIdentifiers \
-  -Xlinker -e -Xlinker _NSExtensionMain -o "$ACTION/OpenInVitrine" \
-  "$ROOT/extension/OpenInVitrine/OpenInVitrine.m" "$ROOT/tweak/Sources/Shared/Navigation/LinkURL.m"
+  -Xlinker -e -Xlinker _NSExtensionMain -o "$ACTION/OpenInRetrine" \
+  "$ROOT/extension/OpenInRetrine/OpenInRetrine.m" "$ROOT/tweak/Sources/Shared/Navigation/LinkURL.m"
 sed -e "s/HOST_BUNDLE_ID/$(plutil -extract CFBundleIdentifier raw -o - "$HOST_PLIST")/" \
     -e "s/HOST_SHORT_VERSION/$(plutil -extract CFBundleShortVersionString raw -o - "$HOST_PLIST")/" \
     -e "s/HOST_VERSION/$(plutil -extract CFBundleVersion raw -o - "$HOST_PLIST")/" \
-    "$ROOT/extension/OpenInVitrine/Info.plist" > "$ACTION/Info.plist"
+    "$ROOT/extension/OpenInRetrine/Info.plist" > "$ACTION/Info.plist"
 plutil -convert binary1 "$ACTION/Info.plist"
-for locale in "$ROOT"/extension/OpenInVitrine/*.lproj; do
+for locale in "$ROOT"/extension/OpenInRetrine/*.lproj; do
   cp -R "$locale" "$ACTION/"
 done
 codesign -f -s - "$ACTION"

@@ -7,6 +7,19 @@
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SleepTimer.h"
+#define HARNESS_ACTIVITY_CLOCK_IMPLEMENTATION
+#import "activity-clock.h"
+
+int64_t harnessActivityDelay;
+uint64_t harnessActivityRepeat;
+dispatch_time_t HarnessActivityTime(dispatch_time_t when, int64_t delta) {
+    harnessActivityDelay = delta;
+    return dispatch_time(when, delta);
+}
+void HarnessActivitySetTimer(dispatch_source_t timer, dispatch_time_t start, uint64_t interval, uint64_t leeway) {
+    harnessActivityRepeat = interval;
+    dispatch_source_set_timer(timer, start, interval, leeway);
+}
 
 static NSString *sentTranslation, *sentLine;
 @interface SGLiveActivityBridge : NSObject
@@ -37,7 +50,8 @@ BOOL SGLiveActivityAllowedByInstall(void) { return YES; }
 // No string tables here: English, as SGL gives without one.
 NSString *SGL(NSString *key, NSString *english) { return english; }
 BOOL SGKaraokeLooking(NSString *track) { return NO; }
-NSArray *SGPlayerUpcomingTracks(SPTPlayerState *state, NSUInteger limit) { return @[]; }
+static NSUInteger queueLimit;
+NSArray *SGPlayerUpcomingTracks(SPTPlayerState *state, NSUInteger limit) { queueLimit = limit; return @[]; }
 id SGPlayerAdvanceRepeat(id player, id options) { return nil; }
 SGSleepTimerMode SGSleepTimerCurrentMode(void) { return SGSleepTimerOff; }
 NSDate *SGSleepTimerEnd(void) { return nil; }
@@ -94,6 +108,32 @@ static void lockedLyrics(void) {
     imp_removeBlock(backgroundState);
 }
 
+static void lyricDeadlines(void) {
+    Method paused = class_getInstanceMethod(SPTPlayerState.class, @selector(isPaused));
+    IMP original = method_getImplementation(paused);
+    IMP playing = imp_implementationWithBlock(^BOOL(id state) { return NO; });
+    method_setImplementation(paused, playing);
+    harnessState(@"activity-deadlines", @"Deadline song");
+    harnessLines(@[lineOf(@"First", 0, 9000), lineOf(@"Second", 10000, 19000)]);
+    harnessPosition(0);
+    SGSetLiveActivityEnabled(YES);
+    refresh();
+    check([sentLine isEqual:@"First"] && harnessActivityDelay == NSEC_PER_SEC,
+          @"an unchanged playing lyric card waits a second instead of polling at 4 Hz");
+    harnessPosition(9000);
+    refresh();
+    check([sentLine isEqual:@"First"] && harnessActivityDelay == 200 * NSEC_PER_MSEC
+          && harnessActivityRepeat == DISPATCH_TIME_FOREVER,
+          @"the next lyric boundary arms a one-shot 200 ms deadline, including rendering lead");
+    harnessPosition(9200);
+    refresh();
+    check([sentLine isEqual:@"Second"], @"the line changes exactly at the lead-adjusted lyric boundary");
+    SGSetLiveActivityEnabled(NO);
+    method_setImplementation(paused, original);
+    imp_removeBlock(playing);
+    harnessPosition(0);
+}
+
 void activityChecks(void) {
     [NSUserDefaults.standardUserDefaults setVolatileDomain:@{SGKeyLiveActivityTranslation: @YES} forName:NSArgumentDomain];
     harnessLanguage = @"en";
@@ -140,4 +180,11 @@ void activityChecks(void) {
     harnessLanguage = @"en";
     [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
     lockedLyrics();
+    lyricDeadlines();
+    [NSUserDefaults.standardUserDefaults setVolatileDomain:@{SGKeyLiveActivityView: @(SGLiveActivityQueue)} forName:NSArgumentDomain];
+    SGSetLiveActivityEnabled(YES);
+    refresh();
+    check(queueLimit == 3, @"queue view requests only the three qualifying tracks it displays");
+    SGSetLiveActivityEnabled(NO);
+    [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
 }

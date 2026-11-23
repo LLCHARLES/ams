@@ -1,5 +1,5 @@
 // EeveeSpotify's service suppression, extended from EeveeSpotifyReincarnated d4daa49.
-// Only 9.1.90's verified Objective-C selectors are added; several upstream Swift services
+// Only verified Objective-C selectors are added; several upstream Swift services
 // have no Objective-C -load there. The audit records those explicitly rather than inventing it.
 // AdServices owns both the target list and installation. Existing load hooks are kept for older
 // versions, but each now requires a compatible method; the two view fallbacks stay separate.
@@ -25,6 +25,7 @@ static const SGServiceTarget serviceTargets[] = {
     // This class registers scroll cards; unlike Eevee's hook, do not add a nonexistent -load.
     {"_TtC32AdsEmbedded_EmbeddedCTACardsImpl23EmbeddedCTACardsService", "registerScrollProviderIn:", NO},
     {"_TtC28AdsPlatform_AdsBaseSwiftImpl23AdsBaseSwiftServiceImpl", "load", NO},
+    {"_TtC23AdsPlatform_AdsBaseImpl18AdsBaseServiceImpl", "load", NO},
     {"_TtC46Betamax_AudioAdPictureInPictureCoordinatorImpl41AudioAdPictureInPictureCoordinatorService", "load", NO},
     {"_TtC28AdsStandalone_RewardedAdImpl32RewardedAdFetchControllerService", "load", NO},
     {"_TtC29AdsStandalone_AdOnAppOpenImpl22AdOnAppOpenServiceImpl", "load", NO},

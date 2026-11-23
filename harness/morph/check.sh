@@ -3,7 +3,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
 export THEOS=${THEOS:-$HOME/theos}
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-morph-check.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-morph-check.XXXXXX")
 DEVICE=
 cleanup() {
     status=$?

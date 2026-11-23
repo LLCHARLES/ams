@@ -222,7 +222,7 @@ static void checkOnline(void) {
     waitFor(^BOOL { return done; });
     check(all.count > 5000 && !error, [NSString stringWithFormat:@"AutoEq's index fetched: %lu headphones (%@)", (unsigned long)all.count, error ?: @"no error"]);
     NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject;
-    NSString *cache = [caches URLByAppendingPathComponent:@"Vitrine/AutoEq/INDEX.md"].path;
+    NSString *cache = [caches URLByAppendingPathComponent:@"Retrine/AutoEq/INDEX.md"].path;
     check([NSFileManager.defaultManager fileExistsAtPath:cache], @"and cached");
 
     done = NO;

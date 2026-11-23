@@ -2,6 +2,8 @@
 #import <UIKit/UIKit.h>
 
 @interface SGPage : UITableViewController
+// Once a second while this page is visible and the app active; nil for a static page.
+@property (nonatomic) SEL refreshSelector;
 @end
 
 // Registers SGPage as one of Spotify's pages; called once, from the settings hook's %ctor.

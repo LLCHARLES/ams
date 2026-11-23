@@ -12,14 +12,14 @@ spec.loader.exec_module(checker)
 
 
 class LocalizationScan(unittest.TestCase):
-    def scan(self, vitrine, pixie):
+    def scan(self, retrine, pixie):
         with tempfile.TemporaryDirectory(prefix="pixie-strings-") as directory:
             root = Path(directory)
             sources = root / "tweak/Sources"
             companion = root / "NativeDownloads/src"
             sources.mkdir(parents=True)
             companion.mkdir(parents=True)
-            (sources / "Page.m").write_text(vitrine)
+            (sources / "Page.m").write_text(retrine)
             (companion / "Page.m").write_text(pixie)
             with patch.multiple(checker, ROOT=str(root), SOURCES=str(sources),
                                 PIXIE_SOURCES=str(companion), problems=[]):

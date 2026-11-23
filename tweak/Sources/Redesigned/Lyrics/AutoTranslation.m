@@ -108,7 +108,7 @@ void SGRAnalyzeLyricsLanguage(NSArray<SGKaraokeLine *> *lines, NSString *languag
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         answers = [NSCache new]; answers.countLimit = SGLyricsLanguageCacheSongLimit;
-        worker = dispatch_queue_create("com.vitrine.lyrics.language", DISPATCH_QUEUE_SERIAL);
+        worker = dispatch_queue_create("com.retrine.lyrics.language", DISPATCH_QUEUE_SERIAL);
     });
     NSArray *snapshot = SGLyricsLanguageSnapshot(lines);
     NSMutableArray *texts = [NSMutableArray arrayWithCapacity:snapshot.count];

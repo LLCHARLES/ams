@@ -1,4 +1,4 @@
-"""Exercise Pixie's bridge against real Vitrine resources and SGLocalize on macOS."""
+"""Exercise Pixie's bridge against real Retrine resources and SGLocalize on macOS."""
 from pathlib import Path
 import plistlib
 import shutil
@@ -10,7 +10,7 @@ project = root.parent
 build = root / "build/localization"
 build.mkdir(parents=True, exist_ok=True)
 core = project / "tweak/Sources/Core/SGLocalize.m"
-resources = project / "tweak/layout/Library/Application Support/Vitrine.bundle"
+resources = project / "tweak/layout/Library/Application Support/Retrine.bundle"
 
 
 def run(*args):
@@ -33,9 +33,9 @@ with tempfile.TemporaryDirectory(prefix="fixture-", dir=build) as temporary:
             "CFBundleLocalizations": ["en"],
         }))
         if bundle:
-            shutil.copytree(resources, app / "Resources/Vitrine.bundle")
-        run("xcrun", "clang", "-fobjc-arc", "-I" + str(root / "src"),
-            root / "src/Localization.m", root / "tests/localization.m",
+            shutil.copytree(resources, app / "Resources/Retrine.bundle")
+        run("xcrun", "clang", "-fobjc-arc", "-I" + str(root / "src/Public"),
+            root / "src/UI/Localization.m", root / "tests/localization.m",
             *([core] if bridge else []), "-framework", "Foundation", "-o", binary)
         binaries[name] = binary
 
@@ -43,6 +43,6 @@ with tempfile.TemporaryDirectory(prefix="fixture-", dir=build) as temporary:
         run(binaries["bridged"], expected, "bridge", "-AppleLanguages", "(" + locale + ")")
     run(binaries["missing-bundle"], "en", "bridge", "-AppleLanguages", "(ko-KR)")
     run(binaries["standalone"], "en", "standalone", "-AppleLanguages", "(ko-KR)")
-    library = work / "VitrineLocalization.dylib"
+    library = work / "RetrineLocalization.dylib"
     run("xcrun", "clang", "-dynamiclib", "-fobjc-arc", core, "-framework", "Foundation", "-o", library)
-    run(binaries["standalone"], "ko", "bridge", "--load-vitrine", library, "-AppleLanguages", "(ko-KR)")
+    run(binaries["standalone"], "ko", "bridge", "--load-retrine", library, "-AppleLanguages", "(ko-KR)")

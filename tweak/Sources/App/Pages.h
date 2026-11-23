@@ -16,7 +16,7 @@ NSString *SGRedesignUntestedWarning(void);
 // warns first. It leads Mod Settings' main page.
 SGModRow *SGRedesignedUIRow(void);
 UIViewController *SGAppearancePage(void);   // the stored look's accent and AMOLED, the font and the app icon
-// The local libraries Vitrine can offer without an account: visualizers under the redesign, audio presets,
+// The local libraries Retrine can offer without an account: visualizers under the redesign, audio presets,
 // AutoEq headphones, fonts and lyrics looks. It does not connect to another mod's account or paid catalog.
 UIViewController *SGWorkshopPage(void);
 UIViewController *SGPlayerSettingsPage(void);

@@ -50,7 +50,7 @@ int main(void) {
         HARNESS_CHECK(!SGLocalMusicSupportsVersion(@"9.1.78") && !SGLocalMusicSupportsVersion(@"9.1.88"));
         NSError *free = [NSError errorWithDomain:@"com.spotify.SPTPlayer" code:101
             userInfo:@{@"kSPTPlayerErrorDisallowReasonsKey": [NSSet setWithObject:@"mft_disallow"]}];
-        HARNESS_CHECK([SGLocalMusicFailureMessage(free) isEqual:@"Spotify Free limits playing chosen songs. Spoof Premium in Vitrine Settings lifts this limit."]);
+        HARNESS_CHECK([SGLocalMusicFailureMessage(free) isEqual:@"Spotify Free limits playing chosen songs. Spoof Premium in Retrine Settings lifts this limit."]);
         NSError *conflict = [NSError errorWithDomain:@"com.spotify.SPTPlayer" code:100 userInfo:nil];
         HARNESS_CHECK([SGLocalMusicFailureMessage(conflict) isEqual:@"Spotify could not play this."]);
         SGLocalMusicObservations *observations = [SGLocalMusicObservations new];

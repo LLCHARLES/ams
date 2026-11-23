@@ -117,6 +117,8 @@ extern const CGFloat SGRPreviewTitleTop, SGRPreviewTitleRowHeight, SGRPreviewTit
 @property (nonatomic) BOOL showsLogo;
 // Defaults YES for existing callers (including the artist). NO draws the static square Card cover.
 @property (nonatomic) BOOL fullCover;
+// Only playlist previews have a face beside the creator and a description below the controls.
+- (void)setCreatorLine:(BOOL)line picture:(BOOL)picture description:(BOOL)description;
 @end
 SGRPreviewHeader *SGRPreviewAddHeader(SGRPagePreview *card, NSUInteger cover, NSString *badge, NSString *trailing);
 

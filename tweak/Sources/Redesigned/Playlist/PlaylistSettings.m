@@ -52,12 +52,14 @@ static SGRPagePreview *playlistPreview(NSString *coverName, NSString *pillsName,
 
     card.state = ^id<NSObject> {
         return @[@(SGEnabled(SGRKeyPlaylistCoverViewer)), @(SGEnabled(SGRKeyPlaylistHideCuration)), @(SGEnabled(SGRKeyPlaylistMenuSortMix)),
-                 @(SGRPageFullCover(SGRKeyPlaylistFullCover))];
+                 @(SGRPageFullCover(SGRKeyPlaylistFullCover)), @(SGEnabled(SGRKeyPlaylistCreatorLine)),
+                 @(SGEnabled(SGRKeyPlaylistCreatorPicture)), @(SGEnabled(SGRKeyPlaylistDescription))];
     };
     card.apply = ^(SGRPagePreview *preview, NSArray<NSNumber *> *state) {
         BOOL viewer = state[0].boolValue, hidePills = state[1].boolValue, sortMix = state[2].boolValue;
         if (header.fullCover != state[3].boolValue) [preview revealPart:header.part];
         header.fullCover = state[3].boolValue;
+        [header setCreatorLine:state[4].boolValue picture:state[5].boolValue description:state[6].boolValue];
         if (header.badge.alpha != viewer) [preview revealPart:header.part];
         header.badge.alpha = viewer;
         header.part.accessibilityLabel = viewer ? coverName : nil;
@@ -83,6 +85,11 @@ UIViewController *SGRPlaylistSettingsPage(void) {
                         SGRKeyCoverBeside),
             SGSwitchRow(coverName, SGL(@"settings.playlist.full_screen_cover.subtitle", @"Tap the picture at the top of a playlist to zoom in or share it"),
                         SGRKeyPlaylistCoverViewer),
+        ]),
+        SGSection(SGL(@"settings.playlist.header_details", @"Playlist details"), @[
+            SGSwitchRow(SGL(@"settings.playlist.creator_line", @"Creator and length"), nil, SGRKeyPlaylistCreatorLine),
+            SGSwitchRow(SGL(@"settings.playlist.creator_picture", @"Creator picture"), nil, SGRKeyPlaylistCreatorPicture),
+            SGSwitchRow(SGL(@"settings.playlist.description", @"Description"), nil, SGRKeyPlaylistDescription),
         ]),
         SGSection(SGL(@"settings.playlist.hide_on_page.header", @"Hide on a playlist's page"), @[
             SGSwitchRow(pillsName, SGL(@"settings.playlist.hide.pills.subtitle", @"Add, Mix, Sort and the rest, over the first track"),

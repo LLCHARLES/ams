@@ -1,0 +1,30 @@
+{
+  "data": [
+    {
+      "id": "1065973699",
+      "type": "albums",
+      "attributes": {
+        "artistName": "Pink Floyd",
+        "name": "The Dark Side of the Moon",
+        "isSingle": false,
+        "upc": "886445635829"
+      }
+    },
+    {
+      "id": "1665303755",
+      "type": "albums",
+      "attributes": {
+        "artistName": "Pink Floyd",
+        "name": "The Dark Side of the Moon (50th Anniversary) [Remastered]",
+        "isSingle": false,
+        "upc": "196589805232",
+        "editorialVideo": {
+          "motionTallVideo3x4": {"video": "https://fixture.invalid/1665303755/master.m3u8"},
+          "motionDetailTall": {"video": "https://fixture.invalid/1665303755/detail-tall/master.m3u8"},
+          "motionSquareVideo1x1": {"video": "https://fixture.invalid/1665303755/square/master.m3u8"},
+          "motionDetailSquare": {"video": "https://fixture.invalid/1665303755/detail-square/master.m3u8"}
+        }
+      }
+    }
+  ]
+}

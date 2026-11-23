@@ -1,12 +1,12 @@
-// Audio files the user imports from Vitrine into the app's Documents folder, where Spotify scans its own
-// Local Files once its setting for audio files on this device is on. Vitrine only copies a file in; Spotify
+// Audio files the user imports from Retrine into the app's Documents folder, where Spotify scans its own
+// Local Files once its setting for audio files on this device is on. Retrine only copies a file in; Spotify
 // indexes and plays it.
 //
 //     LocalAudioImport.m   the copy (never over a file, a number after a name that is taken), the list of
 //                          what was imported and the delete, which touches only a file on that list
 //     LocalAudioPage.m     the Local files settings page, the picker and the Imported files page
 //
-// The list lives in Vitrine's defaults. A file the user put in Documents any other way is never listed,
+// The list lives in Retrine's defaults. A file the user put in Documents any other way is never listed,
 // deleted or renamed.
 #import <Foundation/Foundation.h>
 

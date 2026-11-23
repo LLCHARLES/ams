@@ -13,6 +13,7 @@
 #import "Core/SGBackdrop.h"
 #import "Shared/Gestures/Gestures.h"
 #import "../harness-fail.h"
+#import "../sponsorblock/markers-check.h"
 
 #pragma mark - Spotify's classes, mocked
 
@@ -246,6 +247,32 @@ static void runArtworkChecks(UIWindow *window) {
     NSLog(@"[harness] PASS native cover tap routing, loading preservation and explicit missing artwork");
 }
 
+// A track image as Spotify's bar has it: a 7x7 rounded square in one color, resizable in the middle.
+static UIImage *spotifyTrack(UIColor *color) {
+    UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(7, 7)] imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        [color setFill];
+        [[UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, 7, 7) cornerRadius:3.5] fill];
+    }];
+    return [image resizableImageWithCapInsets:UIEdgeInsetsMake(0, 3, 0, 3)];
+}
+
+// SponsorBlock's marks on Spotify's own bar (harness/sponsorblock/markers-check.m): the slider 17 pt tall with
+// Spotify's white tracks and empty thumb (player-off-full-tree.txt:1902-1916), on a player's color.
+static void runSponsorBlockChecks(UIWindow *window) {
+    UIView *player = [[UIView alloc] initWithFrame:window.bounds];
+    player.backgroundColor = [UIColor colorWithRed:0.27 green:0.17 blue:0.2 alpha:1];
+    [window addSubview:player];
+    CGFloat width = window.bounds.size.width;
+    UISlider *slider = [[_TtCO17NowPlaying_ECMKit11ProgressBar6Slider alloc] initWithFrame:CGRectMake(22, window.bounds.size.height * 0.62, width - 44, 17)];
+    slider.accessibilityIdentifier = @"SPTNowPlayingSliderV2";
+    [slider setMinimumTrackImage:spotifyTrack(UIColor.whiteColor) forState:UIControlStateNormal];
+    [slider setMaximumTrackImage:spotifyTrack([UIColor colorWithWhite:1 alpha:0.3]) forState:UIControlStateNormal];
+    [slider setThumbImage:[UIImage new] forState:UIControlStateNormal];
+    [player addSubview:slider];
+    NSString *shots = NSProcessInfo.processInfo.environment[@"HARNESS_SHOTS"] ?: NSTemporaryDirectory();
+    exit(SBMarksRun(slider, @"native", nil, shots) ? 1 : 0);
+}
+
 @interface Delegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;
 @end
@@ -257,6 +284,8 @@ static void runArtworkChecks(UIWindow *window) {
     self.window.backgroundColor = UIColor.blackColor;
     [self.window makeKeyAndVisible];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSArray<NSString *> *arguments = NSProcessInfo.processInfo.arguments;
+        if ([arguments containsObject:@"sponsorblock"] || [arguments containsObject:@"sponsorblock-off"]) runSponsorBlockChecks(self.window);
         if ([NSProcessInfo.processInfo.arguments containsObject:@"audit"]) {
             runArtworkChecks(self.window);
             exit(0);

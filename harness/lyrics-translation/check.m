@@ -26,7 +26,7 @@ NSURL *SGLyricsTestCacheRoot(void) {
         }
     }
     static NSURL *root;
-    if (!root) root = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES] URLByAppendingPathComponent:[@"vitrine-lyrics-check-" stringByAppendingString:NSUUID.UUID.UUIDString] isDirectory:YES];
+    if (!root) root = [[NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES] URLByAppendingPathComponent:[@"retrine-lyrics-check-" stringByAppendingString:NSUUID.UUID.UUIDString] isDirectory:YES];
     return root;
 }
 static BOOL deviceAvailable;
@@ -619,6 +619,7 @@ int main(int argc, const char **argv) {
         if (argc > 1 && strcmp(argv[1], "--bing-completion-only") == 0) { checkBing(); checkBingCompletion(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--kept-only") == 0) { checkKeptTranslation(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--storage-only") == 0) { checkDurableStorage(); return 0; }
+        if (argc > 1 && strcmp(argv[1], "--startup-reclaim-only") == 0) { checkStartupReclaimRetry(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--connection-only") == 0) { checkConnection(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--gemini-memo-only") == 0) { checkGeminiMemoBound(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--gemini-guidance-only") == 0) { checkGeminiGuidance(); return 0; }

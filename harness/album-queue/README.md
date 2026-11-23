@@ -30,7 +30,7 @@ as a whole, so a valid prefix of a malformed album is never submitted.
 
 The activation harness compiles the production native Logos hook into a UIKit simulator app.
 Install and launch `harness/album-queue/build/activation/AlbumActivation.app` with `simctl` using
-bundle ID `com.vitrine.albumactivation`; its console reports nine checks. It checks a two-second
+bundle ID `com.retrine.albumactivation`; its console reports nine checks. It checks a two-second
 hold before release, target/selector and UIAction dispatch without touch-down, source availability
 inside the handler, cancellation and unrelated controls. A direct UIKit `accessibilityActivate`
 call returned NO in this standalone app, so this verifies the action dispatch paths rather than

@@ -15,23 +15,23 @@ def main():
     devices = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
     runtime, device = next((runtime, d) for runtime, group in devices["devices"].items() for d in group
                            if d["isAvailable"] and "iPhone" in d["name"])
-    udid = subprocess.check_output(["xcrun", "simctl", "create", "VitrineSuggestInfo-" + uuid.uuid4().hex,
+    udid = subprocess.check_output(["xcrun", "simctl", "create", "RetrineSuggestInfo-" + uuid.uuid4().hex,
         device["deviceTypeIdentifier"], runtime], text=True).strip()
     try:
         subprocess.run(["xcrun", "simctl", "boot", udid], check=True)
         subprocess.run(["xcrun", "simctl", "bootstatus", udid, "-b"], check=True)
-        with tempfile.TemporaryDirectory(prefix="vitrine-suggest-sim-") as temp:
+        with tempfile.TemporaryDirectory(prefix="retrine-suggest-sim-") as temp:
             out = pathlib.Path(temp) / "build"
             env = dict(os.environ, OUT=str(out))
             subprocess.run(["sh", str(ROOT / "harness/local-files/sim/build-sim.sh")], env=env, check=True)
             subprocess.run(["xcrun", "simctl", "install", udid, str(out / "EditInfoHarness.app")], check=True)
             process = subprocess.Popen(["xcrun", "simctl", "launch", "--console-pty", udid,
-                "com.vitrine.editinfoharness", "suggest"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                "com.retrine.editinfoharness", "suggest"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             timed_out = threading.Event()
 
             def stop_stalled():
                 timed_out.set()
-                subprocess.run(["xcrun", "simctl", "terminate", udid, "com.vitrine.editinfoharness"], check=True)
+                subprocess.run(["xcrun", "simctl", "terminate", udid, "com.retrine.editinfoharness"], check=True)
                 process.terminate()
 
             timer = threading.Timer(40, stop_stalled)

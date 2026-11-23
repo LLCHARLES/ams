@@ -46,8 +46,9 @@ static NSData *reply(void) {
                        entry(two, [NSData dataWithBytes:wrapped length:sizeof(wrapped)], 200)], 185);
 }
 // The live transport must not run in a fixture-only check.
-void SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
+dispatch_block_t SGSpotifyMetadataRequest(NSString *path, NSData *body, SGSpotifyMetadataReply done) {
     check(NO, @"no live transport");
+    return ^{};
 }
 static NSDictionary *load(SGRAlbumCountsStore *store, NSString *uri) {
     __block BOOL ready = NO;
@@ -64,7 +65,7 @@ static void coverChecks(void) {
     NSUserDefaults *prefs = NSUserDefaults.standardUserDefaults;
     for (NSString *key in @[albumKey, playlistKey, legacyKey, migratedKey, SGKeyStock]) [prefs removeObjectForKey:key];
     SGPrefsChanged();
-    check(SGRPageFullCover(albumKey) && SGRPageFullCover(playlistKey), @"fresh install keeps both full-screen covers");
+    check(!SGRPageFullCover(albumKey) && SGRPageFullCover(playlistKey), @"fresh install: album card, playlist full screen");
     for (NSNumber *old in @[@NO, @YES]) {
         [prefs removeObjectForKey:migratedKey];
         [prefs removeObjectForKey:albumKey]; [prefs removeObjectForKey:playlistKey];
@@ -96,10 +97,21 @@ static void coverChecks(void) {
 int main(void) {
     @autoreleasepool {
         coverChecks();
-        check([SGRAlbumMetadataPath(album) isEqual:@"/metadata/4/album/00000000000000000000000000000001?market=from_token"], @"album base62 converted to 128-bit GID");
-        check(!SGRAlbumMetadataPath(@"spotify:album:ZZZZZZZZZZZZZZZZZZZZZZ"), @"overflowing identity rejected");
-        check(!SGRAlbumMetadataPath(one), @"a track cannot stand in for an album");
+        check([SGSpotifyAlbumMetadataPath(album) isEqual:@"/metadata/4/album/00000000000000000000000000000001?market=from_token"], @"album base62 converted to 128-bit GID");
+        check(!SGSpotifyAlbumMetadataPath(@"spotify:album:ZZZZZZZZZZZZZZZZZZZZZZ"), @"overflowing identity rejected");
+        check(!SGSpotifyAlbumMetadataPath(one), @"a track cannot stand in for an album");
         check([SGRAlbumMetadataTracks(metadata()) isEqual:@[one, two, missing]], @"multi-disc and repeated tracks normalize by URI/GID");
+        SGRAlbumTrackIndex *index = [SGRAlbumTrackIndex fromMetadata:json(@{@"disc": @[
+            @{@"track": @[@{@"uri": one, @"name": @"Shared", @"available": @NO},
+                         @{@"uri": two, @"name": @"Unique"}]},
+            @{@"track": @[@{@"uri": missing, @"name": @"Shared"}]}]})];
+        check([[index numberForURI:one title:nil] isEqual:@1] && [[index numberForURI:two title:nil] isEqual:@2] &&
+              [[index numberForURI:missing title:nil] isEqual:@1], @"greyed rows count; disc position restarts");
+        check([[index numberForURI:nil title:@"Unique"] isEqual:@2] && ![index numberForURI:nil title:@"Shared"] &&
+              ![index numberForURI:@"spotify:track:0000000000000000000004" title:@"Unique"],
+              @"only a missing URI and a unique title can use title fallback");
+        check(![[SGRAlbumTrackIndex fromMetadata:metadata()] numberForURI:one title:nil],
+              @"ambiguous URI never picks a disc");
         check(!SGRAlbumMetadataTracks(json(@{@"disc": @[@{@"track": @[@{@"uri": one, @"gid": @"00000000000000000000000000000002"}]}]})),
               @"conflicting identities rejected");
         check(!SGRAlbumMetadataTracks(json(@{@"disc": @"wrong"})), @"malformed album response rejected");

@@ -551,9 +551,24 @@ static const CGFloat kLogoHeightInBars = 3, kLogoDetailGap = 4;
 @property (nonatomic, weak) SGRPagePreview *card;
 @property (nonatomic, strong) UIImageView *artwork;
 @property (nonatomic, strong) UIView *title, *badge, *logo, *dissolve;
+@property (nonatomic, strong) UIView *face, *about;
+@property (nonatomic) BOOL hideDetails;
 @end
 
 @implementation SGRPreviewHeader
+
+- (void)setCreatorLine:(BOOL)line picture:(BOOL)picture description:(BOOL)description {
+    if (!_face) {
+        _face = SGRPreviewSymbol(@"person.crop.circle.fill", SGRSecondary());
+        _face.accessibilityIdentifier = @"retrine.preview.header.creatorPicture";
+        _about = SGRPreviewBar(SGRTertiary());
+        [self.part addSubview:_face];
+        [self.part addSubview:_about];
+    }
+    _hideDetails = !line;
+    _face.hidden = !line || !picture;
+    _about.hidden = !description;
+}
 
 // The artwork, and the field it dissolves into with the page's, from the same cover.
 - (void)setCover:(NSUInteger)cover {
@@ -581,17 +596,18 @@ SGRPreviewHeader *SGRPreviewAddHeader(SGRPagePreview *card, NSUInteger cover, NS
     SGRPreviewHeader *header = [SGRPreviewHeader new];
     header.fullCover = YES;
     UIImageView *artwork = SGRPreviewCover(cover);
-    artwork.accessibilityIdentifier = @"vitrine.preview.header.artwork";
+    artwork.accessibilityIdentifier = @"retrine.preview.header.artwork";
     UIView *dissolve = SGRPreviewGradient(@[], CGPointMake(0.5, 0), CGPointMake(0.5, 1));
     UIView *badge = SGRPreviewGlass();
     UIImageView *badgeGlyph = SGRPreviewAddSymbol(badge, badgeSymbol, SGRPrimary());
     badge.alpha = 0;
     UIView *title = SGRPreviewBar(SGRPrimary()), *detail = SGRPreviewBar(SGRSecondary()), *length = SGRPreviewBar(SGRTertiary());
+    detail.accessibilityIdentifier = @"retrine.preview.header.detail";
     UIImageView *logo = SGRPreviewSymbol(@"signature", SGRPrimary());
     logo.alpha = 0;
     UIView *shuffle = SGRPreviewGlass(), *trailing = SGRPreviewGlass(), *play = SGRPreviewBar(UIColor.whiteColor);
     UIView *controls = [SGRPreviewFixedRow new];
-    controls.accessibilityIdentifier = @"vitrine.preview.header.controls";
+    controls.accessibilityIdentifier = @"retrine.preview.header.controls";
     for (UIView *view in @[shuffle, play, trailing]) [controls addSubview:view];
     UIImageView *shuffleGlyph = SGRPreviewAddSymbol(shuffle, @"shuffle", SGRPrimary());
     UIImageView *trailingGlyph = SGRPreviewAddSymbol(trailing, trailingSymbol, SGRPrimary());
@@ -612,8 +628,16 @@ SGRPreviewHeader *SGRPreviewAddHeader(SGRPagePreview *card, NSUInteger cover, NS
         if (header.showsLogo) y += kLogoDetailGap * unit;
         CGFloat logoHeight = kTitleBar * kLogoHeightInBars * unit;
         centered(logo, width, CGRectGetMidY(title.frame) - logoHeight / 2, kTitleShare, logoHeight);
-        y = CGRectGetMaxY(centered(detail, width, y, kDetailShare, kDetailBar * unit).frame) + kTextGap * unit;
-        y = CGRectGetMaxY(centered(length, width, y, kLengthShare, kLengthBar * unit).frame) + kControlsGap * unit;
+        detail.hidden = length.hidden = header.hideDetails;
+        if (!header.hideDetails) {
+            CGFloat face = header.face && !header.face.hidden ? kDetailBar * unit : 0;
+            CGFloat lead = face ? face + kTextGap * unit : 0;
+            centered(detail, width, y, kDetailShare, kDetailBar * unit);
+            detail.frame = CGRectOffset(detail.frame, lead / 2, 0);
+            header.face.frame = CGRectMake(CGRectGetMinX(detail.frame) - lead, y, face, face);
+            y += (kDetailBar + kTextGap) * unit;
+            y = CGRectGetMaxY(centered(length, width, y, kLengthShare, kLengthBar * unit).frame) + kControlsGap * unit;
+        }
         CGFloat side = kControl * unit, playWidth = kPlayWidth * unit, spacing = kControlSpacing * unit;
         CGFloat x = (width - 2 * side - playWidth - 2 * spacing) / 2;
         controls.frame = CGRectMake(0, y, width, side);
@@ -624,7 +648,10 @@ SGRPreviewHeader *SGRPreviewAddHeader(SGRPagePreview *card, NSUInteger cover, NS
         SGRPreviewCenter(shuffleGlyph, shuffle.bounds, kControlGlyph * unit);
         SGRPreviewCenter(playGlyph, play.bounds, kControlGlyph * unit);
         SGRPreviewCenter(trailingGlyph, trailing.bounds, kControlGlyph * unit);
-        return y + side;
+        y += side;
+        if (header.about && !header.about.hidden)
+            y = CGRectGetMaxY(centered(header.about, width, y + kControlsGap * unit, kTitleShare, kDetailBar * unit).frame);
+        return y;
     }];
     for (UIView *view in @[artwork, dissolve, badge, title, logo, detail, length, controls]) [part addSubview:view];
     header.part = part;
@@ -732,7 +759,7 @@ void SGRPreviewAddTopBar(SGRPagePreview *card) {
     UIImageView *backGlyph = SGRPreviewAddSymbol(back, @"chevron.left", SGRPrimary());
     // Pointing back, to the right right to left.
     backGlyph.image = backGlyph.image.imageFlippedForRightToLeftLayoutDirection;
-    backGlyph.accessibilityIdentifier = @"vitrine.preview.back";
+    backGlyph.accessibilityIdentifier = @"retrine.preview.back";
     UIImageView *moreGlyph = SGRPreviewAddSymbol(more, @"ellipsis", SGRPrimary());
     UIView *overlay = [card addOverlayWithLayout:^CGRect(UIView *view, CGSize page, CGFloat unit) {
         CGFloat side = kTopButton * unit, inset = kTopButtonInset * unit;

@@ -11,6 +11,6 @@ xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.4-simulator -fobjc-a
     -o "$OUT/AlbumActivation.app/AlbumActivation"
 python3 - "$OUT/AlbumActivation.app/Info.plist" <<'PY'
 import plistlib, sys
-plistlib.dump(dict(CFBundleExecutable='AlbumActivation',CFBundleIdentifier='com.vitrine.albumactivation',CFBundleName='AlbumActivation',CFBundleVersion='1',CFBundleShortVersionString='1.0',UILaunchScreen={},UIApplicationSceneManifest={'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Default','UISceneDelegateClassName':'SGRHarnessScene'}]}}),open(sys.argv[1],'wb'))
+plistlib.dump(dict(CFBundleExecutable='AlbumActivation',CFBundleIdentifier='com.retrine.albumactivation',CFBundleName='AlbumActivation',CFBundleVersion='1',CFBundleShortVersionString='1.0',UILaunchScreen={},UIApplicationSceneManifest={'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[{'UISceneConfigurationName':'Default','UISceneDelegateClassName':'SGRHarnessScene'}]}}),open(sys.argv[1],'wb'))
 PY
 echo "built $OUT/AlbumActivation.app"

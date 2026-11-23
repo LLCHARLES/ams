@@ -41,6 +41,7 @@ static char kSearchKey;
     NSArray<SGSettingsHit *> *_recents;   // the recent places the rows read so far hold
     UILabel *_none;
     id _defaultsObserver;
+    UIViewController *_destination;
 }
 
 - (instancetype)init {
@@ -231,11 +232,17 @@ static char kSearchKey;
         return;
     }
     if (!hit.opens && [page isKindOfClass:SGModPage.class]) [(SGModPage *)page revealRowTitled:hit.title];
-    // The field closes before the page goes on: one still up when the page comes back is laid out again at the top of
-    // its presentation context, which runs under Spotify's own bar, so it would sit over the page's title.
+    // Deactivation starts a dismissal even without animation. Pushing during it is rejected by the navigation
+    // controller, so every destination waits for UIKit to finish taking the search off the stack.
+    _destination = page;
     UISearchController *search = self.search;
     [UIView performWithoutAnimation:^{ search.active = NO; }];
-    [owner.navigationController pushViewController:page animated:YES];
+}
+
+- (void)didDismissSearchController:(UISearchController *)search {
+    UIViewController *page = _destination;
+    _destination = nil;
+    if (page) [self.owner.navigationController pushViewController:page animated:YES];
 }
 
 @end
@@ -250,6 +257,7 @@ void SGSettingsSearchAttach(SGModPage *page) {
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:results];
     results.bar = search.searchBar;
     results.search = search;
+    search.delegate = results;
     search.searchResultsUpdater = results;
     // The field is not left to its own rule, which shows the table only while something is typed and takes it away
     // again the moment the text is cleared: the table is where the recently opened settings are, on an empty field

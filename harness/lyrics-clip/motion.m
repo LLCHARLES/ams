@@ -367,7 +367,7 @@ int motionMain(NSURL *out, int argc, char **argv) {
         CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
         BOOL ok = !strcmp(argv[0], "one")
             ? SGLyricsClipWriteOverMotion([out URLByAppendingPathComponent:@"one.mp4"], video, @"(And I turn into a stalker)",
-                                          @"I stare at the moon", nil, @"When nighttime comes", 1, 4.5, SGLyricsClipLeft)
+                                          @"I stare at the moon", nil, @"When nighttime comes", 1, 4.5, SGLyricsClipLeft, nil)
             : SGMotionClipShape(video, 0.75, [out URLByAppendingPathComponent:@"one-cut.mp4"]);
         printf("%s %s in %.0f ms; footprint now %.1f MB, peak %.1f MB\n", argv[0], ok ? "written" : "FAILED",
                (CFAbsoluteTimeGetCurrent() - start) * 1000, footprintMB(NO), footprintMB(YES));
@@ -414,7 +414,7 @@ int motionMain(NSURL *out, int argc, char **argv) {
     for (NSURL *bad in @[gone, cutShort]) {
         NSURL *clip = [out URLByAppendingPathComponent:[@"from-" stringByAppendingString:bad.lastPathComponent]];
         CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
-        BOOL written = SGLyricsClipWriteOverMotion(clip, bad, nil, @"A line", nil, @"the next", 1, 3, left);
+        BOOL written = SGLyricsClipWriteOverMotion(clip, bad, nil, @"A line", nil, @"the next", 1, 3, left, nil);
         double ms = (CFAbsoluteTimeGetCurrent() - started) * 1000;
         CGImageRef preview = SGLyricsClipMotionFrame(bad, nil, @"A line", nil, @"the next", 1, 3, left);
         check(!written && !preview && ![NSFileManager.defaultManager fileExistsAtPath:clip.path],
@@ -495,7 +495,7 @@ int motionMain(NSURL *out, int argc, char **argv) {
             NSString *translation = c.count > 6 ? c[6] : nil;
             NSURL *url = [out URLByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@%@.mp4", name, c[0], layoutNames[layoutNumber]]];
             start = CFAbsoluteTimeGetCurrent();
-            BOOL written = SGLyricsClipWriteOverMotion(url, video, c[1], c[2], translation, c[3], from, seconds, layout);
+            BOOL written = SGLyricsClipWriteOverMotion(url, video, c[1], c[2], translation, c[3], from, seconds, layout, nil);
             if (!matches) {
                 CGImageRef preview = SGLyricsClipMotionFrame(video, c[1], c[2], translation, c[3], from, seconds, layout);
                 check(!written && !preview && ![NSFileManager.defaultManager fileExistsAtPath:url.path],
@@ -597,7 +597,7 @@ int motionMain(NSURL *out, int argc, char **argv) {
               [NSString stringWithFormat:@"made flat %@, 720x1280, 30 fps, 3 s", flat[0]]);
         NSString *p = blanked(@"(And I turn into a stalker)"), *l = blanked(@"I stare at the moon"), *t = blanked(@"나는 달을 바라봐");
         NSURL *url = [out URLByAppendingPathComponent:[NSString stringWithFormat:@"%@-blank-over.mp4", flat[0]]];
-        BOOL written = SGLyricsClipWriteOverMotion(url, source, p, l, t, nil, 0, 2, SGLyricsClipOverArtwork);
+        BOOL written = SGLyricsClipWriteOverMotion(url, source, p, l, t, nil, 0, 2, SGLyricsClipOverArtwork, nil);
         CGImageRef preview = SGLyricsClipMotionFrame(source, p, l, t, nil, 0, 2, SGLyricsClipOverArtwork), first = frameAt(url, 0);
         if (!written || !preview || !first) {
             check(NO, [NSString stringWithFormat:@"%@: written and read back", flat[0]]);
@@ -634,7 +634,7 @@ int motionMain(NSURL *out, int argc, char **argv) {
         NSString *p = blanked(@"(And I turn into a stalker)"), *l = blanked(@"I stare at the moon"), *n = blanked(@"When nighttime comes");
         NSURL *url = [out URLByAppendingPathComponent:@"dusk-blank.mp4"];
         start = CFAbsoluteTimeGetCurrent();
-        BOOL written = SGLyricsClipWriteOverMotion(url, dusk, p, l, nil, n, 0, 3.5, left);
+        BOOL written = SGLyricsClipWriteOverMotion(url, dusk, p, l, nil, n, 0, 3.5, left, nil);
         double ms = (CFAbsoluteTimeGetCurrent() - start) * 1000;
         check(written, [NSString stringWithFormat:@"0 to 3.5 s written in %.0f ms, %.1f ms a frame", ms, ms / 105]);
         CGImageRef first = frameAt(url, 0), late = frameAt(url, 3), sourceFirst = frameAt(dusk, 0), sourceLate = frameAt(dusk, 3);

@@ -5,7 +5,6 @@
 // over the same Spotify before, left behind, offered once for deleting.
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/Haptics/Haptics.h"
-#import "Shared/LiveActivity/LiveActivity.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
@@ -34,7 +33,7 @@ static BOOL otherVersion(void) {
 
 static SGProblem eevee(void) {
     return @[SGL(@"settings.environment.eevee.title", @"EeveeSpotify is injected too"),
-             SGL(@"settings.environment.eevee.message", @"Vitrine already blocks ads and brings lyrics, and EeveeSpotify hooks the same parts of Spotify. With both, Spotify can freeze as it starts or show the wrong lyrics. Sign Spotify again without EeveeSpotify.")];
+             SGL(@"settings.environment.eevee.message", @"Retrine already blocks ads and brings lyrics, and EeveeSpotify hooks the same parts of Spotify. With both, Spotify can freeze as it starts or show the wrong lyrics. Sign Spotify again without EeveeSpotify.")];
 }
 
 // "a", "a and b", "a, b and c", with `word` for the last join.
@@ -48,13 +47,13 @@ static SGProblem version(void) {
     NSArray<NSString *> *likely = SGSpotifyLikelyWorksVersions;
     NSString *also = !likely.count ? @""
         : [NSString stringWithFormat:SGL(@"settings.environment.version.likely_suffix", @", and %@ likely %@ too"), joined(likely, @"and"), likely.count == 1 ? @"works" : @"work"];
-    return @[[NSString stringWithFormat:SGL(@"settings.environment.version.mismatch.title", @"Spotify %@ is not the version Vitrine is made for"), SGSpotifyVersion()],
-             [NSString stringWithFormat:SGL(@"settings.environment.version.mismatch.message", @"Vitrine is made for Spotify %@%@. On another version some of its changes find nothing to change, and some screens can look wrong or crash. Inject Vitrine into Spotify %@."),
+    return @[[NSString stringWithFormat:SGL(@"settings.environment.version.mismatch.title", @"Spotify %@ is not the version Retrine is made for"), SGSpotifyVersion()],
+             [NSString stringWithFormat:SGL(@"settings.environment.version.mismatch.message", @"Retrine is made for Spotify %@%@. On another version some of its changes find nothing to change, and some screens can look wrong or crash. Inject Retrine into Spotify %@."),
                  joined(SGSpotifySupportedVersions, @"and"), also,
                  joined([SGSpotifySupportedVersions arrayByAddingObjectsFromArray:likely], @"or")]];
 }
 
-// What this install lacks of the app changes Vitrine's IPA build makes (scripts/pipeline.sh: plist/liquid-glass.plist),
+// What this install lacks of the app changes Retrine's IPA build makes (scripts/pipeline.sh: plist/liquid-glass.plist),
 // as when its .deb is injected by hand, each said as what it costs. Spotify's own plist opting out of the system's glass
 // (9.1.88's) costs the redesign its glass bars. 9.1.90 has no such key, and none is the same as glass on. The Live
 // Activity and Music Haptics keys matter in either look, and their own settings say so too.
@@ -63,7 +62,8 @@ static NSArray<NSString *> *missingAppChanges(void) {
     id compatibility = [NSBundle.mainBundle objectForInfoDictionaryKey:@"UIDesignRequiresCompatibility"];
     if (SGRedesignAvailable() && SGRedesignedUIStored() && [compatibility isKindOfClass:NSNumber.class] && [compatibility boolValue])
         [missing addObject:SGL(@"settings.environment.missing.tabbar", @"the tab bar stays Spotify's own, without its glass")];
-    if (!SGLiveActivityAllowedByInstall()) [missing addObject:SGL(@"settings.environment.missing.live_activity", @"the Live Activity is missing")];
+    if (![[NSBundle.mainBundle objectForInfoDictionaryKey:@"NSSupportsLiveActivities"] boolValue])
+        [missing addObject:SGL(@"settings.environment.missing.live_activity", @"the Live Activity is missing")];
     if (!SGMusicHapticsListedByInstall())
         [missing addObject:SGL(@"settings.environment.missing.music_haptics", @"iOS does not list Spotify for Music Haptics, which stops vibrations in the background")];
     return missing;
@@ -74,8 +74,8 @@ static BOOL withoutAppChanges(void) {
 }
 
 static SGProblem appChanges(void) {
-    return @[SGL(@"settings.environment.app_changes.title", @"Installed without Vitrine's app changes"),
-             [NSString stringWithFormat:SGL(@"settings.environment.app_changes.message", @"Some of what Vitrine does needs changes to the app that only its IPA build makes. Without them, %@. Build the IPA with Vitrine instead of injecting its .deb."),
+    return @[SGL(@"settings.environment.app_changes.title", @"Installed without Retrine's app changes"),
+             [NSString stringWithFormat:SGL(@"settings.environment.app_changes.message", @"Some of what Retrine does needs changes to the app that only its IPA build makes. Without them, %@. Build the IPA with Retrine instead of injecting its .deb."),
                  joined(missingAppChanges(), @"and")]];
 }
 
@@ -99,7 +99,7 @@ static void tell(NSArray<SGProblem> *list) {
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
-// What Chroma, installed over the same Spotify before Vitrine, left in the app's storage that Vitrine never
+// What Chroma, installed over the same Spotify before Retrine, left in the app's storage that Retrine never
 // reads: its Karaoke voice model (about 470 MB) and its saved lock screen videos. Its listening history and
 // audio effects are the person's own and stay (AudioEffectsFiles.m moves the effects over).
 static NSArray<NSURL *> *chromaLeftovers(void) {
@@ -131,7 +131,7 @@ static void offerCleanup(void) {
     if (!leftovers.count) return;
     NSString *size = sizeOf(leftovers);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:SGL(@"settings.environment.chroma.alert.title", @"Chroma left %@ on this iPhone"), size]
-                                                                  message:SGL(@"settings.environment.chroma.alert.message", @"Its Karaoke voice model and its saved lock screen videos are still in Spotify's storage, and Vitrine uses neither. Your listening history and audio effects stay.")
+                                                                  message:SGL(@"settings.environment.chroma.alert.message", @"Its Karaoke voice model and its saved lock screen videos are still in Spotify's storage, and Retrine uses neither. Your listening history and audio effects stay.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.delete", @"Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -164,7 +164,7 @@ NSArray<SGModRow *> *SGEnvironmentWarningRows(void) {
     if (withoutAppChanges())
         [rows addObject:SGWarningRow(SGL(@"settings.environment.without_app_changes.title", @"Installed without the app changes"), SGL(@"settings.environment.warning.subtitle", @"Tap for what that does"), ^{ tell(@[appChanges()]); })];
     if (chromaLeftovers().count)
-        [rows addObject:SGWarningRow(SGL(@"settings.environment.chroma.title", @"Chroma left files behind"), [NSString stringWithFormat:SGL(@"settings.environment.chroma.subtitle", @"%@ Vitrine never uses. Tap to delete"), sizeOf(chromaLeftovers())], ^{ offerCleanup(); })];
+        [rows addObject:SGWarningRow(SGL(@"settings.environment.chroma.title", @"Chroma left files behind"), [NSString stringWithFormat:SGL(@"settings.environment.chroma.subtitle", @"%@ Retrine never uses. Tap to delete"), sizeOf(chromaLeftovers())], ^{ offerCleanup(); })];
     return rows;
 }
 

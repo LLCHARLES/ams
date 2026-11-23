@@ -38,7 +38,7 @@ elif command -v llvm-ranlib >/dev/null; then
 fi
 
 # Fail early if an export the Objective-C side relies on is missing.
-for sym in SGWGInspect SGWGStart SGWGStatus SGWGRebind SGWGLookup SGWGResolve SGWGRedact SGWGFree; do
+for sym in SGWGInspect SGWGStart SGWGStatus SGWGSetStateCallback SGWGRebind SGWGLookup SGWGResolve SGWGRedact SGWGFree; do
   grep -q "${sym}" build/libsgwg.h || { echo "missing export ${sym}" >&2; exit 1; }
 done
 if command -v shasum >/dev/null; then shasum -a 256 build/libsgwg.a; else sha256sum build/libsgwg.a; fi

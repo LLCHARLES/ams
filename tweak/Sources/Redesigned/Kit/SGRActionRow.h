@@ -134,3 +134,7 @@ UIView *SGRPinnedMoreRecentPage(void);
 // The pinned ⋯ itself, tapped within that window, or nil: what the redesign's system menu opens from
 // (Redesigned/ContextMenu).
 SGRMirrorButton *SGRPinnedMoreRecentButton(void);
+// The redesign's system menu has taken the sheet a tap on the pinned ⋯ asked for: the button's claim ends there, so the
+// next sheet in the window (a track row's ⋯) is not taken for the page's too. The page's claim stays for the window:
+// the playlist's rows on that same sheet read it as the sheet lays out (SGRPinnedMoreRecentPage).
+void SGRPinnedMoreTaken(void);

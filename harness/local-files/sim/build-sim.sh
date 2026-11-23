@@ -18,13 +18,13 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$HERE/main.m" "$HERE/../../scene.m" "$OUT/gen/EditInfoMenu.m" "$LOCAL/LocalFiles.m" "$LOCAL/LocalInfoLookup.m" "$LOCAL/LocalInfoReview.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGGlass.m" "$SRC/Core/SGViewTree.m" \
     "$SRC/Settings/SGPageStyle.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGLocalize.m" \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework UniformTypeIdentifiers -framework Foundation -framework ImageIO \
-    -o "$OUT/EditInfoHarness.app/EditInfoHarness"
+    "$SRC/Core/SGDataRoot.m" -o "$OUT/EditInfoHarness.app/EditInfoHarness"
 cat > "$OUT/EditInfoHarness.app/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>EditInfoHarness</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.editinfoharness</string>
+<key>CFBundleIdentifier</key><string>com.retrine.editinfoharness</string>
 <key>CFBundleName</key><string>EditInfoHarness</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -46,7 +46,7 @@ echo "built $OUT/EditInfoHarness.app"
 UDID=$1
 xcrun simctl install "$UDID" "$OUT/EditInfoHarness.app"
 [ "$2" = large ] && xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
-xcrun simctl launch --console-pty "$UDID" com.vitrine.editinfoharness $2 2>&1 | tr -ud '\r' | while IFS= read -r line; do
+xcrun simctl launch --console-pty "$UDID" com.retrine.editinfoharness $2 2>&1 | tr -ud '\r' | while IFS= read -r line; do
     echo "$line"
     case "$line" in *"[harness] SHOT "*) xcrun simctl io "$UDID" screenshot "$OUT/shots/${line##*SHOT }.png" >/dev/null 2>&1 & ;; esac
 done

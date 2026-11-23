@@ -1,5 +1,5 @@
-// The sleep timer (SleepTimer.h): a check four times a second while one is set, which fades the gain over
-// the last seconds (the Fade out choice) and pauses once it is up.
+// A wall timer sleeps until the fade or expiry. Track-relative timers follow the
+// player clock, whose effective speed can change between Spotify's reports.
 //
 // The end of the album is read from the player's tracks to come: SPTPlayerTrack's provider (a property
 // with its own ivar in the binary, beside albumURI and contextSource) and the metadata keys is_queued and
@@ -26,12 +26,13 @@ static const NSInteger kFadeDefault = 2;
 static const NSTimeInterval kRestoreAfter = 1;
 
 static SGSleepTimerMode sg_mode;
-static NSDate *sg_end;
+static NSDate *sg_end, *sg_wallStart, *sg_wallDue;
 // The track and the context playing when it was set, by URI.
 static NSString *sg_track, *sg_context;
 static NSTimer *sg_timer;
 // Whether this timer's fade has started, so the log says so once.
 static BOOL sg_fading;
+static NSTimeInterval sg_wallFade;
 
 NSArray<NSString *> *SGSleepTimerFadeNames(void) {
     return @[SGL(@"common.off", @"Off"), SGL(@"settings.sleep_timer.fade.10s", @"10 s"), SGL(@"settings.sleep_timer.fade.30s", @"30 s"),
@@ -109,6 +110,8 @@ static void stopChecking(void) {
     sg_timer = nil;
     sg_mode = SGSleepTimerOff;
     sg_end = nil;
+    sg_wallStart = nil;
+    sg_wallDue = nil;
     sg_track = nil;
     sg_context = nil;
     sg_fading = NO;
@@ -134,6 +137,30 @@ static NSTimeInterval secondsLeft(SPTPlayerState *state) {
     }
 }
 
+static void check(void);
+
+static void arm(NSTimeInterval seconds, BOOL repeats) {
+    [sg_timer invalidate];
+    sg_timer = [NSTimer timerWithTimeInterval:seconds repeats:repeats block:^(NSTimer *timer) { check(); }];
+    [NSRunLoop.mainRunLoop addTimer:sg_timer forMode:NSRunLoopCommonModes];
+}
+
+// Relative timers can retain their pre-sleep delay. Keep the actual next sample date
+// across reports, so reconciling neither republishes unity nor moves the fade grid.
+static void reconcileWall(void) {
+    if (sg_mode != SGSleepTimerAtTime) return;
+    NSTimeInterval remaining = sg_wallDue.timeIntervalSinceNow;
+    if (remaining <= 0 || sg_end.timeIntervalSinceNow <= 0) check();
+    else arm(remaining, NO);
+}
+
+@interface SGSleepWallObserver : NSObject <SGPlayerStateObserver>
+@end
+@implementation SGSleepWallObserver
+- (void)playerStateDidReport:(SPTPlayerState *)state { reconcileWall(); }
+- (void)playerStateDidChange:(SPTPlayerState *)state {} // DidReport already ran.
+@end
+
 static void check(void) {
     if (sg_mode == SGSleepTimerOff) return;
     id<SPTPlayer> player = SGKaraokePlayer();
@@ -152,6 +179,16 @@ static void check(void) {
                   duration, (long)SGKaraokePositionMs());
         }
         SGPlayerSetGain(gain);
+        if (sg_mode == SGSleepTimerAtTime) {
+            sg_wallFade = fade;
+            // Keep the old timer's sample phase (from set/add, not from fade start).
+            // An extension partway through a quarter second need not end on that grid.
+            left = sg_end.timeIntervalSinceNow;
+            NSTimeInterval nextSample = kCheckEvery - fmod(MAX(0, -sg_wallStart.timeIntervalSinceNow), kCheckEvery);
+            NSTimeInterval wait = left > fade ? left - fade : MIN(MAX(0, left), nextSample);
+            sg_wallDue = [sg_end dateByAddingTimeInterval:wait - left];
+            arm(wait, NO);
+        }
         return;
     }
     SGSleepTimerMode mode = sg_mode;
@@ -189,13 +226,33 @@ void SGSetSleepTimer(SGSleepTimerMode mode, NSTimeInterval seconds) {
     }
     SPTPlayerState *state = [(id<SPTPlayer>)SGKaraokePlayer() state];
     sg_mode = mode;
-    if (mode == SGSleepTimerAtTime) sg_end = [NSDate dateWithTimeIntervalSinceNow:seconds];
+    if (mode == SGSleepTimerAtTime) {
+        sg_wallStart = [NSDate dateWithTimeIntervalSinceNow:0];
+        sg_end = [sg_wallStart dateByAddingTimeInterval:seconds];
+    }
     sg_track = SGURIString(state.track.URI);
     sg_context = SGURIString(state.contextURI);
     if (mode == SGSleepTimerEndOfAlbum) logQueue(state);
     SGLog(@"sleep timer: set (mode %ld, %.0f s), fade %.0f s", (long)mode, seconds, SGSleepTimerFade());
-    sg_timer = [NSTimer timerWithTimeInterval:kCheckEvery repeats:YES block:^(NSTimer *timer) { check(); }];
-    [NSRunLoop.mainRunLoop addTimer:sg_timer forMode:NSRunLoopCommonModes];
+    if (mode != SGSleepTimerAtTime) arm(kCheckEvery, YES);
+    else {
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            static SGSleepWallObserver *observer;
+            observer = [SGSleepWallObserver new];
+            SGAddPlayerStateObserver(observer);
+            for (NSString *name in @[NSUserDefaultsDidChangeNotification, NSSystemClockDidChangeNotification,
+                                     UIApplicationDidBecomeActiveNotification, UIApplicationSignificantTimeChangeNotification]) {
+                [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if ([note.name isEqual:UIApplicationDidBecomeActiveNotification]) reconcileWall();
+                        else if (sg_mode == SGSleepTimerAtTime &&
+                            (![note.name isEqual:NSUserDefaultsDidChangeNotification] || sg_wallFade != SGSleepTimerFade())) check();
+                    });
+                }];
+            }
+        });
+    }
     check();
 }
 

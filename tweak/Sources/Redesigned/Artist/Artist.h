@@ -34,9 +34,9 @@
 #define SGRKeyArtistHidePick @"spotifyglass.redesign.artist.hide.pick"
 #define SGRKeyArtistHideCountdown @"spotifyglass.redesign.artist.hide.countdown"
 #define SGRKeyArtistHideAbout @"spotifyglass.redesign.artist.hide.about"
-// Off until switched on: the monthly listeners leave the header once the page's About is known to be there and shown
-// (ArtistSections.x), Spotify's About carrying them; without About they stay under the name.
+// Off by default. Spotify's About shows the count; keep it under the name if the user hides About.
 #define SGRKeyArtistListenersInAbout @"spotifyglass.redesign.artist.listenersInAbout"
+BOOL SGRArtistListenersInAbout(void);
 // Off until switched on: the picture-aware photo, the page's colour picked from the photo's foot with its faces left
 // out; the photo itself drawn as it is without it (ArtistHeader.x, Kit/SGRCoverRead.h).
 #define SGRKeyArtistAdaptivePhoto @"spotifyglass.redesign.artist.adaptivePhoto"

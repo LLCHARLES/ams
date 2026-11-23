@@ -54,164 +54,11 @@ typedef NS_ENUM(NSInteger, SGRArtistCell) {
 static BOOL hidden[SGRArtistCellAbout + 1];   // by kind, read at launch
 static __unsafe_unretained NSString *const dropped[] = {nil, nil, nil, @"the videos", @"the Artist pick", @"the Release Countdown", @"About"};
 
-// Spotify already owns the listeners in About (CreatorBiographyCardLayout and
-// SPTArtistAboutListenersView). We only decide whether the header may omit its copy.
-// Element_List's contentSnapshot is a Swift value, not an Objective-C model API.
-// The list uses UIKit's diffable data source (also read by HomeFeed.swift). Its
-// cell-provider callback is the configuration boundary, including reconfiguration
-// that never calls prepareForReuse. A receipt binds that configuration's artist
-// and item identifier to its source; layout may confirm a receipt, never invent one.
 static BOOL listenersInAbout;
-static char kListenersPageKey, kListenersSourceKey, kListenersConfigurationKey, kListenersUpdatingKey, kListenersConfiguringKey;
 
-@interface SGRArtistItemConfiguration : NSObject
-@property (nonatomic, weak) UICollectionViewDiffableDataSource *source;
-@property (nonatomic, copy) id itemIdentifier;
-@property (nonatomic, copy) NSString *identity;
-@end
-@implementation SGRArtistItemConfiguration @end
-
-@interface SGRArtistAboutEvidence : NSObject
-@property (nonatomic, weak) UIView *header;
-@property (nonatomic, weak) UIView *metadata;
-@property (nonatomic, weak) UIView *identityView;
-@property (nonatomic, copy) NSString *identity;
-@property (nonatomic, weak) UICollectionView *list;
-@property (nonatomic, strong) SGRArtistItemConfiguration *configuration;
-@property (nonatomic, copy) NSIndexPath *aboutPath;
-- (void)forgetAbout;
-@end
-
-@implementation SGRArtistAboutEvidence
-- (void)forgetAbout {
-    if (!self.aboutPath) return;
-    self.aboutPath = nil;
-    self.list = nil;
-    self.configuration = nil;
-    [self.header setNeedsLayout];
+BOOL SGRArtistListenersInAbout(void) {
+    return listenersInAbout && !hidden[SGRArtistCellAbout];
 }
-@end
-
-static BOOL currentConfiguration(SGRArtistItemConfiguration *configuration, UICollectionView *list, NSIndexPath *path) {
-    if (!configuration || !path || configuration.source != list.dataSource ||
-        path.section >= list.numberOfSections || path.item >= [list numberOfItemsInSection:path.section]) return NO;
-    return [configuration.itemIdentifier isEqual:[configuration.source itemIdentifierForIndexPath:path]];
-}
-
-// ArtistHeader.x calls this with Spotify's own identity button and metadata.
-BOOL SGRArtistListenersInAbout(UIView *header, UIView *metadata, UIView *more) {
-    if (!listenersInAbout) return NO;
-    UIView *page = SGRArtistPageOf(header);
-    if (!page) return NO;
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(page, &kListenersPageKey);
-    if (!state) {
-        state = [SGRArtistAboutEvidence new];
-        objc_setAssociatedObject(page, &kListenersPageKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    NSString *identity = more.accessibilityIdentifier;
-    if (![identity hasPrefix:@"Components.UI.ContextMenuButton-"]) identity = nil;
-    if (![state.identity isEqualToString:identity]) {
-        // Configuration/layout may precede this header pass. Keep a receipt
-        // already confirmed for the incoming identity, never the old artist's.
-        if (![state.configuration.identity isEqualToString:identity]) [state forgetAbout];
-        state.identity = identity;
-    }
-    state.header = header;
-    state.identityView = more;
-    if (state.metadata != metadata) {
-        state.metadata = metadata;
-        SGForEachView(metadata, ^(UIView *view) {
-            if ([view isKindOfClass:UILabel.class])
-                objc_setAssociatedObject(view, &kListenersSourceKey, state, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        });
-    }
-    if (!identity || !currentConfiguration(state.configuration, state.list, state.aboutPath) ||
-        ![state.list isDescendantOfView:page]) [state forgetAbout];
-    if (hidden[SGRArtistCellAbout]) return NO;
-    return state.aboutPath != nil;
-}
-
-static void forgetAboutInList(UICollectionView *list) {
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(SGRArtistPageOf(list), &kListenersPageKey);
-    if (state.list == list) [state forgetAbout];
-}
-
-static void recordAbout(UICollectionViewCell *cell, UICollectionView *list, NSIndexPath *path, SGRArtistCell kind, CGFloat height) {
-    if (!listenersInAbout || hidden[SGRArtistCellAbout] || objc_getAssociatedObject(list, &kListenersUpdatingKey) ||
-        objc_getAssociatedObject(list, &kListenersConfiguringKey)) return;
-    // The layout can fit provisional/disappearing cells. Only a cell belonging
-    // to the live data source certifies that its component is still in the list.
-    if (![[list indexPathForCell:cell] isEqual:path]) return;
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(SGRArtistPageOf(list), &kListenersPageKey);
-    SGRArtistItemConfiguration *configuration = objc_getAssociatedObject(cell, &kListenersConfigurationKey);
-    if (!currentConfiguration(configuration, list, path)) return;
-    NSString *identity = state.identityView.accessibilityIdentifier;
-    if (![configuration.identity isEqualToString:identity]) return;
-    if (kind != SGRArtistCellAbout || height <= 0) {
-        if (state.list == list && [state.aboutPath isEqual:path]) [state forgetAbout];
-        return;
-    }
-    if (state.list == list && state.configuration == configuration && [state.aboutPath isEqual:path]) return;
-    state.list = list;
-    state.configuration = configuration;
-    state.aboutPath = path;
-    [state.header setNeedsLayout];
-}
-
-// Both ordinary requests and snapshot reconfigureItemsWithIdentifiers: use the
-// diffable source's provider. Capture before the provider, and require the artist
-// and item still to agree after it returns. In particular, a cell first seen at
-// layout has no receipt and cannot acquire the new header's identity there.
-%group SGRArtistListeners
-
-%hook UICollectionViewDiffableDataSource
-- (UICollectionViewCell *)collectionView:(UICollectionView *)list cellForItemAtIndexPath:(NSIndexPath *)path {
-    UIView *page = SGRArtistPageOf(list);
-    if (!page) return %orig;
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(page, &kListenersPageKey);
-    UIView *more = state.identityView;
-    if (![more isDescendantOfView:page]) {
-        more = SGRFindByIdentifier(page, @"Components.UI.ContextMenuButton*", NULL);
-        state.identityView = more;
-    }
-    NSString *identity = more.accessibilityIdentifier;
-    id item = [(UICollectionViewDiffableDataSource *)self itemIdentifierForIndexPath:path];
-    if (state.list == list && [state.aboutPath isEqual:path]) [state forgetAbout];
-    id configuring = objc_getAssociatedObject(list, &kListenersConfiguringKey);
-    objc_setAssociatedObject(list, &kListenersConfiguringKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    UICollectionViewCell *cell = %orig;
-    SGRArtistItemConfiguration *configuration = nil;
-    if ([identity hasPrefix:@"Components.UI.ContextMenuButton-"] &&
-        [identity isEqualToString:more.accessibilityIdentifier] &&
-        [item isEqual:[(UICollectionViewDiffableDataSource *)self itemIdentifierForIndexPath:path]]) {
-        configuration = [SGRArtistItemConfiguration new];
-        configuration.source = (UICollectionViewDiffableDataSource *)self;
-        configuration.itemIdentifier = item;
-        configuration.identity = identity;
-    }
-    objc_setAssociatedObject(cell, &kListenersConfigurationKey, configuration, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    objc_setAssociatedObject(list, &kListenersConfiguringKey, configuring, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    [cell setNeedsLayout];
-    return cell;
-}
-%end
-
-// Text can arrive without another header pass. Watch only metadata labels bound
-// above; never copy, parse or truncate Spotify's localized string.
-%hook UILabel
-- (void)setText:(NSString *)text {
-    %orig;
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(self, &kListenersSourceKey);
-    [state.header setNeedsLayout];
-}
-- (void)setAttributedText:(NSAttributedString *)text {
-    %orig;
-    SGRArtistAboutEvidence *state = objc_getAssociatedObject(self, &kListenersSourceKey);
-    [state.header setNeedsLayout];
-}
-%end
-
-%end // SGRArtistListeners
 
 static SGRArtistCell kindOf(UIView *content, CGFloat height) {
     __block SGRArtistCell kind = SGRArtistCellOther;
@@ -331,16 +178,7 @@ static void forgetKinds(UICollectionView *list) {
 
 %hook UICollectionView
 - (void)reloadData {
-    UICollectionView *list = (UICollectionView *)self;
-    forgetAboutInList(list);
-    forgetKinds(list);
-    BOOL track = listenersInAbout && SGRArtistPageOf(list);
-    if (track) objc_setAssociatedObject(list, &kListenersUpdatingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    %orig;
-    if (track) objc_setAssociatedObject(list, &kListenersUpdatingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
-- (void)setDataSource:(id<UICollectionViewDataSource>)source {
-    forgetAboutInList((UICollectionView *)self);
+    forgetKinds((UICollectionView *)self);
     %orig;
 }
 %end
@@ -348,21 +186,8 @@ static void forgetKinds(UICollectionView *list) {
 %hook UICollectionViewLayout
 - (void)prepareForCollectionViewUpdates:(NSArray<UICollectionViewUpdateItem *> *)updates {
     UICollectionView *list = ((UICollectionViewLayout *)self).collectionView;
-    forgetAboutInList(list);
-    if (listenersInAbout && SGRArtistPageOf(list))
-        objc_setAssociatedObject(list, &kListenersUpdatingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     forgetKinds(list);
     %orig;
-}
-- (void)finalizeCollectionViewUpdates {
-    %orig;
-    UICollectionView *list = ((UICollectionViewLayout *)self).collectionView;
-    if (objc_getAssociatedObject(list, &kListenersUpdatingKey)) {
-        objc_setAssociatedObject(list, &kListenersUpdatingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // A surviving cell may not be fitted again after a diffable transaction.
-        // Re-read its CURRENT data-source path, never the pre-update position.
-        for (UICollectionViewCell *cell in list.visibleCells) [cell setNeedsLayout];
-    }
 }
 %end
 
@@ -383,7 +208,6 @@ static NSMutableSet<NSString *> *sg_loggedMessages;
     NSIndexPath *path = attributes.indexPath;
     UIView *content = cell.contentView.subviews.firstObject ?: cell.contentView;
     SGRArtistCell kind = kindOf(content, result.size.height);
-    recordAbout(cell, list, path, kind, result.size.height);
     BOOL hide = kind >= SGRArtistCellVideos && hidden[kind];
     if (kind >= SGRArtistCellVideos && !hide) kind = SGRArtistCellOther;
     recordKind(list, path, kind);
@@ -407,11 +231,6 @@ static NSMutableSet<NSString *> *sg_loggedMessages;
     NSNumber *settled = objc_getAssociatedObject(self, &kSettledKey);
     if (settled) SGRCollapseCell(cell, settled.doubleValue, &kSettledKey);
     if (onPageList(cell)) {
-        if (listenersInAbout && !hidden[SGRArtistCellAbout]) {
-            UICollectionView *list = listOf(cell);
-            NSIndexPath *path = [list indexPathForCell:cell];
-            if (path) recordAbout(cell, list, path, kindOf(cell.contentView, cell.bounds.size.height), cell.bounds.size.height);
-        }
         // What the cell paints over the field -- the "You liked" row, every carousel's collection and the
         // fade Popular's "See more" draws over its last track (device, trees/continuous/3.txt 2026-09-18).
         SGRClearCellPaint(cell);
@@ -421,7 +240,6 @@ static NSMutableSet<NSString *> *sg_loggedMessages;
 
 - (void)prepareForReuse {
     %orig;
-    objc_setAssociatedObject(self, &kListenersConfigurationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (objc_getAssociatedObject(self, &kSettledKey)) SGRRestoreCell((UICollectionViewCell *)self, &kSettledKey);
 }
 %end
@@ -434,8 +252,5 @@ static NSMutableSet<NSString *> *sg_loggedMessages;
     hidden[SGRArtistCellAbout] = SGHidden(SGRKeyArtistHideAbout);
     listenersInAbout = SGFlag(SGRKeyArtistListenersInAbout, NO);
     %init;
-    if (listenersInAbout) {
-        %init(SGRArtistListeners);
-    }
     SGRequireClasses(@[@"_TtC12Element_List18CollectionViewCell"]);
 }

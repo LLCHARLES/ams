@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleDisplayName</key><string>Open in Retrine</string>
+<key>CFBundleExecutable</key><string>OpenInRetrine</string>
+<key>CFBundleIdentifier</key><string>HOST_BUNDLE_ID.openinretrine</string>
+<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+<key>CFBundleName</key><string>OpenInRetrine</string>
+<key>CFBundlePackageType</key><string>XPC!</string>
+<key>CFBundleShortVersionString</key><string>HOST_SHORT_VERSION</string>
+<key>CFBundleVersion</key><string>HOST_VERSION</string>
+<key>CFBundleSupportedPlatforms</key><array><string>iPhoneOS</string></array>
+<key>MinimumOSVersion</key><string>16.1</string>
+<key>UIDeviceFamily</key><array><integer>1</integer><integer>2</integer></array>
+<key>NSExtension</key><dict>
+    <key>NSExtensionAttributes</key><dict>
+        <key>NSExtensionActivationRule</key><dict>
+            <key>NSExtensionActivationSupportsWebURLWithMaxCount</key><integer>1</integer>
+            <key>NSExtensionActivationSupportsText</key><true/>
+        </dict>
+        <key>NSExtensionServiceRoleType</key><string>NSExtensionServiceRoleTypeViewer</string>
+    </dict>
+    <key>NSExtensionPointIdentifier</key><string>com.apple.ui-services</string>
+    <key>NSExtensionPrincipalClass</key><string>OIRViewController</string>
+</dict>
+</dict></plist>

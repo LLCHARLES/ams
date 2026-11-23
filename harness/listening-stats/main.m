@@ -480,7 +480,7 @@ static void recapChecks(void) {
     CHECK(!SGRecapAnnouncedYear(date(@"2026-01-15T00:00:00-05:00"), ny), "announcement: over on 15 January");
     CHECK(SGRecapAnnouncementFrom(0) == SGRecapAnnounceOnLaunch && SGRecapAnnouncementFrom(2) == SGRecapAnnounceOff &&
           SGRecapAnnouncementFrom(3) == SGRecapAnnounceInSettings && SGRecapAnnouncementFrom(-1) == SGRecapAnnounceInSettings,
-          "announcement: an invalid stored value reads as In Vitrine Settings");
+          "announcement: an invalid stored value reads as In Retrine Settings");
 
     // The announced year is stored as its number, so a move across time zones neither repeats nor skips it.
     NSCalendar *tokyo = [[NSCalendar alloc] initWithCalendarIdentifier:NSCalendarIdentifierGregorian];
@@ -513,19 +513,19 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
         equal = a.end == b.end && a.ms == b.ms && [a.uri isEqual:b.uri] && [a.title isEqual:b.title] &&
                 [a.artist isEqual:b.artist] && [a.album isEqual:b.album];
     }
-    CHECK(equal && decoded.lastObject.ms == 12500, "Vitrine JSON: all six fields round-trip, including Unicode and counted short tracks");
+    CHECK(equal && decoded.lastObject.ms == 12500, "Retrine JSON: all six fields round-trip, including Unicode and counted short tracks");
     SGPlay *escaped = play(1700000002, 1000, @"Tab\tquote\"newline\n", @"Artist", @"Album");
-    CHECK([SGPlaysFromExport(SGHistoryJSON(@[escaped], nil)).firstObject.title isEqual:escaped.title], "Vitrine JSON: escaped text round-trips");
-    CHECK(SGPlaysFromExport(SGHistoryJSON(@[], nil)).count == 0, "Vitrine JSON: empty versioned history is recognized");
+    CHECK([SGPlaysFromExport(SGHistoryJSON(@[escaped], nil)).firstObject.title isEqual:escaped.title], "Retrine JSON: escaped text round-trips");
+    CHECK(SGPlaysFromExport(SGHistoryJSON(@[], nil)).count == 0, "Retrine JSON: empty versioned history is recognized");
     SGPlay *nearA = play(1700000100, 40000, @"Repeat", @"Artist", @"Album");
     SGPlay *nearB = play(1700000160, 41000, @"Repeat", @"Artist", @"Album");
     NSArray *nearby = SGPlaysFromExport(SGHistoryJSON(@[nearA, nearB], nil));
     SGPlayLog *nearLog = [[SGPlayLog alloc] initWithPath:[dir stringByAppendingPathComponent:@"nearby.tsv"]];
     CHECK([nearLog merge:nearby] == 2 && [nearLog merge:nearby] == 0 && nearLog.plays.count == 2,
-          "Vitrine JSON: distinct plays 60 seconds apart both restore, while an exact second import adds nothing");
+          "Retrine JSON: distinct plays 60 seconds apart both restore, while an exact second import adds nothing");
     NSString *path = [dir stringByAppendingPathComponent:@"local-roundtrip.tsv"];
     SGPlayLog *log = [[SGPlayLog alloc] initWithPath:path];
-    CHECK([log merge:decoded] == records.count && [log merge:decoded] == 0, "Vitrine JSON: merge once, duplicate import adds nothing");
+    CHECK([log merge:decoded] == records.count && [log merge:decoded] == 0, "Retrine JSON: merge once, duplicate import adds nothing");
     NSData *before = [NSData dataWithContentsOfFile:path];
     [log merge:@[play(1900000000, 40000, @"Another", @"Artist", @"Album")]];
     NSData *after = [NSData dataWithContentsOfFile:path];
@@ -533,24 +533,27 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     SGPlayLog *reopened = openLog(path);
     CHECK(reopened.plays.count == records.count + 1 && reopened.plays[records.count - 1].ms == 12500, "TSV: imported local short play persists after reload");
     NSMutableDictionary *root = [[NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:nil] mutableCopy];
-    root[@"version"] = @2;
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: unknown version rejected");
-    root[@"version"] = @YES;
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: boolean version rejected");
-    root[@"version"] = @1; root[@"format"] = @"other.history";
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: unknown format rejected");
+    CHECK([root[@"format"] isEqual:@"retrine.listening-history"], "new listening history export format");
     root[@"format"] = @"vitrine.listening-history";
+    CHECK(SGPlaysFromExport(json(root)).count == records.count, "legacy listening history still imports");
+    root[@"version"] = @2;
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: unknown version rejected");
+    root[@"version"] = @YES;
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: boolean version rejected");
+    root[@"version"] = @1; root[@"format"] = @"other.history";
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: unknown format rejected");
+    root[@"format"] = @"retrine.listening-history";
     NSMutableDictionary *row = [root[@"plays"][0] mutableCopy];
     for (id bad in @[@"123", @YES, @(-1), @1.5, NSNull.null, @18446744073709551615ULL]) {
         row[@"ms"] = bad; root[@"plays"] = @[row];
-        CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: malformed milliseconds rejected (%s)", [[bad description] UTF8String]);
+        CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: malformed milliseconds rejected (%s)", [[bad description] UTF8String]);
     }
     row[@"ms"] = @40000; row[@"title"] = NSNull.null;
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: malformed text rejects whole file");
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: malformed text rejects whole file");
     root[@"plays"] = @[@1];
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: non-object row rejected");
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: non-object row rejected");
     [root removeObjectForKey:@"plays"];
-    CHECK(SGPlaysFromExport(json(root)) == nil, "Vitrine JSON: missing plays rejected");
+    CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: missing plays rejected");
 
     NSString *folder = [dir stringByAppendingPathComponent:@"selected"];
     NSString *nested = [folder stringByAppendingPathComponent:@"nested"];
@@ -984,7 +987,7 @@ int main(int argc, const char **argv) {
         }
 
         // The log: Song B recorded on the phone 30 s after the export's, then both files merged, twice.
-        NSString *logPath = [dir stringByAppendingPathComponent:@"Vitrine/plays.tsv"];
+        NSString *logPath = [dir stringByAppendingPathComponent:@"Retrine/plays.tsv"];
         SGPlayLog *log = [[SGPlayLog alloc] initWithPath:logPath];
         SGPlay *recorded = play(now - 3 * day + 630, 61000, @"Song B", @"Artist 2", @"Album Y");
         recorded.uri = @"spotify:track:b";

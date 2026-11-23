@@ -42,7 +42,14 @@ static UIView *badge(Class cls, NSString *identifier) {
     return view;
 }
 
-int main(void) {
+@interface OrdinaryView : UIView
+@property (nonatomic) NSUInteger reads;
+@end
+@implementation OrdinaryView
+- (NSString *)accessibilityIdentifier { self.reads++; return super.accessibilityIdentifier; }
+@end
+
+static void check(UIWindow *window) {
     @autoreleasepool {
         [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
         refresh();
@@ -50,6 +57,17 @@ int main(void) {
         objc_registerClassPair(retrieval);
         UIView *component = badge(UIView.class, @"Components.UI.ExplicitIcon");
         UIView *row = badge(retrieval, @"CreativeWorkPlatform_RetrievalRowKit.ExplicitBadge");
+        [window addSubview:component];
+        [window addSubview:row];
+        UIView *page = [UIView new];
+        UIView *returning = badge(UIView.class, @"Components.UI.ExplicitIcon");
+        [page addSubview:returning];
+        [window addSubview:page];
+        [page removeFromSuperview];
+        OrdinaryView *ordinary = [OrdinaryView new];
+        ordinary.accessibilityIdentifier = @"ordinary";
+        [ordinary layoutSubviews];
+        expect(ordinary.reads == 0, @"disabled hooks must not classify an ordinary view");
         UIView *download = badge(UIView.class, @"Components.UI.DownloadBadge");
         UIView *podcast = badge(UIView.class, @"Podcast.Row.MarkAsPlayed.ExplicitIcon");
         UILabel *letter = [[UILabel alloc] initWithFrame:CGRectMake(0,0,16,16)]; letter.text = @"E";
@@ -57,6 +75,8 @@ int main(void) {
         stored(!SGNativeUI(), !SGRedesignedUI());
         expect(paints(component), @"inactive look's setting cannot hide a badge");
         stored(SGNativeUI(), SGRedesignedUI());
+        [window addSubview:page];
+        expect(returning.layer.mask != nil, @"badge detached at enable is masked on unchanged reattachment");
         for (UIView *view in @[component, row]) {
             expect(!paints(view), @"verified badge paints no pixels");
             expect(CGRectEqualToRect(view.frame, CGRectMake(0,0,16,16)), @"row geometry remains unchanged");
@@ -75,10 +95,24 @@ int main(void) {
         spotifyMask.frame = row.bounds; spotifyMask.backgroundColor = UIColor.whiteColor.CGColor;
         row.layer.mask = spotifyMask;
         expect(!paints(row), @"Spotify mask updates cannot reveal hidden badge");
+        [row removeFromSuperview];
         stored(NO, NO);
         expect(row.layer.mask == spotifyMask && paints(row), @"turning off restores latest Spotify drawing mask");
         expect(paints(component), @"turning off restores component without layout/restart");
         printf("explicit badges (%s): %lu checks passed\n", SGNativeUI() ? "native" : "redesign", (unsigned long)checks);
     }
-    return 0;
+    exit(0);
+}
+@interface BadgeScene : UIResponder <UIWindowSceneDelegate>
+@end
+@implementation BadgeScene
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    UIWindow *window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
+    window.rootViewController = [UIViewController new];
+    [window makeKeyAndVisible];
+    dispatch_async(dispatch_get_main_queue(), ^{ check(window); });
+}
+@end
+int main(int argc, char **argv) {
+    @autoreleasepool { return UIApplicationMain(argc, argv, nil, nil); }
 }

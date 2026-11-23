@@ -49,10 +49,11 @@ CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) CF_RETURNS_R
 // (SGLyricsClipDimmedArtwork), else over `cover` sharp under a local scrim.
 CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                        NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) CF_RETURNS_RETAINED;
-// Writes the clip as H.264 to `file`, replacing it, and returns once it is written; NO if it was not.
+// Writes H.264 on a worker, replacing `file` only after completion. `current`, if supplied, is
+// checked between encoder frames; NO cancels an obsolete render without publishing it.
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout);
+                                 SGLyricsClipLayout layout, BOOL (^current)(void));
 // The same in the Left layout.
 static inline CF_RETURNS_RETAINED CGImageRef SGLyricsClipFrame(CGImageRef backdrop, NSString *line, NSString *translation,
                                                                NSString *next, CGSize size) {
@@ -60,7 +61,7 @@ static inline CF_RETURNS_RETAINED CGImageRef SGLyricsClipFrame(CGImageRef backdr
 }
 static inline BOOL SGLyricsClipWrite(NSURL *file, CGImageRef backdrop, NSString *line, NSString *translation, NSString *next,
                                      CGSize size, SGLyricsClipStyle style) {
-    return SGLyricsClipWriteWithLayout(file, backdrop, NULL, nil, line, translation, next, size, style, SGLyricsClipLeft);
+    return SGLyricsClipWriteWithLayout(file, backdrop, NULL, nil, line, translation, next, size, style, SGLyricsClipLeft, nil);
 }
 
 // The words over moving artwork instead: `motion` is a local video, played from `from` seconds into the
@@ -72,7 +73,7 @@ static inline BOOL SGLyricsClipWrite(NSURL *file, CGImageRef backdrop, NSString 
 // OverArtwork here is always dimmed whole: every frame blurred and darkened evenly, by the brightest of the
 // stretch, rather than a band behind the words.
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout);
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void));
 // The end of a line's artwork ID, so a clip kept under it is the one wanted: the render version, the style, which a clip falling
 // back to the cover is drawn in, and the layout, d when Over the artwork is dimmed whole, and with moving artwork m and the
 // first 16 characters of its file's name (the store names files by a SHA-1 of their address), so another video for the

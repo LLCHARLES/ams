@@ -35,7 +35,7 @@ NSMutableArray<SGPBField *> *SGPBParse(NSData *data) {
     while (at < length) {
         if (fields.count == SGPBMaxFields) return nil;
         uint64_t key, value;
-        if (!readVarint(bytes, length, &at, &key) || !(key >> 3)) return nil;
+        if (!readVarint(bytes, length, &at, &key) || !(key >> 3) || (key >> 3) > 0x1fffffff) return nil;
         SGPBField *field = [SGPBField new];
         field.number = (uint32_t)(key >> 3);
         field.wire = key & 7;
@@ -117,6 +117,7 @@ NSData *SGPBEdit(NSData *message, NSArray<NSNumber *> *path, NSData *(^edit)(NSD
     if (!field || field.wire != 2) return nil;
     NSData *inner = SGPBEdit(field.payload, [path subarrayWithRange:NSMakeRange(1, path.count - 1)], edit);
     if (!inner) return nil;
+    if ([inner isEqual:field.payload]) return message;
     field.payload = inner;
     return SGPBSerialize(fields);
 }

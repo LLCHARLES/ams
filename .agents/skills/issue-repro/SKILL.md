@@ -8,7 +8,7 @@ description: >
 
 # Reproducing an issue
 
-The repo is `My-Name-Is-Jeff/vitrine`. This skill covers reading the report and turning its media into frames
+The repo is `oneulddu/Retrine`. This skill covers reading the report and turning its media into frames
 you can measure. Driving the device is `phone-check` (the phone and the Simulator, the `scripts/phone.py`
 driver, screenshots, the view tree). Finding a Spotify class or selector a version moved is
 `spotify-version-check`.
@@ -21,7 +21,7 @@ Clean room: reproduce from the issue alone. Never read upstream code to work out
 `gh` runs as the maintainer only with its token, outside the sandbox:
 
     export GH_TOKEN=$(gh auth token -u My-Name-Is-Jeff)
-    gh issue view <n> -R My-Name-Is-Jeff/vitrine --json title,state,body,comments \
+    gh issue view <n> -R oneulddu/Retrine --json title,state,body,comments \
       --jq '"\(.title) [\(.state)]\n\(.body)\n---\n" + ([.comments[] | "\(.author.login): \(.body)"] | join("\n---\n"))'
 
 The body's template carries the conditions that decide whether it reproduces: **Mod version, Spotify version,

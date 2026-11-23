@@ -14,8 +14,9 @@
 // (LibraryMenu.m), and while that menu can stand in for them the chips go and the header closes up by the band
 // they leave: the header is shrunk to the bottom of its control row, which hangs off the safe area and so answers
 // the same on every pass, and the list's top inset is lowered by the band, taken once from the live frames and
-// then held against Spotify setting it again from its own pass. When the menu can no longer stand in -- a filter
-// on with no clear chip, a control it fired gone -- the chips, the header's height and the inset come back. A
+// then held against Spotify setting it again from its own pass, until the safe area moves. When the menu can no
+// longer stand in -- a filter on with no clear chip, a control it fired gone -- the chips, the header's height and
+// the inset come back. A
 // filter can change in the chips or the list alone, on passes of their own that reach neither the header nor the
 // page, so a change there, and the menu opening, have the page look again at once. A folder keeps its chips and
 // its own controls either way.
@@ -33,7 +34,12 @@
 // is of; the header's model shows it where it says isRecentsAvailable, a clock between the spacer and Search
 // (issue #21), and it goes to the trailing edge with the others. A folder (trees/continuous/1.txt:325-344)
 // is the same header under YourLibrary_FolderImpl, with id=YourLibraryFolderHeader.back at the leading edge,
-// its title, then contextMenu, plus and play or pause, and the chips at {0, 118}.
+// its title, then contextMenu, plus and play or pause, and the chips at {0, 118}. Spotify 9.2.0 puts the root
+// header, the same inside, in a plain UIStackView {0, 0} 402x157 that stands where the header stood
+// (design/spotify-920/920-library-tree.txt:488-489). There Auto Layout gives the header its height: the row hangs
+// off the safe area, the chips under it, and the chips' bottom is the header's (filters.bottom == header.bottom),
+// with the stack pinned only at its top and sides so that it follows the header. A frame set on that header is
+// undone on the next pass, so Compact library sizes it through that chain instead (pinToRow).
 //
 // The header neither moves nor shrinks as the list scrolls -- 03.txt, 05.txt and 06.txt hold it at
 // {0, 0} 402x159.33 at three scroll positions -- so there is nothing here to follow: the row is laid out once a
@@ -63,9 +69,20 @@
 // 24pt glyph 20pt from the screen, and the 32pt avatar inside its own 48pt box 16pt from it, which is the
 // margin Home gives the avatar.
 static const CGFloat kRowInset = 8;
-static char kTitleKey, kRowWatchedKey, kListKey, kInsetKey, kHeightKey, kFoldedKey;
+static char kTitleKey, kRowWatchedKey, kListKey, kInsetKey, kHeightKey, kFoldedKey, kHoldKey, kChainKey;
 static char kRecentsKey, kSearchKey, kPlusKey, kHeaderTitleKey;
 static char kBackKey, kMenuKey, kFolderPlusKey, kPlayKey, kPauseKey, kFolderTitleKey;
+
+UIView *SGRLibraryRootHeaderIn(UIView *page) {
+    UIView *header = SGRChildNamed(page, @"YourLibraryHeaderView");
+    if (header) return header;
+    for (UIView *sub in page.subviews) {
+        if (![sub isMemberOfClass:UIStackView.class]) continue;
+        header = SGRChildNamed(sub, @"YourLibraryHeaderView");
+        if (header) return header;
+    }
+    return nil;
+}
 
 void SGRLibraryClearScrim(UIView *header) {
     SGRVanish(SGRChildNamed(header, @"GradientView"));
@@ -196,7 +213,7 @@ static NSArray<UIView *> *placeRoot(UIView *header) {
     CGRect row = SGFrameIn(trailing.firstObject, header);
     // Compact library's menu, as tall and as wide as the row's controls, before the first of them.
     if (SGRLibraryCompact() && header.superview) {
-        UIButton *menu = SGRLibraryMenuButton(header, header.superview);
+        UIButton *menu = SGRLibraryMenuButton(header);
         CGFloat side = row.size.height;
         CGRect frame = CGRectMake(xAt(header, leading - side, side), CGRectGetMidY(row) - side / 2, side, side);
         if (!CGRectEqualToRect(menu.frame, frame)) menu.frame = frame;
@@ -231,10 +248,59 @@ static NSArray<UIView *> *placeFolder(UIView *header) {
 
 #pragma mark - Compact library
 
+// Whether Auto Layout sizes the header: 9.2.0's, arranged in a stack (see the top of the file).
+static BOOL stacked(UIView *header) {
+    return [header.superview isMemberOfClass:UIStackView.class];
+}
+
+// Spotify's link from the chips' bottom to the stacked header's, while it is active.
+static NSLayoutConstraint *chipsToBottom(UIView *header, UIView *filters) {
+    for (NSLayoutConstraint *link in header.constraints) {
+        if (!link.active || link.relation != NSLayoutRelationEqual) continue;
+        if (link.firstAttribute != NSLayoutAttributeBottom || link.secondAttribute != NSLayoutAttributeBottom) continue;
+        if ((link.firstItem == filters && link.secondItem == header) || (link.firstItem == header && link.secondItem == filters)) {
+            return link;
+        }
+    }
+    return nil;
+}
+
+// End the stacked header at the row instead of the chips so a safe-area change moves both bottoms in
+// the same layout pass. Keep Spotify's link for unfoldChips, including any replacement it installs.
+static void pinToRow(UIView *header, UIView *filters, UIView *control) {
+    UIView *row = control;
+    while (row && row.superview != header) row = row.superview;
+    if (!row) return;
+    NSLayoutConstraint *hold = objc_getAssociatedObject(header, &kHoldKey);
+    NSLayoutConstraint *chain = chipsToBottom(header, filters);
+    if (chain) {
+        chain.active = NO;
+        objc_setAssociatedObject(header, &kChainKey, chain, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (hold.secondItem != row) {
+        hold.active = NO;
+        hold = [header.bottomAnchor constraintEqualToAnchor:row.bottomAnchor];
+        objc_setAssociatedObject(header, &kHoldKey, hold, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    hold.active = YES;
+}
+
+// The top of the safe area of the page `list` is in, which the header's row hangs off. The page's own: the list's is
+// worked out after the page's pass, where Spotify sets the list's inset from the page's.
+static CGFloat safeTop(UIView *list) {
+    return SGRLibraryPageAbove(list).safeAreaInsets.top;
+}
+
 // The chips gone and the page closed up by the band they leave (see the top of the file). `control` is any of the
 // header's controls: they fill its row, so the bottom of one is the bottom of the row. What Spotify had -- the
 // chips' alpha, the header's height and the band, the list's inset -- is kept for unfoldChips.
 static void foldChips(UIView *header, UIView *control, UIView *filters, UIScrollView *list) {
+    if (stacked(header) && !objc_getAssociatedObject(header, &kHoldKey) && !chipsToBottom(header, filters)) {
+        static BOOL logged;
+        if (!logged) SGLog(@"redesign library: compact, the stacked header has no link from its chips to its bottom, chips kept");
+        logged = YES;
+        return;
+    }
     if (!objc_getAssociatedObject(filters, &kFoldedKey)) {
         objc_setAssociatedObject(filters, &kFoldedKey, @(filters.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -250,10 +316,14 @@ static void foldChips(UIView *header, UIView *control, UIView *filters, UIScroll
         spotify = @[@(height), @(band)];
         objc_setAssociatedObject(header, &kHeightKey, spotify, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    CGRect frame = header.frame;
-    if (fabs(frame.size.height - wanted) > 0.5) {
-        frame.size.height = wanted;
-        header.frame = frame;
+    if (stacked(header)) {
+        pinToRow(header, filters, control);
+    } else {
+        CGRect frame = header.frame;
+        if (fabs(frame.size.height - wanted) > 0.5) {
+            frame.size.height = wanted;
+            header.frame = frame;
+        }
     }
 
     // The list rests under the header by an inset of its own, which counts the whole header Spotify made. It is
@@ -263,7 +333,7 @@ static void foldChips(UIView *header, UIView *control, UIView *filters, UIScroll
     CGFloat top = list.contentInset.top, band = spotify[1].doubleValue;
     if (top < spotify[0].doubleValue - 0.5) return;
     BOOL atTop = list.contentOffset.y <= -top + 0.5;
-    objc_setAssociatedObject(list, &kInsetKey, @[@(top - band), @(top)], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(list, &kInsetKey, @[@(top - band), @(top), @(safeTop(list))], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     UIEdgeInsets inset = list.contentInset;
     inset.top = top - band;
     list.contentInset = inset;
@@ -282,13 +352,20 @@ static void unfoldChips(UIView *header, UIView *filters, UIScrollView *list) {
         filters.accessibilityElementsHidden = NO;
     }
     NSArray<NSNumber *> *spotify = objc_getAssociatedObject(header, &kHeightKey);
-    if (spotify) {
+    NSLayoutConstraint *hold = objc_getAssociatedObject(header, &kHoldKey);
+    if (hold) {
+        objc_setAssociatedObject(header, &kHoldKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        hold.active = NO;
+        ((NSLayoutConstraint *)objc_getAssociatedObject(header, &kChainKey)).active = YES;
+        objc_setAssociatedObject(header, &kChainKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(header, &kHeightKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else if (spotify) {
         objc_setAssociatedObject(header, &kHeightKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         CGRect frame = header.frame;
         frame.size.height = spotify[0].doubleValue;
         header.frame = frame;
     }
-    NSArray<NSNumber *> *held = list ? objc_getAssociatedObject(list, &kInsetKey) : nil;   // held, Spotify's
+    NSArray<NSNumber *> *held = list ? objc_getAssociatedObject(list, &kInsetKey) : nil;   // held, Spotify's, safe area
     if (!held) return;
     objc_setAssociatedObject(list, &kInsetKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     BOOL atTop = list.contentOffset.y <= -list.contentInset.top + 0.5;
@@ -300,9 +377,11 @@ static void unfoldChips(UIView *header, UIView *filters, UIScrollView *list) {
 }
 
 static void layoutRoot(UIView *page) {
-    UIView *header = SGRChildNamed(page, @"YourLibraryHeaderView");
+    UIView *header = SGRLibraryRootHeaderIn(page);
     if (!header) return;
-    [header layoutIfNeeded];
+    // 9.2.0's stack sizes the header on a pass of its own, after the page's, so it is laid out first here: the
+    // controls are placed against the header's width.
+    [(header.superview == page ? header : header.superview) layoutIfNeeded];
     SGRLibraryClearScrim(header);
 
     NSArray<UIView *> *trailing = placeRoot(header);
@@ -364,11 +443,23 @@ static void layoutFolder(UIView *page) {
 // Spotify works the list's top inset out from the header it made, chips and all, and sets it again whenever it lays
 // the page out. While the chips are folded the list keeps the one foldChips took instead, so the two never take
 // turns setting it: a scroll view laying out again from every set of ours is a loop the page cannot settle out of.
+// The one held is worked out for the safe area it was taken under. Once that moves (a rotation, a window resize) the
+// next top Spotify sets of its own is the one for the new safe area, and the inset held and the one unfoldChips gives
+// back are taken again from it, by the same band. A set that carries the held top back (Spotify changing only the
+// bottom from the list's inset as it stands) is not one: the held top is kept and the safe area still waits.
 %group CompactLibrary
 %hook _TtC21YourLibrary_CommonKit25YourLibraryCollectionView
 - (void)setContentInset:(UIEdgeInsets)inset {
-    NSArray<NSNumber *> *held = objc_getAssociatedObject(self, &kInsetKey);
-    if (held) inset.top = held[0].doubleValue;
+    NSArray<NSNumber *> *held = objc_getAssociatedObject(self, &kInsetKey);   // held, Spotify's, safe area
+    if (held) {
+        CGFloat safe = safeTop((UIView *)self);
+        if (fabs(safe - held[2].doubleValue) > 0.5 && fabs(inset.top - held[0].doubleValue) > 0.5) {
+            CGFloat band = held[1].doubleValue - held[0].doubleValue;
+            held = @[@(inset.top - band), @(inset.top), @(safe)];
+            objc_setAssociatedObject(self, &kInsetKey, held, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        inset.top = held[0].doubleValue;
+    }
     %orig(inset);
 }
 

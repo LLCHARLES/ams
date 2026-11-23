@@ -8,3 +8,4 @@ mkdir -p "$OUT"
 xcrun clang -fobjc-arc -O2 -Wall -Werror -I ../../tweak/Sources -framework Foundation \
     main.m ../../tweak/Sources/Shared/Connect/SGMDNS.m ../../tweak/Sources/Shared/Connect/SGConnectRelay.m -o "$OUT/connect"
 echo "built $OUT/connect"
+OUT="$OUT/browser" sh ./build-browser.sh

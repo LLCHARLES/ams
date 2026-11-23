@@ -28,6 +28,7 @@ SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
         if (response.statusCode == 404 || (response.statusCode == 200 && data == NSNull.null))
             query.requestContext.emptyNameSearch = SGUnisonAsk;
         if (![data isKindOfClass:NSDictionary.class]) {
+            if (response.statusCode == 200 && data != NSNull.null) [query.requestContext noteFailure:YES];
             SGLog(@"unison: no lyrics for %@ by %@", query.title, query.artist);
             done(nil);
             return;
@@ -48,6 +49,7 @@ SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
         }
         SGLyricsResult *result = SGTTMLResult(data[@"lyrics"], [data[@"syncType"] isEqual:@"richsync"]);
         if (!result) {
+            [query.requestContext noteFailure:YES];
             done(nil);
             return;
         }

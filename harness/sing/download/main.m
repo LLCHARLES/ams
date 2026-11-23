@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
         setvbuf(stdout, NULL, _IOLBF, 0);
         double stopAt = argc > 1 ? atof(argv[1]) : 0.2;
         NSURL *sing = [[[NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject
-            URLByAppendingPathComponent:@"Vitrine"] URLByAppendingPathComponent:@"Sing"];
+            URLByAppendingPathComponent:@"Retrine"] URLByAppendingPathComponent:@"Sing"];
         printf("the model goes to %s\n", sing.path.UTF8String);
         // The defaults outlive CFFIXED_USER_HOME's folder (cfprefsd keeps them): every check starts on the full model.
         [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeySingModel];

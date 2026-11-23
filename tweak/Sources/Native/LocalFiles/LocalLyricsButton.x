@@ -1,4 +1,4 @@
-// A lyrics button on the player's footer for a local file with an LRC file linked to it (LocalLyrics.h).
+// A lyrics button on the player's footer for a song with imported or embedded lyrics.
 //
 // NowPlaying_ModesImpl's units are child controllers whose views hold one row each (Native/Player/
 // Player.x); the footer's is FooterElementsUnit (-viewDidLoad, objc-methods). The button is the mod's
@@ -19,13 +19,40 @@
 
 static NSHashTable<UIButton *> *sg_buttons;
 
-static BOOL playingLinked(void) {
-    return SGImportedLRCLinkedTo(SGURIString(SGPlayerState().track.URI)) != nil;
+NSNotificationName const SGNativeFileSheetDidChange = @"spotifyglass.native.fileSheetChanged";
+static NSString *sg_uri, *sg_path;
+static BOOL sg_loading;
+static NSUInteger sg_generation;
+static SGLyricsResult *sg_sheet;
+
+// One current-track snapshot, including a miss. The footer and its page never scan the
+// library or parse the same tag independently. A late result cannot win across A → B → A.
+static void refresh(SPTPlayerState *state, BOOL force) {
+    NSString *uri = SGURIString(state.track.URI);
+    BOOL local = SGLocalFileIs(uri);
+    NSString *path = local ? state.track.metadata[@"local_file_path"] : nil;
+    if (![path isKindOfClass:NSString.class]) path = nil;
+    if (!force && (sg_uri == uri || [sg_uri isEqual:uri]) && (sg_path == path || [sg_path isEqual:path])) return;
+    NSUInteger generation = ++sg_generation;
+    sg_uri = [uri copy]; sg_path = [path copy]; sg_sheet = nil;
+    for (UIButton *button in sg_buttons) button.hidden = YES;
+    sg_loading = local || SGImportedLRCLinkedTo(uri) != nil;
+    if (sg_loading) {
+        SGPlaybackLyricsFetch(local ? SGLocalFileLyricsKey(uri) : uri, path, ^(SGLyricsResult *result) {
+            if (sg_generation != generation) return;
+            sg_loading = NO; sg_sheet = result;
+            for (UIButton *button in sg_buttons) button.hidden = !result.karaokeLines.count;
+            [NSNotificationCenter.defaultCenter postNotificationName:SGNativeFileSheetDidChange object:uri];
+        });
+    }
+    if (force || !sg_loading)
+        [NSNotificationCenter.defaultCenter postNotificationName:SGNativeFileSheetDidChange object:uri];
 }
 
-static void showButtons(void) {
-    BOOL linked = playingLinked();
-    for (UIButton *button in sg_buttons) button.hidden = !linked;
+SGLyricsResult *SGNativeCurrentFileSheet(BOOL *loading) {
+    refresh(SGPlayerState(), NO);
+    *loading = sg_loading;
+    return sg_sheet;
 }
 
 @interface SGLocalLyricsButtons : NSObject <SGPlayerStateObserver>
@@ -33,7 +60,10 @@ static void showButtons(void) {
 
 @implementation SGLocalLyricsButtons
 - (void)playerStateDidChange:(SPTPlayerState *)state {
-    showButtons();
+    if (sg_buttons.count) refresh(state, NO);
+}
+- (void)playerStateDidReport:(SPTPlayerState *)state {
+    if (sg_buttons.count) refresh(state, NO); // the core can supply local_file_path after the track
 }
 @end
 
@@ -64,7 +94,8 @@ static void addButton(UIViewController *unit) {
         [button.heightAnchor constraintEqualToConstant:44],
     ]];
     [sg_buttons addObject:button];
-    button.hidden = !playingLinked();
+    refresh(SGPlayerState(), NO);
+    button.hidden = !sg_sheet.karaokeLines.count;
 }
 
 %hook _TtC20NowPlaying_ModesImpl18FooterElementsUnit
@@ -94,7 +125,9 @@ static void addButton(UIViewController *unit) {
     observer = [SGLocalLyricsButtons new];
     SGAddPlayerStateObserver(observer);
     // An import for the track playing, or the delete of its file, changes the button with no new track.
-    [NSNotificationCenter.defaultCenter addObserverForName:SGImportedLRCDidChangeNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) { showButtons(); }];
+    for (NSString *name in @[SGImportedLRCDidChangeNotification, SGLocalFileEditsDidChangeNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            refresh(SGPlayerState(), YES);
+        }];
     SGRequireClasses(@[@"_TtC20NowPlaying_ModesImpl18FooterElementsUnit", @"SPTPlayerTrack"]);
 }

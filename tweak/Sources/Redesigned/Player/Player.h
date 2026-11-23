@@ -7,7 +7,8 @@
 //
 //     PlayerField.x      the switch's flags and rows, the field in the background plane, the cover it reads
 //     PlayerArtwork.x    the cover's corners, shadow and paused shrink; the lyric preview as Spotify's setting has it
-//     PlayerHeader.x     glass behind the close and more buttons
+//     PlayerHeader.x     the header's close and more buttons put away for the Music app's grabber (the AI DJ's keep
+//                        their glass)
 //     PlayerControls.x   previous, play and next as bare glyphs, shuffle and repeat hidden on request, monospaced times
 //     PlayerFooter.x     share gone, lyrics, Connect and queue as one row of three glyphs
 //     DJPlayer.x         the AI DJ's player (its own units): skip glyphs, a four glyph footer row, over the shared
@@ -22,9 +23,9 @@
 //     PlayerVisualiser.m the Visualizer background: a calm spectrum of the song in the cover's colors, read
 //                        through SGRSpectrum.m from the audio effects' tap on Spotify's output
 //     PlayerLyricStages.m the Visualizer's Poster and Cut lyric styles and their parameters
-//     PlayerMenu.m       the more button's system menu: Share, Add to playlist and Add to queue on top, then
-//                        speed, pitch and reverb, the backgrounds it can switch to, and Spotify's other rows
-//                        under More (Redesigned/ContextMenu)
+//     PlayerMenu.m       the ⋯ beside the title and its system menu: Share, Add to playlist and Add to queue on top,
+//                        the title row's add button and X, Spotify's other rows, then speed, pitch and reverb, the
+//                        backgrounds it can switch to and the rest of the player's own (Redesigned/ContextMenu)
 //     PlayerSettings.m   the Player page in Mod Settings, led by a showcase of the player
 //     PlayerFree.x       a Spotify Free account given the player mode these units belong to
 //     PlayerTitle.x      the title and the artist shown simplified or translated, over Spotify's own labels
@@ -97,6 +98,22 @@ SGRArtworkField *SGRPlayerField(void);
 // Visualizer (PlayerField.x).
 void SGRPlayerHoldField(void);
 
+#pragma mark - the player's margins and rhythm
+
+// The Music app's side margin: the title row and the progress bar (SGRPlayerHoldMargin) and
+// the volume row (PlayerFooter.x) start this far in from the player's edges, where Spotify's own sit nearer.
+static const CGFloat SGRPlayerSideMargin = 32;
+// Insets `view`, which Spotify's constraints lay out in its superview (a unit's view), on both sides so that its content,
+// starting `contentX` in from the view's own leading edge, starts SGRPlayerSideMargin in from the superview's. Called
+// after each of Spotify's layout passes; the inset is measured from the native leading pin and the `contentX` of the pass
+// that inset the view (later ones are of the inset view's own layout and are not used) and added to the constants of Spotify's side
+// constraints (each one's own constant kept), so it never compounds, the content inside lays out for the new width, and
+// a view Spotify already insets as far is left alone.
+void SGRPlayerHoldMargin(UIView *view, CGFloat contentX);
+// The Music app's gap from the volume row's middle to the footer row's middle: the footer's rhythm makes the room for it
+// (PlayerFooter.x) and the volume row stands this far over the footer where the room allows (PlayerVolume.m).
+static const CGFloat SGRPlayerVolumeToRow = 48;
+
 #pragma mark - the cover (PlayerArtwork.x)
 
 // The sideways list of covers behind the player, nil until one has laid out.
@@ -116,14 +133,30 @@ CGRect SGRPlayerArtworkAreaIn(UIView *host);
 // Hides the cover on screen and its shadow, or shows them again, for a stand-in to fly in its place
 // (PlayerMorph.x). Until NO, every cover laid out on screen is hidden too, the first open's included.
 void SGRPlayerSetCoverHidden(BOOL hidden);
+// A header row taking touches (`live`) or letting them go (PlayerHeader.x, on each of its layouts), in `player`, the
+// player's own view holding it, or nil: the cover, lifted to the Music app's top, stays under every live row in its own
+// player, wherever the row is moved in it.
+void SGRPlayerCoverUnderRow(UIView *row, BOOL live, UIView *player);
+// A header row in `view`'s window shows something to read besides the grabber: where it plays from, Spotify's live
+// arrow, the AI DJ's buttons (the rows SGRPlayerCoverUnderRow is told are live). The clip's dim covers it
+// (PlayerMotion.x), which hears of each change through SGRPlayerMotionHeaderChanged.
+BOOL SGRPlayerHeaderShowsIn(UIView *view);
+void SGRPlayerMotionHeaderChanged(void);
 
 #pragma mark - the title (PlayerTitle.x)
 
 // The title the redesign shows for a track, simplified or translated as the Lyrics page sets, and in
 // \`shownArtist\` the artist; the title as given while neither is on or nothing is in. Main thread.
 NSString *SGRShownTitle(NSString *trackID, NSString *title, NSString *artist, NSString **shownArtist);
-// Finds Spotify's title and artist labels in the information unit's view and has them show the title above.
+// Finds Spotify's title and artist labels in the information unit's view and has them show the title above, in the
+// Music app's type.
 void SGRShownTitleWatch(UIView *unit);
+// The lyrics came or went (SGRPlayerLyricsChanged): the two labels take the type for it, 17 over 17 beside the
+// lyrics' thumbnail, 20 over 20 otherwise.
+void SGRShownTitleRestyle(void);
+// The lyrics slide the title's arranged view `slide` points toward the row's trailing controls, 0 when they do not
+// (PlayerLyrics.x): the title, and its explicit mark, then end that much and a gap sooner.
+void SGRShownTitleSlide(CGFloat slide);
 
 #pragma mark - iPad (PlayerLyrics.x, Redesigned/NowPlayingBar/NowPlayingBar.x)
 
@@ -138,7 +171,16 @@ static inline BOOL SGRPlayerIPadRegular(UIView *view) {
 // Both columns use the visible safe rectangle, in the player's coordinates, not just its own bounds.
 static inline CGRect SGRPlayerVisibleSafeArea(UIView *view) {
     UIWindow *window = view.window;
-    CGRect windowSafe = [view convertRect:window.safeAreaLayoutGuide.layoutFrame fromView:window];
+    CGRect safe = window.safeAreaLayoutGuide.layoutFrame;
+    if (@available(iOS 26.0, *)) {
+        if (window.traitCollection.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+            // The ordinary safe area excludes bars, not the window controls in a corner.
+            // Keep the columns below that system-owned region, including full-screen windows.
+            UIViewLayoutRegion *region = [UIViewLayoutRegion safeAreaLayoutRegionWithCornerAdaptation:UIViewLayoutRegionAdaptivityAxisVertical];
+            safe = UIEdgeInsetsInsetRect(window.bounds, [window edgeInsetsForLayoutRegion:region]);
+        }
+    }
+    CGRect windowSafe = [view convertRect:safe fromView:window];
     return CGRectIntersection(UIEdgeInsetsInsetRect(view.bounds, view.safeAreaInsets), windowSafe);
 }
 
@@ -167,6 +209,7 @@ BOOL SGRPlayerLyricsOpen(void);
 BOOL SGRPlayerLyricsFadeView(UIView *view, BOOL fits);
 // Shows them, or puts the cover back; does nothing when there are none to show.
 void SGRPlayerToggleLyrics(void);
+void SGRPlayerOpenPreviewLyrics(UIView *preview);
 // Called by PlayerLyrics.x whenever either of those two changed, so the footer's lyrics glyph follows
 // (PlayerFooter.x). It returns at once when nothing changed.
 void SGRPlayerLyricsChanged(void);
@@ -195,11 +238,26 @@ SGModRow *SGRLyricsHideRow(void);
 
 // A volume slider under the controls (PlayerVolume.m), the system's: this iPhone's, or the Connect device's.
 // On until switched off. Placed by the footer's layout, between the controls (`controls`) and the footer row
-// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side.
+// (`row`), both arranged in Spotify's bottom stack, `margin` in from each side: SGRPlayerVolumeToRow over the footer row
+// where the room allows while the footer keeps the Music app's rhythm (`rhythm`: taller than wide, one column), else
+// halfway between the play button and the footer's glyphs.
 #define SGRKeyPlayerVolume @"spotifyglass.redesign.player.volume"
 BOOL SGRPlayerVolumeOn(void);
+// The colors of the progress bar (PlayerControls.x) and the volume row, translucent as the Music app's: the fill a light
+// white the background shows through, whole white while `lit` (a finger scrubs), and the track dimmer; both more opaque
+// under Increase Contrast.
+UIColor *SGRPlayerBarFill(BOOL lit);
+UIColor *SGRPlayerBarTrack(void);
+// Both bars are drawn the one way, the Music app's: default-style sliders with an empty thumb, as Spotify's progress bar
+// is, whose tracks are capsule images (SGRPlayerBarImage) `height` tall in the bar's colors. Such a slider draws its fill
+// up to the thumb's middle and cuts it there, so the fill ends square inside the round track. Spotify's track images are
+// SGRPlayerBarHeight tall (trees/clean 01.txt:1907), and a finger dragging a bar grows its track to
+// SGRPlayerBarDragHeight about its middle.
+static const CGFloat SGRPlayerBarHeight = 7;
+UIImage *SGRPlayerBarImage(UIColor *color, CGFloat height);
+CGFloat SGRPlayerBarDragHeight(CGFloat height);
 // YES when the row shows; NO when it is off, has no controls to sit under or no room between them and the footer.
-BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin);
+BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat margin, BOOL rhythm);
 
 // Follow the cover (PlayerCoverAccent.x): the player's lit controls painted in the cover's color instead of the accent.
 // Off until switched on, read at launch. The cover's color (a gray one gives the accent back), and a paint of Spotify's
@@ -209,9 +267,9 @@ BOOL SGRPlayerFollowsCover(void);
 void SGRPlayerSetCoverAccent(UIColor *cover);
 void SGRPlayerPaintCover(UIView *stack);
 
-// Glass circles behind the header's down arrow and ⋯ (PlayerHeader.x), in the ordinary player and the AI DJ's. On until
-// switched off; off, the buttons are Spotify's as drawn, with their actions, touches and accessibility, and the grabber
-// stays. Followed at once (SGRPlayerLookChanged).
+// Glass circles behind the AI DJ's header down arrow and ⋯ (PlayerHeader.x; the ordinary player's header has only the
+// grabber). On until switched off; off, the buttons are Spotify's as drawn, with their actions, touches and
+// accessibility, and the grabber stays. Followed at once (SGRPlayerLookChanged).
 #define SGRKeyPlayerHeaderGlass @"spotifyglass.redesign.player.headerGlass"
 #define SGRKeyPlayerHideContext @"spotifyglass.redesign.player.hideContext"
 // The Music app's glyphs in the footer row (PlayerFooter.x) and the AI DJ's (DJPlayer.x): AirPlay audio for Connect and a
@@ -233,8 +291,8 @@ void SGRPlayerLookChanged(void);
 
 // Shuffle and repeat left out of the controls (PlayerControls.x), each on its own switch under Hide on the player, the
 // way the Music app keeps them off its main controls. Off until switched on, read at launch. The buttons go by alpha
-// and keep their slots, so previous, play and next stay centered; with both gone, in portrait, previous and next move
-// out from play (PlayerControls.x, spreadSkips).
+// and keep their slots, so previous, play and next stay centered; with neither shown (both hidden, or a row Spotify
+// builds without them), in portrait, previous and next move out from play (PlayerControls.x, spreadSkips).
 #define SGRKeyPlayerHideShuffle @"spotifyglass.redesign.player.hideShuffle"
 #define SGRKeyPlayerHideRepeat @"spotifyglass.redesign.player.hideRepeat"
 
@@ -273,6 +331,20 @@ BOOL SGRPlayerVisualiserFallbackWanted(void);
 void SGRPlayerMotionLyricsChanged(void);
 // The field was laid out (PlayerField.x): the clip goes onto it, and the cover is hidden or shown again.
 void SGRPlayerMotionFieldLaidOut(void);
+// The player's field is on screen and its controller has not disappeared. Main-thread changes only.
+BOOL SGRPlayerIsVisible(void);
+// The settled field in window coordinates, or CGRectNull. Coverage requires didAppear and a finished
+// opening morph, and ends at willDisappear. Moving or resizing a settled field also notifies.
+CGRect SGRSettledPlayerRect(UIWindow *window);
+FOUNDATION_EXPORT NSNotificationName const SGRPlayerVisibilityDidChangeNotification;
+@class SGRProgressClock;
+extern __thread __unsafe_unretained SGRProgressClock *SGRWritingProgress;
+void SGRProgressSliderWrote(UISlider *slider);
+void SGRProgressOutputMounted(UIView *view);
+void SGRProgressRailChanged(UISlider *slider, BOOL tracking);
+void SGRProgressPlaybackChanged(double seconds, double rate);
+void SGRProgressVisibilityChanged(void);
+void SGRProgressControlsFaded(BOOL finished);
 // A cover in the player laid out: hides it while a clip plays.
 void SGRPlayerMotionCoverLaidOut(void);
 // A clip is playing in place of the cover, which is then hidden: the lyrics' thumbnail and the open's
@@ -379,7 +451,7 @@ void SGRPlayerMenuSetBackground(SGRPlayerBackgroundKind kind);
 UIViewController *SGRPlayerSettingsPage(NSArray *more);
 // The redesign's Buttons card for the Player page's shared sections (App/Pages.m): Shuffle, Repeat and Video as toggle
 // chips, each selected while its hide key (SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat, SGKeyHideVideoSwitch) is
-// off. Only SGRPlayerSettingsPage's page draws the chips.
+// effectively off. Shuffle and Repeat start selected, Video unselected. Only SGRPlayerSettingsPage draws the chips.
 @class SGModSection;
 SGModSection *SGRPlayerButtonsSection(void);
 
@@ -392,6 +464,10 @@ void SGRPlayerPlayGlyphIn(UIView *host);
 @class SGRGlyphView;
 SGRGlyphView *SGRPlayerGlyphFor(UIView *owner, const void *key, NSString *symbol, CGFloat size);
 void SGRPlayerPlaceGlyph(UIView *view, UIView *host, CGFloat dy);
+
+// A podcast's speed button in the controls unit `host`, its words on one line inside the button, where it takes its
+// tap and VoiceOver frames it (PlayerSpeedLabel.m); kept so as Spotify lays the words out again.
+void SGRPlayerFitSpeedLabel(UIView *host);
 
 // The footer's shared parts (PlayerFooter.x), for the AI DJ's footer (DJPlayer.x). `row` is the footer unit's view:
 // moved down over the home indicator with the controls following, the volume row and Follow the cover placed.
@@ -414,6 +490,12 @@ UIColor *SGRPlayerImageInk(UIImage *image);
 BOOL SGRSeekTapLands(UIView *unit, UISlider *slider, CGPoint point);
 CGFloat SGRSeekShareAt(UISlider *slider, CGPoint point);
 
-// The more button's menu opens as the system menu with the player's own items (PlayerMenu.m). Called from
-// PlayerHeader.x with Spotify's more button on every pass; watching it again changes nothing.
+// The player's ⋯ (PlayerMenu.m): a button of the mod's beside the title, where the Music app has it, opening the system
+// menu: the song's actions first (the title row's add button and Spotify's X among them), the player's own items after.
+// PlayerHeader.x hands over Spotify's own ⋯, which it hides, on every pass of the header: its action brings up the
+// sheet whose rows the menu shows. Watching it again changes nothing.
 void SGRPlayerMenuWatch(UIView *button);
+// Called on every pass of the ordinary player's title row (PlayerLyrics.x) with the title's arranged view: the add
+// button and Spotify's X go (alpha, and out of VoiceOver's reach) and the ⋯ takes the add button's slot, or the row's
+// trailing one where there is none.
+void SGRPlayerMenuInTitleRow(UIView *title);

@@ -4,6 +4,7 @@ import mmap
 from pathlib import Path
 import subprocess
 import sys
+from zipfile import ZipFile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'tools'))
 import patch_native_restrictions as quota
 import patch_key_request_mode as key
@@ -14,8 +15,10 @@ root = Path(__file__).resolve().parents[1]
 generate_header(build)
 library = build/'patch-tests.dylib'
 subprocess.run(['xcrun','clang','-dynamiclib','-Wall','-Wextra','-Werror','-I'+str(root/'src'),
-                '-I'+str(build),str(root/'src/JailbreakPatches.c'),'-o',str(library)],check=True)
-engine = C.CDLL(str(library)).SAPJBApplyPatches
+                '-I'+str(build),str(root/'src/JailbreakPatches.c'),str(root/'tests/admitted_host.c'),'-o',str(library)],check=True)
+loaded = C.CDLL(str(library))
+engine = loaded.SAPJBApplyPatches
+loaded.SAPTestSetHostAdmitted.argtypes = [C.c_bool]
 Writer = C.CFUNCTYPE(None,C.c_void_p,C.c_void_p,C.c_size_t,C.c_void_p)
 engine.argtypes = [C.c_void_p,C.c_size_t,Writer,C.c_void_p,C.POINTER(C.c_char_p)]
 engine.restype = C.c_bool
@@ -54,6 +57,9 @@ def case(name, edit=None, expected=True, write_fail=0, expected_writes=None, rep
         print('PASS:',name,reason.value.decode(),flush=True)
 
 case('stock image + idempotence',expected_writes=4,repeat=True)
+loaded.SAPTestSetHostAdmitted(False)
+case('unsupported runtime fingerprint',expected=False,expected_writes=0)
+loaded.SAPTestSetHostAdmitted(True)
 def wrong_uuid(b):
     at=32
     for _ in range(int.from_bytes(b[16:20],'little')):
@@ -78,4 +84,19 @@ def guarded(b):
     b[setter:setter+4]=quota.branch(quota.SETTER,quota.CAVE).to_bytes(4,'little')
 case('existing quota guard',guarded,expected_writes=2)
 case('existing mode zero',lambda b:b.__setitem__(slice(call,call+4),bytes.fromhex('02008052')),expected_writes=4)
+new_ipa=root.parent/'ipa/Spotify-9.2.0.ipa'
+if new_ipa.is_file():
+    with ZipFile(new_ipa) as archive:
+        unsupported=archive.read('Payload/Spotify.app/Spotify')
+    size=next(s[4] for s in quota.layout(unsupported)[2] if s[0]==b'__TEXT')
+    with mmap.mmap(-1,len(unsupported)) as image:
+        image.write(unsupported);del unsupported
+        address=C.addressof(C.c_char.from_buffer(image));writes=[]
+        @Writer
+        def reject_writer(target,content,length,context):
+            writes.append(length)
+        reason=C.c_char_p()
+        assert not engine(address,size,reject_writer,None,C.byref(reason))
+        assert not writes
+        print('PASS: actual 9.2.0 image rejected by jailbreak runtime without writes')
 print('PASS: all DEB native patch guards, idempotence and rollback checks')

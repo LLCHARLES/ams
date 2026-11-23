@@ -21,7 +21,8 @@ extern const CGFloat SGRHeaderInfoBottom;     // 14, under the content
 extern const CGFloat SGRHeaderInfoTitleRise;  // 56, of the content over the picture
 
 // Independent header layouts; an album's animated cover still fills the hero in Card mode.
-// The legacy setting migrates into both choices before either is read. Unset remains Full screen.
+// The legacy setting migrates into both choices before either is read. Unset, an album is Card and a playlist
+// Full screen.
 #define SGRKeyFullBleedCovers @"spotifyglass.redesign.fullBleedCovers"
 #define SGRKeyFullCoverMigrated @"spotifyglass.redesign.fullBleedCovers.migrated"
 #define SGRKeyAlbumFullCover @"spotifyglass.redesign.album.fullCover"
@@ -83,15 +84,21 @@ BOOL SGRPageFullCover(NSString *key);
 // Where the content starts, from the top; 0 keeps it on the bottom edge. Content that would then run past the
 // bottom goes back on the bottom edge.
 @property (nonatomic) CGFloat pinnedTop;
+// The artist's name the Music app's way on iOS 26 (Artist/ArtistHeader.x): Large Title bold (34pt at the default size,
+// capped with the rest at Extra Large), the name, the logo standing for it and the lines under it centered like the
+// album's. NO is the album's and the playlist's centered Title 2.
+@property (nonatomic) BOOL largeTitle;
 // Play a circle 64pt across with its glyph alone, its word only what VoiceOver reads, in a 64pt row, and the buttons
 // either side 44pt across, 20pt off it (the artist's, SGRKeyArtistRoundPlay). NO is the capsule in its 48pt row.
 // Round, Play is cut out while SGRKeyArtistCutOutPlay is on. Set before the first -showShuffle:....
 @property (nonatomic) BOOL roundPlay;
-// With the scroll veil (SGRHeroVeil.h), on every step of the scroll: what of the content has gone under the pinned
+// On every step of `scroll` and after each of the info's own passes: what of the content has gone under the pinned
 // top bar -- the window's top safe area and 44pt under it -- is clipped there, once it is half a point past it,
-// fading in over the 14pt under the line rather than cut at it; the clip goes when nothing is under the bar. From the first call the info clips again after each of its own
-// passes. The mask is the info's own; one someone else set is left alone.
-- (void)clipUnderTopBar;
+// fading in over the 14pt under the line rather than cut at it; the clip goes when nothing is under the bar. The
+// album page always asks (nothing of its header ghosts under the bar), the playlist and artist pages with the scroll
+// veil (SGRHeroVeil.h). nil stops following and takes the clip off. The mask is the info's own; one someone else
+// set is left alone. The scroll view is held weakly.
+- (void)clipUnderTopBarFollowing:(UIScrollView *)scroll;
 // Kept for the page, which reads them back to tell whether a pass has anything new to hand over: the play color
 // it last handed over, and whether it has found Spotify's buttons' row. The info itself never reads them.
 @property (nonatomic, strong) UIColor *handedPlayColor;

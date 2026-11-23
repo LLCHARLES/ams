@@ -18,6 +18,7 @@ nw_connection_t SGWGNativeTestNWCreate(nw_endpoint_t, nw_parameters_t);
 } } while (0)
 
 static NSString *Env(NSString *name) { return NSProcessInfo.processInfo.environment[name]; }
+void SGWGNotifyRecovery(void) {}
 
 @interface SPTCoreURLSessionDataDelegate : NSObject
 @property NSUInteger calls, bytes;

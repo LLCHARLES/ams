@@ -18,6 +18,7 @@ static BOOL sg_fixPending;
 
 // SecTaskCopyValueForEntitlement is not in the iOS SDK, so it is resolved at runtime like the rest
 // of the private API the mod uses. A build that cannot read its own entitlement stays quiet.
+#ifndef SG_SIGNING_HARNESS
 NSString *SGSigningAppIdentifier(void) {
     static NSString *cached;
     static dispatch_once_t once;
@@ -42,6 +43,7 @@ NSString *SGSigningAppIdentifier(void) {
     });
     return cached;
 }
+#endif
 
 // Unreadable counts as fine: a guess here would cry wolf at a build that works.
 BOOL SGSigningOpensFromLockScreen(void) {
@@ -70,10 +72,12 @@ static void showFix(void) {
         UIPasteboard.generalPasteboard.string = appID;
     }]];
     if (SGRepoURL) [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"settings.signing.action.read_more", @"Read more") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        SGOpenURL([SGRepoURL stringByAppendingString:@"#signing"]);
+        SGOpenURL([SGRepoURL stringByAppendingString:@"#%EC%84%9C%EB%AA%85%EA%B3%BC-%EB%B2%88%EB%93%A4-id"]);
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
-    [top presentViewController:sheet animated:YES completion:nil];
+    [top presentViewController:sheet animated:YES completion:^{
+        [NSUserDefaults.standardUserDefaults setObject:appID forKey:kWarned];
+    }];
 }
 
 // nil while the signature is sound, which is what keeps the row out of Mod Settings entirely.
@@ -93,7 +97,6 @@ void SGCheckSigningOnce(void) {
     SGLog(@"signing: installed as %@ but signed under %@; the now playing card cannot open this build",
           NSBundle.mainBundle.bundleIdentifier, appID);
     if ([[store stringForKey:kWarned] isEqualToString:appID]) return;
-    [store setObject:appID forKey:kWarned];
 
     // The first activation, plus a moment for Spotify's own start-up screens to get out of the way.
     __block id token = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification

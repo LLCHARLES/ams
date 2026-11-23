@@ -223,7 +223,8 @@ static void extrasChecks(UIWindow *window) {
     [defaults setBool:YES forKey:SGKeyLyricsFurigana];
     NSMutableArray *many = [NSMutableArray array];
     for (NSUInteger i = 0; i < 80; i++) {
-        SGKaraokeLine *entry = sungLine(100 + i * 2000, [NSString stringWithFormat:@"君の名前%lu", (unsigned long)i]);
+        SGKaraokeLine *entry = sungLine(100 + i * 2000,
+            i == 79 ? @"君 の 名前" : [NSString stringWithFormat:@"君の名前%lu", (unsigned long)i]);
         [many addObject:entry];
     }
     SGHarnessPlayingTrack = @"extras-scroll";
@@ -232,11 +233,23 @@ static void extrasChecks(UIWindow *window) {
     [page layoutSubviews];
     check(extrasWait(^BOOL { return extrasLabel(page, @"なまえ") != nil; }),
           @"long song prepares ruby before viewport construction");
+    check([page valueForKey:@"shown"][@79] == nil, @"last pronunciation row is not materialized before scrolling");
+    NSMutableArray *equivalent = [NSMutableArray array];
+    for (SGKaraokeLine *entry in many) [equivalent addObject:sungLine(entry.start, SGKaraokeLineText(entry))];
+    SGKaraokeKeepLines(SGHarnessPlayingTrack, equivalent);
+    ((void (*)(id, SEL))objc_msgSend)(page, NSSelectorFromString(@"tick"));
     UIScrollView *scroll = [page valueForKey:@"scroll"];
+    [scroll.delegate scrollViewWillBeginDragging:scroll];
     for (NSUInteger i = 1; i <= 5; i++) {
-        scroll.contentOffset = CGPointMake(0, MAX(0, scroll.contentSize.height - scroll.bounds.size.height) * i / 5.0);
+        scroll.contentOffset = CGPointMake(0,
+            MAX(0, scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.size.height) * i / 5.0);
         ((void (*)(id, SEL))objc_msgSend)(page, NSSelectorFromString(@"showLinesInSight"));
     }
+    check(extrasWait(^BOOL {
+        ((void (*)(id, SEL))objc_msgSend)(page, NSSelectorFromString(@"showLinesInSight"));
+        UIView *last = [page valueForKey:@"shown"][@79];
+        return extrasLabel(last, @"kimi") && extrasLabel(last, @"なまえ");
+    }), @"newly materialized rows retain pronunciation and furigana after an equivalent replacement");
     check(!atomic_load(&extrasRubyOnMain), @"rapid furigana-enabled scrolling never performs cold ruby work on main");
     [player removeFromSuperview]; [page removeFromSuperview];
     method_setImplementation(class_getInstanceMethod(SGLyricsRuby.class, @selector(init)), extrasOriginalRubyInit);

@@ -72,6 +72,56 @@ static void check(BOOL passed, const char *description) {
     if (!passed) failures++;
 }
 
+static NSArray<CALayer *> *discsOf(SGRFlowLayer *flow) {
+    NSMutableArray *discs = [NSMutableArray array];
+    for (CALayer *layer in flow.sublayers) {
+        if ([layer isKindOfClass:CAGradientLayer.class] && [((CAGradientLayer *)layer).type isEqual:kCAGradientLayerRadial])
+            [discs addObject:layer];
+    }
+    return discs;
+}
+
+// How far the disc that moved most is from where `from` has it, and the discs' places now.
+static CGFloat moved(SGRFlowLayer *flow, NSArray<NSValue *> *from, NSArray<NSValue *> **now) {
+    NSMutableArray *places = [NSMutableArray array];
+    CGFloat most = 0;
+    NSArray<CALayer *> *discs = discsOf(flow);
+    for (NSUInteger i = 0; i < discs.count; i++) {
+        CGPoint p = discs[i].position;
+        [places addObject:[NSValue valueWithCGPoint:p]];
+        if (i < from.count) most = MAX(most, hypot(p.x - from[i].CGPointValue.x, p.y - from[i].CGPointValue.y));
+    }
+    if (now) *now = places;
+    return most;
+}
+
+static void spin(NSTimeInterval seconds) {
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+}
+
+// The drift is stepped by the layer, not played by the render server: an animation there draws the whole screen
+// again on every frame (21% of an iPhone 13 Pro's GPU under the player, measured). The layer is in no window here,
+// so only its own steps can move the discs.
+static void checkDrift(void) {
+    SGRFlowLayer *flow = [SGRFlowLayer layer];
+    flow.frame = CGRectMake(0, 0, 300, 500);
+    [flow layoutIfNeeded];
+    NSArray<NSValue *> *rest, *drifted, *held;
+    moved(flow, nil, &rest);
+    spin(0.4);
+    check(rest.count == 5 && moved(flow, rest, NULL) == 0, "a flow that was never started stays at rest");
+    flow.moving = YES;
+    spin(1);
+    check(moved(flow, rest, &drifted) > 1, "a moving flow drifts, by the layer's own steps");
+    flow.moving = NO;
+    moved(flow, nil, &drifted);
+    spin(0.4);
+    check(moved(flow, drifted, &held) == 0, "a stopped flow holds its picture");
+    flow.moving = YES;
+    check(moved(flow, held, NULL) < 1, "starting again carries on from the held picture");
+    flow.moving = NO;
+}
+
 int main(void) {
     @autoreleasepool {
         pending = [NSMutableArray array];
@@ -127,6 +177,7 @@ int main(void) {
         deliver(takeReplies());
         check(covered && showsBackdrop(fluid, image),
               "a completed still backdrop returns after another Fluid round trip");
+        checkDrift();
         printf("%d failed\n", failures);
         return failures ? 1 : 0;
     }

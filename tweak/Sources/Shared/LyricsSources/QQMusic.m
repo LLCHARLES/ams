@@ -25,7 +25,11 @@ static void ask(SGLyricsRequestContext *context, NSString *name, NSDictionary *r
     NSDictionary *body = @{@"comm": @{@"ct": @"19", @"cv": @"1859", @"uin": @"0"}, name: request};
     NSDictionary *headers = @{@"Referer": @"https://y.qq.com/", @"User-Agent": SGLyricsBrowserAgent, @"Accept": @"application/json"};
     SGLyricsPostJSONTransformIn(context, [NSURL URLWithString:kAPI], headers, body, ^id(id root) {
-        return transform(dig(root, @[name, @"data"]));
+        id data = dig(root, @[name, @"data"]);
+        id code = dig(root, @[@"code"]), subcode = dig(root, @[name, @"code"]);
+        if (root && (!data || ([code isKindOfClass:NSNumber.class] && [code integerValue] != 0) ||
+            ([subcode isKindOfClass:NSNumber.class] && [subcode integerValue] != 0))) [context noteFailure:YES];
+        return transform(data);
     }, done);
 }
 
@@ -155,7 +159,12 @@ SGLyricsResult *SGQQMusicResult(id payload) {
 static void lyricsFor(SGLyricsRequestContext *context, NSNumber *song, BOOL qrc, void (^done)(SGLyricsResult *)) {
     ask(context, kLyricRequest, @{@"module": @"music.musichallSong.PlayLyricInfo", @"method": @"GetPlayLyricInfo",
         @"param": @{@"crypt": @0, @"qrc": @(qrc), @"songID": song}},
-        ^id(id data) { return SGQQMusicResult(dig(data, @[@"lyric"])); }, ^(SGLyricsResult *result) {
+        ^id(id data) {
+            id payload = dig(data, @[@"lyric"]);
+            SGLyricsResult *result = SGQQMusicResult(payload);
+            if (payload && payload != NSNull.null && ![payload isEqual:@""] && !result) [context noteFailure:YES];
+            return result;
+        }, ^(SGLyricsResult *result) {
             if (!result && qrc) { lyricsFor(context, song, NO, done); return; }
             SGLog(@"qqmusic: song %@ gave %lu timed lines", song, (unsigned long)result.karaokeLines.count);
             done(result);

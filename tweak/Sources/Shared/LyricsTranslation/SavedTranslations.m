@@ -5,6 +5,7 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "AIServicesInternal.h"
 #import "Core/SGFileHash.h"
+#import "Core/SGDataRoot.h"
 #import "Core/TranslationStore/SGTranslationFiles.h"
 #import "Core/TranslationStore/SGTranslationTransfer.h"
 #import "TranslationLibrary.h"
@@ -49,22 +50,28 @@ static NSURL *cacheRoot(void) {
     extern NSURL *SGLyricsTestCacheRoot(void);
     return SGLyricsTestCacheRoot();
 #else
-    NSURL *caches = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    return [caches URLByAppendingPathComponent:@"Vitrine" isDirectory:YES];
+    return SGDataRoot(NSApplicationSupportDirectory);
 #endif
 }
 static NSURL *legacyRoot(void) {
 #ifdef SG_LYRICS_TEST_STORE
     return [cacheRoot() URLByAppendingPathComponent:@"Legacy"];
 #else
-    return [[NSFileManager.defaultManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask].firstObject URLByAppendingPathComponent:@"Vitrine"];
+    return SGDataRoot(NSCachesDirectory);
 #endif
 }
 static SGTranslationFiles *store(void) {
 #ifdef SG_LYRICS_TEST_STORE
     (void)cacheRoot();
 #endif
-    if (!sg_store) sg_store = [[SGTranslationFiles alloc] initWithRoot:cacheRoot() legacy:legacyRoot()];
+    if (!sg_store) {
+        NSURL *root = cacheRoot(), *legacy = legacyRoot();
+#ifdef SG_LYRICS_TEST_STORE
+        sg_store = [[SGTranslationFiles alloc] initWithRoot:root legacy:legacy];
+#else
+        sg_store = [[SGTranslationFiles alloc] initWithRoot:root renamedCache:legacy];
+#endif
+    }
     return sg_store;
 }
 static BOOL prepareStore(void) {
@@ -79,9 +86,14 @@ static BOOL migrateStore(void) {
     sg_migrationError = error;
     return migrated;
 }
-static void maintainStore(BOOL startup) {
+static NSDictionary *sg_importPreview;
+static BOOL sg_stagingReclaimed;
+// Abandoned import stages are reclaimed once per launch, at the first pass that opens the store; a preview
+// staged in this launch is live, so a retry waits until none is held.
+static void maintainStore(void) {
     NSError *error = nil;
-    if ([store() prepare:&error] && (!startup || [SGTranslationTransfer reclaimStaging:store() error:&error]))
+    if ([store() prepare:&error] && (sg_stagingReclaimed || sg_importPreview ||
+        (sg_stagingReclaimed = [SGTranslationTransfer reclaimStaging:store() error:&error])))
         migrateStore();
     sg_storageError = error;
     refreshSummary();
@@ -92,10 +104,12 @@ static dispatch_queue_t writes(void) {
     static dispatch_queue_t queue;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        queue = dispatch_queue_create("vitrine.translations", DISPATCH_QUEUE_SERIAL);
-        dispatch_async(queue, ^{ maintainStore(YES); });
-        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationProtectedDataDidBecomeAvailable object:nil queue:nil
-            usingBlock:^(NSNotification *note) { dispatch_async(queue, ^{ maintainStore(NO); }); }];
+        queue = dispatch_queue_create("retrine.translations", DISPATCH_QUEUE_SERIAL);
+        dispatch_async(queue, ^{ maintainStore(); });
+        // A store first used before UIApplicationMain only learns it is unlocked at launch.
+        for (NSNotificationName name in @[UIApplicationProtectedDataDidBecomeAvailable, UIApplicationDidFinishLaunchingNotification])
+            [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil
+                usingBlock:^(NSNotification *note) { dispatch_async(queue, ^{ maintainStore(); }); }];
     });
     return queue;
 }
@@ -540,7 +554,6 @@ void SGSavedExport(NSArray *selection, void (^done)(NSArray<NSURL *> *, NSError 
         dispatch_async(dispatch_get_main_queue(), ^{ done(files, error); });
     });
 }
-static NSDictionary *sg_importPreview;
 static NSURL *sg_importURL;
 void SGSavedDiscardPreview(void (^done)(NSError *)) {
     dispatch_async(writes(), ^{

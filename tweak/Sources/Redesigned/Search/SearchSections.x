@@ -19,7 +19,8 @@
 // between the search field and the cards. So every cell of the list moves up by the spacing the collapsed cells above the
 // first card leave, measured from the list's own layout attributes. The move is the cell's transform, set after UIKit
 // applies the cell's attributes and on the cell's layout passes, so it holds through scrolling, reuse and reloads (a
-// compositional list with the same shape on the iOS 27 simulator, 2026-09-17), and touches follow it. Spotify's content
+// compositional list with the same shape on the iOS 27 simulator, 2026-09-17), and touches follow it. The list's content
+// size loses the same gap at its end, so the last row ends as far above it as Spotify's layout has it. Spotify's content
 // inset, which its collapsing header is worked out from, stays its own.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
@@ -42,6 +43,8 @@ static CGFloat sg_gap;
 // Collapses and expansions so far, so a layout pass of the page measures again after one.
 static NSUInteger sg_changes;
 static __weak UICollectionView *sg_list;
+// sg_list's content height as its layout last set it, before the gap was taken off.
+static CGFloat sg_layoutHeight;
 static BOOL sg_measureQueued;
 
 static NSMutableSet<NSString *> *sg_loggedMessages;
@@ -111,22 +114,28 @@ void SGRSearchCloseGap(UICollectionView *list) {
     if (!list) return;
     static CGSize lastSize;
     static NSUInteger lastChanges = NSUIntegerMax;
-    static __weak UICollectionView *lastList;
     CGSize size = list.contentSize;
-    if (list == lastList && sg_changes == lastChanges && CGSizeEqualToSize(size, lastSize)) return;
-    sg_list = lastList = list;
+    if (list == sg_list && sg_changes == lastChanges && CGSizeEqualToSize(size, lastSize)) return;
+    // A list not seen before has the height its layout gave it, none of the gap taken off yet.
+    BOOL seen = list == sg_list;
+    if (!seen) sg_layoutHeight = size.height;
+    sg_list = list;
     lastChanges = sg_changes;
-    lastSize = size;
 
     CGFloat gap = measure(list);
-    if (gap == sg_gap) return;
-    sg_gap = gap;
-    SGLog(@"redesign search: cards moved up %.0fpt, the spacing the collapsed sections above them leave", gap);
-    for (UIView *sub in list.subviews) {
-        if ([sub isKindOfClass:UICollectionViewCell.class] && isBrowseCell(((UICollectionViewCell *)sub).contentView)) {
-            shift((UICollectionViewCell *)sub);
+    BOOL moved = gap != sg_gap;
+    if (moved) {
+        sg_gap = gap;
+        SGLog(@"redesign search: cards moved up %.0fpt, the spacing the collapsed sections above them leave", gap);
+        for (UIView *sub in list.subviews) {
+            if ([sub isKindOfClass:UICollectionViewCell.class] && isBrowseCell(((UICollectionViewCell *)sub).contentView)) {
+                shift((UICollectionViewCell *)sub);
+            }
         }
     }
+    // The content's end moves up with the cards (setContentSize: below takes the gap off).
+    if (moved || !seen) list.contentSize = CGSizeMake(size.width, sg_layoutHeight);
+    lastSize = list.contentSize;
 }
 
 // After the pass that sized the cell: the list's attributes take the new height when that pass ends.
@@ -184,6 +193,18 @@ static void measureSoon(void) {
 - (void)prepareForReuse {
     %orig;
     if (objc_getAssociatedObject(self, &kCollapsedKey)) SGRRestoreCell((UICollectionViewCell *)self, &kCollapsedKey);
+}
+%end
+
+// The list's content ends the gap earlier than its layout has it, so it scrolls as far as the moved-up last row and no
+// further. Every other collection view's size goes through untouched.
+%hook UICollectionView
+- (void)setContentSize:(CGSize)size {
+    if ((UICollectionView *)self == sg_list) {
+        sg_layoutHeight = size.height;
+        size.height = MAX(0, size.height - sg_gap);
+    }
+    %orig(size);
 }
 %end
 

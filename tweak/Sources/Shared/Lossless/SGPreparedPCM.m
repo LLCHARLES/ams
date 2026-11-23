@@ -11,7 +11,7 @@
 @end
 
 static void fail(NSError **error, NSInteger code, NSString *message) {
-    if (error) *error = [NSError errorWithDomain:@"VitrineLosslessDecode" code:code
+    if (error) *error = [NSError errorWithDomain:@"RetrineLosslessDecode" code:code
                                       userInfo:@{NSLocalizedDescriptionKey:message}];
 }
 

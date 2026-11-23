@@ -425,7 +425,7 @@ static NSArray<UITabBarItem *> *itemsFor(NSArray<NSDictionary *> *entries, BOOL 
 
 // What Navbar.x composes from the same list: with nothing left shown, Spotify's own tabs come back.
 - (void)showEntries:(NSArray<NSDictionary *> *)entries {
-    BOOL custom = SGEnabled(SGRKeyNavbar), names = !SGEnabled(SGRKeyNavbarHideLabels);
+    BOOL custom = SGEnabled(SGRKeyNavbar), names = !SGHidden(SGRKeyNavbarHideLabels);
     NSMutableArray<NSDictionary *> *shown = [NSMutableArray array];
     if (custom) for (NSDictionary *entry in entries) if (![entry[SGRNavbarHidden] boolValue]) [shown addObject:entry];
     if (!custom) [shown addObjectsFromArray:stockEntries()];
@@ -697,7 +697,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
     [_preview showEntries:_entries];
     NSMutableArray<NSDictionary *> *shown = [NSMutableArray array];
     for (NSDictionary *entry in _entries) if (![entry[SGRNavbarHidden] boolValue]) [shown addObject:entry];
-    BOOL names = !SGEnabled(SGRKeyNavbarHideLabels);
+    BOOL names = !SGHidden(SGRKeyNavbarHideLabels);
     for (SGRLabelCard *card in @[_withNames, _iconsOnly]) {
         [card showEntries:shown.count ? shown : (NSArray *)_entries];
         card.selected = card.names == names;
@@ -839,7 +839,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
                        SGL(@"settings.tabbar.symbols.subtitle", @"Spotify's tabs drawn with SF Symbols; tabs you added keep their icons"), nil, nil);
             UISwitch *toggle = [UISwitch new];
             toggle.onTintColor = SGGreen();
-            toggle.on = SGFlag(SGRKeyNavbarSymbols, NO);
+            toggle.on = SGEnabled(SGRKeyNavbarSymbols);
             [toggle addTarget:self action:@selector(symbolsToggled:) forControlEvents:UIControlEventValueChanged];
             cell.accessoryView = toggle;
             break;

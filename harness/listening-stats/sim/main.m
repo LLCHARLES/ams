@@ -3,7 +3,7 @@
 // delegate. The launch line plays actions, one every 0.7 s from 1 s in; screenshot after.
 //
 //     THEOS=$HOME/theos ./build-sim.sh && xcrun simctl install <udid> build/sim/ListeningStatsHarness.app
-//     xcrun simctl launch <udid> com.vitrine.listeningstatsharness [action...]
+//     xcrun simctl launch <udid> com.retrine.listeningstatsharness [action...]
 //
 // Actions: erase (the log emptied), seed (a week, a month and a year of plays merged in), record (a track played
 // 31 s, one played 5 s, one paused after 10 s for 10 s and played 25 s more, then playback stopped: takes 82 s, so put it
@@ -16,6 +16,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "../../harness-fail.h"
+#import "../../timer-lifecycle.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Shared/Player/PlayerState.h"
@@ -301,6 +302,43 @@ static UIDocumentPickerViewController *SGHarnessPicker;
     }];
 }
 
+- (void)storyBackground {
+    Method factory = class_getClassMethod(CADisplayLink.class, @selector(displayLinkWithTarget:selector:));
+    IMP original = method_getImplementation(factory);
+    NSMutableArray<CADisplayLink *> *links = [NSMutableArray array];
+    IMP capture = imp_implementationWithBlock(^CADisplayLink *(id cls, id target, SEL selector) {
+        CADisplayLink *link = ((id (*)(id, SEL, id, SEL))original)(cls, @selector(displayLinkWithTarget:selector:), target, selector);
+        [links addObject:link];
+        return link;
+    });
+    method_setImplementation(factory, capture);
+    [self openStory:^(UIViewController *story) {
+        method_setImplementation(factory, original);
+        imp_removeBlock(capture);
+        HARNESS_CHECK(links.count == 1);
+        CADisplayLink *link = links.firstObject;
+        HARNESS_CHECK(!link.paused);
+        SGHarnessBeginTimerCapture();
+        NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+        [center postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+        HARNESS_CHECK(link.paused);
+        sg_testAppState = UIApplicationStateBackground;
+        [center postNotificationName:UIApplicationDidEnterBackgroundNotification object:nil];
+        HARNESS_CHECK(link.paused);
+        sg_testAppState = UIApplicationStateActive;
+        [center postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+        HARNESS_CHECK(!link.paused);
+        [story viewWillDisappear:NO];
+        [center postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+        HARNESS_CHECK(link.paused);
+        [story viewDidAppear:NO];
+        HARNESS_CHECK(!link.paused);
+        SGHarnessEndTimerCapture();
+        puts("PASS recap display link pauses in background and resumes only when visible");
+        exit(0);
+    }];
+}
+
 - (void)run:(NSString *)action {
     NSArray<NSString *> *parts = [action componentsSeparatedByString:@"="];
     NSString *verb = parts.firstObject, *value = parts.count > 1 ? parts[1] : @"";
@@ -326,6 +364,8 @@ static UIDocumentPickerViewController *SGHarnessPicker;
         [self chart:value.integerValue];
     } else if ([verb isEqualToString:@"story"]) {
         [self story];
+    } else if ([verb isEqualToString:@"storybackground"]) {
+        [self storyBackground];
     } else if ([verb isEqualToString:@"storyopen"]) {
         [self openStory:^(UIViewController *story) { NSLog(@"[harness] story open"); }];
     } else if ([verb isEqualToString:@"storyshare"]) {
@@ -337,7 +377,7 @@ static UIDocumentPickerViewController *SGHarnessPicker;
             [self after:2 do:^{
                 NSString *tmp = NSTemporaryDirectory();
                 for (NSString *path in [NSFileManager.defaultManager subpathsAtPath:tmp]) {
-                    if (![path.lastPathComponent hasPrefix:@"Vitrine-Recap-"]) continue;
+                    if (![path.lastPathComponent hasPrefix:@"Retrine-Recap-"]) continue;
                     UIImage *image = [UIImage imageWithContentsOfFile:[tmp stringByAppendingPathComponent:path]];
                     NSLog(@"[harness] shared %@: %.0f x %.0f px under %@", path.lastPathComponent, image.size.width * image.scale, image.size.height * image.scale,
                           story.presentedViewController.class);

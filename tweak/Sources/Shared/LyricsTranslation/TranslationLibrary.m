@@ -63,7 +63,7 @@
 - (NSString *)tableView:(UITableView *)table titleForFooterInSection:(NSInteger)section {
     if (!section) return _warning;
     if (section == 2) return nil;
-    return SGL(@"settings.translation.library.footer", @"Tap records to select them. Recovery copies are never automatically deleted. Export before uninstalling. Older Vitrine versions only see the stale legacy cache snapshot; there is no two-way sync.");
+    return SGL(@"settings.translation.library.footer", @"Tap records to select them. Recovery copies are never automatically deleted. Export before uninstalling or going back to an older version: an older version may not see these records.");
 }
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"saved"];

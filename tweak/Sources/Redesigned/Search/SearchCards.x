@@ -1,8 +1,9 @@
 // Search redesign: each category card as Liquid Glass tinted by its own color. Under the glass, the card's color runs
 // diagonally from itself at the top leading corner to a darker shade of it at the bottom trailing one; the glass is the
 // clear style with that color at 35% for its tint, so its rim catches the color and its body stays as vivid as
-// Spotify's card. The cover and the title stay Spotify's, over the glass. The card takes the card radius, continuous;
-// the title moves in with it; and the card gives a little under a press, which Spotify showed by darkening the color
+// Spotify's card. The cover stays Spotify's, over the glass, and the title is the redesign's own over Spotify's
+// (placeTitle), one size and one inset on every card. The card takes the card radius, continuous; and the card gives a
+// little under a press, which Spotify showed by darkening the color
 // the glass now covers. Picked on the iOS 27 simulator against plain tinted glass (flat on black), regular glass over
 // the color (muddy) and the cover under clear glass (smeared), 2026-09-17.
 //
@@ -21,11 +22,12 @@
 // The tint the glass takes of the card's color, and how dark the far corner of the color under it gets.
 static const CGFloat kTintAlpha = 0.35;
 static const CGFloat kFarBrightness = 0.55;
-// Where the title's top leading corner moves to, clear of the larger corner.
+// Where the title's top leading corner is, clear of the larger corner, and how many lines it may take.
 static const CGFloat kTitleInset = 12;
+static const NSInteger kTitleLines = 2;
 static const CGFloat kPressScale = 0.96;
 
-static char kPartsKey, kRoundedKey;
+static char kPartsKey, kRoundedKey, kTitleKey, kTitleWatchedKey;
 
 @interface UIView (SGREncoreBox)
 - (BOOL)isHighlighted;
@@ -143,14 +145,58 @@ static void paint(SGRSearchCardParts *parts, UIColor *color) {
     }
 }
 
-// The title's own position, before the move, is where Spotify's layout put its center.
-static void moveTitleIn(UIView *content) {
+// The title the Music app's tiles have: one size and weight on every card (Spotify draws 16 or 14 by the length of the
+// name), kTitleInset in from the top leading corner on every card, on up to kTitleLines lines as wide as Spotify's
+// label, which keeps clear of the turned cover. Spotify's label goes transparent and still measures the card; this one
+// takes its text and color on every pass of the content view and on every text Spotify sets on its label (a reused
+// card is given its new name without a pass), so it never shows the last card's.
+static UILabel *spotifyTitleIn(UIView *content, UIView **holder) {
     for (UIView *sub in content.subviews) {
         if (![NSStringFromClass(sub.class) containsString:@"EncoreLabel"]) continue;
-        CGPoint origin = CGPointMake(sub.center.x - sub.bounds.size.width / 2, sub.center.y - sub.bounds.size.height / 2);
-        CGAffineTransform moved = CGAffineTransformMakeTranslation(MAX(0, kTitleInset - origin.x), MAX(0, kTitleInset - origin.y));
-        if (!CGAffineTransformEqualToTransform(sub.transform, moved)) sub.transform = moved;
+        for (UIView *inner in sub.subviews) {
+            if (![inner isKindOfClass:UILabel.class]) continue;
+            if (holder) *holder = sub;
+            return (UILabel *)inner;
+        }
     }
+    return nil;
+}
+
+static void placeTitle(UIView *content) {
+    UIView *holder = nil;
+    UILabel *theirs = spotifyTitleIn(content, &holder);
+    UILabel *mine = objc_getAssociatedObject(content, &kTitleKey);
+    if (!theirs) {
+        mine.hidden = YES;
+        return;
+    }
+    if (!mine) {
+        mine = [UILabel new];
+        mine.numberOfLines = kTitleLines;
+        mine.lineBreakMode = NSLineBreakByTruncatingTail;
+        mine.userInteractionEnabled = NO;
+        mine.accessibilityElementsHidden = YES;
+        objc_setAssociatedObject(content, &kTitleKey, mine, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (mine.superview != content) [content addSubview:mine];
+    else if (content.subviews.lastObject != mine) [content bringSubviewToFront:mine];
+    mine.hidden = NO;
+    if (!objc_getAssociatedObject(theirs, &kTitleWatchedKey)) {
+        objc_setAssociatedObject(theirs, &kTitleWatchedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        __weak UIView *weakContent = content;
+        SGRObserveText(theirs, ^(UILabel *label) { if (weakContent) placeTitle(weakContent); });
+    }
+    UIFont *font = SGCategoryCappedFont(UIFontTextStyleHeadline, UIFontWeightSemibold, UIContentSizeCategoryLarge);
+    if (![mine.font isEqual:font]) mine.font = font;
+    if (![mine.text ?: @"" isEqualToString:theirs.text ?: @""]) mine.text = theirs.text;
+    if (theirs.textColor && ![mine.textColor isEqual:theirs.textColor]) mine.textColor = theirs.textColor;
+    if (theirs.alpha != 0) theirs.alpha = 0;
+    CGFloat width = MIN(holder.bounds.size.width, content.bounds.size.width - 2 * kTitleInset);
+    CGFloat height = ceil([mine sizeThatFits:CGSizeMake(width, CGFLOAT_MAX)].height);
+    BOOL rtl = content.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    mine.textAlignment = NSTextAlignmentNatural;
+    CGRect frame = CGRectMake(rtl ? content.bounds.size.width - kTitleInset - width : kTitleInset, kTitleInset, width, height);
+    if (!CGRectEqualToRect(mine.frame, frame)) mine.frame = frame;
 }
 
 static void roundCover(UIView *content) {
@@ -195,7 +241,11 @@ static void style(UIView *box) {
         parts.glass.frame = bounds;
         SGShapeGlass(parts.glass, SGRRadiusCard, NO);
     }
-    moveTitleIn(content);
+    placeTitle(content);
+    if (!objc_getAssociatedObject(content, &kTitleWatchedKey)) {
+        objc_setAssociatedObject(content, &kTitleWatchedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        SGRObserveLayout(content, ^(UIView *view) { placeTitle(view); });
+    }
     roundCover(content);
     SGLogOnce(&sg_loggedMessages, parts.glass ? @"category cards on tinted glass" : @"category cards on their color, no glass", kLogFormat);
 }

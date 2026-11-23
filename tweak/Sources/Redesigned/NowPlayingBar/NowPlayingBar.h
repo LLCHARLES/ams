@@ -8,7 +8,24 @@
 
 @class SGModRow;
 
-#define SGRHideBarConnect @"spotifyglass.redesign.hide.barConnect"   // the device button on the card
+// The device button on the card, hidden until switched back on (BarConnect.x), as the Music app's mini player has none.
+// The minimized row's own choice (SGRKeyBarInlineConnect) wins there.
+#define SGRHideBarConnect @"spotifyglass.redesign.hide.barConnect"
+// Whether the card is in the minimized tab bar's row with its device button kept there (NowPlayingBar.x tuckExtras).
+BOOL SGRBarRowKeepsConnect(void);
+// The device button hidden while SGRHideBarConnect is on and the row does not keep it (SGRBarRowKeepsConnect), and
+// shown again otherwise, only where this hid it (BarConnect.x). Run on every layout of Spotify's bar and by tuckExtras
+// as the card goes into the row or leaves it, so both read the same state in one pass.
+void SGRBarPlaceConnect(UIView *bar);
+// Whether `view` stands in one of Spotify's sheets (the DJ request one has the bar's class at its top), where the bar is
+// Spotify's own and the redesign leaves it as it is (NowPlayingBar.x).
+BOOL SGRBarInSheet(UIView *view);
+// Spotify's own flag for the card's add button. Without an override (the Mini player section's row stores one either
+// way, the All flags page may too) the redesign answers it off at launch (NowPlayingBarSettings.m), so the card ends
+// in play and Next as the Music app's does; a reset to stock shows it.
+#define SGRBarAddFlag @"ios-feature-nowplayingbar.add_button"
+// Whether the add button is left out: the override's answer where there is one, else hidden unless reset to stock.
+BOOL SGRBarAddHidden(void);
 // The device button kept on the card in the minimized tab bar's row (NowPlayingBar.x), off unless set: by
 // default the row has the cover, the title and play alone, as the Music app's. Read each time the card goes
 // into the row, so a change shows the next time the bar minimizes.
@@ -16,7 +33,7 @@
 // The artists on a second line under the title in that row, off unless set, and only when both lines fit the
 // bar's height (NowPlayingBar.x SGRBarText). A change lays the bar out again at once.
 #define SGRKeyBarInlineArtist @"spotifyglass.redesign.inlinePlayer.artist"
-// A Next button after play on the full card, as the Music app's mini player has, off unless set
+// A Next button after play on the full card, as the Music app's mini player has, on until switched off
 // (NowPlayingBar.x SGRBarNextButton). The minimized row keeps play alone. A change lays the bar out again at once.
 #define SGRKeyBarNextButton @"spotifyglass.redesign.nowPlayingBar.nextButton"
 // The cover's shape on the card, Circle unless set; the player's open and close morph from it. A change lays the

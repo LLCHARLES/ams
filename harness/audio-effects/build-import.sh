@@ -16,7 +16,7 @@ xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-a
 python3 - "$APP" <<'PY'
 from pathlib import Path
 import plistlib,sys
-info={'CFBundleExecutable':'ImportHarness','CFBundleIdentifier':'dev.vitrine.audio-import',
+info={'CFBundleExecutable':'ImportHarness','CFBundleIdentifier':'dev.retrine.audio-import',
       'CFBundleName':'ImportHarness','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','UILaunchScreen':{},
       'UIApplicationSceneManifest':{'UISceneConfigurations':{'UIWindowSceneSessionRoleApplication':[
       {'UISceneConfigurationName':'Default','UISceneDelegateClassName':'SGRHarnessScene'}]}}}

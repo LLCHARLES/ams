@@ -1,5 +1,6 @@
 #import "Core/SGCore.h"
 #import "SGRField.h"
+#import "SGRMotionBudget.h"
 #import "SGRFlow.h"
 #import "SGRFluid.h"
 #import "SGRBridges.h"
@@ -242,7 +243,8 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     _watching = YES;
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-                                      NSProcessInfoPowerStateDidChangeNotification, UIAccessibilityReduceMotionStatusDidChangeNotification]) {
+                                      NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+                                      UIAccessibilityReduceMotionStatusDidChangeNotification]) {
         [center addObserver:self selector:@selector(updateMotionSoon) name:name object:nil];
     }
     SGRObservePlayerTransition(self, ^(id owner) { [owner updateMotion]; });
@@ -252,7 +254,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
-// The power state is reported off the main thread.
+// Power and thermal changes can be reported off the main thread.
 - (void)updateMotionSoon {
     dispatch_async(dispatch_get_main_queue(), ^{ [self updateMotion]; });
 }
@@ -262,7 +264,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     // A locked phone keeps the player in its window, so being in front counts as much as being in one.
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     BOOL may = self.window && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion()
-            && !NSProcessInfo.processInfo.lowPowerModeEnabled && !_motionHeld;
+            && !SGRMotionHeldForPowerOrHeat() && !_motionHeld;
     _fluidLayer.moving = may && _fluid;
     BOOL moving = may && _flows && !_flow.hidden;
     if (!_flow || moving == _flow.moving) return;

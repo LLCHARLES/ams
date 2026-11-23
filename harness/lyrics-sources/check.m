@@ -98,7 +98,7 @@ void SGLyricsSourceRequest(NSURL *url, NSDictionary *headers, NSData *body, void
     NSInteger status = 200;
     id answer;
     if ([url.host isEqualToString:@"lrclib.net"]) {
-        CHECK([headers[@"User-Agent"] hasPrefix:@"Vitrine "] && !body);
+        CHECK([headers[@"User-Agent"] hasPrefix:@"Retrine "] && !body);
         answer = sg_answer(url, nil);
     } else answer = sg_sourceAnswer(url, headers, body, &status);
     NSData *data = [answer isKindOfClass:NSString.class] ? [answer dataUsingEncoding:NSUTF8StringEncoding] :
@@ -443,6 +443,27 @@ static void checkLive(NSString *path) {
 
 static id deezerBody(NSDictionary *lyrics) { return @{@"data": @{@"track": @{@"lyrics": lyrics}}}; }
 
+static void checkMalformedPayloads(void) {
+    for (NSNumber *qq in @[@YES, @NO]) for (id payload in @[@"!invalid-base64!", @""]) {
+        SGLyricsQuery *query = [SGLyricsQuery new];
+        query.title = @"Fixture"; query.artist = @"Singer"; query.seconds = 200;
+        query.requestContext = [SGLyricsRequestContext new];
+        sg_answer = ^id(NSURL *url, NSDictionary *body) {
+            if (qq.boolValue) {
+                if (body[@"req"]) return @{@"req": @{@"data": @{@"body": @{@"song": @{@"list": @[
+                    @{@"id": @1, @"title": @"Fixture", @"interval": @200, @"singer": @[@{@"name": @"Singer"}]}]}}}}};
+                return @{@"music.musichallSong.PlayLyricInfo.GetPlayLyricInfo": @{@"data": @{@"lyric": payload}}};
+            }
+            if ([url.host isEqual:@"krcs.kugou.com"]) return @{@"status": @200, @"candidates": @[
+                @{@"id": @"1", @"accesskey": @"k", @"song": @"Fixture", @"singer": @"Singer", @"duration": @200000}]};
+            return @{@"status": @200, @"content": payload};
+        };
+        CHECK(!sourceAnswer(qq.boolValue ? SGQQMusicAsk : SGKuGouAsk, query));
+        CHECK(query.requestContext.failed == ([payload length] != 0));
+    }
+    puts("decoder rejection: malformed QRC/KRC fails; empty content remains a miss");
+}
+
 static void checkNewSources(void) {
     SGLyricsResult *result = SGBugsResult(@{@"lyrics": @"0.3005|Made up＃8.9|Another line＃"}, YES);
     CHECK(result.synced && result.karaokeLines.firstObject.start == 301 && result.karaokeLines[1].start == 8900);
@@ -566,7 +587,8 @@ static void checkNewSources(void) {
         NSDictionary *request = [NSJSONSerialization JSONObjectWithData:body options:0 error:nil];
         CHECK([request[@"variables"][@"trackId"] isEqualToString:@"4"]);
         lyricsRequests++;
-        if (refuse) return @{@"errors": @[@{@"extensions": @{@"code": @"UNAUTHENTICATED"}}]};
+        if (refuse) return @{@"errors": @[@{@"message": @"Jwt token is missing", @"type": @"JwtTokenMissingError",
+            @"path": @[@"track"], @"extensions": @{@"type": @"JwtTokenMissingError"}}], @"data": @{@"track": NSNull.null}};
         return deezer;
     };
     calls = 0; NSUInteger requests = sg_sourceRequests;
@@ -578,10 +600,24 @@ static void checkNewSources(void) {
     SGDeezerAskWith(@"made-up-cookie", query, ^(SGLyricsResult *r) { got = r; calls++; });
     CHECK(calls == 1 && !got && logins == 2 && lyricsRequests == 2);
     refuse = NO;
+    query.requestContext = [SGLyricsRequestContext new];
+    SGDeezerAskWith(@"made-up-cookie", query, ^(SGLyricsResult *r) { got = r; });
+    CHECK(!got && query.requestContext.failed);
+    SGDeezerForgetKey();
     SGDeezerAskWith(@"made-up-cookie", query, ^(SGLyricsResult *r) { got = r; });
     CHECK(got.wordTimed && logins == 3);
     SGDeezerAskWith(@"made-up-cookie", query, ^(SGLyricsResult *r) { got = r; });
     CHECK(got.wordTimed && logins == 3 && lyricsRequests == 4);
+
+    id (^healthyDeezer)(NSURL *, NSDictionary *, NSData *, NSInteger *) = sg_sourceAnswer;
+    sg_sourceAnswer = ^id(NSURL *url, NSDictionary *headers, NSData *body, NSInteger *status) {
+        if ([url.host isEqual:@"pipe.deezer.com"]) return @{@"data": @{@"track": NSNull.null}};
+        return healthyDeezer(url, headers, body, status);
+    };
+    query.requestContext = [SGLyricsRequestContext new];
+    SGDeezerAskWith(@"made-up-cookie", query, ^(SGLyricsResult *r) { got = r; });
+    CHECK(!got && query.requestContext.failed);
+    sg_sourceAnswer = healthyDeezer;
 
     // An HTTP auth failure refreshes once and still answers the original ask only once.
     id (^previousAnswer)(NSURL *, NSDictionary *, NSData *, NSInteger *) = sg_sourceAnswer;
@@ -891,6 +927,14 @@ static void checkPetitLyrics(void) {
     sg_sourceAnswer = ^id(NSURL *url, NSDictionary *headers, NSData *body, NSInteger *status) { return @"<response><songs>"; };
     CHECK(!awaitReply(^(void (^done)(id)) { SGPetitLyricsAsk(query, done); }, nil));
     CHECK(query.requestContext.failed);
+    for (NSString *payload in @[@"", @"<wsy><broken>"]) {
+        query.requestContext = [SGLyricsRequestContext new];
+        sg_sourceAnswer = ^id(NSURL *url, NSDictionary *headers, NSData *body, NSInteger *status) {
+            return wrap(petitSong(@"5", query.title, query.artist, @"180000", @"3", payload));
+        };
+        CHECK(!awaitReply(^(void (^done)(id)) { SGPetitLyricsAsk(query, done); }, nil));
+        CHECK(query.requestContext.failed == (payload.length != 0));
+    }
     puts("PetitLyrics: XML/base64, overlapping word timing, plain fallback, ranked matching, empty and failure checks passed");
 }
 
@@ -1047,6 +1091,7 @@ int main(int argc, char **argv) {
         got = sourceAnswer(SGQQMusicAsk, query);
         CHECK(!got && !asked);
 
+        checkMalformedPayloads();
         checkNewSources();
         checkDeezerKeychain();
         checkReadingAndSearch();

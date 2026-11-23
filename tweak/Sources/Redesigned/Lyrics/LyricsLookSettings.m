@@ -14,6 +14,12 @@ static const CGFloat kChipHeight = 36, kChipGap = 8, kStripGap = 12, kStripPad =
 
 #pragma mark - the sliders
 
+static SGModRow *sizeRow(NSString *title, SGRLyricsPlace place) {
+    NSArray *names = SGRLyricsSizeNames();
+    return SGMenuRow(title, names, ^NSString * { return names[(NSUInteger)SGRLyricsSizeChoice(place)]; },
+                     ^(NSInteger index) { SGRSetLyricsSizeChoice(place, index); });
+}
+
 // A page of the five sliders, each storing as it moves. A preset picked on the page while the sheet is up
 // is read back into them; their own changes are not, so a slider is never reloaded under the finger.
 @interface SGRLyricsStyleSheet : SGModPage
@@ -80,12 +86,6 @@ static SGModRow *lookSlider(NSString *title, double least, double most, double s
     }, format);
 }
 
-// One place's size (LyricsLook.h), picked from a menu on the row.
-static SGModRow *placeRow(NSString *title, SGRLyricsPlace place) {
-    return SGMenuRow(title, SGRLyricsSizeNames(), ^NSString * { return SGRLyricsSizeNames()[(NSUInteger)SGRLyricsSizeChoice(place)]; },
-                     ^(NSInteger index) { SGRSetLyricsSizeChoice(place, index); });
-}
-
 static void presentStyleSheet(UIViewController *owner) {
     static __weak id sheetPage;
     NSArray<SGModRow *> *rows = @[
@@ -103,12 +103,10 @@ static void presentStyleSheet(UIViewController *owner) {
     NSString *footer = SGL(@"settings.lyricslook.footer", @"Blur is how much the lines away from the one sung soften. Glow and Wave are how strongly a held "
                        @"word glows and its letters rise. 100% is Apple Music's.");
     NSArray<SGModRow *> *places = @[
-        placeRow(SGL(@"settings.lyricslook.place.under_cover", @"Under the cover"), SGRLyricsPlaceUnderCover),
-        placeRow(SGL(@"settings.lyricslook.place.player", @"In the player"), SGRLyricsPlacePlayer),
-        placeRow(SGL(@"settings.lyricslook.place.full_screen", @"Landscape and full screen"), SGRLyricsPlaceFullScreen),
+        sizeRow(SGL(@"settings.lyricslook.place.player", @"In the player"), SGRLyricsPlacePlayer),
+        sizeRow(SGL(@"settings.lyricslook.place.full_screen", @"Landscape and full screen"), SGRLyricsPlaceFullScreen),
     ];
-    NSString *placesFooter = SGL(@"settings.lyricslook.place.footer", @"Default keeps each place at Text size, and the line under the cover at "
-                                 @"your iPhone's text size. A percentage sets that place larger or smaller.");
+    NSString *placesFooter = SGL(@"settings.lyricslook.place.footer", @"Default uses Text size. A percentage changes only that place.");
     SGRLyricsStyleSheet *page = [[SGRLyricsStyleSheet alloc] initWithTitle:SGL(@"settings.lyricslook.title", @"Lyrics Style") intro:nil
                                                                  sections:@[SGNotedSection(nil, rows, footer),
                                                                             SGNotedSection(SGL(@"settings.lyricslook.place.header", @"Size in each place"),
@@ -145,6 +143,17 @@ static UIColor *readableOn(UIColor *color) {
     return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.55 ? UIColor.blackColor : UIColor.whiteColor;
 }
 
+// The least scroll from where the strip is that shows rect between its insets, kept within the range the insets allow.
+// scrollRectToVisible: does not keep to that range: it took the first preset's gap past the inset, and the strip
+// bounced back after (issue #41).
+static CGPoint stripOffsetShowing(UIScrollView *strip, CGRect rect) {
+    UIEdgeInsets inset = strip.adjustedContentInset;
+    CGFloat x = strip.contentOffset.x, width = strip.bounds.size.width;
+    if (CGRectGetMaxX(rect) > x + width - inset.right) x = CGRectGetMaxX(rect) - width + inset.right;
+    if (CGRectGetMinX(rect) < x + inset.left) x = CGRectGetMinX(rect) - inset.left;
+    return CGPointMake(MAX(-inset.left, MIN(x, strip.contentSize.width + inset.right - width)), 0);
+}
+
 static UIButtonConfiguration *chipConfiguration(NSString *title, NSString *symbol, BOOL chosen) {
     UIButtonConfiguration *config;
     if (@available(iOS 26.0, *)) {
@@ -179,7 +188,7 @@ static UIButtonConfiguration *chipConfiguration(NSString *title, NSString *symbo
     UIButton *_drawingStyle;
     UILabel *_note;
     UISelectionFeedbackGenerator *_feedback;
-    BOOL _stripPlaced, _showChosen;
+    BOOL _appeared, _showChosen;
 }
 
 - (instancetype)initWithTitle:(NSString *)title note:(NSString *)note sections:(NSArray<SGModSection *> *)sections {
@@ -270,6 +279,11 @@ static UIButtonConfiguration *chipConfiguration(NSString *title, NSString *symbo
     presentStyleSheet(self);
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    _appeared = YES;
+}
+
 // The header keeps the height it is given, so it is measured here and handed back to the table when it
 // changes: the card at the table's inset, the presets and then the sliders' button in a strip that scrolls
 // from edge to edge of the screen, and the note under them.
@@ -291,13 +305,16 @@ static UIButtonConfiguration *chipConfiguration(NSString *title, NSString *symbo
     _strip.frame = CGRectMake(0, top, width, kChipHeight + 2 * kStripPad);
     _strip.contentInset = UIEdgeInsetsMake(0, inset, 0, inset);
     _strip.contentSize = CGSizeMake(MAX(0, x - kChipGap), _strip.bounds.size.height);
-    if (!_stripPlaced) {   // the first button at the inset, where the card starts
-        _strip.contentOffset = CGPointMake(-inset, 0);
-        _stripPlaced = YES;
-    }
     NSInteger chosen = SGRLyricsLookPresetIndex(SGRLyricsLookNow());
-    if (_showChosen && chosen >= 0) {
-        [_strip scrollRectToVisible:CGRectInset(_chips[(NSUInteger)chosen].frame, -kChipGap, 0) animated:self.view.window != nil];
+    CGRect chosenRect = chosen >= 0 ? CGRectInset(_chips[(NSUInteger)chosen].frame, -kChipGap, 0) : CGRectNull;
+    if (!_appeared) {
+        // Until the page is on screen the strip is put where it rests on every pass, as the push settles the table's
+        // margins, so the presets come in already there: the first button at the inset, where the card starts, then
+        // the chosen one in sight. Scrolled once shown, they slid in late (issue #41).
+        _strip.contentOffset = CGPointMake(-inset, 0);
+        if (chosen >= 0) _strip.contentOffset = stripOffsetShowing(_strip, chosenRect);
+    } else if (_showChosen && chosen >= 0) {
+        [_strip setContentOffset:stripOffsetShowing(_strip, chosenRect) animated:self.view.window != nil];
     }
     _showChosen = NO;
     CGFloat styleHeight = MAX(44, ceil([_drawingStyle sizeThatFits:CGSizeMake(inner, CGFLOAT_MAX)].height));

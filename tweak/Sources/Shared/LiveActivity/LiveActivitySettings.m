@@ -84,8 +84,8 @@ static SGModRow *missingRow(void) {
     SGModRow *row = SGWarningRow(SGL(@"settings.liveactivity.missing.title", @"Missing from this install"), SGL(@"settings.liveactivity.missing.subtitle", @"Tap for why"), ^{
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.liveactivity.missing.alert.title", @"Live Activity is missing")
             message:!hasActivityExtension()
-                ? SGL(@"settings.liveactivity.missing.extension.message", @"This IPA does not contain Vitrine's Live Activity extension, so Live Activity cannot run. If it was built without app extensions, rebuild without NO_PLUGINS=1 (turn off Remove every app extension in CI).")
-                : SGL(@"settings.liveactivity.missing.alert.message", @"iOS shows a Live Activity only for an app that says it has one, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so iOS turns the card down. Build the IPA with Vitrine to get it.")
+                ? SGL(@"settings.liveactivity.missing.extension.message", @"The lock screen Live Activity is unavailable in this install. App extensions may have been removed during signing or left out of the IPA; LiveContainer also cannot register them. To use Live Activity, keep app extensions when signing and install an IPA that includes them directly, outside LiveContainer. The rest of Retrine still works.")
+                : SGL(@"settings.liveactivity.missing.alert.message", @"iOS shows a Live Activity only for an app that says it has one, and only Retrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Retrine's .deb injected by hand, so iOS turns the card down. Build the IPA with Retrine to get it.")
             preferredStyle:UIAlertControllerStyleAlert];
         alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];

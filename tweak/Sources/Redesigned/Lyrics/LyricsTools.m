@@ -604,7 +604,16 @@ SGModRow *SGRLyricsKeepAwakeRow(void) {
     row.changed = ^(BOOL on) {
         SGRLyricsKeepAwakeOn();
         sgr_keepAwake = on;
-        if (!on) for (id holder in sgr_holders.allObjects) SGRLyricsHoldAwake(holder, NO);
+        [NSNotificationCenter.defaultCenter postNotificationName:SGRKeyLyricsKeepAwake object:nil];
+    };
+    return row;
+}
+
+SGModRow *SGRLyricsFullRateRow(void) {
+    SGModRow *row = SGSwitchRow(SGL(@"settings.lyrics.full_rate.title", @"Smooth lyrics (120 Hz)"),
+                                SGL(@"settings.lyrics.full_rate.subtitle", @"Off draws the lyrics at up to 60 Hz to use less battery. Only ProMotion displays show a difference."), SGRKeyLyricsFullRate);
+    row.changed = ^(BOOL on) {
+        [NSNotificationCenter.defaultCenter postNotificationName:SGRKeyLyricsFullRate object:nil];
     };
     return row;
 }

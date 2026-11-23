@@ -1,5 +1,5 @@
 // Mod > Report a problem: what went wrong, a screen recording of it happening and the diagnostics, kept
-// in one folder on this phone — Application Support/Vitrine/Reports/<uuid>/ with report.json,
+// in one folder on this phone — Application Support/Retrine/Reports/<uuid>/ with report.json,
 // diagnostics.txt and its .mov recordings — since the mod has no server; Send hands them to the share
 // sheet. The list of the reports kept so far opens each one to add more, refresh the diagnostics, send
 // it again or delete it.
@@ -9,9 +9,11 @@
 // user reaches while the problem is recorded.
 #import <ReplayKit/ReplayKit.h>
 #import "Core/SGCore.h"
+#import "Core/SGDataRoot.h"
 #import "Settings/SGPageStyle.h"
 #import "Settings/SGModPage.h"
 #import "About.h"
+#import "ReportFolder.h"
 
 static NSString *const kReportFile = @"report.json";
 static NSString *const kDiagnosticsFile = @"diagnostics.txt";
@@ -19,8 +21,7 @@ static NSString *const kDiagnosticsFile = @"diagnostics.txt";
 // ---- storage -------------------------------------------------------------------------------------------
 
 static NSURL *reportRoot(void) {
-    NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask].firstObject;
-    return [[support URLByAppendingPathComponent:@"Vitrine" isDirectory:YES] URLByAppendingPathComponent:@"Reports" isDirectory:YES];
+    return [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Reports" isDirectory:YES];
 }
 
 static NSURL *reportFolder(NSString *identifier) {
@@ -451,15 +452,16 @@ enum { SGReportSectionText, SGReportSectionActions, SGReportSectionList, SGRepor
 - (NSString *)ensureReport {
     if (_deleted) return nil;
     if (_identifier) return _identifier;
-    _identifier = NSUUID.UUID.UUIDString.lowercaseString;
+    NSURL *folder = SGCreateReportFolder(reportRoot());
+    if (!folder) return nil;
+    _identifier = folder.lastPathComponent;
     _meta[@"created"] = isoNow();
     _meta[@"mod"] = @(SG_VERSION);
     _meta[@"spotify"] = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"unknown";
     _meta[@"ios"] = UIDevice.currentDevice.systemVersion;
     _meta[@"text"] = @"";
     _meta[@"recordings"] = @[];
-    [NSFileManager.defaultManager createDirectoryAtURL:reportFolder(_identifier) withIntermediateDirectories:YES attributes:nil error:nil];
-    writeMeta(reportFolder(_identifier), _meta);
+    writeMeta(folder, _meta);
     return _identifier;
 }
 
@@ -471,6 +473,7 @@ enum { SGReportSectionText, SGReportSectionActions, SGReportSectionList, SGRepor
     // Empty text on a report with nothing on disk makes no report: Back from a blank page leaves no folder.
     if (!_identifier && !trimmed.length) return;
     NSString *identifier = [self ensureReport];
+    if (!identifier) return;
     _meta[@"text"] = _text.text ?: @"";
     writeMeta(reportFolder(identifier), _meta);
 }
@@ -506,7 +509,8 @@ enum { SGReportSectionText, SGReportSectionActions, SGReportSectionList, SGRepor
     if (_deleted) return;
     [self saveText];
     [self reloadList];
-    startReportRecording([self ensureReport], self);
+    NSString *identifier = [self ensureReport];
+    if (identifier) startReportRecording(identifier, self);
 }
 
 - (void)send {
@@ -521,7 +525,9 @@ enum { SGReportSectionText, SGReportSectionActions, SGReportSectionList, SGRepor
                     SGL(@"settings.report.share.empty.message", @"Write what went wrong, record the screen, or both."));
         return;
     }
-    NSURL *folder = reportFolder([self ensureReport]);
+    NSString *identifier = [self ensureReport];
+    if (!identifier) return;
+    NSURL *folder = reportFolder(identifier);
     _sending = YES;
     SGExportDiagnosticsToURL([folder URLByAppendingPathComponent:kDiagnosticsFile], ^(NSError *error) {
         // The flag owns the export only. A skipped or refused presentation must never latch Send.

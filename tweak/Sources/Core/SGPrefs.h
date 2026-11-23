@@ -7,8 +7,11 @@
 // Set by the reset, after the sweep: an unset switch then reads off rather than the way the build
 // came, so a reset is stock Spotify, for every switch there is and every one added later.
 #define SGKeyStock @"spotifyglass.stock"
+// Shared with Diagnostics so screen dumps omit the user's server URL.
+#define SGKeySponsorBlockServer @"spotifyglass.sponsorblock.serverURL"
 // Install-local authentication for the debug driver, never part of settings backups or reports.
 #define SGKeyDriverToken @"spotifyglass.driver.token"
+// Install-local rotation receipt, not branding: renaming it would rotate an existing token again.
 #define SGKeyDriverTokenRotated @"vitrine.private.driver.token.rotated"
 #define SGKeyDriverTokenLegacyRotation @"spotifyglass.driver.token.rotated"
 // Credentials and their migration state stay on this install, out of backups and screen trees.

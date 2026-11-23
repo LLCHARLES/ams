@@ -1,5 +1,6 @@
-# Entry points; the real work is in scripts/. IPA defaults to the first file in ipa/.
-IPA ?= $(firstword $(wildcard ipa/*.ipa))
+# Entry points; the real work is in scripts/. IPA defaults to the release base, Spotify 9.2.0, when it is in
+# ipa/, and otherwise to the first file there.
+IPA ?= $(firstword $(wildcard ipa/Spotify-9.2.0.ipa) $(wildcard ipa/*.ipa))
 
 # What goes on the phone is the mod alone. FLEX is the inspector `make trees` reads the screens
 # through, so it rides along only when it is asked for: make install FLEX=1. (A make target cannot
@@ -8,8 +9,15 @@ FLEX ?= 0
 FLEX_ARG := $(if $(filter 0,$(FLEX)),--no-flex,)
 WIREGUARD ?= 1
 export WIREGUARD
-PIXIE ?= 0
-PIXIE_ARG := $(if $(filter 1,$(PIXIE)),--pixie,)
+PIXIE ?= 1
+export PIXIE
+ifeq ($(PIXIE),1)
+# Explicit IPA= and environment inputs still win over the Pixie primary target.
+ifeq ($(origin IPA),file)
+IPA := $(or $(wildcard $(shell python3 -B NativeDownloads/tools/pixie_target.py --primary-ipa)),$(IPA))
+endif
+endif
+PIXIE_ARG := $(if $(filter 1,$(PIXIE)),--pixie,--no-pixie)
 NO_PLUGINS ?= 0
 NO_PLUGINS_ARG := $(if $(filter 1,$(NO_PLUGINS)),--no-plugins,)
 
@@ -21,7 +29,7 @@ DEV_ICON ?= docs/icon.png
 .PHONY: build release install quick trees session log flags
 build:    ## FLEX + glass IPA into out/
 	./scripts/pipeline.sh $(IPA) $(PIXIE_ARG) $(NO_PLUGINS_ARG)
-release:  ## glass only, no FLEX
+release:  ## Pixie IPA by default (PIXIE=0 to exclude), no FLEX
 	./scripts/pipeline.sh $(IPA) --no-flex $(PIXIE_ARG) $(NO_PLUGINS_ARG)
 install:  ## build, sign with your certificate, push to the phone on USB (FLEX=1 to take FLEX too)
 	./scripts/pipeline.sh $(IPA) --install $(FLEX_ARG) $(PIXIE_ARG) $(NO_PLUGINS_ARG) --name "$(DEV_NAME)" --icon "$(DEV_ICON)" -o out/spoti.dev.ipa

@@ -38,7 +38,7 @@ cat > "$APP/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>PagePreviewsHarness</string>
-<key>CFBundleIdentifier</key><string>com.vitrine.page-previews-harness</string>
+<key>CFBundleIdentifier</key><string>com.retrine.page-previews-harness</string>
 <key>CFBundleName</key><string>PagePreviewsHarness</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>CFBundleShortVersionString</key><string>1.0</string>
@@ -64,10 +64,10 @@ trap 'xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID"
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" >/dev/null
 xcrun simctl install "$UDID" "$APP"
-SIMCTL_CHILD_PAGE_PREVIEWS_PNG="$OUT/png" xcrun simctl launch --console-pty "$UDID" com.vitrine.page-previews-harness \
+SIMCTL_CHILD_PAGE_PREVIEWS_PNG="$OUT/png" xcrun simctl launch --console-pty "$UDID" com.retrine.page-previews-harness \
     -AppleLanguages '(en)' -AppleLocale en_US | tee "$OUT/run.log"
 grep -q "page previews: all checks passed" "$OUT/run.log"
 # Again right to left: the same checks, the PNGs named <...>-rtl.png, and the cards mirrored (main.m, the mirror check).
-SIMCTL_CHILD_PAGE_PREVIEWS_PNG="$OUT/png" xcrun simctl launch --console-pty "$UDID" com.vitrine.page-previews-harness \
+SIMCTL_CHILD_PAGE_PREVIEWS_PNG="$OUT/png" xcrun simctl launch --console-pty "$UDID" com.retrine.page-previews-harness \
     rtl -AppleLanguages '(en)' -AppleLocale en_US -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES | tee "$OUT/run-rtl.log"
 grep -q "page previews: all checks passed" "$OUT/run-rtl.log"

@@ -57,7 +57,7 @@ mutex off render. Do not relax sequential consistency of reader admission and po
 re-proving reclamation: a reader must increment before loading the active snapshot.
 
 This is not sample-transparent output: substitution occurs after Spotify's mixer/EQ, potentially
-bypassing normalization, fades and ducking. Existing Vitrine stages follow it, and the original decoder
+bypassing normalization, fades and ducking. Existing Retrine stages follow it, and the original decoder
 still consumes data. Native stalling causes native fallback, not continued external playback. There is
 no crossfade between sources. The prototype's whole-span fallback can itself be audible.
 
@@ -70,7 +70,7 @@ only, with a stand-in processing stage; it does not run Spotify or Sing's ML eng
 ```sh
 THEOS="$HOME/theos" sh harness/lossless/handoff-build.sh
 xcrun simctl install booted harness/lossless/build/handoff/LosslessHandoff.app
-xcrun simctl launch --console booted dev.vitrine.lossless-handoff > /tmp/lossless-handoff.log 2>&1
+xcrun simctl launch --console booted dev.retrine.lossless-handoff > /tmp/lossless-handoff.log 2>&1
 ```
 
 Require `RESULT failures=0` and no `FAIL` lines. A 30-second watchdog catches an incomplete run. The
@@ -87,9 +87,9 @@ two outputs. The new direct test separately rejects a wrong output identity.
 Full tweak package build (does not install):
 
 ```sh
-THEOS="$HOME/theos" CLANG_MODULE_CACHE_PATH=/tmp/vitrine-lossless-module-cache \
+THEOS="$HOME/theos" CLANG_MODULE_CACHE_PATH=/tmp/retrine-lossless-module-cache \
   env -u MAKELEVEL gmake -C tweak package -j4 \
-  'ADDITIONAL_SWIFTFLAGS=-module-cache-path /tmp/vitrine-lossless-module-cache'
+  'ADDITIONAL_SWIFTFLAGS=-module-cache-path /tmp/retrine-lossless-module-cache'
 ```
 
 A fresh worktree also needs its ignored `SGFlagList.m` generated from the target IPA with
@@ -120,9 +120,9 @@ this branch merely to enable lossless: replacement remains inactive.
 Build the diagnostic package without installing:
 
 ```sh
-THEOS="$HOME/theos" CLANG_MODULE_CACHE_PATH=/private/tmp/vitrine-anchor-module-cache \
+THEOS="$HOME/theos" CLANG_MODULE_CACHE_PATH=/private/tmp/retrine-anchor-module-cache \
   env -u MAKELEVEL gmake -C tweak package -j4 SG_DRIVER=1 \
-  'ADDITIONAL_SWIFTFLAGS=-module-cache-path /private/tmp/vitrine-anchor-module-cache'
+  'ADDITIONAL_SWIFTFLAGS=-module-cache-path /private/tmp/retrine-anchor-module-cache'
 ```
 
 The package must be used with a FLEX-carrying app for the runtime check to pass. A non-FLEX package
@@ -243,8 +243,8 @@ producer/consumer check on the Mac:
 
 ```sh
 clang -std=c11 -Wall -Wextra -Werror -Wno-unused-parameter -O2 -pthread \
-  harness/lossless/anchor-ring.c -o /tmp/vitrine-anchor-ring
-/tmp/vitrine-anchor-ring
+  harness/lossless/anchor-ring.c -o /tmp/retrine-anchor-ring
+/tmp/retrine-anchor-ring
 ```
 
 Layer and whitespace checks pass. No commit, push, phone installation or main-checkout edit was made.

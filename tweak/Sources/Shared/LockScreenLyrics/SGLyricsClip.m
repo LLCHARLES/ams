@@ -163,6 +163,10 @@ CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
     CGImageRef blurred = SGLyricsBackgroundCreate(cover, size, style);
     if (!blurred) return NULL;
     CGContextRef context = newContext(size, NULL, 0);
+    if (!context) {
+        CGImageRelease(blurred);
+        return NULL;
+    }
     CGContextDrawImage(context, (CGRect){CGPointZero, size}, blurred);
     CGImageRelease(blurred);
     Lights lights = {0};
@@ -291,11 +295,15 @@ static void drawCut(CTFrameRef frame, NSAttributedString *words, CGContextRef co
 // carry a shadow, the dimmed lines are less dim, and the image is only the words' box, which `drawn` gets
 // the place of in the clip. With `scrim` (Over the artwork on its cover kept sharp) the image carries the
 // gradient behind them.
-static CGImageRef newWords(NSString *previous, NSString *line, NSString *translation, NSString *next, CGSize size,
-                           SGLyricsClipLayout layout, BOOL scrim, CGRect *drawn) CF_RETURNS_RETAINED {
+// YES with no image is an intentional rest; NO means rendering failed.
+static BOOL newWords(NSString *previous, NSString *line, NSString *translation, NSString *next, CGSize size,
+                     SGLyricsClipLayout layout, BOOL scrim, CGRect *drawn, CGImageRef *result) {
+    *result = NULL;
     // Over the artwork keeps the line sung last above the line instead of the next, which shows only at a rest.
     if (layout == SGLyricsClipOverArtwork && line.length) next = nil;
-    if (!previous.length && !line.length && !next.length) return NULL;
+    if (!previous.length && !line.length && !next.length) return YES;
+    CGContextRef context = newContext(size, NULL, 0);
+    if (!context) return NO;
     if (!line.length) translation = nil;
     if (layout == SGLyricsClipPoster) {
         // The line alone; at a rest the next one takes its place.
@@ -343,7 +351,6 @@ static CGImageRef newWords(NSString *previous, NSString *line, NSString *transla
     CGRect box = CGRectMake(round((size.width - screen) / 2 + screen * kMargin), round(size.height - top - height), width, height);
     CGPathRef path = CGPathCreateWithRect(box, NULL);
     CTFrameRef frame = CTFramesetterCreateFrame(setter, CFRangeMake(0, 0), path, NULL);
-    CGContextRef context = newContext(size, NULL, 0);
     if (scrim) {
         CGFloat reachX = size.width * kArtworkSideReach, reachY = height / 2 + size.width * kArtworkVerticalReach;
         uint8_t *pixels = CGBitmapContextGetData(context);
@@ -369,7 +376,7 @@ static CGImageRef newWords(NSString *previous, NSString *line, NSString *transla
     else CTFrameDraw(frame, context);
     CGImageRef image = CGBitmapContextCreateImage(context);
     CGContextRelease(context);
-    if (drawn) {
+    if (image && drawn) {
         // Out to the shadow's reach, inside the clip; an image is cut from the top, Core Graphics counts from the bottom.
         *drawn = CGRectIntersection(CGRectIntegral(CGRectInset(box, -lineSize, -lineSize)), (CGRect){CGPointZero, size});
         CGImageRef cut = CGImageCreateWithImageInRect(image, CGRectMake(drawn->origin.x, size.height - CGRectGetMaxY(*drawn),
@@ -380,7 +387,8 @@ static CGImageRef newWords(NSString *previous, NSString *line, NSString *transla
     CFRelease(frame);
     CGPathRelease(path);
     CFRelease(setter);
-    return image;
+    *result = image;
+    return image != NULL;
 }
 
 // Messages and Vinyl paint the whole clip. Their sizes are shares of the card, the strip of the clip the lock screen
@@ -669,6 +677,7 @@ static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NS
 static CGImageRef newScene(CGImageRef cover, NSString *previous, NSString *line, NSString *next, CGSize size,
                            SGLyricsClipLayout layout) CF_RETURNS_RETAINED {
     CGContextRef context = newContext(size, NULL, 0);
+    if (!context) return NULL;
     if (layout == SGLyricsClipMessages) drawMessages(context, previous, line, next, size);
     else drawVinyl(context, cover, line, next, size);
     CGImageRef image = CGBitmapContextCreateImage(context);
@@ -678,11 +687,14 @@ static CGImageRef newScene(CGImageRef cover, NSString *previous, NSString *line,
 
 // What goes over the backdrop: a scene's picture, or the words; Over the artwork's under their scrim when it has no
 // backdrop, as the cover then shows sharp.
-static CGImageRef newPicture(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line, NSString *translation,
-                             NSString *next, CGSize size, SGLyricsClipLayout layout) CF_RETURNS_RETAINED {
-    if (SGLyricsClipIsScene(layout)) return newScene(cover, previous, line, next, size, layout);
+static BOOL newPicture(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line, NSString *translation,
+                       NSString *next, CGSize size, SGLyricsClipLayout layout, CGImageRef *picture) {
+    if (SGLyricsClipIsScene(layout)) {
+        *picture = newScene(cover, previous, line, next, size, layout);
+        return *picture != NULL;
+    }
     BOOL over = layout == SGLyricsClipOverArtwork;
-    return newWords(over ? previous : nil, line, translation, next, size, layout, over && !backdrop, NULL);
+    return newWords(over ? previous : nil, line, translation, next, size, layout, over && !backdrop, NULL, picture);
 }
 
 static CGImageRef newBackdrop(CGImageRef backdrop, CGImageRef cover, CGSize size, SGLyricsClipLayout layout) CF_RETURNS_RETAINED {
@@ -701,20 +713,70 @@ static void drawFrame(CGContextRef context, CGImageRef backdrop, CGImageRef word
 
 CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                        NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) {
-    CGImageRef words = newPicture(backdrop, cover, previous, line, translation, next, size, layout);
+    CGImageRef words;
+    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, &words)) return NULL;
     CGImageRef background = newBackdrop(backdrop, cover, size, layout);
     CGContextRef context = newContext(size, NULL, 0);
-    drawFrame(context, background, words, size, 0);
-    CGImageRef frame = CGBitmapContextCreateImage(context);
-    CGContextRelease(context);
+    CGImageRef frame = NULL;
+    if (context) {
+        drawFrame(context, background, words, size, 0);
+        frame = CGBitmapContextCreateImage(context);
+        CGContextRelease(context);
+    }
     CGImageRelease(words);
     CGImageRelease(background);
     return frame;
 }
 
+@interface SGLyricsWriterStatus : NSObject
+@property (nonatomic, copy) dispatch_block_t failed;
+@end
+@implementation SGLyricsWriterStatus
+- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    AVAssetWriterStatus status = [(AVAssetWriter *)object status];
+    if (status == AVAssetWriterStatusFailed || status == AVAssetWriterStatusCancelled) self.failed();
+}
+@end
+
+// The encoder pulls only when ready. The caller remains on its worker queue until completion.
+static BOOL writeReady(AVAssetWriter *writer, AVAssetWriterInput *input, CMTime length,
+                       BOOL (^current)(void), NSInteger (^frame)(void)) {
+    dispatch_semaphore_t complete = dispatch_semaphore_create(0);
+    dispatch_queue_t queue = dispatch_queue_create("spotifyglass.lyrics.encoder", DISPATCH_QUEUE_SERIAL);
+    __block BOOL finished = NO;
+    dispatch_block_t fail = ^{
+        if (finished) return;
+        finished = YES;
+        [writer cancelWriting];
+        dispatch_semaphore_signal(complete);
+    };
+    SGLyricsWriterStatus *status = [SGLyricsWriterStatus new];
+    status.failed = ^{ dispatch_async(queue, fail); };
+    [writer addObserver:status forKeyPath:@"status" options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:NULL];
+    [input requestMediaDataWhenReadyOnQueue:queue usingBlock:^{
+        if (finished) return;
+        while (input.readyForMoreMediaData) {
+            NSInteger result = (!current || current()) && writer.status == AVAssetWriterStatusWriting ? frame() : -1;
+            if (result > 0) continue;
+            [input markAsFinished];
+            if (result < 0) {
+                fail();
+            } else {
+                finished = YES;
+                [writer endSessionAtSourceTime:length];
+                [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(complete); }];
+            }
+            return;
+        }
+    }];
+    dispatch_semaphore_wait(complete, DISPATCH_TIME_FOREVER);
+    [writer removeObserver:status forKeyPath:@"status"];
+    return writer.status == AVAssetWriterStatusCompleted && (!current || current());
+}
+
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout) {
+                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
     // Written beside the file and moved over it once whole, so a clip cut off halfway is never found.
     NSURL *partial = [file URLByAppendingPathExtension:@"partial"];
     [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
@@ -746,39 +808,43 @@ BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef co
     [writer addInput:input];
     if (![writer startWriting]) return NO;
     [writer startSessionAtSourceTime:kCMTimeZero];
-    CGImageRef words = newPicture(backdrop, cover, previous, line, translation, next, size, layout);
+    CGImageRef words;
+    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, &words)) {
+        [writer cancelWriting];
+        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
+        return NO;
+    }
     CGImageRef background = newBackdrop(backdrop, cover, size, layout);
-    BOOL ok = YES;
-    for (int32_t i = 0; i < frames && ok; i++) {
-        while (!input.readyForMoreMediaData && writer.status == AVAssetWriterStatusWriting) [NSThread sleepForTimeInterval:0.002];
+    __block int32_t i = 0;
+    BOOL ok = writeReady(writer, input, length, current, ^NSInteger {
+        if (i == frames) return 0;
         CVPixelBufferRef buffer = NULL;
-        ok = writer.status == AVAssetWriterStatusWriting && adaptor.pixelBufferPool
+        BOOL allocated = adaptor.pixelBufferPool
             && CVPixelBufferPoolCreatePixelBuffer(NULL, adaptor.pixelBufferPool, &buffer) == kCVReturnSuccess;
-        if (!ok) break;
+        if (!allocated) return -1;
         CVPixelBufferLockBaseAddress(buffer, 0);
         CGContextRef context = newContext(size, CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer));
+        if (!context) {
+            CVPixelBufferUnlockBaseAddress(buffer, 0);
+            CVPixelBufferRelease(buffer);
+            return -1;
+        }
         drawFrame(context, background, words, size, (double)i / frames);
         CGContextRelease(context);
         CVPixelBufferUnlockBaseAddress(buffer, 0);
         CVBufferSetAttachment(buffer, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
         CVBufferSetAttachment(buffer, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, kCVAttachmentMode_ShouldPropagate);
         CVBufferSetAttachment(buffer, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_709_2, kCVAttachmentMode_ShouldPropagate);
-        ok = [adaptor appendPixelBuffer:buffer withPresentationTime:CMTimeMake(i, kFPS)];
+        BOOL appended = [adaptor appendPixelBuffer:buffer withPresentationTime:CMTimeMake(i++, kFPS)];
         CVPixelBufferRelease(buffer);
-    }
+        return appended ? 1 : -1;
+    });
     CGImageRelease(words);
     CGImageRelease(background);
     if (!ok) {
-        [writer cancelWriting];
+        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
         return NO;
     }
-    [input markAsFinished];
-    // The last frame, or a still's only one, is held to the end of the loop.
-    [writer endSessionAtSourceTime:length];
-    dispatch_semaphore_t written = dispatch_semaphore_create(0);
-    [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(written); }];
-    dispatch_semaphore_wait(written, DISPATCH_TIME_FOREVER);
-    if (writer.status != AVAssetWriterStatusCompleted) return NO;
     [NSFileManager.defaultManager removeItemAtURL:file error:nil];
     return [NSFileManager.defaultManager moveItemAtURL:partial toURL:file error:nil];
 }
@@ -848,7 +914,7 @@ static void setKeep(Over *over, size_t rows, CGFloat band) {
 static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
                      SGLyricsClipLayout layout) {
     Over over = {0};
-    over.words = newWords(previous, line, translation, next, motion.cut, layout, NO, &over.drawn);
+    if (!newWords(previous, line, translation, next, motion.cut, layout, NO, &over.drawn, &over.words)) return over;
     size_t rows = (size_t)motion.cut.height;
     over.keep = malloc(rows * sizeof(uint16_t));
     CGRect cut = cutIn(motion);
@@ -946,7 +1012,7 @@ static void fitBand(AVURLAsset *asset, Motion motion, Over *over, double from, d
     uint8_t *frame = malloc(bytesPerRow * height);
     double at = fmod(MAX(from, 0), motion.length), span = MAX(seconds - 1 / kMotionFPS, 0);
     int light = 0;
-    for (int i = 0; i < kBandSamples; i++) {
+    for (int i = 0; frame && i < kBandSamples; i++) {
         CMTime time = CMTimeMakeWithSeconds(fmod(at + span * i / (kBandSamples - 1), motion.length), 600);
         CGImageRef image = [generator copyCGImageAtTime:time actualTime:NULL error:nil];
         if (!image) continue;
@@ -955,6 +1021,10 @@ static void fitBand(AVURLAsset *asset, Motion motion, Over *over, double from, d
         CGContextRef context = space && CGColorSpaceGetModel(space) == kCGColorSpaceModelRGB
             ? CGBitmapContextCreate(frame, width, height, 8, bytesPerRow, space, kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little)
             : newContext(motion.stored, frame, bytesPerRow);
+        if (!context) {
+            CGImageRelease(image);
+            continue;
+        }
         CGContextSetBlendMode(context, kCGBlendModeCopy);
         CGContextDrawImage(context, (CGRect){CGPointZero, motion.stored}, image);
         CGContextRelease(context);
@@ -1005,6 +1075,10 @@ static BOOL drawOver(CVPixelBufferRef buffer, Motion motion, Over *over) {
     }
     if (over->words) {
         CGContextRef context = newContext(motion.stored, base, bytesPerRow);
+        if (!context) {
+            CVPixelBufferUnlockBaseAddress(buffer, 0);
+            return NO;
+        }
         CGContextDrawImage(context, CGRectOffset(over->drawn, cut.origin.x, cut.origin.y), over->words);
         CGContextRelease(context);
     }
@@ -1014,24 +1088,42 @@ static BOOL drawOver(CVPixelBufferRef buffer, Motion motion, Over *over) {
 
 // Each frame of the video from `from` seconds (taken round its length) for `seconds`, round its end as often
 // as needed, timed from 0, to `each`, which returns NO to stop. NO when a read failed.
-static BOOL eachFrame(AVURLAsset *asset, AVAssetTrack *track, Motion motion, double from, double seconds,
-                      BOOL (^each)(CMSampleBufferRef sample)) {
-    int32_t scale = 600;   // a tick that 24, 25, 30 and 60 fps all land on
-    double at = fmod(MAX(from, 0), motion.length), done = 0;
-    // When the next frame is due: kMotionFPS on a schedule, so a 60 fps video keeps every other frame.
-    double due = 0;
-    while (seconds - done > 0.01) {
-        double take = MIN(motion.length - at, seconds - done);
-        AVAssetReader *reader = [AVAssetReader assetReaderWithAsset:asset error:nil];
-        AVAssetReaderTrackOutput *output = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:@{
+@interface SGLyricsMotionFrames : NSObject {
+    AVURLAsset *asset;
+    AVAssetTrack *track;
+    Motion motion;
+    double at, done, due, seconds, take;
+    AVAssetReader *reader;
+    AVAssetReaderTrackOutput *output;
+}
+@property (nonatomic) BOOL failed;
+- (instancetype)initWithAsset:(AVURLAsset *)value track:(AVAssetTrack *)video motion:(Motion)shape from:(double)from seconds:(double)duration;
+- (CMSampleBufferRef)copyNextSample CF_RETURNS_RETAINED;
+@end
+@implementation SGLyricsMotionFrames
+- (instancetype)initWithAsset:(AVURLAsset *)value track:(AVAssetTrack *)video motion:(Motion)shape from:(double)from seconds:(double)duration {
+    if ((self = [super init])) {
+        asset = value; track = video; motion = shape;
+        at = fmod(MAX(from, 0), motion.length); seconds = duration;
+    }
+    return self;
+}
+- (CMSampleBufferRef)copyNextSample {
+    const int32_t scale = 600;
+    while (!_failed && seconds - done > 0.01) {
+      if (!reader) {
+        take = MIN(motion.length - at, seconds - done);
+        reader = [AVAssetReader assetReaderWithAsset:asset error:nil];
+        output = [AVAssetReaderTrackOutput assetReaderTrackOutputWithTrack:track outputSettings:@{
             (id)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_32BGRA),
         }];
         // Copies, so drawing into one never touches a frame the decoder still refers to.
         output.alwaysCopiesSampleData = YES;
-        if (!reader || ![reader canAddOutput:output]) return NO;
+        if (!reader || ![reader canAddOutput:output]) { _failed = YES; return NULL; }
         [reader addOutput:output];
         reader.timeRange = CMTimeRangeMake(CMTimeMakeWithSeconds(at, scale), CMTimeMakeWithSeconds(take, scale));
-        if (![reader startReading]) return NO;
+        if (![reader startReading]) { _failed = YES; return NULL; }
+      }
         CMSampleBufferRef sample;
         while ((sample = [output copyNextSampleBuffer])) {
             // The first frame may start before `at`; it shows from the start of this stretch.
@@ -1045,18 +1137,28 @@ static BOOL eachFrame(AVURLAsset *asset, AVAssetTrack *track, Motion motion, dou
             if (!keep) continue;
             // A jump in the video (its loop) starts the schedule again rather than keeping a burst of frames.
             due = due + 1.0 / kMotionFPS < CMTimeGetSeconds(time) ? CMTimeGetSeconds(time) + 0.5 / kMotionFPS : due + 1.0 / kMotionFPS;
-            BOOL more = each(timed);
-            CFRelease(timed);
-            if (!more) {
-                [reader cancelReading];
-                return YES;
-            }
+            return timed;
         }
-        if (reader.status != AVAssetReaderStatusCompleted) return NO;
+        if (reader.status != AVAssetReaderStatusCompleted) { _failed = YES; return NULL; }
+        reader = nil; output = nil;
         done += take;
         at = 0;
     }
-    return YES;
+    return NULL;
+}
+- (void)dealloc { [reader cancelReading]; }
+@end
+
+static BOOL eachFrame(AVURLAsset *asset, AVAssetTrack *track, Motion motion, double from, double seconds,
+                      BOOL (^each)(CMSampleBufferRef sample)) {
+    SGLyricsMotionFrames *frames = [[SGLyricsMotionFrames alloc] initWithAsset:asset track:track motion:motion from:from seconds:seconds];
+    CMSampleBufferRef sample;
+    while ((sample = [frames copyNextSample])) {
+        BOOL more = each(sample);
+        CFRelease(sample);
+        if (!more) break;
+    }
+    return !frames.failed;
 }
 
 CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSString *line, NSString *translation, NSString *next,
@@ -1067,6 +1169,7 @@ CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSStri
     if (!track) return NULL;
     __block Over over = makeOver(motion, previous, line, translation, next, layout);
     // As the clip judges its band.
+    if (!over.keep) return NULL;
     fitBand(asset, motion, &over, from, MIN(seconds, motion.length));
     __block CGImageRef frame = NULL;
     eachFrame(asset, track, motion, from, motion.length, ^BOOL(CMSampleBufferRef sample) {
@@ -1074,9 +1177,10 @@ CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSStri
         if (!drawOver(buffer, motion, &over)) return NO;
         CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
         CGContextRef context = newContext(motion.stored, CVPixelBufferGetBaseAddress(buffer), CVPixelBufferGetBytesPerRow(buffer));
-        CGImageRef whole = CGBitmapContextCreateImage(context);
-        CGContextRelease(context);
+        CGImageRef whole = context ? CGBitmapContextCreateImage(context) : NULL;
+        if (context) CGContextRelease(context);
         CVPixelBufferUnlockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
+        if (!whole) return NO;
         frame = CGImageCreateWithImageInRect(whole, cutIn(motion));
         CGImageRelease(whole);
         return NO;
@@ -1086,7 +1190,7 @@ CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSStri
 }
 
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout) {
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:motionFile options:nil];
     Motion motion;
     AVAssetTrack *track = motionTrack(asset, &motion);
@@ -1115,23 +1219,30 @@ BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previ
     if (![writer startWriting]) return NO;
     [writer startSessionAtSourceTime:kCMTimeZero];
     __block Over over = makeOver(motion, previous, line, translation, next, layout);
+    if (!over.keep) {
+        [writer cancelWriting];
+        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
+        return NO;
+    }
     fitBand(asset, motion, &over, from, seconds);
-    __block BOOL ok = YES, any = NO;
-    BOOL read = eachFrame(asset, track, motion, from, seconds, ^BOOL(CMSampleBufferRef sample) {
+    __block BOOL any = NO;
+    SGLyricsMotionFrames *frames = [[SGLyricsMotionFrames alloc] initWithAsset:asset track:track motion:motion from:from seconds:seconds];
+    BOOL ok = writeReady(writer, input, CMTimeMakeWithSeconds(seconds, 600), current, ^NSInteger {
+        CMSampleBufferRef sample = [frames copyNextSample];
+        if (!sample) return frames.failed || !any ? -1 : 0;
         CVPixelBufferRef buffer = CMSampleBufferGetImageBuffer(sample);
         if (!drawOver(buffer, motion, &over)) {
-            ok = NO;
-            return NO;
+            CFRelease(sample);
+            return -1;
         }
         // Aspect-fill would scale the complete stored frame when both crop dimensions shrink,
         // shifting the already-drawn letters relative to the preview. Submit precisely its crop instead.
         CGRect cut = cutIn(motion);
-        while (!input.readyForMoreMediaData && writer.status == AVAssetWriterStatusWriting) [NSThread sleepForTimeInterval:0.002];
         CVPixelBufferRef cropped = NULL;
         if (writer.status != AVAssetWriterStatusWriting || !adaptor.pixelBufferPool
             || CVPixelBufferPoolCreatePixelBuffer(NULL, adaptor.pixelBufferPool, &cropped) != kCVReturnSuccess) {
-            ok = NO;
-            return NO;
+            CFRelease(sample);
+            return -1;
         }
         // Pool storage is aligned and IOSurface-backed, unlike a borrowed, offset view of the decoder's bytes.
         CVPixelBufferLockBaseAddress(buffer, kCVPixelBufferLock_ReadOnly);
@@ -1156,23 +1267,18 @@ BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previ
                 CVBufferRemoveAttachment(cropped, colorKeys[i]);
             }
         }
-        ok = writer.status == AVAssetWriterStatusWriting
+        BOOL appended = writer.status == AVAssetWriterStatusWriting
             && [adaptor appendPixelBuffer:cropped withPresentationTime:CMSampleBufferGetPresentationTimeStamp(sample)];
         CVPixelBufferRelease(cropped);
+        CFRelease(sample);
         any = YES;
-        return ok;
+        return appended ? 1 : -1;
     });
     freeOver(over);
-    if (!read || !ok || !any) {
-        [writer cancelWriting];
+    if (!ok) {
+        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
         return NO;
     }
-    [input markAsFinished];
-    [writer endSessionAtSourceTime:CMTimeMakeWithSeconds(seconds, 600)];
-    dispatch_semaphore_t written = dispatch_semaphore_create(0);
-    [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(written); }];
-    dispatch_semaphore_wait(written, DISPATCH_TIME_FOREVER);
-    if (writer.status != AVAssetWriterStatusCompleted) return NO;
     [NSFileManager.defaultManager removeItemAtURL:file error:nil];
     return [NSFileManager.defaultManager moveItemAtURL:partial toURL:file error:nil];
 }

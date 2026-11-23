@@ -301,7 +301,7 @@ static void dimmedArtwork(NSURL *out, CGSize size) {
             for (SGLyricsClipStyle style = SGLyricsClipStill; style <= SGLyricsClipAnimated; style++) {
                 NSURL *url = [out URLByAppendingPathComponent:[NSString stringWithFormat:@"over-dimmed-%@.mp4",
                                                                 style == SGLyricsClipStill ? @"still" : @"animated"]];
-                BOOL written = SGLyricsClipWriteWithLayout(url, dimmed, cover, previous, line, translation, nil, size, style, SGLyricsClipOverArtwork);
+                BOOL written = SGLyricsClipWriteWithLayout(url, dimmed, cover, previous, line, translation, nil, size, style, SGLyricsClipOverArtwork, nil);
                 printf("%s\n", url.lastPathComponent.UTF8String);
                 check(written, @"written");
                 if (written) verify(url, dimmed, size, style, YES);
@@ -333,6 +333,26 @@ int scenesMain(NSURL *out, CGImageRef cover);
 int main(int argc, char **argv) {
     @autoreleasepool {
         NSString *here = [[NSString stringWithUTF8String:argv[0]] stringByDeletingLastPathComponent];
+        if (argc > 1 && !strcmp(argv[1], "lifecycle")) {
+            NSURL *file = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"cancel.mp4"]];
+            CGSize small = SGLyricsClipSize(192);
+            CGImageRef backdrop = SGLyricsClipBackdrop(NULL, small);
+            __block NSUInteger admitted = 0;
+            BOOL wrote = SGLyricsClipWriteWithLayout(file, backdrop, NULL, nil, @"Old line", nil, nil,
+                small, SGLyricsClipAnimated, SGLyricsClipLeft, ^BOOL { return ++admitted < 3; });
+            check(!wrote && ![NSFileManager.defaultManager fileExistsAtPath:file.path],
+                  @"obsolete render stops during encoding without publishing a partial clip");
+            check(SGLyricsClipWriteWithLayout(file, backdrop, NULL, nil, @"Current line", nil, nil,
+                small, SGLyricsClipAnimated, SGLyricsClipLeft, ^BOOL { return YES; }), @"current render completes after cancellation");
+            NSURL *motion = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"cancel-motion.mp4"]];
+            admitted = 0;
+            check(!SGLyricsClipWriteOverMotion(motion, file, nil, @"Old motion", nil, nil, 0, 2,
+                SGLyricsClipLeft, ^BOOL { return ++admitted < 3; })
+                && ![NSFileManager.defaultManager fileExistsAtPath:motion.path], @"obsolete moving render stops without publication");
+            CGImageRelease(backdrop);
+            [NSFileManager.defaultManager removeItemAtURL:file error:nil];
+            return failures ? 1 : 0;
+        }
         if (argc > 1 && !strcmp(argv[1], "motion")) {
             NSURL *motionOut = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"motion"] isDirectory:YES];
             [NSFileManager.defaultManager createDirectoryAtURL:motionOut withIntermediateDirectories:YES attributes:nil error:nil];
@@ -372,7 +392,7 @@ int main(int argc, char **argv) {
                     NSURL *url = [out URLByAppendingPathComponent:name];
                     CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
                     BOOL written = SGLyricsClipWriteWithLayout(url, [c[0] isEqual:@"empty"] ? plain : backdrop, NULL, nil, c[1], c[2], c[3],
-                                                               size, style, layout);
+                                                               size, style, layout, nil);
                     double ms = (CFAbsoluteTimeGetCurrent() - start) * 1000;
                     printf("%s\n", name.UTF8String);
                     check(written, [NSString stringWithFormat:@"written in %.0f ms", ms]);

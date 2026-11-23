@@ -25,6 +25,8 @@
 #import <stdatomic.h>
 #import "Core/SGCore.h"
 #import "Shared/Haptics/Haptics.h"
+#import "Shared/Player/SpeedPitch.h"
+#import "../../harness-fail.h"
 #import "fakehaptics.h"
 
 // Shared/Player/PlayerState.x's, which SpeedPitch.x reads for its clock away from 1x: no player here.
@@ -37,6 +39,7 @@ SPTPlayerState *SGPlayerState(void) {
 void SGSpeedPitchSongValuesChanged(NSString *control) {}
 
 static atomic_uint_fast64_t sg_frame;
+static atomic_bool sg_mute;
 static double sg_generatorRate;
 
 // A kick (a falling sine, 120 to 50 Hz) on each whole second, a snare (noise and 190 Hz) on each half.
@@ -60,7 +63,7 @@ static OSStatus generate(void *refCon, AudioUnitRenderActionFlags *flags, const 
     uint64_t start = atomic_fetch_add(&sg_frame, frames);
     float *left = data->mBuffers[0].mData, *right = data->mNumberBuffers > 1 ? data->mBuffers[1].mData : NULL;
     for (UInt32 i = 0; i < frames; i++) {
-        left[i] = beatAt(start + i, sg_generatorRate);
+        left[i] = atomic_load(&sg_mute) ? 0 : beatAt(start + i, sg_generatorRate);
         if (right) right[i] = left[i];
     }
     return noErr;
@@ -219,6 +222,22 @@ static int sg_failures;
     [self.window makeKeyAndVisible];
     [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:nil];
     [AVAudioSession.sharedInstance setActive:YES error:nil];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"output-lifecycle"]) {
+        extern BOOL HarnessCheckStoppedOutput;
+        extern _Atomic(AudioUnit) HarnessHapticsAttachedOutput;
+        HarnessCheckStoppedOutput = YES;
+        atomic_store(&sg_mute, true);
+        [self startSpotifyChainAt:44100];
+        HARNESS_CHECK(atomic_load(&HarnessHapticsAttachedOutput) == _output && SGPlayerMusicOutputRunning());
+        HARNESS_CHECK(AudioOutputUnitStop(_output) == noErr);
+        HARNESS_CHECK(SGPlayerMusicOutput() == _output && !SGPlayerMusicOutputRunning());
+        HARNESS_CHECK(AudioOutputUnitStart(_output) == noErr);
+        HARNESS_CHECK(atomic_load(&HarnessHapticsAttachedOutput) == _output && SGPlayerMusicOutputRunning());
+        [self stopChain];
+        puts("PASS stopped selected output is not reconfigured by Music Haptics; restart remains usable");
+        exit(0);
+        return YES;
+    }
     [self startSpotifyChainAt:44100];
 
     // Each step: the change, then after 1.5 s to settle, 4 s measured. The first measures what 100% and

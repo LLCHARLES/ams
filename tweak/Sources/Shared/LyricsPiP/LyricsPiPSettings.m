@@ -116,9 +116,9 @@ dispatch_queue_t SGLyricsPiPPreviewQueue(void) {
     BOOL translation = SGFlag(@"spotifyglass.redesign.lyricsTranslation", NO);
     NSArray<NSString *> *sample = @[SGL(@"settings.lyrics.pip.sample.original", @"별빛을 따라 걸어요"),
         SGL(@"settings.lyrics.pip.sample.next", @"A new day is on its way"),
-        SGL(@"settings.lyrics.pip.sample.credit", @"Sample lyrics · Vitrine"),
+        SGL(@"settings.lyrics.pip.sample.credit", @"Sample lyrics · Retrine"),
         pronunciation ? @"Byeolbicheul ttara georeoyo" : @"", translation ? @"We walk beneath the stars" : @"",
-        SGL(@"settings.lyrics.pip.sample.song", @"A song for the night"), @"Vitrine"];
+        SGL(@"settings.lyrics.pip.sample.song", @"A song for the night"), @"Retrine"];
     NSString *label = SGL(@"settings.lyrics.pip.preview", @"Sample preview");
     NSString *hidden = self.role == 1 && !pronunciation ?
             SGL(@"settings.lyrics.pip.preview.hidden.pronunciation", @"Pronunciation is off on the lyrics screen, so it is hidden.") :

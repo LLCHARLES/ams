@@ -6,13 +6,13 @@
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SRC=${SRC:-$(cd "$HERE/../../tweak/Sources" && pwd)}
-OUT=$(mktemp -d "${TMPDIR:-/tmp}/vitrine-keyboard-commands.XXXXXX")
+OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-keyboard-commands.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT HUP INT TERM
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -g -O0 -Wall -Wextra -Werror -Wno-unused-parameter -I "$SRC" \
-    "$HERE/vitrine-keyboard-commands-check.m" "$SRC/Shared/Keyboard/KeyboardCommands.m" \
+    "$HERE/retrine-keyboard-commands-check.m" "$SRC/Shared/Keyboard/KeyboardCommands.m" \
     "$SRC/Core/SGLocalize.m" \
-    -framework UIKit -framework Foundation -framework CoreGraphics -o "$OUT/vitrine-keyboard-commands-check"
-"$OUT/vitrine-keyboard-commands-check"
+    -framework UIKit -framework Foundation -framework CoreGraphics -o "$OUT/retrine-keyboard-commands-check"
+"$OUT/retrine-keyboard-commands-check"

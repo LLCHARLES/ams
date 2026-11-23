@@ -23,6 +23,9 @@
 // Read at launch, each on until switched off (PlaylistSettings.m). PlaylistHeader.x: a tap on the header's
 // picture opens the cover full screen (Kit/SGRCoverViewer.h).
 #define SGRKeyPlaylistCoverViewer @"spotifyglass.redesign.playlist.coverViewer"
+#define SGRKeyPlaylistCreatorLine @"spotifyglass.redesign.playlist.creatorLine"
+#define SGRKeyPlaylistCreatorPicture @"spotifyglass.redesign.playlist.creatorPicture"
+#define SGRKeyPlaylistDescription @"spotifyglass.redesign.playlist.description"
 // PlaylistRows.x: the curation pills over the first track closed up.
 #define SGRKeyPlaylistHideCuration @"spotifyglass.redesign.playlist.hide.curation"
 // PlaylistRows.x: the recommendation component's heading, tracks and Refresh. Off by default;

@@ -18,17 +18,17 @@ There are always 24 hourly buckets; a repeated DST hour combines both occurrence
 7/30/365-day period cutoffs and top-list ordering are unchanged. The page formats hours using the user's
 12/24-hour preference and exposes both plays and duration as ordinary accessible Settings rows.
 
-Vitrine's own export is a JSON object, distinct from Spotify's array exports:
+Retrine's own export is a JSON object, distinct from Spotify's array exports:
 
 ```json
-{"format":"vitrine.listening-history","version":1,"plays":[{"end":1700000001,"ms":12500,"uri":"spotify:local:short","title":"Short track","artist":"Artist","album":""}]}
+{"format":"retrine.listening-history","version":1,"plays":[{"end":1700000001,"ms":12500,"uri":"spotify:local:short","title":"Short track","artist":"Artist","album":""}]}
 ```
 
 All six `SGPlay` fields are included, with Unix seconds and integer milliseconds. It contains no account,
 credentials or settings. Unknown versions, malformed rows, invalid types and unsupported timestamps
 (outside years 1–9999) reject the local file as a whole. Spotify's original filtering remains unchanged.
 Spotify formats use the existing title/artist + 90-second deduplication for their minute precision and clock
-drift. Vitrine backups compare all six persisted fields exactly, so legitimate nearby repeats survive while
+drift. Retrine backups compare all six persisted fields exactly, so legitimate nearby repeats survive while
 selecting the same backup twice still adds nothing. Import never rewrites old TSV bytes.
 The TSV's existing tab/newline-to-space normalization on disk is unchanged.
 
@@ -142,8 +142,8 @@ heading tapped: the chart page opens and ranks), `story` (Recap opened and last 
 moves on by VoiceOver's increment and by itself after 6 s, and Close dismisses it), `storyopen` and `storyshare`
 (the share image read back at 9:16). Failures exit through `harness-fail.h`.
 
-    xcrun simctl launch <udid> com.vitrine.listeningstatsharness erase showcase chart=0
-    xcrun simctl launch <udid> com.vitrine.listeningstatsharness erase showcase story
+    xcrun simctl launch <udid> com.retrine.listeningstatsharness erase showcase chart=0
+    xcrun simctl launch <udid> com.retrine.listeningstatsharness erase showcase story
 
 2026-10-24 local verification: `./build.sh && build/listening-stats` passed all 97 checks.
 
@@ -155,7 +155,7 @@ picker is a remote service), so `pick` hands its delegate a JSON file and a zip 
 
     THEOS=$HOME/theos ./build-sim.sh
     xcrun simctl install <udid> build/sim/ListeningStatsHarness.app
-    xcrun simctl launch <udid> com.vitrine.listeningstatsharness erase seed select=1.0 dump
+    xcrun simctl launch <udid> com.retrine.listeningstatsharness erase seed select=1.0 dump
     xcrun simctl spawn <udid> log show --last 2m --predicate 'eventMessage CONTAINS "[harness]"' --style compact
 
 2026-10-05, iPhone 17 Pro on iOS 27.0: the page with seeded plays (week 1 h 36 min, month 2 h 12 min, as the seed

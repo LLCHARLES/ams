@@ -1,10 +1,13 @@
 #import "SGDiagnosticRedaction.h"
 #import "Core/SGPrefs.h"
+#import "Shared/SponsorBlock/SponsorBlock.h"
 
 NSString *SGRedactDiagnostics(NSString *text, NSDictionary<NSString *, id> *preferences) {
     NSMutableSet<NSString *> *terms = [SGPrivatePreferenceKeys() mutableCopy];
+    [terms addObject:SGKeySponsorBlockServer];
     [preferences enumerateKeysAndObjectsUsingBlock:^(NSString *key, id value, BOOL *stop) {
-        if (SGPrivatePreferenceKey(key) && [value isKindOfClass:NSString.class] && [value length]) [terms addObject:value];
+        if ((SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer]) &&
+            [value isKindOfClass:NSString.class] && [value length]) [terms addObject:value];
     }];
     // Old driver logs can contain a credential that has since been rotated and is no longer stored.
     NSMutableArray<NSString *> *lines = [NSMutableArray array];

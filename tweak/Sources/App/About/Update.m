@@ -5,15 +5,16 @@
 // twenty that count are kept, which is what lets the Updates page show every version between this
 // build and the newest one even after a run of betas a release build skips. Betas count only while
 // Include betas is on: on by default for a beta build, off for a release. Asked a few seconds after
-// Spotify comes up (UpdateNotice.m) and when Mod Settings opens, at most once every six hours either way, and on demand from the page. Off while
+// Spotify comes up (UpdateNotice.m) and when Mod Settings opens, with a six-hour cache per build, and on demand from the page. Off while
 // SGUpdateURL is nil.
 #import "Core/SGCore.h"
 #import "About.h"
 
-NSString *const SGUpdateURL = @"https://api.github.com/repos/My-Name-Is-Jeff/vitrine/releases?per_page=100";
+NSString *const SGUpdateURL = @"https://api.github.com/repos/oneulddu/Retrine/releases?per_page=100";
 NSString *const SGUpdateCheckedNotification = @"spotifyglass.update.checked.notification";
 
 static NSString *const kChecked = @"spotifyglass.update.checked";
+static NSString *const kCheckedBuild = @"spotifyglass.update.checkedBuild";
 static NSString *const kReleases = @"spotifyglass.update.releases";
 static const NSTimeInterval kInterval = 6 * 60 * 60;
 static const NSUInteger kKept = 20;
@@ -267,8 +268,11 @@ void SGCheckForUpdate(BOOL force) {
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSTimeInterval last = [store doubleForKey:kChecked];
     if (!SGUpdateURL || sg_running) return;
-    if (!force && last > 0 && NSDate.date.timeIntervalSince1970 - last < kInterval) return;
+    if (!force && last > 0 && NSDate.date.timeIntervalSince1970 - last < kInterval &&
+        [[store stringForKey:kCheckedBuild] isEqualToString:@(SG_VERSION)]) return;
 
+    // Consume the build-change bypass even if this request fails. kChecked still dates the last success.
+    [store setObject:@(SG_VERSION) forKey:kCheckedBuild];
     sg_running = YES;
     sg_failure = nil;
     void (^finish)(NSArray<NSDictionary *> *, NSInteger, NSError *) = ^(NSArray<NSDictionary *> *releases, NSInteger status, NSError *error) {

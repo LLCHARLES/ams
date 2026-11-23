@@ -2,26 +2,29 @@
 // sends it again each time the line changes. Spotify itself only ever sees its own dictionary back.
 //
 // The timer runs only while the sound moves, and wakes once for the next time the line can change: the
-// next start or end of a line or word the line shown hangs on. While the lyrics or the player's track
-// are not in yet it looks four times a second. The lock screen keeps the line it was left on until the
-// sound starts again.
+// next displayed piece, lead or rest. A setter, player report or arriving lyric can re-arm it.
 #import <MediaPlayer/MediaPlayer.h>
 #import <stdatomic.h>
 #import "Core/SGCore.h"
 #import "LockScreenLyrics.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsSources/LyricsSources.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/Player/PlayerState.h"
+#import "Shared/Player/SpeedPitch.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 #import "Headers/SPTPlayer.h"
 
-// How often to look while the line cannot be worked out yet.
-static const NSTimeInterval kTick = 0.25;
 // About what the lock screen's artist row fits before it cuts the text off.
 static const NSUInteger kMaxChars = 30;
 
 // Spotify may set the info from any thread; the timer reads it on the main one.
 static NSObject *sg_lock;
 static NSDictionary *sg_spotifyInfo;
-static CFAbsoluteTime sg_spotifyInfoAt;
+// The clock can move before the next MediaPlayer setter. Keep its anchor separate
+// from the dictionary the Spotify-facing getter must return unchanged.
+typedef struct { double seconds, rate; CFAbsoluteTime at; } SGRowClock;
+static SGRowClock sg_clock;
 static BOOL sg_refreshPending; // under sg_lock; a background setter burst needs one main refresh
 static NSString *sg_shownLine;
 static _Thread_local BOOL sg_resending;
@@ -75,6 +78,38 @@ NSString *SGLyricsShownLineTag(void) {
     if (shown == SGRLyricsReadingNone) return @"";
     return [NSString stringWithFormat:@"p%ld%d%d%d", (long)shown, leads, SGFlag(SGKeyLyricsPronunciationHangul, NO),
             SGFlag(SGKeyLyricsJapaneseKana, NO)];
+}
+
+// The successor must have started AND the lead's backing must have finished.
+static NSInteger nextBoundary(NSArray<SGKaraokeLine *> *lines, NSInteger index, NSInteger position) {
+    SGKaraokeLine *next = index + 1 < (NSInteger)lines.count ? lines[index + 1] : nil;
+    if (index < 0) return next ? next.start - position : -1;
+    SGKaraokeLine *line = lines[index];
+    NSInteger boundary = next ? MAX(next.start, SGKaraokeSungEnd(line)) : NSIntegerMax;
+    NSInteger rest = line.end + SGKaraokeBreakMs + 1;
+    NSInteger returnAt = next ? next.start - SGKaraokeBreakMs : NSIntegerMax;
+    if (rest < returnAt && position < returnAt)
+        boundary = MIN(boundary, position < rest ? rest : returnAt);
+    return boundary == NSIntegerMax ? -1 : boundary - position;
+}
+
+// Both lock-screen readers wait for the lookup's completion, including the first
+// usable Spotify headers if playback began before any request carried them.
+NSTimeInterval SGLockLyricsRequestMissing(NSString *track) {
+    if (!track) return -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        __block BOOL deferred = NO;
+        SGSpclientHeaders(^(NSDictionary *headers) {
+            if (deferred && (sg_lock || SGLockArtworkShowsLyrics(SGLockScreenArtwork())))
+                SGKaraokeRequestLyrics(SGKaraokePlayingTrack());
+        });
+        deferred = YES;
+    });
+    SGKaraokeRequestLyrics(track);
+    // After a 401, a replacement authorization is captured silently. No callback
+    // is available for *renewed* headers; retain the prior retry latency on failure.
+    return !SGKaraokeLooking(track) && SGLyricsLoadFailed(track) ? 0.25 : -1;
 }
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
@@ -143,36 +178,30 @@ static NSArray<NSString *> *translationPieces(NSString *text) {
     return pieces;
 }
 
-// Seconds into the track at `now`, run on from what Spotify last reported. A rate it left out runs at 1, as
-// playingBy counts it: read as 0, every line written pinned the lock screen's time to Spotify's last report.
-static double elapsedAt(NSDictionary *info, CFAbsoluteTime reportedAt, CFAbsoluteTime now) {
-    NSNumber *reported = info[MPNowPlayingInfoPropertyPlaybackRate];
-    double rate = reported ? reported.doubleValue : 1;
-    return [info[MPNowPlayingInfoPropertyElapsedPlaybackTime] doubleValue] + rate * (now - reportedAt);
+// Advance the latest player or MediaPlayer anchor, not the time in an older metadata dictionary.
+static double elapsedAt(SGRowClock clock, CFAbsoluteTime now) {
+    return clock.seconds + clock.rate * (now - clock.at);
 }
 
 // nil between lines and for a track without synced lyrics, plain text included. Past a line's end by
 // SGKaraokeBreakMs, with the next line at least that far off, the artist comes back. With translations on, a
-// line that has one shows it instead. `wait` is the playback time in seconds until it can change: kTick while it
-// cannot be worked out yet, negative for not again.
+// line that has one shows it instead. `wait` is in playback seconds; negative waits for an event.
 static NSString *lineFor(NSDictionary *info, double elapsed, NSTimeInterval *wait) {
-    *wait = kTick;
+    *wait = -1;
     SPTPlayerState *state = [(id<SPTPlayer>)SGKaraokePlayer() state];
     // The player's track can lag behind the now playing info; its lyrics would then be another song's.
     if (![state.track.trackTitle isEqualToString:info[MPMediaItemPropertyTitle]]) return nil;
     NSString *trackID = SGKaraokePlayingTrack();
     NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
     if (!lines) {
-        SGKaraokeRequestLyrics(trackID);
+        *wait = SGLockLyricsRequestMissing(trackID);
         return nil;
     }
-    *wait = -1;
     // Plain text has no line being sung to show.
     if (SGKaraokeLinesTiming(lines) == SGKaraokeTimingNone) return nil;
     NSInteger position = (NSInteger)(elapsed * 1000) - SGKaraokeDelayMs();
     NSInteger index = SGKaraokeLeadLine(lines, position);
-    // The pieces below turn over at the shown line's word starts.
-    NSInteger ms = SGKaraokeMsToChange(lines, position, index);
+    NSInteger ms = nextBoundary(lines, index, position);
     // A ms on, past the truncation of `position` above.
     if (ms > 0) *wait = (ms + 1) / 1000.0;
     if (index < 0) return nil;
@@ -223,6 +252,10 @@ static NSString *lineFor(NSDictionary *info, double elapsed, NSTimeInterval *wai
     NSString *shown = nil;
     for (NSArray<SGKaraokeWord *> *piece in piecesOf(SGLyricsShownLine(trackID, lines, index, NULL))) {
         if (!shown || piece.firstObject.start <= position) shown = textOf(piece);
+        else {
+            NSTimeInterval next = (piece.firstObject.start - position + 1) / 1000.0;
+            if (*wait < 0 || next < *wait) *wait = next;
+        }
     }
     return shown;
 }
@@ -230,25 +263,19 @@ static NSString *lineFor(NSDictionary *info, double elapsed, NSTimeInterval *wai
 // Spotify's info with the line in place of the artist, or its own artist for nil. The clock always moves
 // on to `elapsed`: the system takes the elapsed time as now's, so the one Spotify reported a while ago
 // would pull the progress bar back.
-static NSDictionary *withLine(NSDictionary *info, NSString *line, double elapsed) {
+static NSDictionary *withLine(NSDictionary *info, NSString *line, double elapsed, double rate) {
     NSMutableDictionary *shown = [info mutableCopy];
     if (line) shown[MPMediaItemPropertyArtist] = line;
     shown[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(elapsed);
+    if (info[MPNowPlayingInfoPropertyPlaybackRate] || rate != 1)
+        shown[MPNowPlayingInfoPropertyPlaybackRate] = @(rate);
     return shown;
 }
 
-// The rate the song's time moves at; 1 for one Spotify left out, as elapsedAt counts it.
-static double rateOf(NSDictionary *info) {
-    NSNumber *rate = info[MPNowPlayingInfoPropertyPlaybackRate];
-    return rate.doubleValue > 0 ? rate.doubleValue : 1;
-}
-
-static BOOL playingBy(NSDictionary *info);
-
 // Main thread, as everything the timer touches is. Stops the timer, or arms it to look again `wait`
 // seconds of the song's time from now; a negative wait leaves it to Spotify's next info.
-static void lookIn(NSTimeInterval wait, NSDictionary *info) {
-    if (wait < 0) {
+static void lookIn(NSTimeInterval wait, double rate) {
+    if (wait < 0 || rate <= 0) {
         if (sg_timer) dispatch_source_cancel(sg_timer);
         sg_timer = nil;
         return;
@@ -265,29 +292,29 @@ static void lookIn(NSTimeInterval wait, NSDictionary *info) {
         });
         dispatch_resume(sg_timer);
     }
-    NSTimeInterval seconds = wait / rateOf(info);
+    NSTimeInterval seconds = wait / rate;
     sg_due = CFAbsoluteTimeGetCurrent() + seconds;
     dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
 }
 
 static void tick(BOOL force) {
     NSDictionary *info;
-    CFAbsoluteTime reportedAt;
+    SGRowClock clock;
     @synchronized (sg_lock) {
         info = sg_spotifyInfo;
-        reportedAt = sg_spotifyInfoAt;
+        clock = sg_clock;
     }
     NSDictionary *shown = info;
     NSString *line = nil;
     NSTimeInterval wait = -1;
     if (info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) {
-        double elapsed = elapsedAt(info, reportedAt, CFAbsoluteTimeGetCurrent());
+        double elapsed = elapsedAt(clock, CFAbsoluteTimeGetCurrent());
         line = lineFor(info, elapsed, &wait);
-        shown = withLine(info, line, elapsed);
+        shown = withLine(info, line, elapsed, clock.rate);
     }
     // A queued setter must restore its latest snapshot even when the line is unchanged
     // (including nil), but refreshing a paused or empty snapshot never starts a timer.
-    lookIn(playingBy(info) ? wait : -1, info);
+    lookIn(wait, clock.rate);
     if (!force && (line == sg_shownLine || [line isEqualToString:sg_shownLine])) return;
     sg_shownLine = line;
     sg_resending = YES;
@@ -295,20 +322,13 @@ static void tick(BOOL force) {
     sg_resending = NO;
 }
 
-// Whether the sound is moving. A rate Spotify did not report at all counts as moving: the line would
-// stand still either way, and a missing key is no reason to leave the feature switched off for good.
-static BOOL playingBy(NSDictionary *info) {
-    NSNumber *rate = info[MPNowPlayingInfoPropertyPlaybackRate];
-    return !rate || rate.doubleValue > 0;
-}
-
 // Looks again at once while the sound moves, for something other than the clock that moves the line.
 static void lookNow(void) {
-    NSDictionary *info;
+    BOOL moving;
     @synchronized (sg_lock) {
-        info = sg_spotifyInfo;
+        moving = sg_clock.rate > 0 && sg_spotifyInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] != nil;
     }
-    if (playingBy(info) && info[MPNowPlayingInfoPropertyElapsedPlaybackTime]) lookIn(0, info);
+    if (moving) tick(NO);
 }
 
 %hook MPNowPlayingInfoCenter
@@ -318,17 +338,18 @@ static void lookNow(void) {
         return;
     }
     CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    NSNumber *rate = info[MPNowPlayingInfoPropertyPlaybackRate];
+    SGRowClock clock = {[info[MPNowPlayingInfoPropertyElapsedPlaybackTime] doubleValue], rate ? rate.doubleValue : 1, now};
     BOOL needsRefresh = !NSThread.isMainThread || !info[MPNowPlayingInfoPropertyElapsedPlaybackTime];
     BOOL enqueueRefresh = NO;
     @synchronized (sg_lock) {
         sg_spotifyInfo = info;
-        sg_spotifyInfoAt = now;
+        sg_clock = clock;
         if (needsRefresh && !sg_refreshPending) {
             sg_refreshPending = YES;
             enqueueRefresh = YES;
         }
     }
-    BOOL playing = playingBy(info) && info[MPNowPlayingInfoPropertyElapsedPlaybackTime] != nil;
     // Karaoke's lyrics are main-thread state. Restore the latest snapshot on main even
     // when paused: an older tick may have republished its own snapshot after this setter.
     if (needsRefresh) {
@@ -339,12 +360,12 @@ static void lookNow(void) {
         %orig;
         return;
     }
-    double elapsed = elapsedAt(info, now, now);
+    double elapsed = clock.seconds;
     NSTimeInterval wait;
     NSString *line = lineFor(info, elapsed, &wait);
-    lookIn(playing ? wait : -1, info);
+    lookIn(wait, clock.rate);
     sg_shownLine = line;
-    %orig(withLine(info, line, elapsed));
+    %orig(withLine(info, line, elapsed, clock.rate));
 }
 
 - (NSDictionary *)nowPlayingInfo {
@@ -356,10 +377,33 @@ static void lookNow(void) {
 }
 %end
 
+@interface SGLockRowPlayer : NSObject <SGPlayerStateObserver>
+@end
+@implementation SGLockRowPlayer
+- (void)playerStateDidChange:(SPTPlayerState *)state {} // DidReport already ran.
+- (void)playerStateDidReport:(SPTPlayerState *)state {
+    NSString *title = state.track.trackTitle;
+    BOOL paused = state.isPaused;
+    SGRowClock clock = {paused ? state.positionAsOfTimestamp : state.position, paused ? 0 : state.playbackSpeed, CFAbsoluteTimeGetCurrent()};
+    @synchronized (sg_lock) {
+        if (!sg_spotifyInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime]) return;
+        if ([title isEqual:sg_spotifyInfo[MPMediaItemPropertyTitle]] && isfinite(clock.seconds) && clock.seconds >= 0 &&
+            isfinite(clock.rate) && clock.rate >= 0) sg_clock = clock;
+    }
+    tick(NO);
+}
+@end
+
 %ctor {
     if (!SGFlag(SGKeyLockScreenLyrics, NO)) return;
     sg_lock = [NSObject new];
     %init;
+    static SGLockRowPlayer *player;
+    player = [SGLockRowPlayer new];
+    SGAddPlayerStateObserver(player);
+    [NSNotificationCenter.defaultCenter addObserverForName:SGPlayerSpeedDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        [player playerStateDidReport:SGPlayerState()];
+    }];
     // A translation saved while the player is paused has no tick to pick it up (Shared/LyricsTranslation).
     // Heard on the writing thread and handed to main without waiting (AGENTS.md).
     for (NSNotificationName name in @[SGLyricsTranslationSavedNotification, SGLyricsTranslationsDidChangeNotification]) {
@@ -386,7 +430,7 @@ static void lookNow(void) {
     }
     // Lines kept for a track, or replaced by better timed ones, can change the line at once.
     for (NSNotificationName name in @[SGKaraokeLinesKeptNotification, SGLyricsReadingsDidChangeNotification,
-                                      SGLyricsLanguageDidChangeNotification]) {
+                                      SGLyricsLanguageDidChangeNotification, SGLyricsOffsetsDidChangeNotification]) {
     [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
         if (!note.object || [note.object isEqual:SGKaraokePlayingTrack()]) tick(NO);
     }];
@@ -395,6 +439,8 @@ static void lookNow(void) {
     // compared on the writing thread and handed to main without waiting only when it moved (AGENTS.md).
     static _Atomic NSInteger delay;
     atomic_store(&delay, SGKaraokeDelayMs());
+    static _Atomic NSInteger rowMode;
+    atomic_store(&rowMode, SGInt(SGKeyLockScreenLyricsLine, SGLockScreenLyricsLineOriginal));
     // So does the lyrics' choice of pronunciation (SGLyricsShownLine), paused or not.
     static NSString *shownTag;
     shownTag = SGLyricsShownLineTag();
@@ -409,7 +455,8 @@ static void lookNow(void) {
         }
         NSInteger now = SGKaraokeDelayMs();
         BOOL moved = atomic_exchange(&delay, now) != now;
-        if (retagged) dispatch_async(dispatch_get_main_queue(), ^{ tick(NO); });
+        NSInteger mode = SGInt(SGKeyLockScreenLyricsLine, SGLockScreenLyricsLineOriginal);
+        if (atomic_exchange(&rowMode, mode) != mode || retagged) dispatch_async(dispatch_get_main_queue(), ^{ tick(NO); });
         else if (moved) dispatch_async(dispatch_get_main_queue(), ^{ lookNow(); });
     }];
     // The timer waits for Spotify to report a playing track; nothing before that has a line to show.

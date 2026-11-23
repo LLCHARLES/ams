@@ -26,6 +26,7 @@ jobs:
           go mod verify && go test -race ./...
       - run: python3 -B harness/wireguard/test_transport_scan.py
   apple:
+    if: github.event_name == 'pull_request'
     runs-on: macos-latest
     env:
       THEOS: ${{ github.workspace }}/theos

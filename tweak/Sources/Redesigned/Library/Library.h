@@ -27,9 +27,9 @@ BOOL SGRLibraryCompact(void);
 UIViewController *SGRLibrarySettingsPage(void);   // LibrarySettings.m, in Mod Settings
 
 // LibraryMenu.m. The menu button the root header shows while Compact library is on, made once per header and
-// kept on it, `page` being the library page under it; LibraryHeader.x places it. Its menu is built as it opens,
-// from the page as it is then.
-UIButton *SGRLibraryMenuButton(UIView *header, UIView *page);
+// kept on it; LibraryHeader.x places it. Its menu is built as it opens, from the library page the header is in then
+// (SGRLibraryPageAbove), whatever stands between them (9.2.0's stack).
+UIButton *SGRLibraryMenuButton(UIView *header);
 // What the menu offers on `page` as it opens, in order: Sort, with the order the sort row shows under it while the
 // row is on screen; the list and grid views, the current one checked (Spotify's own toggle under its own name when
 // the current one cannot be told); and Clear filter while a filter is on. Each fires Spotify's own control: in place
@@ -50,6 +50,9 @@ void SGRLibraryCollectionLaidOut(UICollectionView *view);
 // (Kit/SGREdgeEffect.x) is what keeps the header clear of the list under it. A header without one is left
 // alone; the folder's has none.
 void SGRLibraryClearScrim(UIView *header);
+// LibraryHeader.x. The root page's header (YourLibraryHeaderView): a child of `page` through 9.1.90, the child of a
+// plain UIStackView child of it from 9.2.0. nil while the page has none.
+UIView *SGRLibraryRootHeaderIn(UIView *page);
 // LibraryHeader.x. The root page's list (YourLibraryContent.collectionView), nil until it is there.
 UIScrollView *SGRLibraryListIn(UIView *page);
 // LibraryHeader.x. The root page `view` is in, nil outside one.

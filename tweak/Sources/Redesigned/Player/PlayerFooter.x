@@ -19,7 +19,11 @@
 // track that has none. With Music app icons off it draws Spotify's Encore microphone instead
 // (SGRPlayerFooterGlyph), lit and dimmed the same way. In the iPad two column player (PlayerLyrics.x) Lyrics picks the
 // side column's lines and a queue glyph of the Kit's, where the row puts Spotify's queue button, picks its queue; each
-// is lit while its side shows.
+// is lit while its side shows. The same glyph stands in a row Spotify builds without a queue button (a Free account's)
+// and opens Playing Next (PlayerQueue.m), as the Music app's row always has its queue.
+//
+// The bottom stack keeps the Music app's rhythm (keepRhythm): its gaps from the title row down to the footer row are
+// Apple's, set as the stack's own spacing, which raises the title row into the cover's band.
 //
 // The row sits lower than Spotify puts it, just over the home indicator the way the Music app's does
 // (issue #54): the footer unit's view is translated down, the controls follow it part of the way, and a
@@ -36,6 +40,7 @@
 #import "Redesigned/Kit/SGRPress.h"
 #import "Headers/SPTEncoreIconView.h"
 #import "Player.h"
+#import "PlayerQueue.h"
 #import <objc/message.h>
 
 static const CGFloat kLyricsGlyphSize = 20;
@@ -58,18 +63,20 @@ static const CGFloat kGlyphMaxWidth = 30;
 // bottom, and never less than kRowMinBottom above the screen's on a phone without a home indicator.
 static const CGFloat kRowAboveSafeArea = 20, kRowMinBottom = 34;
 // The controls follow a share of the row's move when nothing stands between them, so the gaps above
-// and below them even out instead of all the room opening under them.
+// and below them even out instead of all the room opening under them. Not while the rhythm below holds them.
 static const CGFloat kControlsShare = 0.3;
-// The volume row's sides, the player's own margin.
-static const CGFloat kVolumeMargin = 24;
+// The Music app's gaps down its player (iOS 26, design/applemusic-gap item 4), each from the middle of what is above
+// unless named: from the artist's last line to the progress bar, from the bar to the play button, and from the play
+// button to the volume row (SGRPlayerVolumeToRow goes on to the footer row). Spotify's own were 27, 71 and 55.
+static const CGFloat kArtistToBar = 38, kBarToPlay = 91, kPlayToVolume = 91;
 
 // "airplayaudio" is the name iOS 16 knows; iOS 18 calls it airplay.audio and keeps this one as its alias.
 static NSString *const kConnectSymbol = @"airplayaudio", *const kQueueSymbol = @"list.bullet";
 
 static char kConnectKey, kShareKey, kTrimmerKey, kSharedByKey, kQueueKey, kQueueIconKey, kLyricsGlyphKey, kReachKey, kRowKey;
-static char kSideQueueKey;
-static __weak SGRGlyphButton *sg_lyricsGlyph, *sg_sideQueueGlyph;
-// Spotify's queue button, taken off the row while the two columns' queue glyph stands in its place.
+static char kQueueGlyphKey;
+static __weak SGRGlyphButton *sg_lyricsGlyph, *sg_queueGlyph;
+// Spotify's queue button, taken off the row while the two columns' queue glyph (placeQueueGlyph) stands in its place.
 static NSHashTable<UIView *> *sg_queueStoodIn;
 
 // The view the footer's stack view arranges around `view`.
@@ -153,9 +160,10 @@ UIView *SGRPlayerFooterGlyph(SGRGlyphButton *button, NSString *encoreName) {
 
 #pragma mark - lyrics
 
-// The two columns' queue glyph, lit while the side column shows the queue, the way Lyrics is lit while it shows the lines.
-static void markSideQueue(void) {
-    SGRGlyphButton *queue = sg_sideQueueGlyph;
+// The queue glyph of the redesign's own, lit while the side column shows the queue, the way Lyrics is lit while it shows
+// the lines; never lit in the one column, where it opens a sheet.
+static void markQueueGlyph(void) {
+    SGRGlyphButton *queue = sg_queueGlyph;
     if (!queue) return;
     BOOL shown = SGRPlayerQueueSideShown();
     UIColor *tint = shown ? SGRPrimary() : SGRSecondary();
@@ -167,7 +175,8 @@ static void markSideQueue(void) {
 void SGRPlayerLyricsChanged(void) {
     SGRPlayerMotionLyricsChanged();
     SGRPlayerVisualiserUpdate();
-    markSideQueue();
+    SGRShownTitleRestyle();
+    markQueueGlyph();
     SGRGlyphButton *glyph = sg_lyricsGlyph;
     if (!glyph) return;
     BOOL enabled = SGRPlayerLyricsAvailable() || SGRPlayerLyricsOpen(), open = SGRPlayerLyricsOpen();
@@ -438,11 +447,39 @@ UIView *SGRPlayerConnectGlyphIn(UIView *host, UIView *connect) {
 @implementation SGRFooterReach
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
     UIView *row = self.row;
-    if (!row.window || row.alpha < 0.01 || row.hidden) return nil;
+    // Its own band only: lifted back on top (placeReach), it is over views that take the touches elsewhere.
+    if (![self pointInside:point withEvent:event] || !row.window || row.alpha < 0.01 || row.hidden) return nil;
     UIView *hit = [row hitTest:[row convertPoint:point fromView:self] withEvent:event];
     return hit == row ? nil : hit;
 }
 @end
+
+// The band of `row`, in `stack`, over `band` of `player`. Spotify holds a podcast episode's player and a track's in units
+// of their own, each row in a bottom stack of its own, and on every switch between them takes its views out of the player
+// and puts the new kind's back on top: the bottom stack and, after it, a plain view over the strip under it, the band's
+// strip (Spotify 9.2.0, music, an episode, music again). A band put in before stays under them, its touches taken by that
+// view, and the band of a row that has left stays in the player. So a band whose row is no longer in the player goes,
+// a row that does not hang out of its stack by a pixel has none, and a band its stack has come over goes back on top.
+static void placeReach(UIView *row, UIView *stack, UIView *player, CGRect band, CGFloat scale) {
+    SGRFooterReach *reach = objc_getAssociatedObject(row, &kReachKey);
+    for (UIView *view in player.subviews) {
+        if ([view isKindOfClass:SGRFooterReach.class] && view != reach && ![((SGRFooterReach *)view).row isDescendantOfView:player])
+            [view removeFromSuperview];
+    }
+    if (band.size.height * scale < 1) {
+        [reach removeFromSuperview];
+        return;
+    }
+    if (!reach) {
+        reach = [SGRFooterReach new];
+        reach.row = row;
+        objc_setAssociatedObject(row, &kReachKey, reach, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    NSArray<UIView *> *siblings = player.subviews;
+    if (reach.superview != player) [player addSubview:reach];
+    else if ([siblings indexOfObject:reach] < [siblings indexOfObject:stack]) [player bringSubviewToFront:reach];
+    if (!CGRectEqualToRect(reach.frame, band)) reach.frame = band;
+}
 
 static UIViewController *unitOf(UIView *view) {
     UIResponder *next = view.nextResponder;
@@ -469,6 +506,199 @@ static UIView *rowAbove(UIView *row) {
     return best;
 }
 
+#pragma mark - margins and rhythm
+
+static char kMarginInsetKey, kMarginOriginalsKey, kMarginContentKey;
+
+// +1 for a constraint on the leading side of `view` that moves it in as its constant grows, -1 for one that moves it
+// out, and on the trailing side the other way round; 0 for any other.
+static CGFloat insetSign(NSLayoutConstraint *constraint, UIView *view) {
+    BOOL first = constraint.firstItem == view;
+    if (!first && constraint.secondItem != view) return 0;
+    NSLayoutAttribute attribute = first ? constraint.firstAttribute : constraint.secondAttribute;
+    CGFloat side = attribute == NSLayoutAttributeLeading || attribute == NSLayoutAttributeLeft ? 1
+                 : attribute == NSLayoutAttributeTrailing || attribute == NSLayoutAttributeRight ? -1 : 0;
+    return first ? side : -side;
+}
+
+// The inset goes into the constants of Spotify's constraints that hold the view's sides in its superview, so the
+// constraints inside it lay its content out for the new width. Each constraint's own constant is kept to add to, and a
+// constraint Spotify makes anew is taken up on the next pass. For a row pinned to the unit, its native margin is
+// in the pin, not in the frame (which can still be the reused row's last adjusted frame). Where the content starts in
+// the view is Spotify's only until the view is inset: the narrowed title row lays its content out anew (the title 8 pt
+// in for 12 on the next pass, 9.2.0), and an inset measured from that changed pass by pass, the row left 24, 32 or
+// 36 pt in by where the passes stopped (issue #35). So it is read once the view is inset and kept for as long as it is.
+// A view not inset still shows Spotify's own layout and is read on every pass: a title row first read while it held
+// a video podcast's thumbnail (the title 60 pt in, so no inset) is read again without it.
+void SGRPlayerHoldMargin(UIView *view, CGFloat contentX) {
+    UIView *unit = view.superview;
+    if (!unit) return;
+    NSNumber *content = objc_getAssociatedObject(view, &kMarginContentKey);
+    if (!content || [objc_getAssociatedObject(view, &kMarginInsetKey) doubleValue] <= 0)
+        objc_setAssociatedObject(view, &kMarginContentKey, content = @(contentX), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    contentX = content.doubleValue;
+    NSMapTable<NSLayoutConstraint *, NSNumber *> *originals = objc_getAssociatedObject(view, &kMarginOriginalsKey);
+    BOOL rtl = unit.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    NSNumber *inset = nil;
+    for (NSLayoutConstraint *pin in unit.constraints) {
+        if (!pin.active || pin.relation != NSLayoutRelationEqual || pin.multiplier != 1 ||
+            pin.firstAttribute != pin.secondAttribute ||
+            (pin.firstAttribute != NSLayoutAttributeLeading && pin.firstAttribute != (rtl ? NSLayoutAttributeRight : NSLayoutAttributeLeft))) continue;
+        id edge = pin.firstItem == view ? pin.secondItem : pin.secondItem == view ? pin.firstItem : nil;
+        CGRect anchor = unit.bounds;
+        if ([edge isKindOfClass:UILayoutGuide.class] && [(UILayoutGuide *)edge owningView] == unit)
+            anchor = [(UILayoutGuide *)edge layoutFrame];
+        else if (edge != unit) continue;
+        NSNumber *original = [originals objectForKey:pin] ?: @(pin.constant);
+        CGFloat from = original.doubleValue * insetSign(pin, view)
+            + (rtl ? CGRectGetMaxX(unit.bounds) - CGRectGetMaxX(anchor) : CGRectGetMinX(anchor) - CGRectGetMinX(unit.bounds));
+        CGFloat wanted = SGRPlayerSideMargin - from - contentX;
+        inset = @(wanted > 0 && view.bounds.size.width > 2 * wanted ? round(wanted) : 0);
+        break;
+    }
+    // Unknown pin arrangements keep the previously measured native margin.
+    NSNumber *lastInset = objc_getAssociatedObject(view, &kMarginInsetKey);
+    if (!inset) inset = lastInset;
+    else if (![inset isEqual:lastInset])
+        objc_setAssociatedObject(view, &kMarginInsetKey, inset, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!inset) {
+        CGRect frame = view.frame;
+        CGFloat from = rtl ? CGRectGetMaxX(unit.bounds) - CGRectGetMaxX(frame) : CGRectGetMinX(frame) - CGRectGetMinX(unit.bounds);
+        CGFloat wanted = SGRPlayerSideMargin - (from + contentX);
+        inset = @(wanted > 0 && frame.size.width > 2 * wanted ? round(wanted) : 0);
+        objc_setAssociatedObject(view, &kMarginInsetKey, inset, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        NSUInteger sides = 0;
+        for (NSLayoutConstraint *constraint in unit.constraints) sides += insetSign(constraint, view) != 0;
+        SGLog(@"redesign player: %@ inset %@ pt to the player's margin through %lu constraints", NSStringFromClass(view.class), inset, (unsigned long)sides);
+    }
+    if (!originals) {
+        originals = [NSMapTable weakToStrongObjectsMapTable];
+        objc_setAssociatedObject(view, &kMarginOriginalsKey, originals, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    for (NSLayoutConstraint *constraint in unit.constraints) {
+        CGFloat sign = insetSign(constraint, view);
+        if (!sign || !constraint.active) continue;
+        NSNumber *original = [originals objectForKey:constraint];
+        if (!original) [originals setObject:(original = @(constraint.constant)) forKey:constraint];
+        CGFloat constant = original.doubleValue + sign * inset.doubleValue;
+        if (constraint.constant != constant) constraint.constant = constant;
+    }
+}
+
+// The Music app's rhythm in Spotify's bottom stack, by the stack's own spacing after the title row, the progress bar
+// and the controls: Spotify pins the stack's bottom, so room added there raises everything over it, the title row into
+// the cover's band, and the room inside the stack opens as the Music app's. Measured from where Spotify's layout puts
+// each, the moves this file and PlayerLyrics.x add left out, so a pass that finds the gaps right changes nothing.
+// Only in a player taller than wide with one column, and only the ordinary player's units (found by Spotify's ids);
+// elsewhere, or when one is missing, Spotify's own spacing comes back.
+static char kArtistKey, kSliderKey, kPlayKey, kRhythmKey;
+
+// The arranged view of `stack` that holds `view`.
+static UIView *arrangedIn(UIStackView *stack, UIView *view) {
+    for (UIView *v = view; v; v = v.superview) {
+        if (v.superview == stack) return [stack.arrangedSubviews containsObject:v] ? v : nil;
+    }
+    return nil;
+}
+
+// Where `y` of `view` is in `player`, its arranged view's transform left out.
+static CGFloat untransformedY(UIStackView *stack, UIView *arranged, UIView *view, CGFloat y, UIView *player) {
+    CGFloat local = [view convertPoint:CGPointMake(0, y) toView:arranged].y - CGRectGetMinY(arranged.bounds);
+    CGFloat top = arranged.center.y - arranged.bounds.size.height / 2;
+    return [stack convertPoint:CGPointMake(0, top + local) toView:player].y;
+}
+
+// YES when the spacing changed.
+static BOOL spaceAfter(UIStackView *stack, UIView *view, CGFloat spacing) {
+    if (fabs([stack customSpacingAfterView:view] - spacing) < 0.5) return NO;
+    [stack setCustomSpacing:spacing afterView:view];
+    NSHashTable<UIView *> *spaced = objc_getAssociatedObject(stack, &kRhythmKey);
+    if (!spaced) {
+        spaced = [NSHashTable weakObjectsHashTable];
+        objc_setAssociatedObject(stack, &kRhythmKey, spaced, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    [spaced addObject:view];
+    return YES;
+}
+
+// From `gap` to `target`, by the spacing after `view`; YES when the spacing changed. The spacing the measured frames were laid out with is read from
+// the frames themselves (the room between `view` and the arranged view after it), not from the stack's setting, which
+// may be ahead of a layout still to come: a pass before it would add the same room again. Never under Spotify's own
+// spacing, and never more than the target over it.
+static BOOL closeGap(UIStackView *stack, UIView *view, CGFloat gap, CGFloat target) {
+    NSArray<UIView *> *arranged = stack.arrangedSubviews;
+    NSUInteger index = [arranged indexOfObject:view];
+    UIView *next = nil;
+    for (NSUInteger i = index + 1; index != NSNotFound && i < arranged.count && !next; i++) {
+        if (!arranged[i].hidden) next = arranged[i];
+    }
+    if (!next) return NO;
+    CGFloat laidOut = (next.center.y - next.bounds.size.height / 2) - (view.center.y + view.bounds.size.height / 2);
+    return spaceAfter(stack, view, round(MIN(MAX(stack.spacing, laidOut + target - gap), stack.spacing + target)));
+}
+
+static void dropRhythm(UIStackView *stack) {
+    NSHashTable<UIView *> *spaced = objc_getAssociatedObject(stack, &kRhythmKey);
+    for (UIView *view in spaced.allObjects) [stack setCustomSpacing:UIStackViewSpacingUseDefault afterView:view];
+    [spaced removeAllObjects];
+}
+
+// YES while the rhythm holds the stack: `rowMiddle` is where the footer row's middle ends up in `player`. `respaced`
+// says whether a spacing changed, which moves the stack's views only once the player lays the stack out again.
+static BOOL keepRhythm(UIStackView *stack, UIView *player, CGFloat rowMiddle, BOOL wanted, BOOL *respaced) {
+    *respaced = NO;
+    UIView *artist = SGRFindByIdentifier(stack, @"now-playing-subtitle-label", &kArtistKey);
+    UIView *slider = SGRFindByIdentifier(stack, @"SPTNowPlayingSliderV2", &kSliderKey);
+    UIView *play = SGRFindByIdentifier(stack, @"SPTNowPlayingPlayButton", &kPlayKey);
+    UIView *info = arrangedIn(stack, artist), *duration = arrangedIn(stack, slider), *controls = arrangedIn(stack, play);
+    NSArray<UIView *> *arranged = stack.arrangedSubviews;
+    BOOL ordered = info && duration && controls && [arranged indexOfObject:info] < [arranged indexOfObject:duration]
+        && [arranged indexOfObject:duration] < [arranged indexOfObject:controls];
+    if (!wanted || !ordered || artist.bounds.size.height < 1 || slider.bounds.size.height < 1) {
+        dropRhythm(stack);
+        return NO;
+    }
+    CGFloat artistBottom = untransformedY(stack, info, artist, CGRectGetMaxY(artist.bounds), player);
+    CGFloat bar = untransformedY(stack, duration, slider, CGRectGetMidY(slider.bounds), player);
+    CGFloat playMiddle = untransformedY(stack, controls, play, CGRectGetMidY(play.bounds), player);
+    CGFloat toRow = kPlayToVolume + (SGRPlayerVolumeOn() ? SGRPlayerVolumeToRow : 0);
+    BOOL afterInfo = closeGap(stack, info, bar - artistBottom, kArtistToBar);
+    BOOL afterBar = closeGap(stack, duration, playMiddle - bar, kBarToPlay);
+    BOOL afterControls = closeGap(stack, controls, rowMiddle - playMiddle, toRow);
+    *respaced = afterInfo || afterBar || afterControls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        SGLog(@"redesign player: rhythm from gaps %.0f, %.0f and %.0f to the Music app's %.0f, %.0f and %.0f", bar - artistBottom,
+              playMiddle - bar, rowMiddle - playMiddle, kArtistToBar, kBarToPlay, toRow);
+    });
+    return YES;
+}
+
+// The stack moves its views for new spacing only when the player lays it out, a pass the footer's own is part of and
+// must not run again from inside: measured before it, the volume row stood against the controls' old place, over them,
+// and nothing laid the footer out again (its size had not changed). So one pass of the player's, out of every layout, on
+// the next turn of the run loop, and the footer placed after it against where the controls are then. That pass asks for
+// none of its own (sg_rhythmSettling), whatever it finds; one is pending per player at a time.
+static char kRhythmPendingKey;
+static BOOL sg_rhythmSettling;
+
+static void settleRhythm(UIView *player, UIView *row) {
+    if (sg_rhythmSettling || objc_getAssociatedObject(player, &kRhythmPendingKey)) return;
+    objc_setAssociatedObject(player, &kRhythmPendingKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak UIView *weakPlayer = player, *weakRow = row;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *settledPlayer = weakPlayer, *settledRow = weakRow;
+        if (!settledPlayer) return;
+        objc_setAssociatedObject(settledPlayer, &kRhythmPendingKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!settledPlayer.window || settledRow.superview.superview != settledPlayer) return;
+        sg_rhythmSettling = YES;
+        [settledPlayer setNeedsLayout];
+        [settledPlayer layoutIfNeeded];
+        SGRPlayerLowerRow(settledRow);
+        sg_rhythmSettling = NO;
+    });
+}
+
 void SGRPlayerLowerRow(UIView *row) {
     UIView *stack = row.superview, *player = stack.superview;
     UIWindow *window = row.window;
@@ -483,6 +713,9 @@ void SGRPlayerLowerRow(UIView *row) {
     if (!columns) move = MAX(0, move);
     CGAffineTransform down = CGAffineTransformMakeTranslation(0, move);
     if (!CGAffineTransformEqualToTransform(row.transform, down)) row.transform = down;
+    BOOL respaced;
+    BOOL rhythm = keepRhythm((UIStackView *)stack, player, middle + move, !columns && height > player.bounds.size.width, &respaced);
+    if (respaced) settleRhythm(player, row);
 
     // Only the controls, and only straight above: a volume row between them keeps its place and theirs.
     UIView *above = rowAbove(row);
@@ -491,32 +724,25 @@ void SGRPlayerLowerRow(UIView *row) {
     BOOL controls = [unit containsString:@"PlaybackControlsElementsUnit"] || [unit containsString:@"DJMHeadUnitViewController"];
     // With the volume row, the controls stay where Spotify put them and the row takes the room the footer leaves.
     // The volume row is placed against the controls where they would stand for it; one that does not show leaves them
-    // following the footer as they do without it.
+    // following the footer as they do without it. The rhythm has placed them already.
     BOOL volume = SGRPlayerVolumeOn() && controls;
-    CGFloat share = volume ? 0 : kControlsShare;
+    CGFloat share = volume || rhythm ? 0 : kControlsShare;
     CGAffineTransform follow = CGAffineTransformMakeTranslation(0, controls ? round(move * share) : 0);
     if (above && controls && !CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     SGRPlayerPaintCover(stack);
-    if (volume && !SGRPlayerPlaceVolume(stack, above, row, kVolumeMargin)) {
+    if (volume && !SGRPlayerPlaceVolume(stack, above, row, SGRPlayerSideMargin, rhythm) && !rhythm) {
         share = kControlsShare;
         follow = CGAffineTransformMakeTranslation(0, round(move * share));
         if (!CGAffineTransformEqualToTransform(above.transform, follow)) above.transform = follow;
     } else if (!volume) {
-        SGRPlayerPlaceVolume(stack, nil, row, kVolumeMargin);
+        SGRPlayerPlaceVolume(stack, nil, row, SGRPlayerSideMargin, rhythm);
     }
 
-    SGRFooterReach *reach = objc_getAssociatedObject(row, &kReachKey);
-    if (!reach) {
-        reach = [SGRFooterReach new];
-        reach.row = row;
-        objc_setAssociatedObject(row, &kReachKey, reach, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    if (reach.superview != player) [player addSubview:reach];
     CGRect stackFrame = [stack convertRect:stack.bounds toView:player];
     CGRect drawn = [row convertRect:row.bounds toView:player];
     CGFloat from = CGRectGetMaxY(stackFrame);
     CGRect band = CGRectMake(CGRectGetMinX(drawn), from, drawn.size.width, MAX(0, CGRectGetMaxY(drawn) - from));
-    if (!CGRectEqualToRect(reach.frame, band)) reach.frame = band;
+    placeReach(row, stack, player, band, window.traitCollection.displayScale);
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -525,38 +751,47 @@ void SGRPlayerLowerRow(UIView *row) {
     });
 }
 
-// The two columns' queue glyph (PlayerLyrics.x), where the row puts Spotify's queue button: it picks the side column's
-// queue rather than a sheet of its own. 9.1.90's iPad player has no queue button in its row; one that a row does have
-// is taken off it for as long as the glyph stands there, and given back with the one column.
-static void placeSideQueue(UIView *host, UIView *spotifyQueue, CGPoint center) {
-    SGRGlyphButton *glyph = objc_getAssociatedObject(host, &kSideQueueKey);
+// The queue glyph of the redesign's own, where the row puts Spotify's queue button. In the two columns (PlayerLyrics.x)
+// it picks the side column's queue rather than a sheet of its own: 9.1.90's iPad player has no queue button in its row,
+// and one that a row does have is taken off it for as long as the glyph stands there, and given back with the one
+// column. In the one column it stands only in a row Spotify gives no queue button (a Free account's, 9.1.90), the
+// Music app's row having one always, and opens Playing Next (PlayerQueue.m); a row with Spotify's keeps Spotify's.
+static void placeQueueGlyph(UIView *host, UIView *spotifyQueue, CGPoint center) {
+    SGRGlyphButton *glyph = objc_getAssociatedObject(host, &kQueueGlyphKey);
     if (!sg_queueStoodIn) sg_queueStoodIn = [NSHashTable weakObjectsHashTable];
-    if (!SGRPlayerTwoColumns()) {
-        [glyph removeFromSuperview];
+    BOOL columns = SGRPlayerTwoColumns();
+    if (!columns) {
         for (UIView *view in sg_queueStoodIn) {
             view.alpha = 1;
             view.userInteractionEnabled = YES;
             view.accessibilityElementsHidden = NO;
         }
         [sg_queueStoodIn removeAllObjects];
+    }
+    if (!columns && spotifyQueue) {
+        [glyph removeFromSuperview];
         return;
     }
     if (!glyph) {
         glyph = [SGRGlyphButton buttonWithSymbol:kQueueSymbol pointSize:kLyricsGlyphSize title:SGL(@"settings.player.ipad.queue", @"Queue")];
-        glyph.accessibilityIdentifier = @"vitrine.player.queue";
-        glyph.onTap = ^{ SGRPlayerToggleQueueSide(); };
-        objc_setAssociatedObject(host, &kSideQueueKey, glyph, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        glyph.accessibilityIdentifier = @"retrine.player.queue";
+        __weak SGRGlyphButton *weakGlyph = glyph;
+        glyph.onTap = ^{
+            if (SGRPlayerTwoColumns()) SGRPlayerToggleQueueSide();
+            else SGRPlayerShowQueue(weakGlyph);
+        };
+        objc_setAssociatedObject(host, &kQueueGlyphKey, glyph, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (glyph.superview != host) [host addSubview:glyph];
     glyph.bounds = CGRectMake(0, 0, kFooterPlatter, kFooterPlatter);
     glyph.center = center;
-    if (spotifyQueue) {
+    if (columns && spotifyQueue) {
         SGRVanish(spotifyQueue);
         [sg_queueStoodIn addObject:spotifyQueue];
     }
-    sg_sideQueueGlyph = glyph;
+    sg_queueGlyph = glyph;
     UIView *drawn = SGRPlayerFooterGlyph(glyph, @"queue");
-    markSideQueue();
+    markQueueGlyph();
     SGRPressGlyph(glyph, drawn, host, kFooterPlatter, drawn == glyph.glyph ? 0 : SGRPressScale);
 }
 
@@ -585,20 +820,23 @@ static void placeSideQueue(UIView *host, UIView *spotifyQueue, CGPoint center) {
     SGRVanish(sharedBy);
     SGRVanish(arrangedAround(sharedBy, host));
 
+    UIView *queue = SGRFindByIdentifier(host, @"QueueButtonNowPlaying", &kQueueKey);
+    CGPoint queueMiddle = CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds));
+    // The Agent prompt adds height below the row. The queue only moves sideways, so its y stays on the row.
+    CGFloat rowY = queue.window ? round([queue convertPoint:queueMiddle toView:host].y) : middleY;
     SGRGlyphButton *lyrics = SGRPlayerLyricsGlyphIn(host);
     lyrics.bounds = CGRectMake(0, 0, 44, 44);
-    lyrics.center = CGPointMake(round(width * (rtl ? kTrailing : kLeading)), middleY);
+    lyrics.center = CGPointMake(round(width * (rtl ? kTrailing : kLeading)), rowY);
     SGRPlayerLyricsChanged();
 
     UIView *connect = SGRFindByIdentifier(host, @"Components.ConnectButtonOutputSwitcher", &kConnectKey);
     UIView *glyph = SGRPlayerConnectGlyphIn(host, connect);
     CGFloat connectFrom = glyph ? moveTo(arrangedAround(connect, host), glyph, CGPointMake(CGRectGetMidX(glyph.bounds), CGRectGetMidY(glyph.bounds)), host, round(width * kMiddle)) : -1;
 
-    UIView *queue = SGRFindByIdentifier(host, @"QueueButtonNowPlaying", &kQueueKey);
     standInForQueue((SPTEncoreIconView *)SGRFindByIdentifier(queue, @"Encore.IconView", &kQueueIconKey));
     CGFloat queueX = round(width * (rtl ? kLeading : kTrailing));
-    CGFloat queueFrom = moveTo(arrangedAround(queue, host), queue, CGPointMake(CGRectGetMidX(queue.bounds), CGRectGetMidY(queue.bounds)), host, queueX);
-    placeSideQueue(host, arrangedAround(queue, host), CGPointMake(queueX, middleY));
+    CGFloat queueFrom = moveTo(arrangedAround(queue, host), queue, queueMiddle, host, queueX);
+    placeQueueGlyph(host, arrangedAround(queue, host), CGPointMake(queueX, rowY));
 
     SGRPlayerLowerRow(host);
     SGRPlayerCoverConnect(arrangedAround(connect, host), glyph);
@@ -614,7 +852,7 @@ static void placeSideQueue(UIView *host, UIView *spotifyQueue, CGPoint center) {
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        SGLog(@"redesign player: footer lyrics at %.0f, connect %.0f (%@) to %.0f, queue %.0f to %.0f, share %@", lyrics.center.x,
+        SGLog(@"redesign player: footer lyrics at %.0f,%.0f (unit middle %.0f), connect %.0f (%@) to %.0f, queue %.0f to %.0f, share %@", lyrics.center.x, lyrics.center.y, middleY,
               connectFrom, glyph ? @"glyph" : @"button", round(width * kMiddle), queueFrom, queueX, share ? @"gone" : @"not found");
     });
 }

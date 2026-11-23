@@ -216,8 +216,45 @@ NSString *SGHarnessPlayingTrack;
 NSString *SGKaraokePlayingTrack(void) { return SGHarnessPlayingTrack ?: @"harness"; }
 NSArray<SGKaraokeLine *> *SGKaraokeLinesForTrack(NSString *trackID) { return sg_lines; }
 void SGKaraokeKeepLines(NSString *trackID, NSArray<SGKaraokeLine *> *lines) { sg_lines = lines; }
+BOOL SGHarnessLoadFailed;
+void (^SGHarnessRetryLyrics)(NSString *);
+BOOL SGLyricsLoadFailed(NSString *trackID) { return SGHarnessLoadFailed; }
+BOOL SGKaraokeLooking(NSString *trackID) { return NO; }
+void SGLyricsRetry(NSString *trackID) { if (SGHarnessRetryLyrics) SGHarnessRetryLyrics(trackID); }
 
-void SGAddPlayerStateObserver(id observer) {}
+NSNotificationName const SGKaraokeLinesKeptNotification = @"harness.kept";
+@interface SGHarnessPlayback : NSObject
+@property(nonatomic) BOOL isPaused;
+@property(nonatomic) double positionAsOfTimestamp;
+@end
+@implementation SGHarnessPlayback
+- (double)position { return SGKaraokePositionMs() / 1000.; }
+- (BOOL)isPlaying { return !self.isPaused; }
+- (double)playbackSpeed { return sg_rate; }
+@end
+static __weak id sg_listener;
+static SGHarnessPlayback *sg_playback;
+id SGKaraokePlayer(void) { return nil; }
+void SGAddPlayerStateObserver(id observer) { sg_listener = observer; }
+id SGPlayerState(void) {
+    if (!sg_playback) sg_playback = [SGHarnessPlayback new];
+    return sg_playback;
+}
+void SGHarnessPause(BOOL paused) {
+    double at = SGKaraokePositionMs();
+    SGHarnessStartClock(at, paused ? 0 : 1, -1, 0);
+    SGHarnessPlayback *state = SGPlayerState();
+    state.positionAsOfTimestamp = at / 1000.;
+    state.isPaused = paused;
+    [sg_listener performSelector:@selector(playerStateDidChange:) withObject:state];
+}
+void SGHarnessStall(BOOL stalled) {
+    double at = SGKaraokePositionMs();
+    SGHarnessStartClock(at, stalled ? 0 : 1, -1, 0);
+    SGHarnessPlayback *state = SGPlayerState();
+    state.positionAsOfTimestamp = at / 1000.;
+    [sg_listener performSelector:@selector(playerStateDidReport:) withObject:state];
+}
 NSInteger SGKaraokeDelayMs(void) { return [NSUserDefaults.standardUserDefaults integerForKey:SGKeyLyricsDelay]; }
 
 NSInteger SGKaraokePositionMs(void) {
@@ -280,8 +317,30 @@ NSNumber *SGLyricsPinnedID(NSString *trackID) { return nil; }
 void SGRShowLyricsSync(NSString *trackID) { NSLog(@"harness: Sync for %@", trackID); }
 void SGRShowLyricsSearch(NSString *trackID) { NSLog(@"harness: Search LRCLIB for %@", trackID); }
 NSString *SGRLyricsSyncSummary(NSString *trackID) { return nil; }
-BOOL SGRLyricsKeepAwakeOn(void) { return NO; }
-void SGRLyricsHoldAwake(id holder, BOOL hold) {}
+BOOL SGHarnessAwake;
+NSUInteger SGHarnessAwakeWrites;
+#if __has_include("awake-row-under-check.inc")
+#import "Core/SGLog.h"
+#import "Redesigned/Lyrics/LyricsTools.h"
+#import "Settings/SGModPage.h"
+@implementation SGModRow
+@end
+#define SGSwitchRow(title, subtitle, key) [SGModRow new]
+#define SGEnabled(key) [NSUserDefaults.standardUserDefaults boolForKey:@"plainIdle"]
+#define SGRLyricsHoldAwake registryHold
+#include "awake-row-under-check.inc"
+#undef SGRLyricsHoldAwake
+#undef SGEnabled
+#undef SGSwitchRow
+void SGRLyricsHoldAwake(id holder, BOOL hold) {
+    SGHarnessAwakeWrites++;
+    registryHold(holder, hold);
+    SGHarnessAwake = UIApplication.sharedApplication.idleTimerDisabled;
+}
+#else
+BOOL SGRLyricsKeepAwakeOn(void) { return [NSUserDefaults.standardUserDefaults boolForKey:@"plainIdle"]; }
+void SGRLyricsHoldAwake(id holder, BOOL hold) { SGHarnessAwakeWrites++; SGHarnessAwake = hold; }
+#endif
 
 // The AI services, Claude and a reload are off in the harness; the song's language is the real one (LyricsLanguage.m).
 BOOL SGClaudeKeySet(void) { return NO; }
@@ -354,4 +413,7 @@ NSNotificationName const SGLyricsWordTimingDidChangeNotification = @"spotifyglas
 #import "Redesigned/Lyrics/LyricCardPicker.h"
 @implementation SGRLyricCardLine
 @end
-void SGRPresentLyricCardPicker(NSArray<SGRLyricCardLine *> *lines, NSUInteger picked, BOOL pronunciation, NSString *trackID) {}
+void (^SGHarnessLyricCardPresented)(NSArray<SGRLyricCardLine *> *, NSUInteger);
+void SGRPresentLyricCardPicker(NSArray<SGRLyricCardLine *> *lines, NSUInteger picked, BOOL pronunciation, NSString *trackID) {
+    if (SGHarnessLyricCardPresented) SGHarnessLyricCardPresented(lines, picked);
+}

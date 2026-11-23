@@ -21,6 +21,8 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
 @property (nonatomic, readonly) NSArray<NSDictionary *> *unresolved;
 @property (nonatomic) unsigned long long ceiling;
 - (instancetype)initWithRoot:(NSURL *)root legacy:(NSURL *)legacy;
+// Read both the active cache and any conflicting files left at its previous name.
+- (instancetype)initWithRoot:(NSURL *)root renamedCache:(NSURL *)cache;
 - (BOOL)prepare:(NSError **)error;
 - (NSNumber *)importAuthority:(NSError **)error;
 - (BOOL)permitsImport:(NSDictionary *)record authority:(NSNumber *)authority error:(NSError **)error;

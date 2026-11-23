@@ -1,0 +1,3 @@
+NSNotificationName const SGSimplifyTitlesDidChangeNotification = @"SGSimplifyTitlesDidChange";
+NSNotificationName const SGTranslatedTitleDidChangeNotification = @"SGTranslatedTitleDidChange";
+NSNotificationName const SGTitleTranslationSettingsDidChangeNotification = @"SGTitleTranslationSettingsDidChange";
