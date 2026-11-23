@@ -293,7 +293,7 @@ static __weak SGAlbumQueueNotice *sg_notice;
 
     self.isAccessibilityElement = YES;
     self.accessibilityLabel = detail ? [NSString stringWithFormat:@"%@, %@", title, detail] : title;
-    self.accessibilityHint = @"Double-tap to dismiss.";
+    self.accessibilityHint = SGL(@"settings.album.queue.notice.hint", @"Double-tap to dismiss.");
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapped)]];
     [self addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(dragged:)]];
     [window addSubview:self];
@@ -362,7 +362,7 @@ static __weak SGAlbumQueueNotice *sg_notice;
     if (!(self = [super initWithFrame:frame])) return nil;
     self.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     _title = [UILabel new];
-    _title.text = @"Add to Queue";
+    _title.text = SGL(@"settings.localmusic.queue", @"Add to Queue");
     _title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleBody];
     _title.adjustsFontForContentSizeCategory = YES;
     _title.textColor = UIColor.whiteColor;
@@ -371,7 +371,7 @@ static __weak SGAlbumQueueNotice *sg_notice;
     _icon.contentMode = UIViewContentModeScaleAspectFit;
     for (UIView *v in @[_title, _icon]) { v.userInteractionEnabled = NO; [self addSubview:v]; }
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Add to Queue";
+    self.accessibilityLabel = SGL(@"settings.localmusic.queue", @"Add to Queue");
     self.accessibilityIdentifier = @"spotifyglass.albumQueue";
     self.accessibilityTraits = UIAccessibilityTraitButton;
     [self addTarget:self action:@selector(addAlbum) forControlEvents:UIControlEventTouchUpInside];

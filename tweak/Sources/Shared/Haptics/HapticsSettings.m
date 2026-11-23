@@ -101,7 +101,7 @@ SGMusicFollows SGMusicHapticsFollows(void) {
 static SGModRow *strengthRow(NSString *key, void (^changed)(void)) {
     NSInteger minimum, maximum;
     strengthRange(key, &minimum, &maximum);
-    return SGSliderRow(@"Strength", nil, minimum, maximum, SGStrengthStep,
+    return SGSliderRow(SGL(@"settings.vibrations.strength.title", @"Strength"), nil, minimum, maximum, SGStrengthStep,
         ^double { return SGHapticsStrength(key) * 100; },
         ^(double value) {
             SGSetInt(key, lround(value));
@@ -115,7 +115,7 @@ static SGModRow *strengthRow(NSString *key, void (^changed)(void)) {
 static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^explain)(void)) {
     SGMigrateMusicHaptics();
     __weak SGVibrationsPreview *weakPreview = preview;
-    SGModRow *controls = SGSwitchRow(@"Controls", nil, SGKeyControlHaptics);
+    SGModRow *controls = SGSwitchRow(SGL(@"settings.player.controls.header", @"Controls"), nil, SGKeyControlHaptics);
     controls.changed = ^(BOOL on) { [weakPreview reload]; };
     SGModRow *controlStrength = strengthRow(SGKeyControlStrength, ^{
         // Felt as it is set, and seen: a tap at the new strength with each step, and its ripple.
@@ -128,7 +128,7 @@ static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^ex
         [NSNotificationCenter.defaultCenter postNotificationName:SGMusicHapticsSwitchesChangedNotification object:nil];
         [weakPreview reload];
     };
-    SGModRow *music = SGOptionRow(@"Music Haptics", nil, SGKeyMusicHaptics);
+    SGModRow *music = SGOptionRow(SGL(@"settings.vibrations.music.title", @"Music Haptics"), nil, SGKeyMusicHaptics);
     music.info = kMusicInfo;
     music.changed = switched;
     SGModRow *musicStrength = strengthRow(SGKeyMusicStrength, ^{
@@ -138,29 +138,29 @@ static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^ex
         [weakPreview rippleAt:SGHapticsStrength(SGKeyMusicStrength) / 2];
     });
     musicStrength.waitsOn = SGKeyMusicHaptics;
-    SGModRow *follows = SGChoiceRow(@"Follows", nil, SGKeyMusicFollows, followsNames(), SGMusicFollowsEverything);
+    SGModRow *follows = SGChoiceRow(SGL(@"settings.vibrations.follows.title", @"Follows"), nil, SGKeyMusicFollows, followsNames(), SGMusicFollowsEverything);
     follows.choiceNotes = followsNotes();
     follows.chosen = ^(NSInteger index) { SGMusicHapticsSettingsChanged(); };
     follows.waitsOn = SGKeyMusicHaptics;
 
-    SGModRow *background = SGOptionRow(@"In the Background", nil, SGKeyMusicHapticsBackground);
+    SGModRow *background = SGOptionRow(SGL(@"settings.vibrations.background.title", @"In the Background"), nil, SGKeyMusicHapticsBackground);
     background.info = kBackgroundInfo;
     background.changed = switched;
     background.visible = ^BOOL { return backgroundAvailable(); };
     // What iOS's own is doing, or, while it is off in Accessibility, a row saying where to turn it on.
-    SGModRow *status = SGStatRow(@"Status", ^NSString *{ return SGMusicHapticsStatus(); });
+    SGModRow *status = SGStatRow(SGL(@"settings.wireguard.status", @"Status"), ^NSString *{ return SGMusicHapticsStatus(); });
     status.visible = ^BOOL { return SGMusicHapticsInBackground() && SGSystemMusicHapticsOn(); };
     // Under In the Background while the install lacks the key iOS lists apps for Music Haptics by.
-    SGModRow *unlisted = SGWarningRow(@"In the Background is missing from this install", @"Tap for why", ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"In the Background is missing"
-            message:@"iOS plays Music Haptics only for apps that say they support it, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Vitrine to get both."
+    SGModRow *unlisted = SGWarningRow(SGL(@"settings.vibrations.missing.title", @"In the Background is missing from this install"), SGL(@"settings.vibrations.missing.subtitle", @"Tap for why"), ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.vibrations.alert.missing.title", @"In the Background is missing")
+            message:SGL(@"ui.ios.plays.music.haptics.ee5399", @"iOS plays Music Haptics only for apps that say they support it, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Vitrine to get both.")
             preferredStyle:UIAlertControllerStyleAlert];
         alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
         [SGTopController() presentViewController:alert animated:YES completion:nil];
     });
     unlisted.visible = ^BOOL { return backgroundAvailable() && !SGMusicHapticsListedByInstall(); };
-    SGModRow *systemOff = SGActionRow(@"Music Haptics is off in iOS", @"Tap to turn it on in Settings", explain);
+    SGModRow *systemOff = SGActionRow(SGL(@"settings.vibrations.system_off.title", @"Music Haptics is off in iOS"), SGL(@"settings.vibrations.system_off.subtitle", @"Tap to turn it on in Settings"), explain);
     systemOff.visible = ^BOOL { return SGMusicHapticsInBackground() && !SGSystemMusicHapticsOn(); };
 
     return @[
@@ -221,9 +221,9 @@ static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^ex
     // iOS opens no Settings page but an app's own from a third-party app (App-prefs: links fail on iOS 27), so the
     // message gives the path from there.
     NSString *message = @"In the Background needs iOS's Music Haptics. Settings opens on Spotify's page: go back to Settings, then Accessibility > Music Haptics, and turn it on.";
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Turn On Music Haptics" message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Not Now" style:UIAlertActionStyleCancel handler:nil]];
-    UIAlertAction *open = [UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.vibrations.alert.system_off.title", @"Turn On Music Haptics") message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.vibrations.alert.not_now", @"Not Now") style:UIAlertActionStyleCancel handler:nil]];
+    UIAlertAction *open = [UIAlertAction actionWithTitle:SGL(@"settings.translation.download.open", @"Open Settings") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [UIApplication.sharedApplication openURL:[NSURL URLWithString:UIApplicationOpenSettingsURLString] options:@{} completionHandler:nil];
     }];
     [alert addAction:open];
@@ -237,7 +237,7 @@ UIViewController *SGVibrationsSettingsPage(void) {
     SGVibrationsPreview *preview = [SGVibrationsPreview new];
     __block __weak SGVibrationsPage *weakPage;
     NSArray<SGModSection *> *cards = sections(preview, ^{ [weakPage explainBackground]; });
-    SGVibrationsPage *page = [[SGVibrationsPage alloc] initWithTitle:@"Vibrations" intro:nil sections:cards footer:nil];
+    SGVibrationsPage *page = [[SGVibrationsPage alloc] initWithTitle:SGL(@"settings.main.vibrations.title", @"Vibrations") intro:nil sections:cards footer:nil];
     page.preview = preview;
     weakPage = page;
     return page;

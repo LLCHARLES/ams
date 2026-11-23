@@ -590,19 +590,19 @@ void SGBatchTranslateURI(NSString *uri, SGBatchTranslationEngine engine, UIWindo
     UIWindow *strongWindow = window;
 
     if (onDevice) {
-        UIAction *action = [UIAction actionWithTitle:@"Translate on iPhone" image:[UIImage systemImageNamed:@"translate"] identifier:nil handler:^(UIAction *a) {
+        UIAction *action = [UIAction actionWithTitle:SGL(@"settings.translation.ondevice.title", @"Translate on iPhone") image:[UIImage systemImageNamed:@"translate"] identifier:nil handler:^(UIAction *a) {
             [weakMenu dismissViewControllerAnimated:YES completion:nil];
             SGBatchTranslateURI(uri, SGBatchTranslationEngineOnDevice, strongWindow);
         }];
-        action.subtitle = @"Apple's Translate, on this iPhone";
+        action.subtitle = SGL(@"settings.lyricstools.menu.ondevice.subtitle", @"Apple's Translate, on this iPhone");
         [items addObject:action];
     }
     if (intelligence) {
-        UIAction *action = [UIAction actionWithTitle:@"Translate with Apple Intelligence" image:[UIImage systemImageNamed:@"apple.intelligence"] identifier:nil handler:^(UIAction *a) {
+        UIAction *action = [UIAction actionWithTitle:SGL(@"settings.lyricstools.menu.intelligence", @"Translate with Apple Intelligence") image:[UIImage systemImageNamed:@"apple.intelligence"] identifier:nil handler:^(UIAction *a) {
             [weakMenu dismissViewControllerAnimated:YES completion:nil];
             SGBatchTranslateURI(uri, SGBatchTranslationEngineAppleIntelligence, strongWindow);
         }];
-        action.subtitle = @"On this iPhone";
+        action.subtitle = SGL(@"settings.lyrics.auto_translation.intelligence.note", @"On this iPhone");
         [items addObject:action];
     }
     if (ai) {
@@ -616,9 +616,9 @@ void SGBatchTranslateURI(NSString *uri, SGBatchTranslationEngine engine, UIWindo
         [items addObject:action];
     }
     if (!onDevice && !intelligence && !ai) {
-        UIAction *action = [UIAction actionWithTitle:@"No Translator Configured" image:[UIImage systemImageNamed:@"exclamationmark.circle"] identifier:nil handler:^(UIAction *a) {}];
+        UIAction *action = [UIAction actionWithTitle:SGL(@"ui.no.translator.configured.bc5d28", @"No Translator Configured") image:[UIImage systemImageNamed:@"exclamationmark.circle"] identifier:nil handler:^(UIAction *a) {}];
         action.attributes = UIMenuElementAttributesDisabled;
-        action.subtitle = @"Add an API key in Mod Settings > Lyrics";
+        action.subtitle = SGL(@"ui.add.an.api.key.024f3a", @"Add an API key in Mod Settings > Lyrics");
         [items addObject:action];
     }
     self.menu = [UIMenu menuWithTitle:rowTitle image:[UIImage systemImageNamed:@"translate"] identifier:nil options:0 children:items];

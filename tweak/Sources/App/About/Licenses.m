@@ -30,24 +30,24 @@ static NSString *const kZlib =
     @"3. This notice may not be removed or altered from any source distribution.";
 
 UIViewController *SGLicensesPage(void) {
-    SGModRow *mod = SGLinkRow(@"Vitrine", @"GNU General Public License v3.0", @"https://www.gnu.org/licenses/gpl-3.0.html");
-    SGModRow *bs2b = SGLinkRow(@"libbs2b", @"Crossfeed · MIT License", @"https://github.com/alexmarsev/libbs2b");
-    SGModRow *wdl = SGLinkRow(@"WDL", @"Liveprog's EEL2 · zlib License", @"https://github.com/justinfrankel/WDL");
+    SGModRow *mod = SGLinkRow(SGL(@"ui.vitrine.43c7e6", @"Vitrine"), SGL(@"settings.mod.licenses.vitrine.subtitle", @"GNU General Public License v3.0"), @"https://www.gnu.org/licenses/gpl-3.0.html");
+    SGModRow *bs2b = SGLinkRow(@"libbs2b", SGL(@"settings.mod.licenses.bs2b.subtitle", @"Crossfeed · MIT License"), @"https://github.com/alexmarsev/libbs2b");
+    SGModRow *wdl = SGLinkRow(SGL(@"ui.wdl.573e32", @"WDL"), SGL(@"settings.mod.licenses.wdl.subtitle", @"Liveprog's EEL2 · zlib License"), @"https://github.com/justinfrankel/WDL");
     // EeveeSpotify's repo was taken down, so the row opens the license both projects are under.
-    SGModRow *eevee = SGLinkRow(@"EeveeSpotify", @"Ads, upsells, Spoof Premium · GNU GPL v3.0", @"https://www.gnu.org/licenses/gpl-3.0.html");
+    SGModRow *eevee = SGLinkRow(SGL(@"ui.eeveespotify.b04e6c", @"EeveeSpotify"), SGL(@"settings.mod.licenses.eevee.subtitle", @"Ads, upsells, Spoof Premium · GNU GPL v3.0"), @"https://www.gnu.org/licenses/gpl-3.0.html");
     // Not shipped: the Headphones page downloads its results when asked, but they are AutoEq's work all the same.
-    SGModRow *autoEq = SGLinkRow(@"AutoEq", @"Headphone corrections · MIT License", @"https://github.com/jaakkopasanen/AutoEq");
+    SGModRow *autoEq = SGLinkRow(SGL(@"ui.autoeq.b90e82", @"AutoEq"), SGL(@"settings.mod.licenses.autoeq.subtitle", @"Headphone corrections · MIT License"), @"https://github.com/jaakkopasanen/AutoEq");
     // Sing's voice model is downloaded rather than built in, and its NOTICE travels with it here all the same.
-    SGModRow *voice = SGLinkRow(@"Karaoke's voice model", @"Mel-Band RoFormer · MIT License", @"https://huggingface.co/My-Name-Is-Jeff/vitrine-sing");
-    SGModRow *lightVoice = SGLinkRow(@"Karaoke's light voice model", @"Mini-BS-RoFormer-18M · MIT License",
+    SGModRow *voice = SGLinkRow(SGL(@"settings.mod.licenses.voice_model.title", @"Karaoke's voice model"), SGL(@"settings.mod.licenses.voice_model.subtitle", @"Mel-Band RoFormer · MIT License"), @"https://huggingface.co/My-Name-Is-Jeff/vitrine-sing");
+    SGModRow *lightVoice = SGLinkRow(SGL(@"settings.mod.licenses.light_voice_model.title", @"Karaoke's light voice model"), SGL(@"settings.mod.licenses.light_voice_model.subtitle", @"Mini-BS-RoFormer-18M · MIT License"),
                                      @"https://huggingface.co/HiDolen/Mini-BS-RoFormer-18M");
-    return [[SGModPage alloc] initWithTitle:@"Licenses" intro:@"The mod's own license, and the code from others it includes." sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.mod.licenses.title", @"Licenses") intro:SGL(@"settings.mod.licenses.intro", @"The mod's own license, and the code from others it includes.") sections:@[
         SGSection(nil, @[mod]),
-        SGNotedSection(nil, @[eevee], @"By whoeevee (whoeevee/EeveeSpotify), under the GNU General Public License v3.0, as Vitrine is.\n\n"
+        SGNotedSection(nil, @[eevee], SGL(@"settings.mod.licenses.eevee.note", @"By whoeevee (whoeevee/EeveeSpotify), under the GNU General Public License v3.0, as Vitrine is.\n\n"
                                       @"Ported from it, on the Premium, ads & privacy page: Hide ads (the ad services kept from starting, "
                                       @"ad components taken out of Home and Search, ad sections out of the feeds, ad requests answered empty), "
                                       @"Hide upsells (the Premium pop-ups, and the ad and upsell flags it turns off) and Spoof Premium "
-                                      @"(the account attributes and flag rules it rewrites, and crossfade under it)."),
+                                      @"(the account attributes and flag rules it rewrites, and crossfade under it).")),
         SGNotedSection(nil, @[bs2b], [@"Copyright (c) 2005 Boris Mikhaylov\n\n" stringByAppendingString:kMIT]),
         SGNotedSection(nil, @[wdl], [@"Copyright (C) 2004-2013 Cockos Incorporated\nCopyright (C) 1999-2003 Nullsoft, Inc.\n\n"
                                      stringByAppendingString:kZlib]),

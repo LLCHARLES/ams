@@ -129,7 +129,7 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
 }
 
 SGModRow *SGMotionSourcesRow(void) {
-    SGModRow *row = SGPageRow(@"Artwork sources", ^UIViewController *{
+    SGModRow *row = SGPageRow(SGL(@"settings.artwork.sources.title", @"Artwork sources"), ^UIViewController *{
         return SGSourcesPageMake(@"Artwork sources", @"Asked top to bottom until one has a clip for the track. Apple Music is "
                                                      @"asked for the album by its name; it never sees your account.",
                                  allSources(), ^NSArray<NSString *> * { return SGMotionSourceOrder(); },

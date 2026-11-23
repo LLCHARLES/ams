@@ -7,11 +7,11 @@
 // The mini player (Redesigned/Navbar/SystemTabs.x): Apple Music style (the tab bar minimizes as a page scrolls), the
 // swipe, and the buttons beside play, each on a key of its own.
 UIViewController *SGRMiniPlayerSettingsPage(void) {
-    SGModRow *minimize = SGSwitchRow(@"Apple Music style", @"The tab bar shrinks as a page scrolls down", SGRKeyNavbarMinimize);
-    SGModRow *swipe = SGSwitchRow(@"Swipe to skip", @"Sideways on the mini player", SGRKeyMiniPlayerSwipe);
+    SGModRow *minimize = SGSwitchRow(SGL(@"ui.apple.music.style.58eee0", @"Apple Music style"), SGL(@"ui.the.tab.bar.shrinks.cdd004", @"The tab bar shrinks as a page scrolls down"), SGRKeyNavbarMinimize);
+    SGModRow *swipe = SGSwitchRow(SGL(@"ui.swipe.to.skip.3cb185", @"Swipe to skip"), SGL(@"ui.sideways.on.the.mini.b8b9b4", @"Sideways on the mini player"), SGRKeyMiniPlayerSwipe);
     // The buttons beside the title, dragged into their order, the ones below the line off (Settings/SGSourcesPage.h; its
     // owner, 2026-11-06). Play stays on.
-    SGModRow *buttons = SGPageRow(@"Buttons", ^UIViewController *{
+    SGModRow *buttons = SGPageRow(SGL(@"settings.player.buttons.header", @"Buttons"), ^UIViewController *{
         NSArray<SGSource *> *all = @[
             [SGSource sourceWithKey:SGRMiniButtonAirPlay name:@"AirPlay" detail:@"The output's device"],
             [SGSource sourceWithKey:SGRMiniButtonStar name:@"Star" detail:@"Add to Liked Songs"],
@@ -25,7 +25,7 @@ UIViewController *SGRMiniPlayerSettingsPage(void) {
                                  ^(NSArray<NSString *> *keys) { SGRSetMiniPlayerButtons(keys); });
     });
     buttons.value = ^NSString * { return [NSString stringWithFormat:@"%lu", (unsigned long)SGRMiniPlayerButtons().count]; };
-    return [[SGModPage alloc] initWithTitle:@"Mini player" intro:nil sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.player.mini_player.header", @"Mini player") intro:nil sections:@[
         SGNotedSection(nil, @[minimize, swipe, buttons],
                        @"Apple Music style moves the mini player into the tab bar's row as you scroll down. Swipe to skip pages to the "
                        @"next or previous song; on the player, a sideways swipe on the title does the same."),

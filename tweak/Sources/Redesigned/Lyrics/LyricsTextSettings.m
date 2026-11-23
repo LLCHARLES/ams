@@ -14,7 +14,7 @@
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Text sizes";
+    self.title = SGL(@"settings.lyricstext.title", @"Text sizes");
     return self;
 }
 
@@ -89,5 +89,5 @@
 @end
 
 SGModRow *SGRLyricsTextSizesRow(void) {
-    return SGPageRow(@"Text sizes", ^UIViewController *{ return [SGRLyricsTextPage new]; });
+    return SGPageRow(SGL(@"settings.lyricstext.title", @"Text sizes"), ^UIViewController *{ return [SGRLyricsTextPage new]; });
 }

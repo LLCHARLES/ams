@@ -24,24 +24,24 @@ static void resetAll(void) {
 }
 
 static void confirmReset(void) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset all settings?"
-                                                                  message:@"Every switch goes off, flag overrides and the tab bar layout are cleared, and Spotify restarts as it came, with the mod doing nothing until asked. Spotify's own settings are untouched."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.mod.reset.alert.title", @"Reset all settings?")
+                                                                  message:SGL(@"ui.every.switch.goes.off.5f7e53", @"Every switch goes off, flag overrides and the tab bar layout are cleared, and Spotify restarts as it came, with the mod doing nothing until asked. Spotify's own settings are untouched.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Reset and restart" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { resetAll(); }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.mod.reset.action.reset_and_restart", @"Reset and restart") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { resetAll(); }]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
 // Reset all leaves the Keychain alone, so a key outlives a reset; this takes every item Vitrine keeps there.
 static void confirmClearKeychain(void) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear Keychain?"
-                                                                  message:@"The Gemini, OpenAI-compatible and Anthropic API keys, and the OpenAI-compatible server are removed from this iPhone. Settings stay as they are."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.mod.keychain.alert.title", @"Clear Keychain?")
+                                                                  message:SGL(@"ui.the.gemini.openai.compatible.583c9e", @"The Gemini, OpenAI-compatible and Anthropic API keys, and the OpenAI-compatible server are removed from this iPhone. Settings stay as they are.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Clear Keychain" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.mod.keychain.title", @"Clear Keychain") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGAIForgetKeys();
         SGLog(@"reset: keychain cleared");
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -52,30 +52,37 @@ static SGModRow *withSymbol(SGModRow *row, NSString *symbol) {
 
 // Which build this is and where the mod lives.
 UIViewController *SGAboutPage(void) {
-    SGModRow *reset = withSymbol(SGActionRow(@"Reset all settings", nil, ^{ confirmReset(); }), @"trash");
+    SGModRow *reset = withSymbol(SGActionRow(SGL(@"settings.mod.reset.title", @"Reset all settings"), nil, ^{ confirmReset(); }), @"trash");
     reset.color = SGRed();
-    SGModRow *clearKeys = withSymbol(SGActionRow(@"Clear Keychain", nil, ^{ confirmClearKeychain(); }), @"key");
+    SGModRow *clearKeys = withSymbol(SGActionRow(SGL(@"settings.mod.keychain.title", @"Clear Keychain"), nil, ^{ confirmClearKeychain(); }), @"key");
     clearKeys.color = SGRed();
     NSString *spotify = SGSpotifyVersion();
     if ([SGSpotifyLikelyWorksVersions containsObject:spotify]) spotify = [spotify stringByAppendingString:@", likely works"];
     else if (![SGSpotifySupportedVersions containsObject:spotify]) spotify = [NSString stringWithFormat:@"%@, made for %@", spotify, SGSpotifyMadeFor];
     NSMutableArray<SGModRow *> *links = [NSMutableArray array];
-    if (SGRepoURL) [links addObject:withSymbol(SGLinkRow(@"GitHub", nil, SGRepoURL), @"chevron.left.forwardslash.chevron.right")];
+    if (SGRepoURL) [links addObject:withSymbol(SGLinkRow(SGL(@"ui.github.5442e2", @"GitHub"), nil, SGRepoURL), @"chevron.left.forwardslash.chevron.right")];
     [links addObjectsFromArray:@[
-        withSymbol(SGPageRow(@"Licenses", ^UIViewController *{ return SGLicensesPage(); }), @"doc.text"),
+        withSymbol(SGPageRow(SGL(@"settings.mod.licenses.title", @"Licenses"), ^UIViewController *{ return SGLicensesPage(); }), @"doc.text"),
     ]];
+    // Language of the mod's own screens. System follows Spotify's language; the other two are explicit.
+    SGModRow *language = SGChoiceRow(SGL(@"settings.mod.language.title", @"Language"), nil, SGKeyLanguage,
+        @[ SGL(@"settings.mod.language.system", @"System"),
+           SGL(@"settings.mod.language.english", @"English"),
+           SGL(@"settings.mod.language.chinese", @"简体中文") ], 0);
+    language.choiceFooter = SGL(@"settings.mod.language.footer", @"Applies after you restart Spotify.");
     NSMutableArray<SGModRow *> *build = [NSMutableArray arrayWithObjects:
-        SGStatRow(@"Version", ^NSString *{ return SGVersionWithBuild(); }),
-        SGStatRow(@"Spotify", ^NSString *{ return spotify; }), nil];
+        language,
+        SGStatRow(SGL(@"settings.mod.version.title", @"Version"), ^NSString *{ return SGVersionWithBuild(); }),
+        SGStatRow(SGL(@"settings.liveactivity.colors.choice.spotify", @"Spotify"), ^NSString *{ return spotify; }), nil];
     SGModRow *signedUntil = SGSigningExpiryRow();
     if (signedUntil) [build addObject:signedUntil];
-    return [[SGModPage alloc] initWithTitle:@"Mod" intro:nil sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.mod.title", @"Mod") intro:nil sections:@[
         SGSection(nil, build),
         SGSection(nil, links),
         SGSection(nil, @[
-            withSymbol(SGActionRow(@"Export settings", nil, ^{ SGExportSettings(); }), @"square.and.arrow.up"),
-            withSymbol(SGActionRow(@"Import settings", nil, ^{ SGImportSettings(); }), @"square.and.arrow.down"),
-            withSymbol(SGActionRow(@"Share diagnostics", @"For a bug report: versions, ad counts, this launch's log and Spotify's config. Song names can show.",
+            withSymbol(SGActionRow(SGL(@"settings.mod.export_settings.title", @"Export settings"), nil, ^{ SGExportSettings(); }), @"square.and.arrow.up"),
+            withSymbol(SGActionRow(SGL(@"settings.mod.import_settings.title", @"Import settings"), nil, ^{ SGImportSettings(); }), @"square.and.arrow.down"),
+            withSymbol(SGActionRow(SGL(@"settings.mod.share_diagnostics.title", @"Share diagnostics"), SGL(@"settings.mod.share_diagnostics.subtitle", @"For a bug report: versions, ad counts, this launch's log and Spotify's config. Song names can show."),
                                    ^{ SGShareDiagnostics(); }), @"stethoscope"),
         ]),
         SGSection(nil, @[clearKeys, reset]),

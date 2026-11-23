@@ -26,7 +26,7 @@ UIMenu *SGRPlayerMenuArtwork(void (^changed)(void)) {
         }
         [items addObject:pick];
     }
-    UIMenu *menu = [UIMenu menuWithTitle:@"Artwork" image:[UIImage systemImageNamed:@"photo"] identifier:nil options:0 children:items];
+    UIMenu *menu = [UIMenu menuWithTitle:SGL(@"settings.player.artwork.header", @"Artwork") image:[UIImage systemImageNamed:@"photo"] identifier:nil options:0 children:items];
     menu.subtitle = currentName;
     return menu;
 }

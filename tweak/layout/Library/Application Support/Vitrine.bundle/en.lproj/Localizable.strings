@@ -1,0 +1,499 @@
+/* Vitrine's English, written by scripts/check-strings.py --sync from SGL(...) and SAPL(...) source calls. */
+
+"common.cancel" = "Cancel";
+
+"common.delete" = "Delete";
+
+"common.done" = "Done";
+
+"common.later" = "Later";
+
+"common.ok" = "OK";
+
+"common.remove" = "Remove";
+
+"common.reset" = "Reset";
+
+"common.save" = "Save";
+
+"player.volume" = "Volume";
+
+"settings.addtab.action.use_link" = "Use Link";
+"settings.addtab.add_tab.title" = "Add a Tab";
+"settings.addtab.choose_icon.title" = "Choose an Icon";
+"settings.addtab.choose_link.title" = "Choose a Link";
+"settings.addtab.custom_link.alert.message" = "A share link or a spotify: URI.";
+"settings.addtab.custom_link.alert.title" = "Custom Link";
+"settings.addtab.edit_tab.title" = "Edit Tab";
+"settings.addtab.name.a11y" = "Name";
+"settings.addtab.remove_tab.title" = "Remove Tab";
+"settings.addtab.search_icons.placeholder" = "Search icons";
+
+"settings.album.animated_covers.title" = "Animated covers";
+"settings.album.apple_music.header" = "Apple Music";
+"settings.album.hide.everything_else.subtitle" = "Any other section Spotify sends";
+"settings.album.hide.merch.title" = "Merch";
+"settings.album.hide.more_by_artist.title" = "More by the artist";
+"settings.album.hide.related_videos.title" = "Related music videos";
+"settings.album.hide.you_might_like.title" = "You might also like";
+"settings.album.hide_on_page.header" = "Hide on an album's page";
+"settings.album.hide_track_artists.subtitle" = "The artist under a track when it is the album's own";
+"settings.album.hide_track_artists.title" = "Repeated track artists";
+"settings.album.hide_under_tracks.header" = "Hide under an album's tracks";
+"settings.album.queue.notice.hint" = "Double-tap to dismiss.";
+"settings.album.title" = "Albums";
+
+"settings.appearance.accent_color.title" = "Accent color";
+"settings.appearance.accent_preset.title" = "Accent color preset";
+"settings.appearance.title" = "Appearance";
+
+"settings.appicon.error.alert.title" = "The icon did not change";
+"settings.appicon.title" = "App icon";
+
+"settings.artist.hide.about.title" = "About";
+"settings.artist.hide.countdown.subtitle" = "The pre-save of an upcoming release";
+"settings.artist.hide.countdown.title" = "Release countdown";
+"settings.artist.hide.pick.title" = "Artist pick";
+"settings.artist.hide.tabs.subtitle" = "Without them the Music list is the page";
+"settings.artist.hide.tabs.title" = "Music, Video and Merch tabs";
+"settings.artist.hide.videos.subtitle" = "In the Music list, and in the Video tab";
+"settings.artist.hide.videos.title" = "Videos";
+"settings.artist.hide_on_page.header" = "Hide on an artist's page";
+"settings.artist.logos.subtitle" = "In place of the name on an artist's page";
+"settings.artist.logos.title" = "Artist logos";
+"settings.artist.title" = "Artists";
+
+"settings.artistblock.nothing_playing.alert.message" = "Play a track by the artist first, then come back here.";
+"settings.artistblock.nothing_playing.alert.title" = "Nothing playing";
+"settings.artistblock.pick.action_sheet.title" = "Block";
+"settings.artistblock.title" = "Blocked Artists";
+
+"settings.artwork.sources.title" = "Artwork sources";
+
+"settings.audioeffects.amount.title" = "Amount";
+"settings.audioeffects.curve.a11y.band_hint" = "Double tap and hold, then drag up or down, or swipe up or down to adjust.";
+"settings.audioeffects.curve.presets" = "Presets";
+"settings.audioeffects.graphiceq.text.a11y" = "GraphicEQ";
+"settings.audioeffects.graphiceq.title" = "Graphic EQ";
+"settings.audioeffects.headphones.applying.a11y" = "Applying";
+"settings.audioeffects.headphones.search.placeholder" = "Search headphones";
+"settings.audioeffects.headphones.swipehint" = "Swipe left to remove";
+"settings.audioeffects.preset.title" = "Preset";
+"settings.audioeffects.presets.save.alert.message" = "A preset of the same name is replaced.";
+"settings.audioeffects.presets.save.alert.title" = "Save preset";
+"settings.audioeffects.reset.alert.message" = "Every effect goes off, and every value, curve and file choice back to its default. The Effects switch and your imported files stay.";
+"settings.audioeffects.reset.alert.title" = "Reset all effects?";
+"settings.audioeffects.response.title" = "Response";
+"settings.audioeffects.title" = "Audio effects";
+
+"settings.automix.blendlength.title" = "Blend length";
+"settings.automix.style.title" = "Style";
+"settings.automix.title" = "AutoMix";
+
+"settings.background.mode.title" = "Background";
+
+"settings.context_menu.quick.add_to_playlist" = "Add to Playlist";
+
+"settings.cover_viewer.share" = "Share";
+
+"settings.environment.chroma.action.keep" = "Keep";
+"settings.environment.chroma.alert.message" = "Its Karaoke voice model and its saved lock screen videos are still in Spotify's storage, and Vitrine uses neither. Your listening history and audio effects stay.";
+"settings.environment.chroma.title" = "Chroma left files behind";
+"settings.environment.eevee.title" = "EeveeSpotify is injected too";
+"settings.environment.warning.subtitle" = "Tap for what that does";
+"settings.environment.without_app_changes.title" = "Installed without the app changes";
+
+"settings.flags.action.auto" = "Auto";
+"settings.flags.action.force" = "Force";
+"settings.flags.title" = "Flags";
+
+"settings.font.action.restart_now" = "Restart now";
+"settings.font.choice.default" = "Default";
+"settings.font.title" = "Font";
+
+"settings.headgestures.teach.try_again" = "Try again";
+
+"settings.home.cards_from.title" = "Cards from";
+"settings.home.dj.title" = "DJ";
+"settings.home.keep_title.subtitle" = "The title, the avatar and the pill stay at the top as Home scrolls under them";
+"settings.home.keep_title.title" = "Title stays on scroll";
+"settings.home.look.subtitle" = "Top picks and its color, and the title's glass pill; off, Home as the redesign had it";
+"settings.home.look.title" = "Home look";
+"settings.home.on_home.header" = "On Home";
+"settings.home.pill.devices" = "Devices";
+"settings.home.previews.subtitle" = "The cards that play as Home scrolls";
+"settings.home.previews.title" = "Video and playlist previews";
+"settings.home.shelves.header" = "Shelves";
+"settings.home.shelves.none" = "None seen yet";
+"settings.home.shelves.note" = "The shelves Home has shown in the last 30 days. A shelf is known by its heading, so one Spotify names differently in another language is listed again.";
+"settings.home.shortcut_glass.subtitle" = "The shortcuts as tinted glass pills with bold names";
+"settings.home.shortcut_glass.title" = "Glass shortcuts";
+"settings.home.shortcuts.title" = "Shortcuts";
+"settings.home.song_suggestions.subtitle" = "Spotify's carousel of songs to try, when Home offers one";
+"settings.home.song_suggestions.title" = "Song suggestions";
+"settings.home.title" = "Home";
+"settings.home.top_picks.subtitle" = "Home's first shelf above the shortcuts, as large cards in their covers' colors";
+"settings.home.top_picks.title" = "Top picks";
+"settings.home.top_picks_color.title" = "Color behind Top picks";
+"settings.home.top_picks_heading.subtitle" = "The shelf's own heading over its cards";
+"settings.home.top_picks_heading.title" = "Show Top picks heading";
+
+"settings.karaoke.advanced.header" = "Advanced";
+"settings.karaoke.card.vocals.a11y" = "Vocals";
+"settings.karaoke.computeunits.footer" = "Karaoke loads the voice model on the CPU first and starts with it. On Automatic a second copy then loads on the Neural Engine and takes over, in the background too. The iPhone prepares it the first time after Vitrine is installed or updated, for a minute or so, and Karaoke runs on the CPU until then, unless Prepare after updates did it already. If it does not load, Karaoke stays on the CPU until Spotify is opened again.";
+"settings.karaoke.computeunits.note.auto" = "The Neural Engine, the fastest, with the CPU while it loads";
+"settings.karaoke.computeunits.note.cpu" = "Slower and warmer, and a little less memory";
+"settings.karaoke.computeunits.title" = "Runs on";
+"settings.karaoke.ignoreheat.subtitle" = "Keeps Karaoke going on a hot iPhone, which then gets hotter";
+"settings.karaoke.ignoreheat.title" = "Ignore heat warnings";
+"settings.karaoke.ignorememory.subtitle" = "Keeps Karaoke going when iOS is low on memory, which may then close Spotify";
+"settings.karaoke.ignorememory.title" = "Ignore memory warnings";
+"settings.karaoke.model.action.remove" = "Remove voice model";
+"settings.karaoke.model.header" = "Voice model";
+"settings.karaoke.model.removeother.title" = "Remove the other model";
+"settings.karaoke.prepareahead.title" = "Prepare after updates";
+"settings.karaoke.title" = "Karaoke";
+"settings.karaoke.togglebutton.subtitle" = "The mic in the corner of the lyrics";
+"settings.karaoke.togglebutton.title" = "Toggle from lyrics";
+
+"settings.labs.sleep_fade_out.title" = "Fade out";
+"settings.labs.sleep_timer.header" = "Sleep timer";
+
+"settings.liveactivity.colors.choice.spotify" = "Spotify";
+
+"settings.localmusic.go_artist" = "Go to Artist";
+"settings.localmusic.play" = "Play";
+"settings.localmusic.queue" = "Add to Queue";
+"settings.localmusic.shuffle" = "Shuffle";
+
+"settings.lockscreen.artwork.title" = "Full-screen artwork";
+"settings.lockscreen.low_data.title" = "Download in Low Data Mode";
+"settings.lockscreen.needs_ios26.status" = "Needs iOS 26";
+
+"settings.lyrics.all_tracks.subtitle" = "Even where Spotify has none";
+"settings.lyrics.all_tracks.title" = "Lyrics for every track";
+"settings.lyrics.auto_translation.intelligence.note" = "On this iPhone";
+"settings.lyrics.delay.title" = "Delay";
+"settings.lyrics.display.header" = "Display";
+"settings.lyrics.hide_controls.all_note" = "The lyrics take the whole player";
+"settings.lyrics.hide_controls.off_note" = "The controls stay";
+"settings.lyrics.hide_controls.room" = "A few seconds after the last touch, the lyrics take the room";
+"settings.lyrics.hide_controls.title" = "Hide the controls";
+"settings.lyrics.hide_controls.title_note" = "The cover, the title and the top row stay; in landscape, the title";
+"settings.lyrics.lockscreen_lyrics.subtitle" = "Current line in place of the artist";
+"settings.lyrics.lockscreen_lyrics.title" = "Lock screen lyrics";
+"settings.lyrics.meanings.footer" = "Explanations from Genius. Tap the bubble after a line, or hold the line.";
+"settings.lyrics.meanings.title" = "Line meanings";
+"settings.lyrics.pip.landscape" = "Landscape";
+"settings.lyrics.pip.translation" = "Translation";
+"settings.lyrics.prefer_words.title" = "Prefer word-by-word timing";
+"settings.lyrics.show_source.title" = "Show source";
+"settings.lyrics.simulate_word_timing.title" = "Simulate word timing";
+"settings.lyrics.sources.eevee_conflict.footer" = "EeveeSpotify's lyrics are on, so it answers Spotify's lyrics and these sources stay off: both answering froze Spotify after launch. Turn its lyrics off in its own settings to use these.";
+"settings.lyrics.sources.header" = "Sources";
+"settings.lyrics.timing.header" = "Timing";
+"settings.lyrics.title" = "Lyrics";
+"settings.lyrics.translation_language.footer" = "A language brings Musixmatch's community translations to lyrics that have none, which sends Musixmatch each song's ID. Any shows the first translation the lyrics come with. It is also the language the lyrics' translate menu translates into, offered only for songs in another one; with Any, the iPhone's own language.";
+"settings.lyrics.translation_language.title" = "Translation language";
+"settings.lyrics.use_beside_eevee.subtitle" = "Only if EeveeSpotify's lyrics are really off";
+"settings.lyrics.use_beside_eevee.title" = "Use these sources anyway";
+
+"settings.lyricslook.adjust.a11y" = "Adjust";
+"settings.lyricslook.adjust.hint.a11y" = "Opens the sliders";
+"settings.lyricslook.preview.a11y" = "Preview of the lyrics";
+"settings.lyricslook.title" = "Lyrics Style";
+
+"settings.lyricssources.offers.empty" = "No Source Has Lyrics";
+"settings.lyricssources.pick.menu" = "Lyrics Source";
+"settings.lyricssources.spicy.action.open_dashboard" = "Open Dashboard";
+"settings.lyricssources.spicy.alert.title" = "Spicy Lyrics Key";
+"settings.lyricssources.spicy.row.subtitle" = "Community word syncs, with your own key";
+"settings.lyricssources.spicy.row.title" = "Spicy Lyrics key";
+
+"settings.lyricstext.title" = "Text sizes";
+
+"settings.lyricstools.meaning.artist" = "Meaning from the artist";
+"settings.lyricstools.menu.intelligence" = "Translate with Apple Intelligence";
+"settings.lyricstools.menu.ondevice.subtitle" = "Apple's Translate, on this iPhone";
+
+"settings.main.all_flags.title" = "All flags";
+"settings.main.entry.title" = "Mod Settings";
+"settings.main.lock_screen.title" = "Lock screen";
+"settings.main.vibrations.title" = "Vibrations";
+
+"settings.mod.backup.action.import_and_restart" = "Import and restart";
+"settings.mod.export_settings.title" = "Export settings";
+"settings.mod.import_settings.title" = "Import settings";
+"settings.mod.keychain.alert.title" = "Clear Keychain?";
+"settings.mod.keychain.title" = "Clear Keychain";
+"settings.mod.language.chinese" = "简体中文";
+"settings.mod.language.english" = "English";
+"settings.mod.language.footer" = "Applies after you restart Spotify.";
+"settings.mod.language.system" = "System";
+"settings.mod.language.title" = "Language";
+"settings.mod.licenses.autoeq.subtitle" = "Headphone corrections · MIT License";
+"settings.mod.licenses.bs2b.subtitle" = "Crossfeed · MIT License";
+"settings.mod.licenses.eevee.note" = "By whoeevee (whoeevee/EeveeSpotify), under the GNU General Public License v3.0, as Vitrine is.\n\nPorted from it, on the Premium, ads & privacy page: Hide ads (the ad services kept from starting, ad components taken out of Home and Search, ad sections out of the feeds, ad requests answered empty), Hide upsells (the Premium pop-ups, and the ad and upsell flags it turns off) and Spoof Premium (the account attributes and flag rules it rewrites, and crossfade under it).";
+"settings.mod.licenses.eevee.subtitle" = "Ads, upsells, Spoof Premium · GNU GPL v3.0";
+"settings.mod.licenses.intro" = "The mod's own license, and the code from others it includes.";
+"settings.mod.licenses.light_voice_model.subtitle" = "Mini-BS-RoFormer-18M · MIT License";
+"settings.mod.licenses.light_voice_model.title" = "Karaoke's light voice model";
+"settings.mod.licenses.title" = "Licenses";
+"settings.mod.licenses.vitrine.subtitle" = "GNU General Public License v3.0";
+"settings.mod.licenses.voice_model.subtitle" = "Mel-Band RoFormer · MIT License";
+"settings.mod.licenses.voice_model.title" = "Karaoke's voice model";
+"settings.mod.licenses.wdl.subtitle" = "Liveprog's EEL2 · zlib License";
+"settings.mod.reset.action.reset_and_restart" = "Reset and restart";
+"settings.mod.reset.alert.title" = "Reset all settings?";
+"settings.mod.reset.title" = "Reset all settings";
+"settings.mod.share_diagnostics.subtitle" = "For a bug report: versions, ad counts, this launch's log and Spotify's config. Song names can show.";
+"settings.mod.share_diagnostics.title" = "Share diagnostics";
+"settings.mod.title" = "Mod";
+"settings.mod.version.title" = "Version";
+
+"settings.page.info.a11y" = "About this setting";
+"settings.page.locked.alert.message" = "Another switch is forcing this flag, so the row shows what it forces instead of taking a value of its own.";
+"settings.page.locked.alert.title" = "Overridden by another setting";
+"settings.page.unstable.action.open_github" = "Open GitHub";
+
+"settings.player.artwork.header" = "Artwork";
+"settings.player.blocked_artists.title" = "Blocked artists";
+"settings.player.buttons.header" = "Buttons";
+"settings.player.controls.header" = "Controls";
+"settings.player.hide_video_switch.title" = "Switch to video";
+"settings.player.ipad.repeat" = "Repeat";
+"settings.player.like_dislike.title" = "Like and dislike buttons";
+"settings.player.mini_player.header" = "Mini player";
+"settings.player.not_playing" = "Not Playing";
+"settings.player.preview.a11y" = "Player preview";
+"settings.player.title" = "Player";
+"settings.player.widget.header" = "Widget";
+
+"settings.playlist.hide.more.title" = "More";
+
+"settings.privacy.ad_flags.title" = "Ad and upsell flags";
+"settings.privacy.ads.footer_note" = "Audio ads between songs need Spoof Premium.";
+"settings.privacy.ads.header" = "Ads";
+"settings.privacy.block_cta_card.title" = "Block its CTA card";
+"settings.privacy.block_open_ad.title" = "Block the ad when the app opens";
+"settings.privacy.block_telemetry.subtitle" = "Spotify's own events still go out, since Recents is built from them";
+"settings.privacy.block_telemetry.title" = "Block telemetry";
+"settings.privacy.blocked_stats.header" = "Ads blocked so far";
+"settings.privacy.clean_links.subtitle" = "Takes the tracking (si, utm) off the links you copy or share";
+"settings.privacy.clean_links.title" = "Clean shared links";
+"settings.privacy.hide_account_switch_tip.title" = "Hide the account switching tip";
+"settings.privacy.hide_ads.title" = "Hide ads";
+"settings.privacy.hide_ai_playlist_tip.title" = "Hide the AI playlist creation tip";
+"settings.privacy.hide_concert_notif_tip.title" = "Hide the concert notifications tip";
+"settings.privacy.hide_data_saver_tip.title" = "Hide the data saver tip";
+"settings.privacy.hide_live_event_tip.title" = "Hide the live event tip";
+"settings.privacy.hide_puffin_nudge.title" = "Hide the Puffin nudge";
+"settings.privacy.hide_shuffle_upsell.title" = "Hide the shuffle toggle upsell";
+"settings.privacy.hide_smart_shuffle_tip.title" = "Hide the smart shuffle helper";
+"settings.privacy.hide_suggestions_upsell.title" = "Hide the player suggestions upsell";
+"settings.privacy.hide_upsells.title" = "Hide upsells";
+"settings.privacy.hide_venue_tip.title" = "Hide the live event venue tip";
+"settings.privacy.hide_video_shuffle_upsell.title" = "Hide the shuffle upsell in the video player";
+"settings.privacy.hide_watch_feed_tip.title" = "Hide the watch feed explorer tip";
+"settings.privacy.interventions.header" = "Reduce interventions";
+"settings.privacy.premium.header" = "Premium";
+"settings.privacy.reset_counters.action" = "Reset the counters";
+"settings.privacy.reset_telemetry.action" = "Reset the telemetry counters";
+"settings.privacy.section.header" = "Privacy";
+"settings.privacy.spoof_premium.title" = "Spoof Premium";
+"settings.privacy.telemetry_stats.header" = "Telemetry blocked so far";
+"settings.privacy.title" = "Premium, ads & privacy";
+"settings.privacy.tooltips.header" = "Tooltips";
+"settings.privacy.total.title" = "Total";
+"settings.privacy.upsells.header" = "Upsells";
+
+"settings.search_tab.hide.other.title" = "Everything else";
+
+"settings.signing.action.copy_bundle_id" = "Copy the bundle id";
+"settings.signing.action.read_more" = "Read more";
+"settings.signing.mismatch.title" = "The lock screen cannot open Spotify";
+"settings.signing.signed_until.title" = "Signed until";
+
+"settings.sing.button.hint" = "Turns the vocals down";
+
+"settings.songlanguage.automatic" = "Automatic";
+
+"settings.spatial.distance.title" = "Distance";
+"settings.spatial.front.title" = "Back in front";
+"settings.spatial.room.title" = "Room";
+"settings.spatial.sound.header" = "Sound";
+"settings.spatial.subtitle" = "With AirPods, the voice stays in front of you as you turn your head";
+"settings.spatial.title" = "Spatial voice";
+"settings.spatial.width.title" = "Instruments width";
+
+"settings.stats.action.erase" = "Erase listening history";
+"settings.stats.alert.erase.action" = "Erase";
+"settings.stats.alert.erase.message" = "Every play recorded on this phone and every one imported is deleted. Spotify's own history is untouched.";
+"settings.stats.alert.erase.title" = "Erase listening history?";
+"settings.stats.empty" = "Nothing yet";
+"settings.stats.page.title" = "Listening stats";
+"settings.stats.record.title" = "Record plays";
+"settings.stats.row.history" = "History";
+"settings.stats.row.listening_time" = "Listening time";
+"settings.stats.row.plays" = "Plays";
+
+"settings.tabbar.reset_alert.title" = "Use Spotify's tabs";
+"settings.tabbar.tab.concerts" = "Concerts";
+"settings.tabbar.title" = "Tab bar";
+
+"settings.translation.download.open" = "Open Settings";
+"settings.translation.intelligence.title" = "Apple Intelligence";
+"settings.translation.ondevice.title" = "Translate on iPhone";
+"settings.translation.openaikey.key" = "API key";
+"settings.translation.openaikey.model" = "Model";
+"settings.translation.prompt.title" = "Translation prompt";
+"settings.translation.savedtranslations.title" = "Saved translations";
+"settings.translation.thinking.title" = "Thinking";
+"settings.translation.timeout.title" = "Timeout";
+"settings.translation.translateanysong.subtitle" = "The lyrics' translate menu for songs that already read as your language";
+"settings.translation.translateanysong.title" = "Translate any song";
+
+"settings.vibrations.alert.missing.title" = "In the Background is missing";
+"settings.vibrations.alert.not_now" = "Not Now";
+"settings.vibrations.alert.system_off.title" = "Turn On Music Haptics";
+"settings.vibrations.background.title" = "In the Background";
+"settings.vibrations.follows.title" = "Follows";
+"settings.vibrations.missing.subtitle" = "Tap for why";
+"settings.vibrations.missing.title" = "In the Background is missing from this install";
+"settings.vibrations.music.title" = "Music Haptics";
+"settings.vibrations.preview.a11y" = "Vibrations preview, rings of dots that ripple out from the middle with each tap";
+"settings.vibrations.strength.title" = "Strength";
+"settings.vibrations.system_off.subtitle" = "Tap to turn it on in Settings";
+"settings.vibrations.system_off.title" = "Music Haptics is off in iOS";
+
+"settings.wireguard.status" = "Status";
+
+"settings.workshop.headphones.title" = "Headphones";
+
+"ui.a.button.beside.the.abc4d7" = "A button beside the star for a song with a music video";
+
+"ui.add.an.api.key.024f3a" = "Add an API key in Mod Settings > Lyrics";
+
+"ui.ai.translator.c1e0b0" = "AI translator";
+
+"ui.airplay.051209" = "AirPlay";
+
+"ui.apple.intelligence.in.the.663be7" = "Apple Intelligence in the lyrics' translate menu";
+"ui.apple.music.style.58eee0" = "Apple Music style";
+"ui.apple.s.translate.in.2114d7" = "Apple's Translate in the lyrics' translate menu";
+
+"ui.asks.down.the.order.bd1c90" = "Asks down the order past lines timed by the line";
+
+"ui.autoeq.b90e82" = "AutoEq";
+
+"ui.batch.prompt.942fc2" = "Batch prompt";
+
+"ui.brightness.above.100.can.65bca2" = "Brightness above 100% can make white text harder to read. A paused song holds the background still. Animated and Visualizer use these where they show Fluid.";
+
+"ui.clear.history.e16f97" = "Clear History";
+
+"ui.copy.the.api.key.e1b4b7" = "Copy the API key, then tap Paste Key again.";
+
+"ui.count.after.9bdcbd" = "Count After";
+
+"ui.delete.saved.translations.b0902b" = "Delete saved translations?";
+"ui.delete.this.translation.77908a" = "Delete This Translation";
+
+"ui.dj.x.d9898e" = "DJ X";
+
+"ui.eeveespotify.b04e6c" = "EeveeSpotify";
+
+"ui.end.of.album.or.276947" = "End of album or playlist";
+"ui.end.of.album.or.c1ddeb" = "End of Album or Playlist";
+"ui.end.of.song.527942" = "End of Song";
+"ui.end.of.song.79e46a" = "End of song";
+
+"ui.every.switch.goes.off.5f7e53" = "Every switch goes off, flag overrides and the tab bar layout are cleared, and Spotify restarts as it came, with the mod doing nothing until asked. Spotify's own settings are untouched.";
+"ui.every.tab.of.spotify.05dbee" = "Every tab of Spotify's comes back where Spotify put it, and the tabs you added go.";
+
+"ui.exit.full.screen.5dcbf4" = "Exit Full Screen";
+
+"ui.github.5442e2" = "GitHub";
+
+"ui.go.to.album.5a24ab" = "Go to Album";
+"ui.go.to.artist.concerts.9a115d" = "Go to Artist Concerts";
+
+"ui.import.spotify.s.data.2a13db" = "Import Spotify's data export";
+
+"ui.in.place.of.original.9a6d91" = "In place of original";
+"ui.in.the.cover.of.f06e44" = "In the cover of an album that has one, about 5 MB each. Apple Music's only, never a Canvas, whatever the player's sources are";
+
+"ui.ios.plays.music.haptics.ee5399" = "iOS plays Music Haptics only for apps that say they support it, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Vitrine to get both.";
+
+"ui.like.button.445187" = "Like button";
+
+"ui.lines.in.other.alphabets.07613e" = "Lines in other alphabets, again in Latin letters";
+
+"ui.listening.history.d109c2" = "Listening History";
+
+"ui.lock.screen.translation.2c2418" = "Lock screen translation";
+
+"ui.moving.artwork.up.to.75d236" = "Moving artwork, up to about 7 MB a song";
+
+"ui.no.key.on.the.c0d57d" = "No key on the clipboard";
+"ui.no.lyrics.for.this.4902cc" = "No lyrics for this song";
+"ui.no.translator.configured.bc5d28" = "No Translator Configured";
+
+"ui.paste.key.895d5c" = "Paste Key";
+
+"ui.prompt.used.when.translating.f0f44d" = "Prompt used when translating multiple songs at once";
+
+"ui.pronunciation.and.translation.27bfe3" = "Pronunciation and translation";
+
+"ui.romanized.lyrics.85aae5" = "Romanized lyrics";
+
+"ui.save.server.465cac" = "Save Server";
+
+"ui.show.the.latin.letters.75dd09" = "Show the Latin letters instead of the original script";
+
+"ui.sideways.on.the.mini.b8b9b4" = "Sideways on the mini player";
+
+"ui.skip.saved.translations.cc78d6" = "Skip saved translations";
+"ui.skip.songs.that.already.0676e6" = "Skip songs that already have a saved translation";
+
+"ui.sleep.timer.39548a" = "Sleep\nTimer";
+
+"ui.songs.per.batch.108696" = "Songs per batch";
+"ui.songs.translated.before.are.932837" = "Songs translated before are translated again the next time you ask.";
+"ui.songs.translated.on.this.cabcd7" = "Songs translated on this iPhone or by an AI translator come back translated";
+
+"ui.spotify.s.own.fade.d2acd3" = "Spotify's own fade";
+
+"ui.swipe.to.skip.3cb185" = "Swipe to skip";
+
+"ui.tap.for.what.still.cf97c2" = "Tap for what still works";
+"ui.tap.the.song.s.c14708" = "Tap the song's title to go to its album";
+
+"ui.the.gemini.openai.compatible.583c9e" = "The Gemini, OpenAI-compatible and Anthropic API keys, and the OpenAI-compatible server are removed from this iPhone. Settings stay as they are.";
+"ui.the.last.50.songs.02ff2c" = "The last 50 songs you listened to";
+"ui.the.line.s.translation.d2e45d" = "The line's translation in its place, when the lyrics have one";
+"ui.the.look.needs.ios.38779c" = "The look needs iOS 26";
+"ui.the.selected.tab.everything.9f8ff5" = "The selected tab; everything else is white";
+"ui.the.star.beside.the.6501cd" = "The star beside the title";
+"ui.the.tab.bar.shrinks.cdd004" = "The tab bar shrinks as a page scrolls down";
+
+"ui.title.opens.album.c3f293" = "Title Opens Album";
+
+"ui.track.position.fde1ec" = "Track position";
+
+"ui.translate.any.song.from.377a0c" = "Translate any song from the lyrics' corner menu";
+
+"ui.translated.by.7ad105" = "Translated by";
+
+"ui.turn.off.timer.f1d075" = "Turn Off Timer";
+"ui.turn.the.app.and.5e2c63" = "Turn the app and the player with the phone";
+
+"ui.up.to.about.7.3b8f47" = "Up to about 7 MB a song";
+
+"ui.vitrine.43c7e6" = "Vitrine";
+
+"ui.wdl.573e32" = "WDL";
+
+"ui.what.the.ai.translator.ee74f6" = "What the AI translator is told to do with a song's lines";
+
+"ui.who.the.lyrics.came.2e0259" = "Who the lyrics came from, after the last line";

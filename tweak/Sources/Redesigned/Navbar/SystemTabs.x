@@ -312,7 +312,7 @@ static const CGFloat kDeviceRoom = 80;
     [self syncSaved];
     // Nothing playing, the Music app's way (its owner's screenshot, 2026-11-02): "Not Playing" by the note, next dimmed.
     BOOL empty = !hasTrack;
-    if (empty) _current.title.text = @"Not Playing";
+    if (empty) _current.title.text = SGL(@"settings.player.not_playing", @"Not Playing");
     _next.glyph.alpha = empty ? 0.35 : 1;
     _next.userInteractionEnabled = !empty;
     _previous.track = SGRPreviousTrack(state);

@@ -8,7 +8,7 @@
 
 static void showAlert(UIViewController *owner, NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [owner presentViewController:alert animated:YES completion:nil];
 }
 
@@ -50,7 +50,7 @@ static NSArray<NSString *> *userPresetNames(void) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Presets";
+    self.title = SGL(@"settings.audioeffects.curve.presets", @"Presets");
     _builtIn = SGDSPBuiltInPresetNames();
     return self;
 }
@@ -169,15 +169,15 @@ static NSArray<NSString *> *userPresetNames(void) {
 }
 
 - (void)askForName {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Save preset"
-        message:@"A preset of the same name is replaced." preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.audioeffects.presets.save.alert.title", @"Save preset")
+        message:SGL(@"settings.audioeffects.presets.save.alert.message", @"A preset of the same name is replaced.") preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *field) {
-        field.placeholder = @"Name";
+        field.placeholder = SGL(@"settings.addtab.name.a11y", @"Name");
         field.autocapitalizationType = UITextAutocapitalizationTypeSentences;
         field.keyboardAppearance = UIKeyboardAppearanceDark;
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.save", @"Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *name = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
         if (!name.length) return;
         SGDSPSaveUserPreset(name);
@@ -229,7 +229,7 @@ typedef NS_ENUM(NSInteger, SGDSPHeadphoneSection) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Headphones";
+    self.title = SGL(@"settings.workshop.headphones.title", @"Headphones");
     return self;
 }
 
@@ -238,7 +238,7 @@ typedef NS_ENUM(NSInteger, SGDSPHeadphoneSection) {
     UITableView *table = self.tableView;
     table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     _search = [UISearchBar new];
-    _search.placeholder = @"Search headphones";
+    _search.placeholder = SGL(@"settings.audioeffects.headphones.search.placeholder", @"Search headphones");
     _search.searchBarStyle = UISearchBarStyleMinimal;
     _search.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     _search.keyboardAppearance = UIKeyboardAppearanceDark;
@@ -410,7 +410,7 @@ static NSString *correctionName(NSString *path) {
         SGFillCell(cell, output[@"name"], now ? [NSString stringWithFormat:@"%@ · playing now", correctionName(output[@"path"])] : correctionName(output[@"path"]), nil, nil);
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.accessibilityTraits = UIAccessibilityTraitNone;
-        cell.accessibilityHint = @"Swipe left to remove";
+        cell.accessibilityHint = SGL(@"settings.audioeffects.headphones.swipehint", @"Swipe left to remove");
         return cell;
     }
     cell.accessibilityHint = nil;
@@ -437,11 +437,11 @@ static NSString *correctionName(NSString *path) {
     if ([headphone.path isEqualToString:_applying]) {
         UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
         spinner.color = SGGrey();
-        spinner.accessibilityLabel = @"Applying";
+        spinner.accessibilityLabel = SGL(@"settings.audioeffects.headphones.applying.a11y", @"Applying");
         [spinner startAnimating];
         cell.accessoryView = spinner;
         // The cell is what VoiceOver reads, not the spinner in it.
-        cell.accessibilityValue = @"Applying";
+        cell.accessibilityValue = SGL(@"settings.audioeffects.headphones.applying.a11y", @"Applying");
         return cell;
     }
     tick(cell, headphoneInUse() && [headphone.path isEqualToString:SGDSPString(SGKeyDSPGraphicEqHeadphone)]);

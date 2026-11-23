@@ -1055,7 +1055,7 @@ static const NSUInteger kLinesPerFrame = 4;
         _bubble.alpha = kBubbleAlpha;
         _bubble.frame = CGRectMake(x, last.center.y - kBubbleSide / 2, kBubbleSide, kBubbleSide);
         _bubble.isAccessibilityElement = YES;
-        _bubble.accessibilityLabel = @"Meaning from the artist";
+        _bubble.accessibilityLabel = SGL(@"settings.lyricstools.meaning.artist", @"Meaning from the artist");
         [self addSubview:_bubble];
         return;
     }
@@ -2015,7 +2015,7 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
         _extras.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
         _extras.showsMenuAsPrimaryAction = YES;
         _extras.preferredMenuElementOrder = UIContextMenuConfigurationElementOrderFixed;
-        _extras.accessibilityLabel = @"Pronunciation and translation";
+        _extras.accessibilityLabel = SGL(@"ui.pronunciation.and.translation.27bfe3", @"Pronunciation and translation");
         [_extrasBox addSubview:_extras];
         [self addSubview:_extrasBox];
         self.extrasHidden = _extrasHidden;
@@ -2051,12 +2051,12 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
         // Not while a translator works: its next batch would save the file again.
         if (_saved.deletable && !translating) {
             NSString *track = _track, *language = _savedLanguage;
-            UIAction *delete = [UIAction actionWithTitle:@"Delete This Translation" image:[UIImage systemImageNamed:@"trash"] identifier:nil
+            UIAction *delete = [UIAction actionWithTitle:SGL(@"ui.delete.this.translation.77908a", @"Delete This Translation") image:[UIImage systemImageNamed:@"trash"] identifier:nil
                                                  handler:^(UIAction *action) { SGLyricsDeleteSavedTranslation(track, language); }];
             delete.attributes = UIMenuElementAttributesDestructive;
             [about addObject:delete];
         }
-        [items addObject:[UIMenu menuWithTitle:@"Translated by" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:about]];
+        [items addObject:[UIMenu menuWithTitle:SGL(@"ui.translated.by.7ad105", @"Translated by") image:nil identifier:nil options:UIMenuOptionsDisplayInline children:about]];
     }
     // Also for a song a source translated in part, as Musixmatch's community often has: the rest is filled in.
     // Said in each item: whether the song's words stay on the phone.
@@ -2126,14 +2126,14 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
             // Over the player, which is dark whatever the system's appearance.
             alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
             if (needsDownload) {
-                [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-                UIAlertAction *open = [UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+                UIAlertAction *open = [UIAlertAction actionWithTitle:SGL(@"settings.translation.download.open", @"Open Settings") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                     [SGOnDeviceTranslation openTranslateSettings];
                 }];
                 [alert addAction:open];
                 alert.preferredAction = open;
             } else {
-                [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+                [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
             }
             [SGTopController() presentViewController:alert animated:YES completion:nil];
         }

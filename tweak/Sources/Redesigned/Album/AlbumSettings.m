@@ -6,22 +6,22 @@
 #import "Album.h"
 
 UIViewController *SGRAlbumSettingsPage(void) {
-    return [[SGModPage alloc] initWithTitle:@"Albums" intro:SGRestartNote sections:@[
-        SGNotedSection(@"Apple Music", @[
-            SGSwitchRow(@"Animated covers", @"In the cover of an album that has one, about 5 MB each. Apple Music's only, "
-                        @"never a Canvas, whatever the player's sources are", SGRKeyAlbumMotion),
-            SGOptionRow(@"Download in Low Data Mode", nil, SGKeyMotionLowData),
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.album.title", @"Albums") intro:SGRestartNote sections:@[
+        SGNotedSection(SGL(@"settings.album.apple_music.header", @"Apple Music"), @[
+            SGSwitchRow(SGL(@"settings.album.animated_covers.title", @"Animated covers"), SGL(@"ui.in.the.cover.of.f06e44", @"In the cover of an album that has one, about 5 MB each. Apple Music's only, "
+                        @"never a Canvas, whatever the player's sources are"), SGRKeyAlbumMotion),
+            SGOptionRow(SGL(@"settings.lockscreen.low_data.title", @"Download in Low Data Mode"), nil, SGKeyMotionLowData),
         ], @"Only the album's name is sent to Apple Music. A cover stays still in Low Power Mode."),
-        SGSection(@"Hide on an album's page", @[
-            SGSwitchRow(@"Repeated track artists", @"The artist under a track when it is the album's own", SGRKeyAlbumHideTrackArtists),
+        SGSection(SGL(@"settings.album.hide_on_page.header", @"Hide on an album's page"), @[
+            SGSwitchRow(SGL(@"settings.album.hide_track_artists.title", @"Repeated track artists"), SGL(@"settings.album.hide_track_artists.subtitle", @"The artist under a track when it is the album's own"), SGRKeyAlbumHideTrackArtists),
         ]),
-        SGNotedSection(@"Hide under an album's tracks", @[
-            SGSwitchRow(@"More by the artist", nil, SGRKeyAlbumHideMoreBy),
-            SGSwitchRow(@"Related music videos", nil, SGRKeyAlbumHideVideos),
-            SGSwitchRow(@"Concerts", nil, SGRKeyAlbumHideConcerts),
-            SGSwitchRow(@"Merch", nil, SGRKeyAlbumHideMerch),
-            SGSwitchRow(@"You might also like", nil, SGRKeyAlbumHideYouMightLike),
-            SGSwitchRow(@"Everything else", @"Any other section Spotify sends", SGRKeyAlbumHideOther),
+        SGNotedSection(SGL(@"settings.album.hide_under_tracks.header", @"Hide under an album's tracks"), @[
+            SGSwitchRow(SGL(@"settings.album.hide.more_by_artist.title", @"More by the artist"), nil, SGRKeyAlbumHideMoreBy),
+            SGSwitchRow(SGL(@"settings.album.hide.related_videos.title", @"Related music videos"), nil, SGRKeyAlbumHideVideos),
+            SGSwitchRow(SGL(@"settings.tabbar.tab.concerts", @"Concerts"), nil, SGRKeyAlbumHideConcerts),
+            SGSwitchRow(SGL(@"settings.album.hide.merch.title", @"Merch"), nil, SGRKeyAlbumHideMerch),
+            SGSwitchRow(SGL(@"settings.album.hide.you_might_like.title", @"You might also like"), nil, SGRKeyAlbumHideYouMightLike),
+            SGSwitchRow(SGL(@"settings.search_tab.hide.other.title", @"Everything else"), SGL(@"settings.album.hide.everything_else.subtitle", @"Any other section Spotify sends"), SGRKeyAlbumHideOther),
         ], @"Sections are told apart by their English names. With Spotify in another language, Everything else "
            @"covers them all."),
     ] footer:nil];

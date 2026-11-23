@@ -28,10 +28,10 @@ static void choosePreset(NSInteger index) {
 // The redesign's rows of the Appearance page (App/Pages.m): the preset from a menu, then the color in effect,
 // which opens the picker; a color stored from there is Custom. AMOLED has no row: the redesign is always black.
 NSArray<SGModRow *> *SGRAppearanceRows(void) {
-    SGModRow *menu = SGMenuRow(@"Accent color preset", presets(), ^NSString *{ return presets()[(NSUInteger)preset()]; },
+    SGModRow *menu = SGMenuRow(SGL(@"settings.appearance.accent_preset.title", @"Accent color preset"), presets(), ^NSString *{ return presets()[(NSUInteger)preset()]; },
                                ^(NSInteger index) { choosePreset(index); });
-    SGModRow *colour = SGStatActionRow(@"Accent color", @"The selected tab; everything else is white", ^NSString *{ return [NSString stringWithFormat:@"#%06lX", (long)SGRAccentRGB()]; }, ^{
-        SGPickColor(@"Accent color", SGRAccentRGB(), ^(NSInteger rgb) {
+    SGModRow *colour = SGStatActionRow(SGL(@"settings.appearance.accent_color.title", @"Accent color"), SGL(@"ui.the.selected.tab.everything.9f8ff5", @"The selected tab; everything else is white"), ^NSString *{ return [NSString stringWithFormat:@"#%06lX", (long)SGRAccentRGB()]; }, ^{
+        SGPickColor(SGL(@"settings.appearance.accent_color.title", @"Accent color"), SGRAccentRGB(), ^(NSInteger rgb) {
             SGSetInt(SGRKeyAccent, rgb);
             SGSetInt(SGRKeyAccentCustom, rgb);
         });

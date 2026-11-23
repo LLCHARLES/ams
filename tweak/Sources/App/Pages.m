@@ -22,7 +22,7 @@ UIViewController *SGAppearancePage(void) {
     NSMutableArray<SGModRow *> *everywhere = [NSMutableArray arrayWithArray:SGAppFontRows()];
     SGModRow *icon = SGAppIconRow();
     if (icon) [everywhere addObject:icon];
-    return [[SGModPage alloc] initWithTitle:@"Appearance" intro:SGRestartNote sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.appearance.title", @"Appearance") intro:SGRestartNote sections:@[
         SGSection(nil, SGRAppearanceRows()),
         SGSection(nil, everywhere),
     ] footer:nil];
@@ -33,16 +33,16 @@ UIViewController *SGNavbarPage(void) {
 }
 
 static UIViewController *lyricsPage(void) {
-    SGModRow *sing = SGPageRow(@"Karaoke", ^UIViewController *{ return SGSingSettingsPage(); });
+    SGModRow *sing = SGPageRow(SGL(@"settings.karaoke.title", @"Karaoke"), ^UIViewController *{ return SGSingSettingsPage(); });
     sing.value = ^NSString *{ return SGSingSummary(); };
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:SGSection(nil, @[SGWithTile(sing, @"music.mic", UIColor.systemRedColor)]),
                                                 SGLyricsSourcesSection(), nil];
     [sections addObjectsFromArray:@[
-        SGSection(@"Display", @[SGRLyricsTextSizesRow(), SGLyricsWordTimingRow(), SGLyricsRomanisedRow(), SGLyricsRomanisedReplaceRow(),
+        SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[SGRLyricsTextSizesRow(), SGLyricsWordTimingRow(), SGLyricsRomanisedRow(), SGLyricsRomanisedReplaceRow(),
             SGRLyricsHideRow()]),
-        SGNotedSection(@"Timing", @[SGLyricsDelayRow()],
+        SGNotedSection(SGL(@"settings.lyrics.timing.header", @"Timing"), @[SGLyricsDelayRow()],
             @"Every line shows this much later than the song, for Bluetooth headphones that play a little behind the lyrics. Applies at once."),
-        SGSection(@"Translation", [[[@[SGLyricsTranslationLanguageRow(), SGTranslateEverySongRow()] arrayByAddingObjectsFromArray:SGOnDeviceTranslatorRows()]
+        SGSection(SGL(@"settings.lyrics.pip.translation", @"Translation"), [[[@[SGLyricsTranslationLanguageRow(), SGTranslateEverySongRow()] arrayByAddingObjectsFromArray:SGOnDeviceTranslatorRows()]
                                       arrayByAddingObjectsFromArray:SGAITranslatorRows()] arrayByAddingObject:SGSavedTranslationsRow()]),
         SGSection(nil, @[SGLyricsMeaningsRow()]),
         SGSection(nil, @[SGLockScreenLyricsRow(), SGLockScreenTranslationRow()]),
@@ -57,29 +57,29 @@ UIViewController *SGLyricsSettingsPage(void) {
 }
 
 UIViewController *SGPlayerSettingsPage(void) {
-    SGModRow *blocked = SGPageRow(@"Blocked artists", ^UIViewController *{ return SGArtistBlockSettingsPage(); });
+    SGModRow *blocked = SGPageRow(SGL(@"settings.player.blocked_artists.title", @"Blocked artists"), ^UIViewController *{ return SGArtistBlockSettingsPage(); });
     blocked.value = ^NSString *{
         return SGFlag(SGKeyArtistBlock, NO) ? @(SGBlockedArtists().count).stringValue : @"Off";
     };
 
     // The lock screen widget and Vibrations have rows of their own on Mod Settings' main page.
     NSArray<SGModRow *> *pages = @[
-        SGWithTile(SGPageRow(@"Mini player", ^UIViewController *{ return SGRMiniPlayerSettingsPage(); }), @"rectangle.bottomthird.inset.filled", UIColor.systemPinkColor),
+        SGWithTile(SGPageRow(SGL(@"settings.player.mini_player.header", @"Mini player"), ^UIViewController *{ return SGRMiniPlayerSettingsPage(); }), @"rectangle.bottomthird.inset.filled", UIColor.systemPinkColor),
         SGWithTile(blocked, @"person.crop.circle.badge.xmark", UIColor.systemRedColor),
     ];
     // Shuffle, Repeat and Switch to video are switches that show them in the Player page's Controls section
     // (Redesigned/Player/PlayerSettings.m). Landscape turns the whole app and the player page with the phone
     // (Redesigned/Player/SystemTurn.m; its owner, 2026-11-06).
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:SGSection(nil, pages),
-        SGSection(nil, @[SGSwitchRow(@"Landscape", @"Turn the app and the player with the phone", SGRKeyLyricsLandscape)]), nil];
+        SGSection(nil, @[SGSwitchRow(SGL(@"settings.lyrics.pip.landscape", @"Landscape"), SGL(@"ui.turn.the.app.and.5e2c63", @"Turn the app and the player with the phone"), SGRKeyLyricsLandscape)]), nil];
     // Spotify's own sleep timer fade, a flag it built and did not ship (Shared/Player/SpotifySleepTimer.m stands aside
     // while it is on). The only one kept of the Labs page that was.
     // The sleep timer: how long the mod fades Spotify's own timer out (Shared/Player/SpotifySleepTimer.m), and Spotify's
     // own fade, a flag it built and did not ship (which the mod's stands aside for).
     NSArray<NSString *> *fades = SGSleepTimerFadeNames();
-    SGModRow *fade = SGMenuRow(@"Fade out", fades, ^NSString *{ return fades[(NSUInteger)SGSleepTimerFadeChoice()]; },
+    SGModRow *fade = SGMenuRow(SGL(@"settings.labs.sleep_fade_out.title", @"Fade out"), fades, ^NSString *{ return fades[(NSUInteger)SGSleepTimerFadeChoice()]; },
                                ^(NSInteger index) { SGSetInt(SGKeySleepTimerFade, index); });
-    [sections addObject:SGNotedSection(@"Sleep timer", @[fade, SGFlagRow(@"Spotify's own fade", @"ios-feature-sleeptimer.enable_fade_out")],
+    [sections addObject:SGNotedSection(SGL(@"settings.labs.sleep_timer.header", @"Sleep timer"), @[fade, SGFlagRow(SGL(@"ui.spotify.s.own.fade.d2acd3", @"Spotify's own fade"), @"ios-feature-sleeptimer.enable_fade_out")],
                                        @"Fade out is how long the sound fades before the sleep timer from the player's ⋯ pauses Spotify. "
                                        @"Spotify's own fade applies after you restart Spotify.")];
 

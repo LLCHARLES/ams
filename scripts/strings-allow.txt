@@ -1,0 +1,8 @@
+# Text scripts/check-strings.py lets through untranslated: names that read the same in every language.
+# One per line, either the text alone (allowed anywhere) or a source file under tweak/Sources, a tab, then the text.
+GitHub
+Spotify
+Vitrine
+WDL
+EeveeSpotify
+AutoEq

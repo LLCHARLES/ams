@@ -124,7 +124,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Tab bar";
+    self.title = SGL(@"settings.tabbar.title", @"Tab bar");
     return self;
 }
 
@@ -350,11 +350,11 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 }
 
 - (void)reset {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Use Spotify's tabs"
-                                                                  message:@"Every tab of Spotify's comes back where Spotify put it, and the tabs you added go."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.tabbar.reset_alert.title", @"Use Spotify's tabs")
+                                                                  message:SGL(@"ui.every.tab.of.spotify.05dbee", @"Every tab of Spotify's comes back where Spotify put it, and the tabs you added go.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.reset", @"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGRSetNavbarLayout(@[]);
         SGRRefreshTabBar();
         [self reload];

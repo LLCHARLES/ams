@@ -9,9 +9,9 @@
 // the one lock screen control a song gets. Spotify's flags for podcasts, audiobooks and its
 // own lock screen artwork stay on the All flags page: the Artwork section is the mod's.
 UIViewController *SGLockScreenWidgetPage(void) {
-    SGModRow *likes = SGFlagRow(@"Like and dislike buttons", @"ios-feature-lockscreen.like_dislike_enabled");
-    return [[SGModPage alloc] initWithTitle:@"Lock screen" intro:SGRestartNote sections:@[
-        SGSection(@"Widget", @[SGLockScreenLyricsRow(), SGLockScreenTranslationRow(), likes]),
-        SGSection(@"Artwork", SGLockScreenMotionRows()),
+    SGModRow *likes = SGFlagRow(SGL(@"settings.player.like_dislike.title", @"Like and dislike buttons"), @"ios-feature-lockscreen.like_dislike_enabled");
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.main.lock_screen.title", @"Lock screen") intro:SGRestartNote sections:@[
+        SGSection(SGL(@"settings.player.widget.header", @"Widget"), @[SGLockScreenLyricsRow(), SGLockScreenTranslationRow(), likes]),
+        SGSection(SGL(@"settings.player.artwork.header", @"Artwork"), SGLockScreenMotionRows()),
     ] footer:nil];
 }

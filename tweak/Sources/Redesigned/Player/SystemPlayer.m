@@ -430,7 +430,7 @@ static const CGFloat kScrubEdge = 0.005, kScrubHysteresis = 0.004;
     [_track addSubview:_fill];
     [self addSubview:_track];
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Track position";
+    self.accessibilityLabel = SGL(@"ui.track.position.fde1ec", @"Track position");
     self.accessibilityTraits = UIAccessibilityTraitAdjustable;
     [self syncStyle];
     return self;
@@ -1161,7 +1161,7 @@ static BOOL openSpotifyConnect(NSString **how) {
     self.tintColor = UIColor.clearColor;
     self.activeTintColor = UIColor.clearColor;
     self.prioritizesVideoDevices = NO;
-    self.accessibilityLabel = @"AirPlay";
+    self.accessibilityLabel = SGL(@"ui.airplay.051209", @"AirPlay");
     // The lyrics and queue glyphs' size and weight (SGRGlyphButton at 20pt), in the row's color: the Music app's device
     // glyph is not lit for another device, and neither is the footer's.
     _glyph = [[SGRGlyphView alloc] initWithSymbol:@"airplayaudio" pointSize:20 weight:UIImageSymbolWeightRegular];
@@ -1347,7 +1347,7 @@ static NSString *sgrLyricsTimingText(NSArray<SGKaraokeLine *> *lines) {
     [super viewDidLoad];
     self.tableView.backgroundColor = UIColor.clearColor;
     UILabel *title = [UILabel new];
-    title.text = @"Lyrics Source";
+    title.text = SGL(@"settings.lyricssources.pick.menu", @"Lyrics Source");
     title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     title.textColor = UIColor.labelColor;
     title.accessibilityTraits = UIAccessibilityTraitHeader;
@@ -1371,7 +1371,7 @@ static NSString *sgrLyricsTimingText(NSArray<SGKaraokeLine *> *lines) {
     NSDictionary<NSString *, SGLyricsResult *> *offers = SGLyricsOffersSoFar(_track, &asking);
     NSString *current = SGLyricsChosenSource(_track);
     SGRSourceRow *automatic = [SGRSourceRow new];
-    automatic.title = @"Automatic";
+    automatic.title = SGL(@"settings.songlanguage.automatic", @"Automatic");
     automatic.subtitle = current ? @"As the order chooses" : SGLyricsCreditFor(_track);
     automatic.picked = !current;
     NSMutableArray<SGRSourceRow *> *rows = [NSMutableArray arrayWithObject:automatic];
@@ -1389,7 +1389,7 @@ static NSString *sgrLyricsTimingText(NSArray<SGKaraokeLine *> *lines) {
     }
     if (rows.count == 1) {
         SGRSourceRow *none = [SGRSourceRow new];
-        none.title = @"No Source Has Lyrics";
+        none.title = SGL(@"settings.lyricssources.offers.empty", @"No Source Has Lyrics");
         none.note = YES;
         [rows addObject:none];
     }
@@ -1447,7 +1447,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
     NSArray<NSString *> *parts = [SGURIString(SGPlayerState().track.URI) componentsSeparatedByString:@":"];
     if (!SGLyricsEnabled() || !track.length || (parts.count > 2 && [parts[1] isEqualToString:@"episode"])) return nil;
     __weak UIView *from = anchor;
-    UIAction *open = [UIAction actionWithTitle:@"Lyrics Source" image:[UIImage systemImageNamed:@"quote.bubble"] identifier:nil
+    UIAction *open = [UIAction actionWithTitle:SGL(@"settings.lyricssources.pick.menu", @"Lyrics Source") image:[UIImage systemImageNamed:@"quote.bubble"] identifier:nil
                                        handler:^(UIAction *action) {
         SGRLyricsSourcePanel *panel = [SGRLyricsSourcePanel new];
         panel.track = track;
@@ -1815,7 +1815,7 @@ static UIAction *sgrLyricsSourceItem(UIView *anchor) {
         else if (!UIAccessibilityIsVoiceOverRunning() && !me.presentedViewController) [me setAlone:YES animated:YES];
     };
     _lyricsNote = [UILabel new];
-    _lyricsNote.text = @"No lyrics for this song";
+    _lyricsNote.text = SGL(@"ui.no.lyrics.for.this.4902cc", @"No lyrics for this song");
     _lyricsNote.font = SGRFont(UIFontTextStyleTitle3, UIFontWeightSemibold, UIContentSizeCategoryExtraLarge);
     _lyricsNote.textColor = SGRSecondary();
     _lyricsNote.textAlignment = NSTextAlignmentCenter;
@@ -2400,7 +2400,7 @@ static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
     UIButton *more = [UIButton buttonWithType:UIButtonTypeCustom];
     more.showsMenuAsPrimaryAction = YES;
     more.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-    more.accessibilityLabel = @"More";
+    more.accessibilityLabel = SGL(@"settings.playlist.hide.more.title", @"More");
     SGRGlyphView *glyph = [[SGRGlyphView alloc] initWithSymbol:@"ellipsis" pointSize:20 weight:UIImageSymbolWeightSemibold];
     glyph.tintColor = SGRAddedSecondary();
     glyph.userInteractionEnabled = NO;
@@ -2459,7 +2459,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     NSMutableArray<UIMenuElement *> *actions = [NSMutableArray array];
     if ((song || [kind isEqualToString:@"episode"]) && parts[2].length) {
         NSURL *link = [NSURL URLWithString:[NSString stringWithFormat:@"https://open.spotify.com/%@/%@", kind, parts[2]]];
-        [actions addObject:[UIAction actionWithTitle:@"Share" image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
+        [actions addObject:[UIAction actionWithTitle:SGL(@"settings.cover_viewer.share", @"Share") image:[UIImage systemImageNamed:@"square.and.arrow.up"] identifier:nil
                                              handler:^(UIAction *action) { [weakSelf share:link from:presenter]; }]];
     }
     [actions addObject:[self sleepTimerMenu]];
@@ -2482,7 +2482,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     // I play for you?", a request typed or spoken, Let DJ pick), by the one DJ link Spotify takes from outside (its owner's
     // link tests, 2026-11-09). Spotify's song menu and its video settings were tried the same way and refused. With the
     // DJ's icon, as its button.
-    [menu addObject:inlineGroup(@[[UIAction actionWithTitle:@"DJ X" image:SGRDJGlyphImage(20) identifier:nil
+    [menu addObject:inlineGroup(@[[UIAction actionWithTitle:SGL(@"ui.dj.x.d9898e", @"DJ X") image:SGRDJGlyphImage(20) identifier:nil
                                       handler:^(UIAction *action) { SGRSystemOpenDJ(); }]])];
 
     // The album from the track's metadata (album_uri, beside the album_title the header reads; a key of the player's
@@ -2491,17 +2491,17 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     id album = track.metadata[@"album_uri"];
     NSString *albumURI = [album isKindOfClass:NSString.class] && [album hasPrefix:@"spotify:album:"] ? album : nil;
     if (albumURI && !SGEnabled(SGRKeyPlayerTitleAlbum)) {
-        [goTos addObject:[UIAction actionWithTitle:@"Go to Album" image:[UIImage systemImageNamed:@"square.stack"] identifier:nil
+        [goTos addObject:[UIAction actionWithTitle:SGL(@"ui.go.to.album.5a24ab", @"Go to Album") image:[UIImage systemImageNamed:@"square.stack"] identifier:nil
                                            handler:^(UIAction *action) { [weakSelf closeAndOpen:albumURI landscape:landscape]; }]];
     }
     NSString *artistURI = SGURIString(track.artistURI);
     if ([artistURI hasPrefix:@"spotify:artist:"]) {
-        [goTos addObject:[UIAction actionWithTitle:@"Go to Artist" image:[UIImage systemImageNamed:@"music.microphone"] identifier:nil
+        [goTos addObject:[UIAction actionWithTitle:SGL(@"settings.localmusic.go_artist", @"Go to Artist") image:[UIImage systemImageNamed:@"music.microphone"] identifier:nil
                                            handler:^(UIAction *action) { [weakSelf closeAndOpen:artistURI landscape:landscape]; }]];
         // The artist's concerts ("spotify:artist:%s%cconcerts" in the 9.1.90 binary), in the menu itself (its owner,
         // 2026-11-06: no More submenu).
         NSString *concerts = [artistURI stringByAppendingString:@":concerts"];
-        [goTos addObject:[UIAction actionWithTitle:@"Go to Artist Concerts" image:[UIImage systemImageNamed:@"ticket"] identifier:nil
+        [goTos addObject:[UIAction actionWithTitle:SGL(@"ui.go.to.artist.concerts.9a115d", @"Go to Artist Concerts") image:[UIImage systemImageNamed:@"ticket"] identifier:nil
                                            handler:^(UIAction *action) { [weakSelf closeAndOpen:concerts landscape:landscape]; }]];
     }
     // Add to Playlist: Spotify's own sheet, by its link with the song as `entities`, the parameter its page requires
@@ -2510,7 +2510,7 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
     if (song && SGHidden(SGRKeyPlayerHideAdd)) {
         NSString *entities = [uri stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.alphanumericCharacterSet];
         NSString *link = [@"spotify:add-to-playlist?entities=" stringByAppendingString:entities];
-        [goTos addObject:[UIAction actionWithTitle:@"Add to Playlist" image:[UIImage systemImageNamed:@"text.badge.plus"] identifier:nil
+        [goTos addObject:[UIAction actionWithTitle:SGL(@"settings.context_menu.quick.add_to_playlist", @"Add to Playlist") image:[UIImage systemImageNamed:@"text.badge.plus"] identifier:nil
                                            handler:^(UIAction *action) { SGOpenSpotifyURI([NSURL URLWithString:link]); }]];
     }
     if (goTos.count) [menu addObject:inlineGroup(goTos)];
@@ -2543,22 +2543,22 @@ static UIMenu *inlineGroup(NSArray<UIMenuElement *> *children) {
             SGSetSleepTimer(SGSleepTimerAtTime, minutes.doubleValue * 60);
         }]];
     }
-    UIAction *track = [UIAction actionWithTitle:@"End of Song" image:nil identifier:nil handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfTrack, 0); }];
+    UIAction *track = [UIAction actionWithTitle:SGL(@"ui.end.of.song.527942", @"End of Song") image:nil identifier:nil handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfTrack, 0); }];
     if (mode == SGSleepTimerEndOfTrack) track.state = UIMenuElementStateOn;
-    UIAction *album = [UIAction actionWithTitle:@"End of Album or Playlist" image:nil identifier:nil handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfAlbum, 0); }];
+    UIAction *album = [UIAction actionWithTitle:SGL(@"ui.end.of.album.or.c1ddeb", @"End of Album or Playlist") image:nil identifier:nil handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerEndOfAlbum, 0); }];
     if (mode == SGSleepTimerEndOfAlbum) album.state = UIMenuElementStateOn;
     [items addObjectsFromArray:@[track, album]];
     if (mode != SGSleepTimerOff) {
-        [items addObject:[UIAction actionWithTitle:@"Turn Off Timer" image:[UIImage systemImageNamed:@"xmark"] identifier:nil
+        [items addObject:[UIAction actionWithTitle:SGL(@"ui.turn.off.timer.f1d075", @"Turn Off Timer") image:[UIImage systemImageNamed:@"xmark"] identifier:nil
                                            handler:^(UIAction *action) { SGSetSleepTimer(SGSleepTimerOff, 0); }]];
     }
-    UIMenu *menu = [UIMenu menuWithTitle:@"Sleep\nTimer" image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
+    UIMenu *menu = [UIMenu menuWithTitle:SGL(@"ui.sleep.timer.39548a", @"Sleep\nTimer") image:[UIImage systemImageNamed:@"moon.zzz"] identifier:nil options:0 children:items];
     NSDate *end = SGSleepTimerEnd();
     if (mode == SGSleepTimerAtTime && end) {
         NSInteger left = MAX(0, (NSInteger)ceil(end.timeIntervalSinceNow / 60));
         menu.subtitle = [NSString stringWithFormat:@"%ld min left", (long)left];
-    } else if (mode == SGSleepTimerEndOfTrack) menu.subtitle = @"End of song";
-    else if (mode == SGSleepTimerEndOfAlbum) menu.subtitle = @"End of album or playlist";
+    } else if (mode == SGSleepTimerEndOfTrack) menu.subtitle = SGL(@"ui.end.of.song.79e46a", @"End of song");
+    else if (mode == SGSleepTimerEndOfAlbum) menu.subtitle = SGL(@"ui.end.of.album.or.276947", @"End of album or playlist");
     return menu;
 }
 

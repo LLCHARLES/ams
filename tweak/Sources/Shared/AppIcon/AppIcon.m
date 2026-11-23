@@ -22,10 +22,10 @@ static void setIcon(NSString *icon) {
         // A re-signed install, or a call while the app is not frontmost, can be refused; without
         // a word the row looks broken. The handler can run off the main thread.
         dispatch_async(dispatch_get_main_queue(), ^{
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"The icon did not change"
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.appicon.error.alert.title", @"The icon did not change")
                                                                            message:error.localizedDescription
                                                                     preferredStyle:UIAlertControllerStyleAlert];
-            [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
             [SGTopController() presentViewController:alert animated:YES completion:nil];
         });
     }];
@@ -37,6 +37,6 @@ SGModRow *SGAppIconRow(void) {
     if (!names.count || !UIApplication.sharedApplication.supportsAlternateIcons) return nil;
     NSMutableArray<NSString *> *choices = [NSMutableArray arrayWithObject:label(nil)];
     for (NSString *name in names) [choices addObject:label(name)];
-    return SGWithSymbol(SGMenuRow(@"App icon", choices, ^NSString *{ return label(UIApplication.sharedApplication.alternateIconName); },
+    return SGWithSymbol(SGMenuRow(SGL(@"settings.appicon.title", @"App icon"), choices, ^NSString *{ return label(UIApplication.sharedApplication.alternateIconName); },
                                   ^(NSInteger index) { setIcon(index > 0 ? names[(NSUInteger)index - 1] : nil); }), @"app.badge");
 }

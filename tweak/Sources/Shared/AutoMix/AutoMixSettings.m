@@ -9,15 +9,15 @@
 static const double kShortest = 1, kLongest = 12;
 
 UIViewController *SGAutoMixSettingsPage(void) {
-    SGModRow *toggle = SGOptionRow(@"AutoMix", nil, SGKeyAutoMix);
+    SGModRow *toggle = SGOptionRow(SGL(@"settings.automix.title", @"AutoMix"), nil, SGKeyAutoMix);
     toggle.changed = ^(BOOL on) { SGAutoMixApply(on); };
 
     NSArray<NSString *> *styles = @[@"Beat-matched", @"Crossfade"];
-    SGModRow *style = SGMenuRow(@"Style", styles, ^NSString *{ return styles[(NSUInteger)SGAutoMixCurrentStyle()]; },
+    SGModRow *style = SGMenuRow(SGL(@"settings.automix.style.title", @"Style"), styles, ^NSString *{ return styles[(NSUInteger)SGAutoMixCurrentStyle()]; },
                                 ^(NSInteger index) { SGAutoMixSetStyle(index); });
     style.waitsOn = SGKeyAutoMix;
 
-    SGModRow *blend = SGSliderRow(@"Blend length", nil, kShortest, kLongest, 1,
+    SGModRow *blend = SGSliderRow(SGL(@"settings.automix.blendlength.title", @"Blend length"), nil, kShortest, kLongest, 1,
         ^double {
             SGTransitionSettings s;
             return SGTransitionSettingsRead(&s) ? MAX(kShortest, MIN(kLongest, s.milliseconds / 1000.0)) : 5;
@@ -27,7 +27,7 @@ UIViewController *SGAutoMixSettingsPage(void) {
     blend.waitsOn = SGKeyAutoMix;
 
     NSString *note = SGAutoMixAccountAllows() ? nil : @"AutoMix needs Premium, or Spoof Premium under Premium, ads & privacy.";
-    return [[SGModPage alloc] initWithTitle:@"AutoMix" intro:nil sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.automix.title", @"AutoMix") intro:nil sections:@[
         SGNotedSection(nil, @[toggle, style, blend], note),
     ] footer:nil];
 }
