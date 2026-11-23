@@ -542,10 +542,15 @@
 "settings.privacy.hide_video_shuffle_upsell.title" = "隐藏视频播放器中的随机播放推广";
 "settings.privacy.hide_watch_feed_tip.title" = "隐藏观看信息流探索提示";
 "settings.privacy.interventions.header" = "减少干扰";
+"settings.privacy.podcasts.footer" = "跳过由听众提交到 sponsor.ajay.app 的片段，即时生效。";
+"settings.privacy.podcasts.header" = "播客";
 "settings.privacy.premium.header" = "Premium";
 "settings.privacy.reset_counters.action" = "重置计数器";
 "settings.privacy.reset_telemetry.action" = "重置遥测计数器";
 "settings.privacy.section.header" = "隐私";
+"settings.privacy.sponsorblock.categories" = "分类与行为";
+"settings.privacy.sponsorblock.subtitle" = "跳过剧集中的赞助片段和废话";
+"settings.privacy.sponsorblock.title" = "SponsorBlock";
 "settings.privacy.spoof_premium.title" = "伪装 Premium";
 "settings.privacy.telemetry_stats.header" = "迄今已屏蔽的遥测";
 "settings.privacy.title" = "Premium、广告与隐私";
@@ -575,6 +580,8 @@
 "settings.spatial.subtitle" = "使用 AirPods 时，转头后人声仍停留在你正前方";
 "settings.spatial.title" = "空间音频人声";
 "settings.spatial.width.title" = "乐器宽度";
+
+"settings.sponsorblock.title" = "SponsorBlock";
 
 "settings.stats.action.erase" = "清除收听历史";
 "settings.stats.alert.erase.action" = "清除";
@@ -613,6 +620,7 @@
 "settings.translation.translateanysong.subtitle" = "为本身已被识别为你所用语言的歌曲提供歌词翻译菜单";
 "settings.translation.translateanysong.title" = "翻译任何歌曲";
 
+"settings.vibrations.alert.missing.livecontainer" = "在 LiveContainer 下，iOS 检查的是 LiveContainer 本身是否支持 Music Haptics，而不是其中的 Spotify。由于此 LiveContainer 不具备该支持，Spotify 退到后台后振动会停止。\n\nSpotify 保持打开时，上方的 Music Haptics 仍然有效。请安装支持 Music Haptics 的 LiveContainer 版本以同时获得两者。";
 "settings.vibrations.alert.missing.message" = "iOS 只会为声明支持该功能的 App 播放音乐触感，而只有 Vitrine 的 IPA 构建会将其写入 Spotify。此 Spotify 是通过其他方式组装的，例如手动注入 Vitrine 的 .deb，因此 Spotify 离开屏幕后振动即停止。上方的音乐触感在 Spotify 打开时仍可用。请用 Vitrine 构建 IPA 以同时获得两者。";
 "settings.vibrations.alert.missing.title" = "缺少后台功能";
 "settings.vibrations.alert.not_now" = "暂不";
@@ -627,6 +635,7 @@
 "settings.vibrations.system_off.subtitle" = "轻点前往设置开启";
 "settings.vibrations.system_off.title" = "iOS 中音乐触感已关闭";
 
+"settings.wireguard.server" = "服务器";
 "settings.wireguard.status" = "状态";
 
 "settings.workshop.headphones.title" = "耳机";
@@ -660,27 +669,40 @@
 
 "ui.canvas.for.the.large.548508" = "大尺寸封面的 Canvas";
 
+"ui.categories.6ccb60" = "分类";
+
+"ui.choose.color.09b969" = "选择颜色";
+
 "ui.clear.history.e16f97" = "清除历史";
 
 "ui.copy.the.api.key.e1b4b7" = "复制 API 密钥，然后再次轻点「粘贴密钥」。";
 
 "ui.count.after.9bdcbd" = "之后计数";
 
+"ui.custom.sponsorblock.api.server.cce76b" = "自定义 SponsorBlock API 服务器地址";
+
 "ui.delete.saved.translations.b0902b" = "删除已保存的译文？";
 "ui.delete.this.translation.77908a" = "删除此译文";
 
 "ui.device.button.70d9a4" = "设备按钮";
 
+"ui.dismiss.70afe9" = "关闭";
+
 "ui.dj.x.d9898e" = "DJ X";
 
 "ui.eeveespotify.b04e6c" = "EeveeSpotify";
+"ui.eeveespotify.reincarnated.on.github.ba8d4c" = "在 GitHub 上查看 EeveeSpotify Reincarnated";
 
 "ui.end.of.album.or.276947" = "专辑或播放列表结束时";
 "ui.end.of.album.or.c1ddeb" = "专辑或播放列表结束时";
 "ui.end.of.song.527942" = "歌曲结束时";
 "ui.end.of.song.79e46a" = "歌曲结束时";
 
+"ui.enter.custom.sponsorblock.api.ece952" = "输入自定义 SponsorBlock API 服务器地址（默认：https://sponsor.ajay.app）";
+
 "ui.every.switch.goes.off.5f7e53" = "所有开关将关闭，标志覆盖和标签栏布局将被清除，Spotify 以原样重启，Mod 在再次启用前不执行任何操作。Spotify 自身的设置不受影响。";
+
+"ui.everything.settings.statistics.01aed8" = "全部（设置 + 统计）";
 
 "ui.everywhere.2f2b74" = "所有位置";
 
@@ -695,6 +717,8 @@
 
 "ui.go.to.album.5a24ab" = "前往专辑";
 "ui.go.to.artist.concerts.9a115d" = "前往艺人演出";
+
+"ui.haptic.feedback.b0baa9" = "触觉反馈";
 
 "ui.home.search.library.and.13de93" = "首页、搜索、资料库以及每次翻页也会生效";
 
@@ -720,6 +744,8 @@
 
 "ui.match.the.lyrics.button.d220b1" = "匹配歌词按钮";
 
+"ui.min.segment.duration.854cf8" = "最短片段时长";
+
 "ui.moving.artwork.up.to.75d236" = "动态封面，每首歌最高约 7 MB";
 
 "ui.native.redesign.3cf341" = "原生重新设计";
@@ -738,28 +764,57 @@
 
 "ui.playback.speed.6ff42b" = "播放速度";
 
+"ui.prompt.duration.842932" = "提示时长";
 "ui.prompt.used.when.translating.f0f44d" = "一次翻译多首歌曲时使用的提示词";
 
 "ui.pronunciation.and.translation.27bfe3" = "发音与翻译";
+
+"ui.reset.advanced.settings.c8127d" = "重置高级设置";
+"ui.reset.categories.and.colors.413e0b" = "重置分类和颜色？";
+"ui.reset.categories.and.colors.7b18d6" = "重置分类和颜色";
+"ui.reset.statistics.12f5e3" = "重置统计";
+"ui.reset.statistics.9a2ec6" = "重置统计？";
+"ui.reset.to.default.eef3a3" = "恢复默认";
+"ui.reset.what.3ea3d1" = "重置哪些内容？";
+
+"ui.respect.manual.seek.don.735427" = "尊重手动拖动（不重新跳过）";
+
+"ui.restore.default.behaviors.and.18ab9e" = "恢复默认行为和片段颜色";
+"ui.restore.default.server.and.e60358" = "恢复默认服务器和时长设置";
 
 "ui.romanized.lyrics.85aae5" = "罗马音歌词";
 
 "ui.save.server.465cac" = "保存服务器";
 
+"ui.segments.skipped.274ba2" = "已跳过片段";
+
+"ui.server.url.1d5d1e" = "服务器地址";
+
+"ui.settings.toggles.categories.colors.8baea3" = "设置（开关 + 分类 + 颜色）";
+
+"ui.show.colored.overlay.on.bf8a28" = "在进度条上显示彩色覆盖层";
 "ui.show.the.latin.letters.75dd09" = "显示拉丁字母而非原始文字";
+"ui.show.toast.when.skipping.8c767f" = "跳过时显示提示";
 
 "ui.sideways.on.the.mini.b8b9b4" = "在迷你播放器上横向显示";
 
 "ui.skip.saved.translations.cc78d6" = "跳过已保存的译文";
 "ui.skip.songs.that.already.0676e6" = "跳过已有保存译文的歌曲";
+"ui.skip.sponsored.segments.and.8b2aca" = "跳过播客中的赞助片段和废话。";
 
-"ui.sleep.timer.39548a" = "睡眠\\n定时";
+"ui.skips.segments.submitted.by.9f3127" = "跳过听众提交到 sponsor.ajay.app 的片段，每次跳过后显示撤销横幅。较新或较少见的剧集可能尚未被标记。分类和行为位于 Mod 设置 > 会员、广告与隐私。";
+
+"ui.sleep.timer.39548a" = "睡眠\\\n定时";
 
 "ui.songs.per.batch.108696" = "每批歌曲数";
 "ui.songs.translated.before.are.932837" = "此前翻译过的歌曲，下次请求时会再次翻译。";
 "ui.songs.translated.on.this.cabcd7" = "在此 iPhone 上或由 AI 翻译器翻译的歌曲会带回译文";
 
+"ui.spot.sponsorblock.extension.on.accff1" = "在 GitHub 上查看 Spot-SponsorBlock-Extension";
+
 "ui.spotify.s.icons.1dd941" = "Spotify 的图标";
+
+"ui.statistics.2086b2" = "统计";
 
 "ui.still.draws.each.line.b289a8" = "仍逐行绘制一次；动态模式会让封面在背后呼吸。动态封面用于本身没有封面的歌曲";
 
@@ -776,11 +831,17 @@
 "ui.the.tab.bar.shrinks.cdd004" = "页面向下滚动时标签栏会缩小";
 "ui.the.title.play.and.284426" = "标题、播放与暂停以及跳过";
 
+"ui.this.clears.your.skipped.bd0b4e" = "这将清除你的已跳过片段计数和节省的时间。";
+"ui.this.restores.all.categories.a0bccf" = "这将把所有分类恢复为默认行为和片段颜色。";
 "ui.this.vitrine.comes.with.dbf114" = "此 Vitrine 附带的 Vitrine 附加组件比已安装的更新。轻点「更新」，选择 Sileo 或 Filza，安装后重启桌面。";
 
 "ui.those.five.were.too.f42756" = "那五次间隔太远，无法用于学习。我们再来一次。";
 
+"ui.time.saved.bf2a1a" = "节省的时间";
+
 "ui.title.opens.album.c3f293" = "轻点标题打开专辑";
+
+"ui.toast.duration.523df5" = "提示时长";
 
 "ui.top.picks.the.tinted.cd8879" = "「为你精选」、带色调的快捷胶囊和标题的玻璃胶囊；关闭则恢复重新设计的首页原样";
 
@@ -789,6 +850,8 @@
 "ui.translate.any.song.from.377a0c" = "从歌词的角落菜单翻译任何歌曲";
 
 "ui.translated.by.7ad105" = "翻译者";
+
+"ui.tuning.221b75" = "调整";
 
 "ui.turn.off.timer.f1d075" = "关闭定时器";
 "ui.turn.the.player.page.8ddf3c" = "随手机转动播放器页面";

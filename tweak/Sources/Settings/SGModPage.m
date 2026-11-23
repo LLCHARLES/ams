@@ -595,7 +595,7 @@ static UIImage *colorDotImage(UIColor *fill, CGFloat side) {
     _colorButton.layer.masksToBounds = YES;
     _colorButton.layer.borderWidth = 1.0 / UIScreen.mainScreen.scale;
     _colorButton.layer.borderColor = [UIColor colorWithWhite:1.0 alpha:0.35].CGColor;
-    _colorButton.accessibilityLabel = @"Choose color";
+    _colorButton.accessibilityLabel = SGL(@"ui.choose.color.09b969", @"Choose color");
     [_colorButton addTarget:self action:@selector(colorTapped) forControlEvents:UIControlEventTouchUpInside];
 
     _segmentedControl = [UISegmentedControl new];

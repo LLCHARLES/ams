@@ -542,10 +542,15 @@
 "settings.privacy.hide_video_shuffle_upsell.title" = "Hide the shuffle upsell in the video player";
 "settings.privacy.hide_watch_feed_tip.title" = "Hide the watch feed explorer tip";
 "settings.privacy.interventions.header" = "Reduce interventions";
+"settings.privacy.podcasts.footer" = "Skips segments submitted to sponsor.ajay.app. Changes take effect immediately.";
+"settings.privacy.podcasts.header" = "Podcasts";
 "settings.privacy.premium.header" = "Premium";
 "settings.privacy.reset_counters.action" = "Reset the counters";
 "settings.privacy.reset_telemetry.action" = "Reset the telemetry counters";
 "settings.privacy.section.header" = "Privacy";
+"settings.privacy.sponsorblock.categories" = "Categories & behavior";
+"settings.privacy.sponsorblock.subtitle" = "Skip sponsored segments and filler in episodes";
+"settings.privacy.sponsorblock.title" = "SponsorBlock";
 "settings.privacy.spoof_premium.title" = "Spoof Premium";
 "settings.privacy.telemetry_stats.header" = "Telemetry blocked so far";
 "settings.privacy.title" = "Premium, ads & privacy";
@@ -575,6 +580,8 @@
 "settings.spatial.subtitle" = "With AirPods, the voice stays in front of you as you turn your head";
 "settings.spatial.title" = "Spatial voice";
 "settings.spatial.width.title" = "Instruments width";
+
+"settings.sponsorblock.title" = "SponsorBlock";
 
 "settings.stats.action.erase" = "Erase listening history";
 "settings.stats.alert.erase.action" = "Erase";
@@ -613,20 +620,22 @@
 "settings.translation.translateanysong.subtitle" = "The lyrics' translate menu for songs that already read as your language";
 "settings.translation.translateanysong.title" = "Translate any song";
 
-"settings.vibrations.alert.missing.message" = "iOS plays Music Haptics only for apps that say they support it, and only Vitrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Vitrine's .deb injected by hand, so the vibrations stop when Spotify leaves the screen. Music Haptics above still works while Spotify is open. Build the IPA with Vitrine to get both.";
-"settings.vibrations.alert.missing.title" = "In the Background is missing";
+"settings.vibrations.alert.missing.livecontainer" = "Under LiveContainer, iOS checks LiveContainer itself for Music Haptics, not Spotify inside it. Because this LiveContainer lacks that support, vibrations stop when Spotify leaves the screen.\n\nMusic Haptics above still work while Spotify is open. Install a build of LiveContainer with Music Haptics to get both.";
+"settings.vibrations.alert.missing.message" = "iOS plays Music Haptics only for apps that say they support it, which only Vitrine's IPA build adds to Spotify. If Spotify was installed another way—such as injecting the tweak alone—vibrations stop when Spotify leaves the screen.\n\nMusic Haptics above still work while Spotify is open. Build the IPA with Vitrine to get both.";
+"settings.vibrations.alert.missing.title" = "Background Haptics Unavailable";
 "settings.vibrations.alert.not_now" = "Not Now";
 "settings.vibrations.alert.system_off.title" = "Turn On Music Haptics";
 "settings.vibrations.background.title" = "In the Background";
 "settings.vibrations.follows.title" = "Follows";
 "settings.vibrations.missing.subtitle" = "Tap for why";
-"settings.vibrations.missing.title" = "In the Background is missing from this install";
+"settings.vibrations.missing.title" = "Background Haptics Unavailable";
 "settings.vibrations.music.title" = "Music Haptics";
 "settings.vibrations.preview.a11y" = "Vibrations preview, rings of dots that ripple out from the middle with each tap";
 "settings.vibrations.strength.title" = "Strength";
 "settings.vibrations.system_off.subtitle" = "Tap to turn it on in Settings";
 "settings.vibrations.system_off.title" = "Music Haptics is off in iOS";
 
+"settings.wireguard.server" = "Server";
 "settings.wireguard.status" = "Status";
 
 "settings.workshop.headphones.title" = "Headphones";
@@ -660,27 +669,40 @@
 
 "ui.canvas.for.the.large.548508" = "Canvas for the large cover";
 
+"ui.categories.6ccb60" = "Categories";
+
+"ui.choose.color.09b969" = "Choose color";
+
 "ui.clear.history.e16f97" = "Clear History";
 
 "ui.copy.the.api.key.e1b4b7" = "Copy the API key, then tap Paste Key again.";
 
 "ui.count.after.9bdcbd" = "Count After";
 
+"ui.custom.sponsorblock.api.server.cce76b" = "Custom SponsorBlock API server address";
+
 "ui.delete.saved.translations.b0902b" = "Delete saved translations?";
 "ui.delete.this.translation.77908a" = "Delete This Translation";
 
 "ui.device.button.70d9a4" = "Device button";
 
+"ui.dismiss.70afe9" = "Dismiss";
+
 "ui.dj.x.d9898e" = "DJ X";
 
 "ui.eeveespotify.b04e6c" = "EeveeSpotify";
+"ui.eeveespotify.reincarnated.on.github.ba8d4c" = "EeveeSpotify Reincarnated on GitHub";
 
 "ui.end.of.album.or.276947" = "End of album or playlist";
 "ui.end.of.album.or.c1ddeb" = "End of Album or Playlist";
 "ui.end.of.song.527942" = "End of Song";
 "ui.end.of.song.79e46a" = "End of song";
 
+"ui.enter.custom.sponsorblock.api.ece952" = "Enter custom SponsorBlock API server address (default: https://sponsor.ajay.app)";
+
 "ui.every.switch.goes.off.5f7e53" = "Every switch goes off, flag overrides and the tab bar layout are cleared, and Spotify restarts as it came, with the mod doing nothing until asked. Spotify's own settings are untouched.";
+
+"ui.everything.settings.statistics.01aed8" = "Everything (settings + statistics)";
 
 "ui.everywhere.2f2b74" = "Everywhere";
 
@@ -695,6 +717,8 @@
 
 "ui.go.to.album.5a24ab" = "Go to Album";
 "ui.go.to.artist.concerts.9a115d" = "Go to Artist Concerts";
+
+"ui.haptic.feedback.b0baa9" = "Haptic feedback";
 
 "ui.home.search.library.and.13de93" = "Home, Search, Library and every page turn too";
 
@@ -720,6 +744,8 @@
 
 "ui.match.the.lyrics.button.d220b1" = "Match the lyrics button";
 
+"ui.min.segment.duration.854cf8" = "Min segment duration";
+
 "ui.moving.artwork.up.to.75d236" = "Moving artwork, up to about 7 MB a song";
 
 "ui.native.redesign.3cf341" = "Native redesign";
@@ -738,20 +764,45 @@
 
 "ui.playback.speed.6ff42b" = "Playback speed";
 
+"ui.prompt.duration.842932" = "Prompt duration";
 "ui.prompt.used.when.translating.f0f44d" = "Prompt used when translating multiple songs at once";
 
 "ui.pronunciation.and.translation.27bfe3" = "Pronunciation and translation";
+
+"ui.reset.advanced.settings.c8127d" = "Reset advanced settings";
+"ui.reset.categories.and.colors.413e0b" = "Reset categories and colors?";
+"ui.reset.categories.and.colors.7b18d6" = "Reset categories and colors";
+"ui.reset.statistics.12f5e3" = "Reset statistics";
+"ui.reset.statistics.9a2ec6" = "Reset statistics?";
+"ui.reset.to.default.eef3a3" = "Reset to Default";
+"ui.reset.what.3ea3d1" = "Reset what?";
+
+"ui.respect.manual.seek.don.735427" = "Respect manual seek (don't re-skip)";
+
+"ui.restore.default.behaviors.and.18ab9e" = "Restore default behaviors and segment colors";
+"ui.restore.default.server.and.e60358" = "Restore default server and duration settings";
 
 "ui.romanized.lyrics.85aae5" = "Romanized lyrics";
 
 "ui.save.server.465cac" = "Save Server";
 
+"ui.segments.skipped.274ba2" = "Segments skipped";
+
+"ui.server.url.1d5d1e" = "Server URL";
+
+"ui.settings.toggles.categories.colors.8baea3" = "Settings (toggles + categories + colors)";
+
+"ui.show.colored.overlay.on.bf8a28" = "Show colored overlay on progress bar";
 "ui.show.the.latin.letters.75dd09" = "Show the Latin letters instead of the original script";
+"ui.show.toast.when.skipping.8c767f" = "Show toast when skipping";
 
 "ui.sideways.on.the.mini.b8b9b4" = "Sideways on the mini player";
 
 "ui.skip.saved.translations.cc78d6" = "Skip saved translations";
 "ui.skip.songs.that.already.0676e6" = "Skip songs that already have a saved translation";
+"ui.skip.sponsored.segments.and.8b2aca" = "Skip sponsored segments and filler in podcasts.";
+
+"ui.skips.segments.submitted.by.9f3127" = "Skips segments submitted by listeners to sponsor.ajay.app, with an Undo banner after each skip. Newer or less common episodes may not be marked yet. Categories and behavior live in Mod Settings > Premium, ads & privacy.";
 
 "ui.sleep.timer.39548a" = "Sleep\nTimer";
 
@@ -759,7 +810,11 @@
 "ui.songs.translated.before.are.932837" = "Songs translated before are translated again the next time you ask.";
 "ui.songs.translated.on.this.cabcd7" = "Songs translated on this iPhone or by an AI translator come back translated";
 
+"ui.spot.sponsorblock.extension.on.accff1" = "Spot-SponsorBlock-Extension on GitHub";
+
 "ui.spotify.s.icons.1dd941" = "Spotify's icons";
+
+"ui.statistics.2086b2" = "Statistics";
 
 "ui.still.draws.each.line.b289a8" = "Still draws each line once; Animated breathes the cover behind it. With moving artwork, for songs that have none";
 
@@ -776,11 +831,17 @@
 "ui.the.tab.bar.shrinks.cdd004" = "The tab bar shrinks as a page scrolls down";
 "ui.the.title.play.and.284426" = "The title, play and pause, and skip";
 
+"ui.this.clears.your.skipped.bd0b4e" = "This clears your skipped segment count and time saved.";
+"ui.this.restores.all.categories.a0bccf" = "This restores all categories to their default behaviors and segment colors.";
 "ui.this.vitrine.comes.with.dbf114" = "This Vitrine comes with a newer Vitrine Addon than the one installed. Tap Update, pick Sileo or Filza, install it, then respring.";
 
 "ui.those.five.were.too.f42756" = "Those five were too far apart to learn from. Let's take them again.";
 
+"ui.time.saved.bf2a1a" = "Time saved";
+
 "ui.title.opens.album.c3f293" = "Title Opens Album";
+
+"ui.toast.duration.523df5" = "Toast duration";
 
 "ui.top.picks.the.tinted.cd8879" = "Top picks, the tinted shortcut pills and the title's glass pill; off, Home as the redesign had it";
 
@@ -789,6 +850,8 @@
 "ui.translate.any.song.from.377a0c" = "Translate any song from the lyrics' corner menu";
 
 "ui.translated.by.7ad105" = "Translated by";
+
+"ui.tuning.221b75" = "Tuning";
 
 "ui.turn.off.timer.f1d075" = "Turn Off Timer";
 "ui.turn.the.player.page.8ddf3c" = "Turn the player page with the phone";

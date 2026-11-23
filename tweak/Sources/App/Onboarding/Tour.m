@@ -489,15 +489,15 @@ static BOOL adFree(void) {
                                                   subtitle:@"Skip sponsored segments and filler in podcasts." accessory:_sponsorBlock];
     [_sponsorBlockCard addTarget:self action:@selector(toggleSponsorBlock) forControlEvents:UIControlEventTouchUpInside];
     _sponsorBlockCard.isAccessibilityElement = YES;
-    _sponsorBlockCard.accessibilityLabel = @"SponsorBlock";
-    _sponsorBlockCard.accessibilityHint = @"Skip sponsored segments and filler in podcasts.";
+    _sponsorBlockCard.accessibilityLabel = SGL(@"settings.sponsorblock.title", @"SponsorBlock");
+    _sponsorBlockCard.accessibilityHint = SGL(@"ui.skip.sponsored.segments.and.8b2aca", @"Skip sponsored segments and filler in podcasts.");
     _sponsorBlockCard.accessibilityValue = _sponsorBlock.on ? @"On" : @"Off";
     if (@available(iOS 17.0, *)) _sponsorBlockCard.accessibilityTraits = UIAccessibilityTraitToggleButton;
     else _sponsorBlockCard.accessibilityTraits = UIAccessibilityTraitButton;
     UILabel *sponsorBlockText = [UILabel new];
-    sponsorBlockText.text = @"Skips segments submitted by listeners to sponsor.ajay.app, with an Undo banner after each skip. "
+    sponsorBlockText.text = SGL(@"ui.skips.segments.submitted.by.9f3127", @"Skips segments submitted by listeners to sponsor.ajay.app, with an Undo banner after each skip. "
                             @"Newer or less common episodes may not be marked yet. "
-                            @"Categories and behavior live in Mod Settings > Premium, ads & privacy.";
+                            @"Categories and behavior live in Mod Settings > Premium, ads & privacy.");
     UIStackView *sponsorBlockNote = noteLine(SGSymbolView(@"info.circle.fill", 15, UIImageSymbolWeightSemibold, 22), sponsorBlockText);
     sponsorBlockNote.arrangedSubviews.firstObject.tintColor = SGGrey();
     sponsorBlockNote.layoutMargins = UIEdgeInsetsMake(4, 4, 0, 4);

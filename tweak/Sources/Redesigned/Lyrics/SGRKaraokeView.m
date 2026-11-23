@@ -2156,8 +2156,8 @@ static BOOL anyUntranslated(NSArray<SGKaraokeLine *> *lines) {
                 [alert addAction:open];
                 alert.preferredAction = open;
             } else if ([error containsString:@"Mod Settings"]) {
-                [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleCancel handler:nil]];
-                UIAlertAction *open = [UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+                [alert addAction:[UIAlertAction actionWithTitle:SGL(@"ui.dismiss.70afe9", @"Dismiss") style:UIAlertActionStyleCancel handler:nil]];
+                UIAlertAction *open = [UIAlertAction actionWithTitle:SGL(@"settings.translation.download.open", @"Open Settings") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                     SGOpenModSettings(nil);
                 }];
                 [alert addAction:open];

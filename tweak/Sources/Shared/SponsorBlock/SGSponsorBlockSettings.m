@@ -183,9 +183,9 @@ static void presentDarkAlert(UIAlertController *alert) {
 static UIViewController *sponsorBlockAdvancedPage(void) {
     __block __weak SGModPage *weakPage = nil;
 
-    SGModRow *serverRow = SGWithSymbol(SGActionRow(@"Server URL", @"Custom SponsorBlock API server address", ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Server URL"
-                                                                       message:@"Enter custom SponsorBlock API server address (default: https://sponsor.ajay.app)"
+    SGModRow *serverRow = SGWithSymbol(SGActionRow(SGL(@"ui.server.url.1d5d1e", @"Server URL"), SGL(@"ui.custom.sponsorblock.api.server.cce76b", @"Custom SponsorBlock API server address"), ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.server.url.1d5d1e", @"Server URL")
+                                                                       message:SGL(@"ui.enter.custom.sponsorblock.api.ece952", @"Enter custom SponsorBlock API server address (default: https://sponsor.ajay.app)")
                                                                 preferredStyle:UIAlertControllerStyleAlert];
         __weak UIAlertController *weakAlert = alert;
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
@@ -195,41 +195,41 @@ static UIViewController *sponsorBlockAdvancedPage(void) {
             textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
             textField.autocorrectionType = UITextAutocorrectionTypeNo;
         }];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.save", @"Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             UITextField *tf = weakAlert.textFields.firstObject;
             SGSetSponsorBlockServerURL(tf.text);
             [weakPage.tableView reloadData];
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Reset to Default" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"ui.reset.to.default.eef3a3", @"Reset to Default") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             SGSetSponsorBlockServerURL(nil);
             [weakPage.tableView reloadData];
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         presentDarkAlert(alert);
     }), @"network");
     serverRow.value = ^NSString *{
         return SGSponsorBlockServerURL();
     };
 
-    SGModRow *minDuration = SGSliderRow(@"Min segment duration", nil, 0.0, 30.0, 0.5,
+    SGModRow *minDuration = SGSliderRow(SGL(@"ui.min.segment.duration.854cf8", @"Min segment duration"), nil, 0.0, 30.0, 0.5,
         ^double { return SGSponsorBlockMinDuration(); },
         ^(double value) { SGSetSponsorBlockMinDuration(value); },
         ^NSString *(double value) { return [NSString stringWithFormat:@"%.1fs", value]; });
 
-    SGModRow *toastDuration = SGSliderRow(@"Toast duration", nil, 1.0, 8.0, 0.2,
+    SGModRow *toastDuration = SGSliderRow(SGL(@"ui.toast.duration.523df5", @"Toast duration"), nil, 1.0, 8.0, 0.2,
         ^double { return SGSponsorBlockToastDuration(); },
         ^(double value) { SGSetSponsorBlockToastDuration(value); },
         ^NSString *(double value) { return [NSString stringWithFormat:@"%.1fs", value]; });
 
-    SGModRow *promptDuration = SGSliderRow(@"Prompt duration", nil, 5.0, SGSponsorBlockPromptDurationInfinite, 5.0,
+    SGModRow *promptDuration = SGSliderRow(SGL(@"ui.prompt.duration.842932", @"Prompt duration"), nil, 5.0, SGSponsorBlockPromptDurationInfinite, 5.0,
         ^double { return SGSponsorBlockPromptDuration(); },
         ^(double value) { SGSetSponsorBlockPromptDuration(value); },
         ^NSString *(double value) {
             return value >= SGSponsorBlockPromptDurationInfinite ? @"Until end" : [NSString stringWithFormat:@"%.0fs", value];
         });
 
-    SGModRow *resetAction = SGWithSymbol(SGActionRow(@"Reset advanced settings", @"Restore default server and duration settings", ^{
-        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Reset what?"
+    SGModRow *resetAction = SGWithSymbol(SGActionRow(SGL(@"ui.reset.advanced.settings.c8127d", @"Reset advanced settings"), SGL(@"ui.restore.default.server.and.e60358", @"Restore default server and duration settings"), ^{
+        UIAlertController *sheet = [UIAlertController alertControllerWithTitle:SGL(@"ui.reset.what.3ea3d1", @"Reset what?")
                                                                         message:nil
                                                                  preferredStyle:UIAlertControllerStyleActionSheet];
         void (^resetSettings)(BOOL) = ^(BOOL includeStats) {
@@ -246,13 +246,13 @@ static UIViewController *sponsorBlockAdvancedPage(void) {
             SGSponsorBlockPreferencesDidChange();
             [weakPage.tableView reloadData];
         };
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Settings (toggles + categories + colors)" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"ui.settings.toggles.categories.colors.8baea3", @"Settings (toggles + categories + colors)") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             resetSettings(NO);
         }]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Everything (settings + statistics)" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"ui.everything.settings.statistics.01aed8", @"Everything (settings + statistics)") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             resetSettings(YES);
         }]];
-        [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         UIView *source = weakPage.view ?: SGTopController().view;
         sheet.popoverPresentationController.sourceView = source;
         sheet.popoverPresentationController.sourceRect = CGRectMake(CGRectGetMidX(source.bounds), CGRectGetMidY(source.bounds), 1, 1);
@@ -261,9 +261,9 @@ static UIViewController *sponsorBlockAdvancedPage(void) {
     }), @"arrow.counterclockwise");
     resetAction.color = SGRed();
 
-    SGModPage *page = [[SGModPage alloc] initWithTitle:@"Advanced" intro:nil sections:@[
-        SGSection(@"Server", @[serverRow]),
-        SGSection(@"Tuning", @[minDuration, toastDuration, promptDuration]),
+    SGModPage *page = [[SGModPage alloc] initWithTitle:SGL(@"settings.karaoke.advanced.header", @"Advanced") intro:nil sections:@[
+        SGSection(SGL(@"settings.wireguard.server", @"Server"), @[serverRow]),
+        SGSection(SGL(@"ui.tuning.221b75", @"Tuning"), @[minDuration, toastDuration, promptDuration]),
         SGSection(nil, @[resetAction]),
     ] footer:nil];
     weakPage = page;
@@ -273,16 +273,16 @@ static UIViewController *sponsorBlockAdvancedPage(void) {
 UIViewController *SGSponsorBlockSettingsPage(void) {
     __block __weak SGModPage *weakPage = nil;
 
-    SGModRow *overlay = SGWithSymbol(SGSwitchRow(@"Show colored overlay on progress bar", nil, SGKeySponsorBlockOverlay), @"chart.bar.xaxis");
+    SGModRow *overlay = SGWithSymbol(SGSwitchRow(SGL(@"ui.show.colored.overlay.on.bf8a28", @"Show colored overlay on progress bar"), nil, SGKeySponsorBlockOverlay), @"chart.bar.xaxis");
     overlay.changed = ^(BOOL on) { SGSponsorBlockPreferencesDidChange(); };
 
-    SGModRow *toast = SGWithSymbol(SGSwitchRow(@"Show toast when skipping", nil, SGKeySponsorBlockShowToast), @"bell");
+    SGModRow *toast = SGWithSymbol(SGSwitchRow(SGL(@"ui.show.toast.when.skipping.8c767f", @"Show toast when skipping"), nil, SGKeySponsorBlockShowToast), @"bell");
     toast.changed = ^(BOOL on) { SGSponsorBlockPreferencesDidChange(); };
 
-    SGModRow *haptics = SGWithSymbol(SGSwitchRow(@"Haptic feedback", nil, SGKeySponsorBlockHaptics), @"iphone.radiowaves.left.and.right");
+    SGModRow *haptics = SGWithSymbol(SGSwitchRow(SGL(@"ui.haptic.feedback.b0baa9", @"Haptic feedback"), nil, SGKeySponsorBlockHaptics), @"iphone.radiowaves.left.and.right");
     haptics.changed = ^(BOOL on) { SGSponsorBlockPreferencesDidChange(); };
 
-    SGModRow *respectManual = SGWithSymbol(SGSwitchRow(@"Respect manual seek (don't re-skip)", nil, SGKeySponsorBlockRespectManual), @"slider.horizontal.below.rectangle");
+    SGModRow *respectManual = SGWithSymbol(SGSwitchRow(SGL(@"ui.respect.manual.seek.don.735427", @"Respect manual seek (don't re-skip)"), nil, SGKeySponsorBlockRespectManual), @"slider.horizontal.below.rectangle");
     respectManual.changed = ^(BOOL on) { SGSponsorBlockPreferencesDidChange(); };
 
     NSMutableArray<SGModRow *> *categories = [NSMutableArray arrayWithCapacity:kCategoryCount + 1];
@@ -290,55 +290,55 @@ UIViewController *SGSponsorBlockSettingsPage(void) {
         [categories addObject:categorySegmentRow(&kCategories[i])];
     }
 
-    SGModRow *resetCategoriesRow = SGWithSymbol(SGActionRow(@"Reset categories and colors", @"Restore default behaviors and segment colors", ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset categories and colors?"
-                                                                        message:@"This restores all categories to their default behaviors and segment colors."
+    SGModRow *resetCategoriesRow = SGWithSymbol(SGActionRow(SGL(@"ui.reset.categories.and.colors.7b18d6", @"Reset categories and colors"), SGL(@"ui.restore.default.behaviors.and.18ab9e", @"Restore default behaviors and segment colors"), ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.reset.categories.and.colors.413e0b", @"Reset categories and colors?")
+                                                                        message:SGL(@"ui.this.restores.all.categories.a0bccf", @"This restores all categories to their default behaviors and segment colors.")
                                                                  preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.reset", @"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             SGResetSponsorBlockCategoriesToDefaults();
             [weakPage.tableView reloadData];
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         presentDarkAlert(alert);
     }), @"arrow.counterclockwise");
     [categories addObject:resetCategoriesRow];
 
-    SGModRow *advancedNav = SGWithSymbol(SGPageRow(@"Advanced", ^UIViewController *{ return sponsorBlockAdvancedPage(); }), @"gearshape.2");
+    SGModRow *advancedNav = SGWithSymbol(SGPageRow(SGL(@"settings.karaoke.advanced.header", @"Advanced"), ^UIViewController *{ return sponsorBlockAdvancedPage(); }), @"gearshape.2");
 
-    SGModRow *statRow = SGWithSymbol(SGStatRow(@"Segments skipped", ^NSString *{
+    SGModRow *statRow = SGWithSymbol(SGStatRow(SGL(@"ui.segments.skipped.274ba2", @"Segments skipped"), ^NSString *{
         return @(SGSponsorBlockSkipCount()).stringValue;
     }), @"number");
 
-    SGModRow *timeRow = SGWithSymbol(SGStatRow(@"Time saved", ^NSString *{
+    SGModRow *timeRow = SGWithSymbol(SGStatRow(SGL(@"ui.time.saved.bf2a1a", @"Time saved"), ^NSString *{
         return SGSponsorBlockFormattedTimeSaved();
     }), @"clock");
 
-    SGModRow *resetStatsRow = SGWithSymbol(SGActionRow(@"Reset statistics", nil, ^{
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset statistics?"
-                                                                        message:@"This clears your skipped segment count and time saved."
+    SGModRow *resetStatsRow = SGWithSymbol(SGActionRow(SGL(@"ui.reset.statistics.12f5e3", @"Reset statistics"), nil, ^{
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.reset.statistics.9a2ec6", @"Reset statistics?")
+                                                                        message:SGL(@"ui.this.clears.your.skipped.bd0b4e", @"This clears your skipped segment count and time saved.")
                                                                  preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.reset", @"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             SGResetSponsorBlockStats();
             [weakPage.tableView reloadData];
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         presentDarkAlert(alert);
     }), @"trash");
 
-    SGModRow *eeveeLink = SGWithSymbol(SGLinkRow(@"EeveeSpotify Reincarnated on GitHub", nil, @"https://github.com/SideloadLabs/EeveeSpotifyReincarnated"), @"link");
-    SGModRow *extLink = SGWithSymbol(SGLinkRow(@"Spot-SponsorBlock-Extension on GitHub", nil, @"https://github.com/Spot-SponsorBlock/Spot-SponsorBlock-Extension"), @"link");
-    SGModRow *sbLink = SGWithSymbol(SGLinkRow(@"SponsorBlock", nil, @"https://sponsor.ajay.app"), @"safari");
+    SGModRow *eeveeLink = SGWithSymbol(SGLinkRow(SGL(@"ui.eeveespotify.reincarnated.on.github.ba8d4c", @"EeveeSpotify Reincarnated on GitHub"), nil, @"https://github.com/SideloadLabs/EeveeSpotifyReincarnated"), @"link");
+    SGModRow *extLink = SGWithSymbol(SGLinkRow(SGL(@"ui.spot.sponsorblock.extension.on.accff1", @"Spot-SponsorBlock-Extension on GitHub"), nil, @"https://github.com/Spot-SponsorBlock/Spot-SponsorBlock-Extension"), @"link");
+    SGModRow *sbLink = SGWithSymbol(SGLinkRow(SGL(@"settings.sponsorblock.title", @"SponsorBlock"), nil, @"https://sponsor.ajay.app"), @"safari");
 
     NSString *headerSectionFooter = @"Skips community-marked segments in podcast episodes.";
     NSString *categoriesFooter = @"Auto · Prompt · Show · Off. Tap the color circle to change.";
     NSString *creditsFooter = @"Segment data from the SponsorBlock community (sponsor.ajay.app). Ported from EeveeSpotify Reincarnated (GPL-3.0), based on Spot-SponsorBlock-Extension.";
 
-    SGModPage *page = [[SGModPage alloc] initWithTitle:@"SponsorBlock" intro:nil sections:@[
+    SGModPage *page = [[SGModPage alloc] initWithTitle:SGL(@"settings.sponsorblock.title", @"SponsorBlock") intro:nil sections:@[
         SGNotedSection(nil, @[overlay, toast, haptics, respectManual], headerSectionFooter),
-        SGNotedSection(@"Categories", categories, categoriesFooter),
+        SGNotedSection(SGL(@"ui.categories.6ccb60", @"Categories"), categories, categoriesFooter),
         SGSection(nil, @[advancedNav]),
-        SGSection(@"Statistics", @[statRow, timeRow, resetStatsRow]),
-        SGNotedSection(@"Credits", @[eeveeLink, extLink, sbLink], creditsFooter),
+        SGSection(SGL(@"ui.statistics.2086b2", @"Statistics"), @[statRow, timeRow, resetStatsRow]),
+        SGNotedSection(SGL(@"settings.player.hide.credits.title", @"Credits"), @[eeveeLink, extLink, sbLink], creditsFooter),
     ] footer:nil];
     weakPage = page;
     return page;

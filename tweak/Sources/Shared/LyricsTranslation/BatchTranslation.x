@@ -313,15 +313,15 @@ static void showBatchErrorAlert(NSString *error) {
                                                                        message:error preferredStyle:UIAlertControllerStyleAlert];
         SGPresentDark(alert);
         if ([error hasPrefix:@"Download "]) {
-            [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-            UIAlertAction *open = [UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+            UIAlertAction *open = [UIAlertAction actionWithTitle:SGL(@"settings.translation.download.open", @"Open Settings") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 [SGOnDeviceTranslation openTranslateSettings];
             }];
             [alert addAction:open];
             alert.preferredAction = open;
         } else {
-            [alert addAction:[UIAlertAction actionWithTitle:@"Dismiss" style:UIAlertActionStyleCancel handler:nil]];
-            UIAlertAction *open = [UIAlertAction actionWithTitle:@"Open Settings" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            [alert addAction:[UIAlertAction actionWithTitle:SGL(@"ui.dismiss.70afe9", @"Dismiss") style:UIAlertActionStyleCancel handler:nil]];
+            UIAlertAction *open = [UIAlertAction actionWithTitle:SGL(@"settings.translation.download.open", @"Open Settings") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
                 SGOpenModSettings(nil);
             }];
             [alert addAction:open];
