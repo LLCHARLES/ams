@@ -347,7 +347,7 @@ static UIImage *chipSymbol(NSString *name) {
     BOOL on = read && SGFlag(SGKeyAutoMix, NO);
     BOOL crossfade = on && SGAutoMixCurrentStyle() == SGAutoMixCrossfade;
     [self setChip:_automix on:on image:crossfade ? crossfadeGlyph() : automixGlyph() title:crossfade ? @"Crossfade" : @"AutoMix" animated:animated];
-    _automix.accessibilityLabel = @"AutoMix";
+    _automix.accessibilityLabel = SGL(@"settings.automix.title", @"AutoMix");
     _automix.accessibilityValue = !on ? @"Off" : crossfade ? @"Crossfade" : @"Beat-matched";
 }
 
@@ -647,7 +647,7 @@ static UIImage *chipSymbol(NSString *name) {
         UILabel *heading = [UILabel new];
         heading.font = SGRFont(UIFontTextStyleHeadline, UIFontWeightBold, UIContentSizeCategoryExtraExtraLarge);
         heading.textColor = SGRPrimary();
-        heading.text = @"History";
+        heading.text = SGL(@"settings.stats.row.history", @"History");
         heading.tag = 1;
         [_historyBox addSubview:heading];
         [tracks enumerateObjectsUsingBlock:^(SPTPlayerTrack *track, NSUInteger i, BOOL *stop) {
@@ -1265,7 +1265,7 @@ static UIImage *chipSymbol(NSString *name) {
     // The Music app's: a white disc with the minus cut through it, on the red (its owner's screenshot, 2026-11-02).
     remove.image = [UIImage systemImageNamed:@"minus.circle.fill" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightSemibold]];
     remove.backgroundColor = UIColor.systemRedColor;
-    remove.accessibilityLabel = @"Remove";
+    remove.accessibilityLabel = SGL(@"common.remove", @"Remove");
     UISwipeActionsConfiguration *config = [UISwipeActionsConfiguration configurationWithActions:@[remove]];
     config.performsFirstActionWithFullSwipe = YES;
     return config;

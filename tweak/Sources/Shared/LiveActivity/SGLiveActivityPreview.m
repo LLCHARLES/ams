@@ -254,7 +254,7 @@ static UIView *panelView(Look look, NSInteger tab) {
         case TabControls: {
             UILabel *track = label(nil, nil, nil, 1, NSTextAlignmentNatural);
             track.attributedText = trackLine(kTitle, kArtist, kSubheadline);
-            page = stack(@[track, chipRow(@[chip(@"backward.fill", @"Previous", NO, look), chip(@"pause.fill", @"Pause", NO, look),
+            page = stack(@[track, chipRow(@[chip(@"backward.fill", SGL(@"settings.liveactivity.preview.control.previous", @"Previous"), NO, look), chip(@"pause.fill", SGL(@"settings.player.landscape.pause", @"Pause"), NO, look),
                                              chip(@"forward.fill", @"Next", NO, look), chip(@"shuffle", @"Shuffle", YES, look),
                                              chip(@"repeat", @"Repeat", NO, look)], 10)],
                          UILayoutConstraintAxisVertical, 8);
@@ -369,7 +369,7 @@ static NSString *stepName(NSInteger view, NSInteger step) {
     _view = -1;
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(advance)]];
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Preview of the Live Activity on the lock screen";
+    self.accessibilityLabel = SGL(@"settings.liveactivity.preview.a11y.label", @"Preview of the Live Activity on the lock screen");
     [self reload];
     return self;
 }

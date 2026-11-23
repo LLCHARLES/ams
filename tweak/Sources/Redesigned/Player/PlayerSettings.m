@@ -76,7 +76,7 @@ static NSArray<NSString *> *backgroundNotes(void) {
     self.userInteractionEnabled = NO;
     self.isAccessibilityElement = YES;
     self.accessibilityTraits = UIAccessibilityTraitImage;
-    self.accessibilityLabel = @"Player preview";
+    self.accessibilityLabel = SGL(@"settings.player.preview.a11y", @"Player preview");
 
     _field = [[SGRArtworkField alloc] initWithFrame:frame];
     _field.showsBackdrop = YES;
@@ -329,9 +329,9 @@ static SGModRow *fluidSlider(NSString *title, SGRFluidSetting setting, NSString 
 }
 
 SGModRow *SGRLyricsHideRow(void) {
-    SGModRow *row = SGChoiceRow(@"Hide the controls", @"A few seconds after the last touch, the lyrics take the room",
+    SGModRow *row = SGChoiceRow(SGL(@"settings.lyrics.hide_controls.title", @"Hide the controls"), SGL(@"settings.lyrics.hide_controls.room", @"A few seconds after the last touch, the lyrics take the room"),
                                 SGRKeyLyricsAutoHide, @[@"Off", @"Everything", @"Keep the title"], SGRLyricsHideMode());
-    row.choiceNotes = @[@"The controls stay", @"The lyrics take the whole player", @"The cover, the title and the top row stay; in landscape, the title"];
+    row.choiceNotes = @[SGL(@"settings.lyrics.hide_controls.off_note", @"The controls stay"), SGL(@"settings.lyrics.hide_controls.all_note", @"The lyrics take the whole player"), SGL(@"settings.lyrics.hide_controls.title_note", @"The cover, the title and the top row stay; in landscape, the title")];
     return row;
 }
 
@@ -339,16 +339,16 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     SGRPlayerShowcase *showcase = [[SGRPlayerShowcase alloc] initWithFrame:CGRectMake(0, 0, 320, kCardMinHeight)];
     UISegmentedControl *backgrounds = [[UISegmentedControl alloc] initWithItems:SGRPlayerBackgroundNames()];
     backgrounds.selectedSegmentIndex = SGRPlayerBackground();
-    backgrounds.accessibilityLabel = @"Background";
+    backgrounds.accessibilityLabel = SGL(@"settings.background.mode.title", @"Background");
     backgrounds.apportionsSegmentWidthsByContent = YES;
 
-    SGModRow *lowData = SGOptionRow(@"Download in Low Data Mode", @"Up to about 7 MB a song", SGKeyMotionLowData);
+    SGModRow *lowData = SGOptionRow(SGL(@"settings.lockscreen.low_data.title", @"Download in Low Data Mode"), SGL(@"ui.up.to.about.7.3b8f47", @"Up to about 7 MB a song"), SGKeyMotionLowData);
     lowData.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated; };
     SGModRow *sources = SGMotionSourcesRow();
     sources.visible = lowData.visible;
 
     __block __weak UITableViewController *weakPage;
-    SGModRow *reset = SGActionRow(@"Reset", nil, ^{
+    SGModRow *reset = SGActionRow(SGL(@"common.reset", @"Reset"), nil, ^{
         SGRResetFluidSettings();
         [weakPage.tableView reloadData];   // the sliders at once, rather than at the page's next tick
     });
@@ -361,47 +361,47 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
 
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:
         SGSection(nil, @[sources, lowData]),
-        SGNotedSection(nil, fluid, @"Brightness above 100% can make white text harder to read. A paused song holds the "
-                                   @"background still. Animated and Visualizer use these where they show Fluid."),
+        SGNotedSection(nil, fluid, SGL(@"ui.brightness.above.100.can.65bca2", @"Brightness above 100% can make white text harder to read. A paused song holds the "
+                                   @"background still. Animated and Visualizer use these where they show Fluid.")),
         nil];
     // Native redesign draws its own player page and mini player: Follow the cover, Spotify's icons and the glass bar's Mini
     // player section are not theirs, and its mini player's rows are on a page of their own (App/Pages.m).
     if (SGNativeRedesignStored()) {
         // One section for what the page's controls show, each switch on to show its control (its owner, 2026-11-02): Hide
         // on the player's Shuffle, Repeat and Switch to video turned round, on the same keys.
-        [sections addObject:SGNotedSection(@"Controls", @[SGSwitchRow(@"Volume", nil, SGRKeyPlayerVolume),
-                                                          SGShownRow(@"Shuffle", nil, SGRKeyPlayerHideShuffle),
-                                                          SGShownRow(@"Repeat", nil, SGRKeyPlayerHideRepeat),
-                                                          SGShownRow(@"Like button", @"The star beside the title", SGRKeyPlayerHideAdd),
-                                                          SGShownRow(@"Switch to video", @"A button beside the star for a song with a music video", SGKeyHideVideoSwitch),
-                                                          SGSwitchRow(@"Title Opens Album", @"Tap the song's title to go to its album", SGRKeyPlayerTitleAlbum),
-                                                          SGOptionRow(@"Match the lyrics button", @"The title, play and pause, and skip", SGRKeyPlayerSoftControls)],
+        [sections addObject:SGNotedSection(SGL(@"settings.player.controls.header", @"Controls"), @[SGSwitchRow(SGL(@"player.volume", @"Volume"), nil, SGRKeyPlayerVolume),
+                                                          SGShownRow(SGL(@"settings.localmusic.shuffle", @"Shuffle"), nil, SGRKeyPlayerHideShuffle),
+                                                          SGShownRow(SGL(@"settings.player.ipad.repeat", @"Repeat"), nil, SGRKeyPlayerHideRepeat),
+                                                          SGShownRow(SGL(@"ui.like.button.445187", @"Like button"), SGL(@"ui.the.star.beside.the.6501cd", @"The star beside the title"), SGRKeyPlayerHideAdd),
+                                                          SGShownRow(SGL(@"settings.player.hide_video_switch.title", @"Switch to video"), SGL(@"ui.a.button.beside.the.abc4d7", @"A button beside the star for a song with a music video"), SGKeyHideVideoSwitch),
+                                                          SGSwitchRow(SGL(@"ui.title.opens.album.c3f293", @"Title Opens Album"), SGL(@"ui.tap.the.song.s.c14708", @"Tap the song's title to go to its album"), SGRKeyPlayerTitleAlbum),
+                                                          SGOptionRow(SGL(@"ui.match.the.lyrics.button.d220b1", @"Match the lyrics button"), SGL(@"ui.the.title.play.and.284426", @"The title, play and pause, and skip"), SGRKeyPlayerSoftControls)],
             @"Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. "
             @"Shuffle and Repeat switched off move into the queue's row. With Like button off, Add to Playlist joins the ⋯ menu. "
             @"With Title Opens Album on, Go to Album leaves the ⋯ menu. "
             @"Match the lyrics button draws the song's title, play and pause, and skip buttons in the see-through white of the lyrics and queue buttons while they're open.")];
         // History in the queue: the songs actually listened to, kept by the mod (Redesigned/Navbar/SystemHistory.h), or
         // Spotify's own list.
-        [sections addObject:SGNotedSection(@"History", @[SGSwitchRow(@"Listening History", @"The last 50 songs you listened to", SGRKeyOwnHistory),
-                                                         SGChoiceRow(@"Count After", nil, SGRKeyHistoryAfter, SGRSystemHistoryAfterChoices(), 4),
-                                                         SGActionRow(@"Clear History", nil, ^{ SGRSystemHistoryClear(); })],
+        [sections addObject:SGNotedSection(SGL(@"settings.stats.row.history", @"History"), @[SGSwitchRow(SGL(@"ui.listening.history.d109c2", @"Listening History"), SGL(@"ui.the.last.50.songs.02ff2c", @"The last 50 songs you listened to"), SGRKeyOwnHistory),
+                                                         SGChoiceRow(SGL(@"ui.count.after.9bdcbd", @"Count After"), nil, SGRKeyHistoryAfter, SGRSystemHistoryAfterChoices(), 4),
+                                                         SGActionRow(SGL(@"ui.clear.history.e16f97", @"Clear History"), nil, ^{ SGRSystemHistoryClear(); })],
             @"A song counts once it has played this long, or half of a shorter song. Off, History shows Spotify's list, which "
             @"also counts the songs skipped over when you pick one further down the queue.")];
     } else {
-        [sections addObject:SGNotedSection(@"Controls", @[SGSwitchRow(@"Volume", nil, SGRKeyPlayerVolume),
-                                                          SGOptionRow(@"Follow the cover", nil, SGRKeyPlayerFollowsCover),
-                                                          SGOptionRow(@"Spotify's icons", @"Lyrics, device, queue and the AI DJ's button", SGRKeyPlayerSpotifyIcons)],
+        [sections addObject:SGNotedSection(SGL(@"settings.player.controls.header", @"Controls"), @[SGSwitchRow(SGL(@"player.volume", @"Volume"), nil, SGRKeyPlayerVolume),
+                                                          SGOptionRow(SGL(@"settings.player.follows_cover.title", @"Follow the cover"), nil, SGRKeyPlayerFollowsCover),
+                                                          SGOptionRow(SGL(@"ui.spotify.s.icons.1dd941", @"Spotify's icons"), SGL(@"ui.lyrics.device.queue.and.61d722", @"Lyrics, device, queue and the AI DJ's button"), SGRKeyPlayerSpotifyIcons)],
             @"Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. "
             @"Follow the cover paints the like, shuffle, repeat, device and queue buttons, and the mini player's device and like, in the color of the song playing. "
             @"Spotify's icons keeps Spotify's own glyphs in the row under the controls instead of the Music app's.")];
-        [sections addObject:SGNotedSection(@"Mini player", SGRNowPlayingBarRows(),
+        [sections addObject:SGNotedSection(SGL(@"settings.player.mini_player.header", @"Mini player"), SGRNowPlayingBarRows(),
             @"Apple Music style moves the now playing bar in between two tabs as you scroll down.")];
     }
     [sections addObjectsFromArray:more];
     // Fluid, Animated and Visualizer share the field (PlayerMotion.x reads the choice on every track, PlayerVisualiser.m
     // on the field's layout); Still and Colors are a field of another kind, made once a launch (PlayerField.x).
     NSString *footer = @"Fluid, Animated and Visualizer change with the next song. Still, Colors and Hide on the player apply after you restart Spotify.";
-    SGRPlayerPage *page = [[SGRPlayerPage alloc] initWithTitle:@"Player" intro:nil sections:sections footer:footer];
+    SGRPlayerPage *page = [[SGRPlayerPage alloc] initWithTitle:SGL(@"settings.player.title", @"Player") intro:nil sections:sections footer:footer];
     weakPage = page;
     page.showcase = showcase;
     page.backgrounds = backgrounds;

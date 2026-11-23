@@ -127,7 +127,7 @@ static CAKeyframeAnimation *keyframes(NSString *path, NSArray *values, NSArray<N
     [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(play)]];
     self.isAccessibilityElement = YES;
     self.accessibilityTraits = UIAccessibilityTraitButton;
-    self.accessibilityLabel = @"Vibrations preview, rings of dots that ripple out from the middle with each tap";
+    self.accessibilityLabel = SGL(@"settings.vibrations.preview.a11y", @"Vibrations preview, rings of dots that ripple out from the middle with each tap");
     [self reload];
     return self;
 }

@@ -1351,7 +1351,7 @@ static NSString *landscapeTime(double seconds) {
     // previous and next dimmed, as the page (its owner, 2026-11-09: the sideways player showed pause and 0:00).
     if (!track) {
         _cover.image = SGRSystemNotPlayingArt();
-        _title.text = @"Not Playing";
+        _title.text = SGL(@"settings.player.not_playing", @"Not Playing");
         _artist.text = nil;
     }
     for (SGRSystemControlButton *skip in @[_previous, _next]) {
@@ -1361,7 +1361,7 @@ static NSString *landscapeTime(double seconds) {
     if (!track) {
         [self tick];
         [_play turnToSymbol:@"play.fill" animated:self.view.window != nil];
-        _play.accessibilityLabel = @"Play";
+        _play.accessibilityLabel = SGL(@"settings.localmusic.play", @"Play");
         [self showPaused:YES animated:self.view.window != nil];
         _field.motionHeld = YES;
         [self setControlsShown:YES];
@@ -1440,7 +1440,7 @@ static NSString *landscapeTime(double seconds) {
 // The ⋯ menu: the portrait page's, then the way back.
 - (UIMenu *)moreMenu {
     __weak SGRSystemLandscapeController *menuSelf = self;
-    UIAction *back = [UIAction actionWithTitle:@"Exit Full Screen" image:[UIImage systemImageNamed:@"arrow.down.right.and.arrow.up.left"]
+    UIAction *back = [UIAction actionWithTitle:SGL(@"ui.exit.full.screen.5dcbf4", @"Exit Full Screen") image:[UIImage systemImageNamed:@"arrow.down.right.and.arrow.up.left"]
                                     identifier:nil handler:^(UIAction *action) { [menuSelf turnBack]; }];
     // The portrait page's ⋯ above (SystemPlayer.m's menuItems), read afresh as it opens, then the screen's own.
     UIDeferredMenuElement *page = [UIDeferredMenuElement elementWithUncachedProvider:^(void (^completion)(NSArray<UIMenuElement *> *)) {

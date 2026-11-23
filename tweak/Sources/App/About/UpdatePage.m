@@ -85,7 +85,7 @@ static NSString *longDate(NSString *published) {    // 18 September 2026
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Updates";
+    self.title = SGL(@"settings.mod.update.title", @"Updates");
     _groups = [self build];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(checkLanded)
                                                name:SGUpdateCheckedNotification object:nil];
@@ -128,7 +128,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
 - (NSArray<SGUpdateGroup *> *)build {
     NSMutableArray<SGUpdateGroup *> *groups = [NSMutableArray array];
     SGUpdateRow *check = [SGUpdateRow new];
-    check.title = @"Check now";
+    check.title = SGL(@"settings.mod.update.check_now.title", @"Check now");
     check.symbol = @"arrow.clockwise";
     check.value = ^NSString *{ return SGUpdateStatus(); };
     check.action = ^{ SGCheckForUpdate(YES); };
@@ -138,12 +138,12 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
         [top addObject:linkRow([@"Get " stringByAppendingString:newest.version],
                                newest.prerelease ? @"A beta, on GitHub with its .deb" : @"The release on GitHub, where its .deb is",
                                @"arrow.down.circle", newest.url)];
-    if (SGRepoURL) [top addObject:linkRow(@"All releases", @"Every version, this one and the ones before it",
+    if (SGRepoURL) [top addObject:linkRow(@"All releases", SGL(@"settings.mod.update.all_releases.subtitle", @"Every version, this one and the ones before it"),
                            @"clock.arrow.circlepath", [SGRepoURL stringByAppendingString:@"/releases"])];
     [groups addObject:group(nil, top)];
 
     SGUpdateRow *notice = [SGUpdateRow new];
-    notice.title = @"Auto check updates";
+    notice.title = SGL(@"settings.mod.update.auto_check.title", @"Auto check updates");
     notice.symbol = @"bell";
     notice.key = SGKeyUpdateNotice;
     [groups addObject:group(nil, @[notice])];
@@ -166,7 +166,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
         NSString *date = shortDate(release.date);
         if (!kinds.count) {
             SGUpdateRow *empty = [SGUpdateRow new];
-            empty.title = @"Nothing written down";
+            empty.title = SGL(@"settings.mod.update.empty.title", @"Nothing written down");
             empty.subtitle = release.url.length ? @"Tap to read the release on GitHub" : nil;
             if (release.url.length) empty.action = ^{ SGOpenURL(release.url); };
             [groups addObject:group([NSString stringWithFormat:@"%@%@", release.version,

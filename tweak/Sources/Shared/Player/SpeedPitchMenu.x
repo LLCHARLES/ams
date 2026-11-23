@@ -144,7 +144,7 @@ static UILabel *makeLabel(UIFont *font, UIColor *color) {
     [button setTitleColor:[primary() colorWithAlphaComponent:0.4] forState:UIControlStateHighlighted];
     [button setTitleColor:primary() forState:UIControlStateDisabled];
     button.contentHorizontalAlignment = UIControlContentHorizontalAlignmentRight;
-    button.accessibilityHint = @"Resets it";
+    button.accessibilityHint = SGL(@"player.speed_pitch.reset_hint", @"Resets it");
     [button addTarget:self action:reset forControlEvents:UIControlEventTouchUpInside];
     return button;
 }
@@ -212,7 +212,7 @@ static void placeTick(UISlider *slider) {
     _icon = [[UIImageView alloc] initWithImage:paintedSymbol(@"slider.horizontal.3", 20, UIImageSymbolWeightRegular, secondary())];
     _icon.contentMode = UIViewContentModeCenter;
     _title = makeLabel(font(UIFontTextStyleBody, UIFontWeightRegular, UIContentSizeCategoryExtraLarge), primary());
-    _title.text = @"Speed and pitch";
+    _title.text = SGL(@"player.speed_pitch.title", @"Speed and pitch");
     _summary = makeLabel(monospacedDigits(font(UIFontTextStyleSubheadline, UIFontWeightRegular, UIContentSizeCategoryExtraLarge)), secondary());
     _summary.textAlignment = NSTextAlignmentRight;
     _chevron = [[UIImageView alloc] initWithImage:paintedSymbol(@"chevron.down", 13, UIImageSymbolWeightSemibold, secondary())];
@@ -226,24 +226,24 @@ static void placeTick(UISlider *slider) {
     [self addSubview:_panel];
     UIFont *nameFont = font(UIFontTextStyleSubheadline, UIFontWeightRegular, UIContentSizeCategoryExtraLarge);
     _speedName = makeLabel(nameFont, secondary());
-    _speedName.text = @"Speed";
+    _speedName.text = SGL(@"player.speed_pitch.speed", @"Speed");
     _pitchName = makeLabel(nameFont, secondary());
-    _pitchName.text = @"Pitch";
+    _pitchName.text = SGL(@"player.speed_pitch.pitch", @"Pitch");
     _speedValue = [self valueButton:@selector(resetSpeed)];
     _pitchValue = [self valueButton:@selector(resetPitch)];
     _speed = [self slider:kMinSpeed max:kMaxSpeed normal:1 minImage:@"tortoise.fill" maxImage:@"hare.fill"];
-    _speed.accessibilityLabel = @"Speed";
+    _speed.accessibilityLabel = SGL(@"player.speed_pitch.speed", @"Speed");
     _pitch = [self slider:-kMaxPitch max:kMaxPitch normal:0 minImage:@"arrow.down" maxImage:@"arrow.up"];
-    _pitch.accessibilityLabel = @"Pitch";
+    _pitch.accessibilityLabel = SGL(@"player.speed_pitch.pitch", @"Pitch");
     _reverbName = makeLabel(nameFont, secondary());
-    _reverbName.text = @"Reverb";
+    _reverbName.text = SGL(@"player.speed_pitch.reverb", @"Reverb");
     _reverbValue = [self valueButton:@selector(resetReverb)];
     _reverb = [self slider:0 max:100 normal:0 minImage:@"speaker" maxImage:@"building.columns"];
-    _reverb.accessibilityLabel = @"Reverb";
+    _reverb.accessibilityLabel = SGL(@"player.speed_pitch.reverb", @"Reverb");
     _followsName = makeLabel(nameFont, primary());
-    _followsName.text = @"Pitch follows speed";
+    _followsName.text = SGL(@"player.speed_pitch.pitch_follows_speed", @"Pitch follows speed");
     _follows = [UISwitch new];
-    _follows.accessibilityLabel = @"Pitch follows speed";
+    _follows.accessibilityLabel = SGL(@"player.speed_pitch.pitch_follows_speed", @"Pitch follows speed");
     [_follows addTarget:self action:@selector(followsChanged) forControlEvents:UIControlEventValueChanged];
     for (UIView *view in @[_speedName, _speedValue, _speed, _pitchName, _pitchValue, _pitch, _reverbName, _reverbValue, _reverb,
                            _followsName, _follows]) [_panel addSubview:view];
@@ -253,9 +253,9 @@ static void placeTick(UISlider *slider) {
         _animatedIcon = [[UIImageView alloc] initWithImage:paintedSymbol(@"play.rectangle.on.rectangle", 18, UIImageSymbolWeightRegular, secondary())];
         _animatedIcon.contentMode = UIViewContentModeCenter;
         _animatedName = makeLabel(font(UIFontTextStyleBody, UIFontWeightRegular, UIContentSizeCategoryExtraLarge), primary());
-        _animatedName.text = @"Animated artwork";
+        _animatedName.text = SGL(@"player.speed_pitch.animated_artwork", @"Animated artwork");
         _animated = [UISwitch new];
-        _animated.accessibilityLabel = @"Animated artwork";
+        _animated.accessibilityLabel = SGL(@"player.speed_pitch.animated_artwork", @"Animated artwork");
         [_animated addTarget:self action:@selector(animatedChanged) forControlEvents:UIControlEventValueChanged];
         for (UIView *view in @[_animatedIcon, _animatedName, _animated]) [_animatedRow addSubview:view];
         [self addSubview:_animatedRow];

@@ -101,11 +101,11 @@ static void offerUpdate(void) {
         UIViewController *top = SGTopController();
         if (!top || !SGHapticAddonOutdated() || [top isKindOfClass:UIAlertController.class]) return;
         [defaults setInteger:kSGRelayAddonBuild forKey:kUpdateOfferedKey];
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Update Vitrine Addon"
-            message:@"This Vitrine comes with a newer Vitrine Addon than the one installed. Tap Update, pick Sileo or Filza, install it, then respring."
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.update.vitrine.addon.edbd38", @"Update Vitrine Addon")
+            message:SGL(@"ui.this.vitrine.comes.with.dbf114", @"This Vitrine comes with a newer Vitrine Addon than the one installed. Tap Update, pick Sileo or Filza, install it, then respring.")
             preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Update" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGHapticAddonShareSoon(); }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"ui.update.fb91e2", @"Update") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGHapticAddonShareSoon(); }]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
         [top presentViewController:alert animated:YES completion:nil];
         SGLog(@"music haptics: the add-on's build %llu is older than this Vitrine's %d, its update offered", (unsigned long long)sg_installedBuild, kSGRelayAddonBuild);
     });
@@ -116,13 +116,13 @@ void SGHapticAddonExplain(NSString *feature) {
     NSString *message = carried
         ? [NSString stringWithFormat:@"%@ is played by SpringBoard, through a small add-on that comes with Vitrine. Tap Install, pick Sileo or Filza, install it, then respring. The switch stays on and works once the add-on is there.", feature]
         : [NSString stringWithFormat:@"%@ is played by SpringBoard, through a small add-on that comes inside Vitrine's IPA. This install has no copy of it: install Vitrine from its IPA, then turn the switch on again to put the add-on in place.", feature];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Needs Vitrine Addon" message:message
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.needs.vitrine.addon.1cc48c", @"Needs Vitrine Addon") message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
     if (carried) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Install" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGHapticAddonShareSoon(); }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Later" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"ui.install.fd6c3e", @"Install") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGHapticAddonShareSoon(); }]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
     } else {
-        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     }
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }

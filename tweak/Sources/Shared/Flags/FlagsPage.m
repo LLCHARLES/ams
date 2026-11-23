@@ -27,7 +27,7 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStylePlain])) return nil;
-    self.title = @"Flags";
+    self.title = SGL(@"settings.flags.title", @"Flags");
     return self;
 }
 
@@ -148,11 +148,11 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
         field.text = value ? [value description] : @"";
         field.keyboardType = flag->type == SGFlagInt ? UIKeyboardTypeNumbersAndPunctuation : UIKeyboardTypeDefault;
     }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Auto" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.flags.action.auto", @"Auto") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *a) {
         [self store:nil forKey:key row:path.row];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Force" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.flags.action.force", @"Force") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         NSString *text = alert.textFields.firstObject.text;
         if (!text.length) return;
         [self store:flag->type == SGFlagInt ? @(text.integerValue) : text forKey:key row:path.row];

@@ -124,7 +124,7 @@ static NSArray<SGDSPEffect *> *effects(void) {
             row(SGDSPRowCurve, nil, SGKeyDSPEqualizerGains),
         ]),
         effect(SGKeyDSPGraphicEq, @"Graphic EQ", @"Any curve, like AutoEq's corrections", @[
-            pageRow(@"Response", ^NSString *{ return graphicEqSummary(); }, ^UIViewController *{ return SGDSPGraphicEqPage(); }),
+            pageRow(SGL(@"settings.audioeffects.response.title", @"Response"), ^NSString *{ return graphicEqSummary(); }, ^UIViewController *{ return SGDSPGraphicEqPage(); }),
         ]),
         effect(SGKeyDSPConvolver, @"Convolver", @"Recorded rooms and speakers", @[
             fileRow(@"Impulse response", SGDSPFileImpulseResponse),
@@ -394,7 +394,7 @@ static UIFont *tabular(UIFont *font) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Audio effects";
+    self.title = SGL(@"settings.audioeffects.title", @"Audio effects");
     _effects = effects();
     _open = [NSMutableSet set];
     _errors = [NSMutableDictionary dictionary];
@@ -717,17 +717,17 @@ static UIFont *tabular(UIFont *font) {
 }
 
 - (void)confirmReset {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Reset all effects?"
-        message:@"Every effect goes off, and every value, curve and file choice back to its default. The Effects switch and your imported files stay."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.audioeffects.reset.alert.title", @"Reset all effects?")
+        message:SGL(@"settings.audioeffects.reset.alert.message", @"Every effect goes off, and every value, curve and file choice back to its default. The Effects switch and your imported files stay.")
         preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.reset", @"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGDSPResetAll();
         [self readState];
         [UIView transitionWithView:self.tableView duration:0.25 options:UIViewAnimationOptionTransitionCrossDissolve animations:^{
             [self.tableView reloadData];
         } completion:nil];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 

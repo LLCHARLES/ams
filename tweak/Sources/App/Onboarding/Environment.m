@@ -95,7 +95,7 @@ static void tell(NSArray<SGProblem> *list) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
                                                                   message:[paragraphs componentsJoinedByString:@"\n\n"]
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -131,15 +131,15 @@ static void offerCleanup(void) {
     if (!leftovers.count) return;
     NSString *size = sizeOf(leftovers);
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Chroma left %@ on this iPhone", size]
-                                                                  message:@"Its Karaoke voice model and its saved lock screen videos are still in Spotify's storage, and Vitrine uses neither. Your listening history and audio effects stay."
+                                                                  message:SGL(@"settings.environment.chroma.alert.message", @"Its Karaoke voice model and its saved lock screen videos are still in Spotify's storage, and Vitrine uses neither. Your listening history and audio effects stay.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.delete", @"Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             for (NSURL *url in leftovers) [NSFileManager.defaultManager removeItemAtURL:url error:nil];
             SGLog(@"environment: deleted %@ Chroma left", size);
         });
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Keep" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.environment.chroma.action.keep", @"Keep") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -156,15 +156,15 @@ static NSArray<SGProblem> *installProblems(void) {
 NSArray<SGModRow *> *SGEnvironmentWarningRows(void) {
     NSMutableArray<SGModRow *> *rows = [NSMutableArray array];
     if (SGEeveeSpotifyInjected())
-        [rows addObject:SGWarningRow(@"EeveeSpotify is injected too", @"Tap for what that does", ^{ tell(@[eevee()]); })];
+        [rows addObject:SGWarningRow(SGL(@"settings.environment.eevee.title", @"EeveeSpotify is injected too"), SGL(@"settings.environment.warning.subtitle", @"Tap for what that does"), ^{ tell(@[eevee()]); })];
     if (otherVersion())
         [rows addObject:SGWarningRow([NSString stringWithFormat:@"Made for Spotify %@", joined(SGSpotifySupportedVersions, @"and")],
                                      [NSString stringWithFormat:@"This is %@. Tap for what that does", SGSpotifyVersion()],
                                      ^{ tell(@[version()]); })];
     if (withoutAppChanges())
-        [rows addObject:SGWarningRow(@"Installed without the app changes", @"Tap for what that does", ^{ tell(@[appChanges()]); })];
+        [rows addObject:SGWarningRow(SGL(@"settings.environment.without_app_changes.title", @"Installed without the app changes"), SGL(@"settings.environment.warning.subtitle", @"Tap for what that does"), ^{ tell(@[appChanges()]); })];
     if (chromaLeftovers().count)
-        [rows addObject:SGWarningRow(@"Chroma left files behind", [NSString stringWithFormat:@"%@ Vitrine never uses. Tap to delete", sizeOf(chromaLeftovers())], ^{ offerCleanup(); })];
+        [rows addObject:SGWarningRow(SGL(@"settings.environment.chroma.title", @"Chroma left files behind"), [NSString stringWithFormat:@"%@ Vitrine never uses. Tap to delete", sizeOf(chromaLeftovers())], ^{ offerCleanup(); })];
     return rows;
 }
 

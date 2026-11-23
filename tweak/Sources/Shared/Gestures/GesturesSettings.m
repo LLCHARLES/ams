@@ -107,7 +107,7 @@ static NSString *cellLabel(SGGestureAction action) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Gestures";
+    self.title = SGL(@"settings.gestures.title", @"Gestures");
     return self;
 }
 
@@ -144,7 +144,7 @@ static NSString *cellLabel(SGGestureAction action) {
 
 - (void)pickActionFor:(NSInteger)cell {
     NSArray<NSString *> *names = SGGestureActionNames();
-    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:@"Double tap here"
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:SGL(@"settings.gestures.pick_action.title", @"Double tap here")
                                                                   message:nil
                                                            preferredStyle:UIAlertControllerStyleActionSheet];
     [names enumerateObjectsUsingBlock:^(NSString *name, NSUInteger index, BOOL *stop) {
@@ -153,7 +153,7 @@ static NSString *cellLabel(SGGestureAction action) {
             [self refresh];
         }]];
     }];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = _grid;
     sheet.popoverPresentationController.sourceRect = _grid.bounds;
     [self presentViewController:sheet animated:YES completion:nil];

@@ -37,7 +37,7 @@ static NSString *extensionList(SGDSPFileKind kind) {
 
 static void showAlert(UIViewController *owner, NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [owner presentViewController:alert animated:YES completion:nil];
 }
 
@@ -299,7 +299,7 @@ typedef NS_ENUM(NSInteger, SGGraphicEqRow) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Graphic EQ";
+    self.title = SGL(@"settings.audioeffects.graphiceq.title", @"Graphic EQ");
     self.errorKey = SGKeyDSPGraphicEq;
     return self;
 }
@@ -324,7 +324,7 @@ typedef NS_ENUM(NSInteger, SGGraphicEqRow) {
     _text.smartQuotesType = UITextSmartQuotesTypeNo;
     _text.smartDashesType = UITextSmartDashesTypeNo;
     _text.smartInsertDeleteType = UITextSmartInsertDeleteTypeNo;
-    _text.accessibilityLabel = @"GraphicEQ";
+    _text.accessibilityLabel = SGL(@"settings.audioeffects.graphiceq.text.a11y", @"GraphicEQ");
     _text.delegate = self;
     _text.text = SGDSPString(SGKeyDSPGraphicEqNodes);
 }

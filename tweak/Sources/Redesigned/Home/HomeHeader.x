@@ -150,7 +150,7 @@ static NSArray<UIMenuElement *> *menuElements(void) {
     UIControl *connect = connectButton(sg_header.window);
     if (connect) {
         __weak UIControl *weakConnect = connect;
-        [more addObject:[UIAction actionWithTitle:@"Devices" image:[UIImage systemImageNamed:@"hifispeaker"] identifier:nil handler:^(UIAction *a) {
+        [more addObject:[UIAction actionWithTitle:SGL(@"settings.home.pill.devices", @"Devices") image:[UIImage systemImageNamed:@"hifispeaker"] identifier:nil handler:^(UIAction *a) {
             if (weakConnect) SGRActivate(weakConnect);
         }]];
     }

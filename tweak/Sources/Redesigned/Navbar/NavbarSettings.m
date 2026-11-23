@@ -137,7 +137,7 @@ typedef NS_ENUM(NSInteger, SGRSplitSection) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Split Tabs";
+    self.title = SGL(@"settings.tabbar.split.title", @"Split Tabs");
     return self;
 }
 
@@ -221,7 +221,7 @@ typedef NS_ENUM(NSInteger, SGRSplitSection) {
         cell.accessibilityHint = entry[SGRNavbarURI] ? @"Opens the tab to edit it" : nil;
     } else {
         SGFillCell(cell, _stock[(NSUInteger)path.row], nil, nil, nil);
-        cell.accessibilityHint = @"Moves the tab to the right end of the bar";
+        cell.accessibilityHint = SGL(@"settings.tabbar.split_tabs.move_hint", @"Moves the tab to the right end of the bar");
     }
     return cell;
 }
@@ -354,7 +354,7 @@ static const CGFloat kPlatterInset = 21, kApartItemWidth = 62, kPlatterGap = 12;
     [self addSubview:_main];
     [self addSubview:_apart];
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Tab bar preview";
+    self.accessibilityLabel = SGL(@"settings.tabbar.preview.a11y", @"Tab bar preview");
     return self;
 }
 
@@ -580,7 +580,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = @"Tab bar";
+    self.title = SGL(@"settings.tabbar.title", @"Tab bar");
     return self;
 }
 
@@ -592,8 +592,8 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
     _header = [UIView new];
     [_header addSubview:_preview];
     self.tableView.tableHeaderView = _header;
-    _withNames = [[SGRLabelCard alloc] initWithTitle:@"Icons and names" names:YES];
-    _iconsOnly = [[SGRLabelCard alloc] initWithTitle:@"Icons only" names:NO];
+    _withNames = [[SGRLabelCard alloc] initWithTitle:SGL(@"settings.tabbar.labels.icons_and_names", @"Icons and names") names:YES];
+    _iconsOnly = [[SGRLabelCard alloc] initWithTitle:SGL(@"settings.tabbar.labels.icons_only", @"Icons only") names:NO];
     for (SGRLabelCard *card in @[_withNames, _iconsOnly]) [card addTarget:self action:@selector(labelsPicked:) forControlEvents:UIControlEventTouchUpInside];
     _entries = navbarEntries();
     [self showChoices];
@@ -893,11 +893,11 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
 }
 
 - (void)reset {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Use Spotify's tabs"
-                                                                  message:@"Every tab of Spotify's comes back where Spotify put it, the tabs you added go, and no tab is split apart."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.tabbar.reset_alert.title", @"Use Spotify's tabs")
+                                                                  message:SGL(@"settings.tabbar.reset_alert.message", @"Every tab of Spotify's comes back where Spotify put it, the tabs you added go, and no tab is split apart.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Reset" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.reset", @"Reset") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGRSetNavbarLayout(@[]);
         SGRSetNavbarSplit(@[]);
         SGRRefreshTabBar();

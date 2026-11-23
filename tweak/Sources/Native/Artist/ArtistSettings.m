@@ -4,39 +4,39 @@
 
 UIViewController *SGArtistSettingsPage(void) {
     NSArray<SGModSection *> *sections = @[
-        SGSection(@"Photo", @[
-            SGOptionRow(@"Fade into a blur", nil, SGKeyArtistPhotoFade),
+        SGSection(SGL(@"settings.artist.photo.header", @"Photo"), @[
+            SGOptionRow(SGL(@"settings.artist.photo_fade.title", @"Fade into a blur"), nil, SGKeyArtistPhotoFade),
         ]),
-        SGSection(@"Hide in the header", @[
-            SGHideRow(@"Explore (video deck)", nil, SGHideArtistExplore),
-            SGHideRow(@"Follow", nil, SGHideArtistFollow),
-            SGHideRow(@"More options", nil, SGHideArtistMore),
-            SGHideRow(@"Shuffle", nil, SGHideArtistShuffle),
-            SGHideRow(@"Verified badge", nil, SGHideArtistVerified),
-            SGHideRow(@"Monthly listeners", nil, SGHideArtistListeners),
+        SGSection(SGL(@"settings.album.hide_in_header.header", @"Hide in the header"), @[
+            SGHideRow(SGL(@"settings.album.hide.explore.title", @"Explore (video deck)"), nil, SGHideArtistExplore),
+            SGHideRow(SGL(@"settings.artist.hide.follow.title", @"Follow"), nil, SGHideArtistFollow),
+            SGHideRow(SGL(@"settings.album.hide.more.title", @"More options"), nil, SGHideArtistMore),
+            SGHideRow(SGL(@"settings.localmusic.shuffle", @"Shuffle"), nil, SGHideArtistShuffle),
+            SGHideRow(SGL(@"settings.artist.hide.verified_badge.title", @"Verified badge"), nil, SGHideArtistVerified),
+            SGHideRow(SGL(@"settings.artist.hide.listeners.title", @"Monthly listeners"), nil, SGHideArtistListeners),
         ]),
-        SGSection(@"Tabs", @[
-            SGHideRow(@"Hide the tab bar", nil, SGHideArtistTabBar),
+        SGSection(SGL(@"settings.artist.tabs.header", @"Tabs"), @[
+            SGHideRow(SGL(@"settings.artist.hide.tab_bar.title", @"Hide the tab bar"), nil, SGHideArtistTabBar),
         ]),
-        SGNotedSection(@"Hide on the page", @[
-            SGHideRow(@"Songs you liked", nil, SGHideArtistLikedSongs),
-            SGHideRow(@"Popular", nil, SGHideArtistPopular),
-            SGHideRow(@"Artist pick", nil, SGHideArtistPick),
-            SGHideRow(@"Popular releases", nil, SGHideArtistReleases),
-            SGHideRow(@"Featuring", nil, SGHideArtistFeaturing),
-            SGHideRow(@"Music videos", nil, SGHideArtistVideos),
-            SGHideRow(@"About", nil, SGHideArtistAbout),
-            SGHideRow(@"Artist playlists", nil, SGHideArtistPlaylists),
-            SGHideRow(@"Fans also like", nil, SGHideArtistFansAlsoLike),
-            SGHideRow(@"Appears on", nil, SGHideArtistAppearsOn),
-            SGHideRow(@"Discovered on", nil, SGHideArtistDiscoveredOn),
+        SGNotedSection(SGL(@"settings.album.native.hide_on_page.header", @"Hide on the page"), @[
+            SGHideRow(SGL(@"settings.artist.hide.liked_songs.title", @"Songs you liked"), nil, SGHideArtistLikedSongs),
+            SGHideRow(SGL(@"settings.artist.hide.popular.title", @"Popular"), nil, SGHideArtistPopular),
+            SGHideRow(SGL(@"settings.artist.hide.pick.title", @"Artist pick"), nil, SGHideArtistPick),
+            SGHideRow(SGL(@"settings.artist.hide.releases.title", @"Popular releases"), nil, SGHideArtistReleases),
+            SGHideRow(SGL(@"settings.artist.hide.featuring.title", @"Featuring"), nil, SGHideArtistFeaturing),
+            SGHideRow(SGL(@"settings.artist.native.hide.music_videos.title", @"Music videos"), nil, SGHideArtistVideos),
+            SGHideRow(SGL(@"settings.artist.hide.about.title", @"About"), nil, SGHideArtistAbout),
+            SGHideRow(SGL(@"settings.artist.hide.playlists.title", @"Artist playlists"), nil, SGHideArtistPlaylists),
+            SGHideRow(SGL(@"settings.artist.hide.fans_like.title", @"Fans also like"), nil, SGHideArtistFansAlsoLike),
+            SGHideRow(SGL(@"settings.artist.hide.appears_on.title", @"Appears on"), nil, SGHideArtistAppearsOn),
+            SGHideRow(SGL(@"settings.artist.hide.discovered_on.title", @"Discovered on"), nil, SGHideArtistDiscoveredOn),
         ], @"Works only with Spotify in English."),
-        SGSection(@"Spotify's own", @[
-            SGFlagRow(@"Share button in the header", @"ios-creator-impl.share_in_action_row_enabled_artist"),
-            SGFlagRow(@"More options in the navigation bar", @"ios-creator-impl.context_menu_in_navigation_bar_enabled_artist"),
-            SGFlagRow(@"Top collaborators", @"ios-creator-impl.is_top_collaborators_enabled"),
-            SGFlagRow(@"Artist facts", @"ios-creator-impl.is_artist_facts_enabled"),
+        SGSection(SGL(@"settings.artist.spotify_own.header", @"Spotify's own"), @[
+            SGFlagRow(SGL(@"settings.artist.share_in_header.title", @"Share button in the header"), @"ios-creator-impl.share_in_action_row_enabled_artist"),
+            SGFlagRow(SGL(@"settings.artist.more_in_nav.title", @"More options in the navigation bar"), @"ios-creator-impl.context_menu_in_navigation_bar_enabled_artist"),
+            SGFlagRow(SGL(@"settings.artist.top_collaborators.title", @"Top collaborators"), @"ios-creator-impl.is_top_collaborators_enabled"),
+            SGFlagRow(SGL(@"settings.artist.artist_facts.title", @"Artist facts"), @"ios-creator-impl.is_artist_facts_enabled"),
         ]),
     ];
-    return [[SGModPage alloc] initWithTitle:@"Artist" intro:nil sections:sections footer:nil];
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.artist.native.title", @"Artist") intro:nil sections:sections footer:nil];
 }

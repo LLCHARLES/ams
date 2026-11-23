@@ -136,16 +136,16 @@ static NSString *summary(void) {
 }
 
 SGModRow *SGSavedTranslationsRow(void) {
-    return SGStatActionRow(@"Saved translations", @"Songs translated on this iPhone or by an AI translator come back translated",
+    return SGStatActionRow(SGL(@"settings.translation.savedtranslations.title", @"Saved translations"), SGL(@"ui.songs.translated.on.this.cabcd7", @"Songs translated on this iPhone or by an AI translator come back translated"),
                            ^NSString *{ return summary(); }, ^{
         if (!files().count) return;
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Delete saved translations?"
-            message:@"Songs translated before are translated again the next time you ask." preferredStyle:UIAlertControllerStyleAlert];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Delete" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"ui.delete.saved.translations.b0902b", @"Delete saved translations?")
+            message:SGL(@"ui.songs.translated.before.are.932837", @"Songs translated before are translated again the next time you ask.") preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.delete", @"Delete") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             SGLyricsForgetAITranslation(nil, nil);
             deleteQueued(folder(), @"saved translations");
         }]];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
         [SGTopController() presentViewController:alert animated:YES completion:nil];
     });
 }

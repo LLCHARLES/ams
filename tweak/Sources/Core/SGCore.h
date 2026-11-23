@@ -2,6 +2,7 @@
 // header under Shared/, Native/ or Redesigned/, next to the keys it reads.
 #import "SGRuntime.h"
 #import "SGLog.h"
+#import "SGLocalize.h"
 #import "SGPrefs.h"
 #import "SGViewTree.h"
 #import "SGGlass.h"

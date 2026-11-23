@@ -22,7 +22,7 @@ static NSString *playsText(NSUInteger plays) {
 
 static void showAlert(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -34,7 +34,7 @@ static SGModSection *topSection(NSString *title, NSArray<SGStatEntry *> *entries
         row.subtitle = entry.detail;
         [rows addObject:row];
     }];
-    if (!rows.count) [rows addObject:SGStatRow(@"Nothing yet", nil)];
+    if (!rows.count) [rows addObject:SGStatRow(SGL(@"settings.stats.empty", @"Nothing yet"), nil)];
     return SGSection(title, rows);
 }
 
@@ -44,8 +44,8 @@ static UIViewController *periodPage(NSString *title, int64_t since) {
     NSString *time = duration(stats.ms), *plays = playsText(stats.plays);
     return [[SGModPage alloc] initWithTitle:title intro:nil sections:@[
         SGSection(nil, @[
-            SGStatRow(@"Listening time", ^NSString *{ return time; }),
-            SGStatRow(@"Plays", ^NSString *{ return plays; }),
+            SGStatRow(SGL(@"settings.stats.row.listening_time", @"Listening time"), ^NSString *{ return time; }),
+            SGStatRow(SGL(@"settings.stats.row.plays", @"Plays"), ^NSString *{ return plays; }),
         ]),
         topSection(@"Top tracks", stats.tracks),
         topSection(@"Top artists", stats.artists),
@@ -121,14 +121,14 @@ static void pickExport(UITableViewController *page) {
 }
 
 static void confirmErase(UITableViewController *page) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Erase listening history?"
-                                                                  message:@"Every play recorded on this phone and every one imported is deleted. Spotify's own history is untouched."
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.stats.alert.erase.title", @"Erase listening history?")
+                                                                  message:SGL(@"settings.stats.alert.erase.message", @"Every play recorded on this phone and every one imported is deleted. Spotify's own history is untouched.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Erase" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.stats.alert.erase.action", @"Erase") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [SGListeningLog() erase];
         [page.tableView reloadData];
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -147,16 +147,16 @@ UIViewController *SGListeningStatsPage(void) {
         [periods addObject:row];
     }
 
-    SGModRow *import = SGWithSymbol(SGStatActionRow(@"Import Spotify's data export", nil,
+    SGModRow *import = SGWithSymbol(SGStatActionRow(SGL(@"ui.import.spotify.s.data.2a13db", @"Import Spotify's data export"), nil,
                                                     ^NSString *{ return sg_importing ? @"Importing…" : nil; }, nil), @"square.and.arrow.down");
-    SGModRow *erase = SGWithSymbol(SGActionRow(@"Erase listening history", nil, nil), @"trash");
+    SGModRow *erase = SGWithSymbol(SGActionRow(SGL(@"settings.stats.action.erase", @"Erase listening history"), nil, nil), @"trash");
     erase.color = SGRed();
-    SGModPage *page = [[SGModPage alloc] initWithTitle:@"Listening stats" intro:nil sections:@[
-        SGNotedSection(nil, @[SGSwitchRow(@"Record plays", nil, SGKeyListeningStats)],
+    SGModPage *page = [[SGModPage alloc] initWithTitle:SGL(@"settings.stats.page.title", @"Listening stats") intro:nil sections:@[
+        SGNotedSection(nil, @[SGSwitchRow(SGL(@"settings.stats.record.title", @"Record plays"), nil, SGKeyListeningStats)],
                        @"A play counts once it has run 30 seconds, or half of a shorter track. Everything stays on this phone."),
         SGSection(nil, periods),
         SGNotedSection(nil, @[
-            SGStatRow(@"Plays", ^NSString *{ return [NSString stringWithFormat:@"%lu", (unsigned long)SGListeningLog().plays.count]; }),
+            SGStatRow(SGL(@"settings.stats.row.plays", @"Plays"), ^NSString *{ return [NSString stringWithFormat:@"%lu", (unsigned long)SGListeningLog().plays.count]; }),
             import,
         ], @"In Spotify's account privacy settings, ask for your data: the account data's StreamingHistory_music files, or the extended streaming history's Streaming_History_Audio files. Pick the JSON files or the zip they came in. Plays already here are skipped."),
         SGSection(nil, @[erase]),

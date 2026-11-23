@@ -50,7 +50,7 @@ static UIAction *soundMenu(void) {
     if (SGPlayerSpeedAllowed() && fabs(SGPlayerSpeed() - 1) >= 0.01) [changed addObject:speedText(SGPlayerSpeed())];
     if (SGPlayerPitchAvailable() && !pitchFollowing() && SGPlayerPitch() != 0) [changed addObject:semitonesText(SGPlayerPitch())];
     if (SGPlayerReverb() > 0) [changed addObject:[NSString stringWithFormat:@"Reverb %.0f%%", SGPlayerReverb()]];
-    UIAction *open = [UIAction actionWithTitle:@"Speed, Pitch & Reverb" image:symbol(@"slider.horizontal.3") identifier:nil
+    UIAction *open = [UIAction actionWithTitle:SGL(@"settings.player.sound_menu", @"Speed, Pitch & Reverb") image:symbol(@"slider.horizontal.3") identifier:nil
                                        handler:^(UIAction *action) { SGPlayerShowSpeedPitchPanel(sg_moreButton); }];
     open.subtitle = changed.count ? [changed componentsJoinedByString:@", "] : @"Normal";
     return open;
@@ -96,7 +96,7 @@ static const CGFloat kSourcePanelWidth = 300, kSourcePanelMaxHeight = 440;
     [super viewDidLoad];
     self.tableView.backgroundColor = UIColor.clearColor;
     UILabel *title = [UILabel new];
-    title.text = @"Lyrics Source";
+    title.text = SGL(@"settings.lyricssources.pick.menu", @"Lyrics Source");
     title.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
     title.textColor = UIColor.labelColor;
     title.accessibilityTraits = UIAccessibilityTraitHeader;
@@ -120,7 +120,7 @@ static const CGFloat kSourcePanelWidth = 300, kSourcePanelMaxHeight = 440;
     NSDictionary<NSString *, SGLyricsResult *> *offers = SGLyricsOffersSoFar(_track, &asking);
     NSString *current = SGLyricsChosenSource(_track);
     SGRSourceRow *automatic = [SGRSourceRow new];
-    automatic.title = @"Automatic";
+    automatic.title = SGL(@"settings.songlanguage.automatic", @"Automatic");
     automatic.subtitle = current ? @"As the order chooses" : SGLyricsCreditFor(_track);
     automatic.picked = !current;
     NSMutableArray<SGRSourceRow *> *rows = [NSMutableArray arrayWithObject:automatic];
@@ -138,7 +138,7 @@ static const CGFloat kSourcePanelWidth = 300, kSourcePanelMaxHeight = 440;
     }
     if (rows.count == 1) {
         SGRSourceRow *none = [SGRSourceRow new];
-        none.title = @"No Source Has Lyrics";
+        none.title = SGL(@"settings.lyricssources.offers.empty", @"No Source Has Lyrics");
         none.note = YES;
         [rows addObject:none];
     }
@@ -192,7 +192,7 @@ static const CGFloat kSourcePanelWidth = 300, kSourcePanelMaxHeight = 440;
 static UIAction *lyricsSourceItem(void) {
     NSString *track = SGKaraokePlayingTrack();
     if (!SGLyricsEnabled() || !track.length || [sheetKind() isEqualToString:@"episode"]) return nil;
-    UIAction *open = [UIAction actionWithTitle:@"Lyrics Source" image:symbol(@"quote.bubble") identifier:nil handler:^(UIAction *action) {
+    UIAction *open = [UIAction actionWithTitle:SGL(@"settings.lyricssources.pick.menu", @"Lyrics Source") image:symbol(@"quote.bubble") identifier:nil handler:^(UIAction *action) {
         SGRLyricsSourcePanel *panel = [SGRLyricsSourcePanel new];
         panel.track = track;
         panel.preferredContentSize = CGSizeMake(kSourcePanelWidth, 200);
@@ -271,7 +271,7 @@ UIMenu *SGRPlayerMenuArtwork(void (^changed)(void)) {
         }
         [items addObject:pick];
     }
-    UIMenu *menu = [UIMenu menuWithTitle:@"Artwork" image:symbol(@"photo") identifier:nil options:0 children:items];
+    UIMenu *menu = [UIMenu menuWithTitle:SGL(@"settings.player.artwork.header", @"Artwork") image:symbol(@"photo") identifier:nil options:0 children:items];
     menu.subtitle = currentName;
     return menu;
 }

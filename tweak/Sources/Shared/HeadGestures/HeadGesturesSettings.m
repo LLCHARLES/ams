@@ -17,7 +17,7 @@ static NSArray<NSString *> *actionNames(void) {
 
 static void say(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -38,15 +38,15 @@ static BOOL anythingLearned(void) {
 
 // Both learned sizes back to the defaults, asked first; `done` runs once they are.
 static void forget(void (^done)(void)) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Forget your nod and shake?"
-        message:@"Both go back to the default sizes. You can teach them again." preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Forget" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.headgestures.alert.forget.title", @"Forget your nod and shake?")
+        message:SGL(@"settings.headgestures.alert.forget.message", @"Both go back to the default sizes. You can teach them again.") preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.headgestures.action.forget", @"Forget") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGSetInt(SGKeyHeadNod, 0);
         SGSetInt(SGKeyHeadShake, 0);
         SGHeadGesturesSettingsChanged();
         done();
     }]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -56,20 +56,20 @@ static SGModRow *actionRow(NSString *title, SGHeadGesture gesture) {
 }
 
 UIViewController *SGHeadGesturesSettingsPage(void) {
-    SGModRow *toggle = SGOptionRow(@"Head gestures", @"Nod twice or shake your head to control the music", SGKeyHeadGestures);
+    SGModRow *toggle = SGOptionRow(SGL(@"settings.headgestures.toggle.title", @"Head gestures"), SGL(@"settings.headgestures.toggle.subtitle", @"Nod twice or shake your head to control the music"), SGKeyHeadGestures);
     toggle.changed = ^(BOOL on) { SGHeadGesturesSettingsChanged(); };
 
-    SGModRow *nodAction = SGWithSymbol(actionRow(@"Nod twice", SGHeadGestureDoubleNod), @"arrow.up.and.down");
-    SGModRow *shakeAction = SGWithSymbol(actionRow(@"Shake your head", SGHeadGestureShake), @"arrow.left.and.right");
-    SGModRow *chime = SGWithSymbol(SGSwitchRow(@"Chime on activation", nil, SGKeyHeadChime), @"bell");
+    SGModRow *nodAction = SGWithSymbol(actionRow(SGL(@"settings.headgestures.try.nod", @"Nod twice"), SGHeadGestureDoubleNod), @"arrow.up.and.down");
+    SGModRow *shakeAction = SGWithSymbol(actionRow(SGL(@"settings.headgestures.shake.title", @"Shake your head"), SGHeadGestureShake), @"arrow.left.and.right");
+    SGModRow *chime = SGWithSymbol(SGSwitchRow(SGL(@"settings.headgestures.chime.title", @"Chime on activation"), nil, SGKeyHeadChime), @"bell");
 
     __block __weak SGModPage *page;
-    SGModRow *teach = SGStatActionRow(@"Teach your gestures", @"Five of each, one after each tone", ^NSString *{ return learnedValue(); }, ^{
+    SGModRow *teach = SGStatActionRow(SGL(@"settings.headgestures.teach.title", @"Teach your gestures"), SGL(@"ui.five.of.each.one.afb3fd", @"Five of each, one after each tone"), ^NSString *{ return learnedValue(); }, ^{
         if (!headTracking()) return;
         SGPresentHeadGesturesTeaching(page, ^{ [page refreshVisibility]; });
     });
 
-    SGModRow *sensitivity = SGSliderRow(@"Sensitivity", @"Higher counts a smaller move",
+    SGModRow *sensitivity = SGSliderRow(SGL(@"settings.headgestures.sensitivity.title", @"Sensitivity"), SGL(@"settings.headgestures.sensitivity.subtitle", @"Higher counts a smaller move"),
         SGHeadSensitivityMin, SGHeadSensitivityMax, SGHeadSensitivityStep,
         ^double { return MAX(SGHeadSensitivityMin, MIN(SGHeadSensitivityMax, SGInt(SGKeyHeadSensitivity, 100))); },
         ^(double value) {
@@ -81,7 +81,7 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
     // What the last try picked up, read out on its row until the next; a new page starts blank.
     __block NSString *tried = @"";
     __block BOOL trying = NO;
-    SGModRow *tryRow = SGStatActionRow(@"Try it", @"Listens after the tone and says what it picked up", ^NSString *{ return tried; }, ^{
+    SGModRow *tryRow = SGStatActionRow(SGL(@"settings.headgestures.try.title", @"Try it"), SGL(@"settings.headgestures.try.subtitle", @"Listens after the tone and says what it picked up"), ^NSString *{ return tried; }, ^{
         if (trying || !headTracking()) return;
         trying = YES;
         tried = @"Listening…";
@@ -99,19 +99,19 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
         });
     });
 
-    SGModRow *forgetRow = SGActionRow(@"Forget what it learned", nil, ^{ forget(^{ [page refreshVisibility]; }); });
+    SGModRow *forgetRow = SGActionRow(SGL(@"settings.headgestures.forget.title", @"Forget what it learned"), nil, ^{ forget(^{ [page refreshVisibility]; }); });
     forgetRow.color = SGRed();
     forgetRow.visible = ^BOOL { return anythingLearned(); };
     for (SGModRow *row in @[nodAction, shakeAction, chime, teach, sensitivity, tryRow, forgetRow]) row.waitsOn = SGKeyHeadGestures;
 
-    SGModPage *shown = [[SGModPage alloc] initWithTitle:@"AirPods gestures" intro:nil sections:@[
+    SGModPage *shown = [[SGModPage alloc] initWithTitle:SGL(@"settings.headgestures.page.title", @"AirPods gestures") intro:nil sections:@[
         SGSection(nil, @[SGWithSymbol(toggle, @"airpods.pro")]),
-        SGNotedSection(@"Gestures", @[nodAction, shakeAction, chime],
+        SGNotedSection(SGL(@"settings.gestures.title", @"Gestures"), @[nodAction, shakeAction, chime],
             @"They work while Spotify plays through headphones that track head motion: AirPods Pro, AirPods (3rd "
             "generation and later), AirPods Max and some Beats. Set to Play or pause, they listen with a song paused too. With the chime on, a "
             "tone in the music confirms each, a rising pair when it worked and a low one when it did not, with the "
             "iPhone on silent too. iOS asks once for Motion & Fitness access, which is how Spotify reads the movement."),
-        SGNotedSection(@"Fit to you", @[teach, sensitivity, tryRow, forgetRow],
+        SGNotedSection(SGL(@"settings.headgestures.section.fit.header", @"Fit to you"), @[teach, sensitivity, tryRow, forgetRow],
             @"Teaching sets how big a move counts from five of your own. Sensitivity scales that for both. Try it does "
             "nothing to the music, so you can tune it while a song plays."),
     ] footer:nil];

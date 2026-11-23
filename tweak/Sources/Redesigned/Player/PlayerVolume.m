@@ -108,7 +108,7 @@ static UIImageView *glyph(NSString *symbol) {
                                                name:UIApplicationDidBecomeActiveNotification object:nil];
 
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Volume";
+    self.accessibilityLabel = SGL(@"player.volume", @"Volume");
     self.accessibilityTraits = UIAccessibilityTraitAdjustable;
     return self;
 }

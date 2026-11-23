@@ -1144,7 +1144,7 @@ void SGLyricsTranslateBatchWithAI(NSDictionary<NSString *, NSArray<NSString *> *
 NSNotificationName const SGLyricsTranslationsDidChangeNotification = @"spotifyglass.lyricsTranslationsDidChange";
 
 SGModRow *SGTranslateEverySongRow(void) {
-    SGModRow *row = SGOptionRow(@"Translate any song", @"The lyrics' translate menu for songs that already read as your language",
+    SGModRow *row = SGOptionRow(SGL(@"settings.translation.translateanysong.title", @"Translate any song"), SGL(@"settings.translation.translateanysong.subtitle", @"The lyrics' translate menu for songs that already read as your language"),
                                 SGKeyLyricsTranslateEverySong);
     row.changed = ^(BOOL on) {
         [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsTranslationsDidChangeNotification object:nil];
@@ -1158,8 +1158,8 @@ static void translatorChanged(void) {
 }
 
 NSArray<SGModRow *> *SGOnDeviceTranslatorRows(void) {
-    SGModRow *onDevice = SGSwitchRow(@"Translate on iPhone", @"Apple's Translate in the lyrics' translate menu", SGKeyLyricsTranslateOnDevice);
-    SGModRow *intelligence = SGSwitchRow(@"Apple Intelligence", @"Apple Intelligence in the lyrics' translate menu", SGKeyLyricsAppleIntelligence);
+    SGModRow *onDevice = SGSwitchRow(SGL(@"settings.translation.ondevice.title", @"Translate on iPhone"), SGL(@"ui.apple.s.translate.in.2114d7", @"Apple's Translate in the lyrics' translate menu"), SGKeyLyricsTranslateOnDevice);
+    SGModRow *intelligence = SGSwitchRow(SGL(@"settings.translation.intelligence.title", @"Apple Intelligence"), SGL(@"ui.apple.intelligence.in.the.663be7", @"Apple Intelligence in the lyrics' translate menu"), SGKeyLyricsAppleIntelligence);
     onDevice.changed = intelligence.changed = ^(BOOL on) { translatorChanged(); };
     return @[onDevice, intelligence];
 }
@@ -1200,18 +1200,18 @@ static void askForKey(void) {
         NSString *url = SGAIServerIn(weakAlert.textFields.firstObject.text);
         storeSecret(p, kServerAccount, [url isEqualToString:kOpenAIDefaultURL] ? nil : url);
     };
-    UIAlertAction *paste = [UIAlertAction actionWithTitle:@"Paste Key" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    UIAlertAction *paste = [UIAlertAction actionWithTitle:SGL(@"ui.paste.key.895d5c", @"Paste Key") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         // A key copied with the quotes around it, as from a code sample, is turned down as it stands.
         NSMutableCharacterSet *around = [NSMutableCharacterSet whitespaceAndNewlineCharacterSet];
         [around addCharactersInString:@"\"'“”‘’"];
         UIPasteboard *board = UIPasteboard.generalPasteboard;
         NSString *key = [board.string stringByTrimmingCharactersInSet:around];
         if (!key.length || [key rangeOfCharacterFromSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].location != NSNotFound) {
-            UIAlertController *none = [UIAlertController alertControllerWithTitle:@"No key on the clipboard"
-                                                                          message:@"Copy the API key, then tap Paste Key again."
+            UIAlertController *none = [UIAlertController alertControllerWithTitle:SGL(@"ui.no.key.on.the.c0d57d", @"No key on the clipboard")
+                                                                          message:SGL(@"ui.copy.the.api.key.e1b4b7", @"Copy the API key, then tap Paste Key again.")
                                                                    preferredStyle:UIAlertControllerStyleAlert];
             none.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-            [none addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+            [none addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
             [SGTopController() presentViewController:none animated:YES completion:nil];
             return;
         }
@@ -1223,7 +1223,7 @@ static void askForKey(void) {
         board.items = @[];
         translatorChanged();
     }];
-    UIAlertAction *save = server && stored ? [UIAlertAction actionWithTitle:@"Save Server" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    UIAlertAction *save = server && stored ? [UIAlertAction actionWithTitle:SGL(@"ui.save.server.465cac", @"Save Server") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         saveServer();
         translatorChanged();
     }] : nil;
@@ -1245,7 +1245,7 @@ static void askForKey(void) {
     [alert addAction:paste];
     if (save) [alert addAction:save];
     if (stored) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Remove" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.remove", @"Remove") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
             storeSecret(p, kKeyAccount, nil);
             storeSecret(p, kServerAccount, nil);
             if ([p->tag isEqualToString:@"gemini"]) {
@@ -1255,7 +1255,7 @@ static void askForKey(void) {
             translatorChanged();
         }]];
     }
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -1422,7 +1422,7 @@ static void askForModel(void) {
         message:[NSString stringWithFormat:@"A model id, such as %@.", example] preferredStyle:UIAlertControllerStyleAlert];
     alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     __weak UIAlertController *weakAlert = alert;
-    UIAlertAction *save = [UIAlertAction actionWithTitle:@"Save" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+    UIAlertAction *save = [UIAlertAction actionWithTitle:SGL(@"common.save", @"Save") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         NSString *modelID = modelIDIn(weakAlert.textFields.firstObject.text, p);
         if (modelID) [NSUserDefaults.standardUserDefaults setObject:modelID forKey:modelKey(p)];
         translatorChanged();
@@ -1437,7 +1437,7 @@ static void askForModel(void) {
         forControlEvents:UIControlEventEditingChanged];
     }];
     [alert addAction:save];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -1511,8 +1511,8 @@ static NSArray<NSString *> *modelMenu(const SGAIProvider *p) {
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(close)];
     // Plain: Spotify's white tint fills a Done item's glass and hides its glyph.
     UIBarButtonItem *done = [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"checkmark"] style:UIBarButtonItemStylePlain target:self action:@selector(save)];
-    done.accessibilityLabel = @"Save";
-    UIBarButtonItem *reset = [[UIBarButtonItem alloc] initWithTitle:@"Default" style:UIBarButtonItemStylePlain target:self action:@selector(reset)];
+    done.accessibilityLabel = SGL(@"common.save", @"Save");
+    UIBarButtonItem *reset = [[UIBarButtonItem alloc] initWithTitle:SGL(@"settings.font.choice.default", @"Default") style:UIBarButtonItemStylePlain target:self action:@selector(reset)];
     self.navigationItem.rightBarButtonItems = @[done, reset];
 }
 
@@ -1539,7 +1539,7 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
     NSMutableArray<NSString *> *names = [NSMutableArray array];
     for (NSUInteger i = 0; i < kProviderCount; i++) [names addObject:kProviders[i].name];
     // A pick in a menu row reloads the page's rows; the model row's menu is the chosen provider's presets.
-    SGModRow *models = SGMenuRow(@"Model", modelMenu(chosen()), ^NSString *{
+    SGModRow *models = SGMenuRow(SGL(@"settings.translation.openaikey.model", @"Model"), modelMenu(chosen()), ^NSString *{
         const SGAIProvider *p = chosen();
         NSString *current = model(p);
         if ([p->tag isEqualToString:@"gemini"]) {
@@ -1575,19 +1575,19 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
         else askForModel();
         translatorChanged();
     };
-    SGModRow *provider = SGMenuRow(@"AI translator", names, ^NSString *{ return chosen()->name; }, ^(NSInteger index) {
+    SGModRow *provider = SGMenuRow(SGL(@"ui.ai.translator.c1e0b0", @"AI translator"), names, ^NSString *{ return chosen()->name; }, ^(NSInteger index) {
         if (index == 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyAITranslator];
         else [NSUserDefaults.standardUserDefaults setObject:kProviders[index].tag forKey:SGKeyAITranslator];
         weakModels.menu = modelMenu(chosen());
         SGLog(@"ai: translator %@", chosen()->tag);
         translatorChanged();
     });
-    SGModRow *key = SGStatActionRow(@"API key", @"Translate any song from the lyrics' corner menu", ^NSString *{
+    SGModRow *key = SGStatActionRow(SGL(@"settings.translation.openaikey.key", @"API key"), SGL(@"ui.translate.any.song.from.377a0c", @"Translate any song from the lyrics' corner menu"), ^NSString *{
         const SGAIProvider *p = chosen();
         if (!storedSecret(p, kKeyAccount)) return @"Off";
         return isOpenAI(p) ? serverHost() ?: @"Server not usable" : @"Set";
     }, ^{ askForKey(); });
-    SGModRow *prompt = SGStatActionRow(@"Translation prompt", @"What the AI translator is told to do with a song's lines",
+    SGModRow *prompt = SGStatActionRow(SGL(@"settings.translation.prompt.title", @"Translation prompt"), SGL(@"ui.what.the.ai.translator.ee74f6", @"What the AI translator is told to do with a song's lines"),
                                        ^NSString *{ return storedString(SGKeyAIPrompt) ? @"Edited" : @"Default"; }, ^{
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[SGPromptEditor new]];
         nav.modalPresentationStyle = UIModalPresentationPageSheet;
@@ -1596,7 +1596,7 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
     });
     // Low first: 3.8 Flash refuses minimal.
     NSArray<NSString *> *thinkingLevels = @[@"Low", @"Medium", @"High"];
-    SGModRow *thinking = SGMenuRow(@"Thinking", thinkingLevels, ^NSString *{
+    SGModRow *thinking = SGMenuRow(SGL(@"settings.translation.thinking.title", @"Thinking"), thinkingLevels, ^NSString *{
         return geminiThinkingLevel().capitalizedString;
     }, ^(NSInteger index) {
         if (index == 0) [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyAIThinking];
@@ -1608,7 +1608,7 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
     NSArray<NSNumber *> *timeoutSeconds = @[@30, @60, @90, @(kDefaultAITimeout), @180, @240, @300];
     NSMutableArray<NSString *> *timeouts = [NSMutableArray array];
     for (NSNumber *seconds in timeoutSeconds) [timeouts addObject:[NSString stringWithFormat:@"%@ s", seconds]];
-    SGModRow *timeout = SGMenuRow(@"Timeout", timeouts, ^NSString *{
+    SGModRow *timeout = SGMenuRow(SGL(@"settings.translation.timeout.title", @"Timeout"), timeouts, ^NSString *{
         return [NSString stringWithFormat:@"%ld s", (long)aiTimeout()];
     }, ^(NSInteger index) {
         NSInteger seconds = timeoutSeconds[index].integerValue;
@@ -1618,7 +1618,7 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
 
     NSArray<NSNumber *> *batchSizes = @[@10, @20, @30, @40, @50, @0];
     NSArray<NSString *> *batchSizeOptions = @[@"10 songs", @"20 songs", @"30 songs", @"40 songs", @"50 songs", @"All at once"];
-    SGModRow *batchSizeRow = SGMenuRow(@"Songs per batch", batchSizeOptions, ^NSString *{
+    SGModRow *batchSizeRow = SGMenuRow(SGL(@"ui.songs.per.batch.108696", @"Songs per batch"), batchSizeOptions, ^NSString *{
         NSUInteger idx = [batchSizes indexOfObject:@(SGLyricsBatchSize())];
         return batchSizeOptions[idx != NSNotFound ? idx : 1];
     }, ^(NSInteger index) {
@@ -1626,13 +1626,13 @@ NSArray<SGModRow *> *SGAITranslatorRows(void) {
         if (size == 20) [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyLyricsBatchSize];
         else [NSUserDefaults.standardUserDefaults setInteger:size forKey:SGKeyLyricsBatchSize];
     });
-    SGModRow *batchPromptRow = SGStatActionRow(@"Batch prompt", @"Prompt used when translating multiple songs at once",
+    SGModRow *batchPromptRow = SGStatActionRow(SGL(@"ui.batch.prompt.942fc2", @"Batch prompt"), SGL(@"ui.prompt.used.when.translating.f0f44d", @"Prompt used when translating multiple songs at once"),
                                                ^NSString *{ return storedString(SGKeyLyricsBatchPrompt) ? @"Edited" : @"Default"; }, ^{
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:[[SGPromptEditor alloc] initWithBatch:YES]];
         nav.modalPresentationStyle = UIModalPresentationPageSheet;
         SGPresentDark(nav);
         [SGTopController() presentViewController:nav animated:YES completion:nil];
     });
-    SGModRow *skipSavedRow = SGSwitchRow(@"Skip saved translations", @"Skip songs that already have a saved translation", SGKeyLyricsBatchSkipSaved);
+    SGModRow *skipSavedRow = SGSwitchRow(SGL(@"ui.skip.saved.translations.cc78d6", @"Skip saved translations"), SGL(@"ui.skip.songs.that.already.0676e6", @"Skip songs that already have a saved translation"), SGKeyLyricsBatchSkipSaved);
     return @[provider, key, models, thinking, timeout, prompt, batchSizeRow, batchPromptRow, skipSavedRow];
 }

@@ -52,8 +52,8 @@ static char kButtonGlassKey, kPanelGlassKey;
     // VoiceOver has the mic itself as one adjustable button: the slider shows only for a held finger and
     // goes again on a timer, which a swipe up or down never holds open.
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Karaoke";
-    self.accessibilityHint = @"Turns the vocals down";
+    self.accessibilityLabel = SGL(@"settings.karaoke.title", @"Karaoke");
+    self.accessibilityHint = SGL(@"settings.sing.button.hint", @"Turns the vocals down");
     self.accessibilityTraits = UIAccessibilityTraitButton | UIAccessibilityTraitAdjustable;
 
     _ring = [CAShapeLayer layer];
@@ -218,7 +218,7 @@ static char kButtonGlassKey, kPanelGlassKey;
 #pragma mark - the tap
 
 static void tell(NSString *message, NSString *action, void (^then)(void)) {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Karaoke" message:message preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.karaoke.title", @"Karaoke") message:message preferredStyle:UIAlertControllerStyleAlert];
     // Over the player, which is dark whatever the system's appearance.
     alert.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     if (action) [alert addAction:[UIAlertAction actionWithTitle:action style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) { then(); }]];
@@ -267,7 +267,7 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
         _slider.minimumValue = 0;
         _slider.maximumValue = 2;
         _slider.transform = CGAffineTransformMakeRotation(-M_PI_2);
-        _slider.accessibilityLabel = @"Vocals";
+        _slider.accessibilityLabel = SGL(@"settings.karaoke.card.vocals.a11y", @"Vocals");
         [_slider addTarget:self action:@selector(slid) forControlEvents:UIControlEventValueChanged];
         [_slider addTarget:self action:@selector(holdPanel) forControlEvents:UIControlEventTouchDown];
         [_slider addTarget:self action:@selector(letPanelGo) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];

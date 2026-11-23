@@ -43,7 +43,7 @@ static void addButton(UIViewController *unit) {
     [button setImage:[UIImage systemImageNamed:@"quote.bubble" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:20 weight:UIImageSymbolWeightRegular]]
             forState:UIControlStateNormal];
     button.tintColor = UIColor.whiteColor;
-    button.accessibilityLabel = @"Lyrics";
+    button.accessibilityLabel = SGL(@"settings.lyrics.title", @"Lyrics");
     button.translatesAutoresizingMaskIntoConstraints = NO;
     __weak UIViewController *weakUnit = unit;
     [button addAction:[UIAction actionWithHandler:^(UIAction *action) {

@@ -63,9 +63,9 @@ static BOOL sg_redirecting;
 // without case) and that row's item number, the accessibility identifier of its Encore ListRow on 9.1.78. The
 // number is matched first, so a sheet in another language still finds them; the title is the fallback.
 static NSArray<NSArray<NSString *> *> *quickItems(void) {
-    return @[@[@"Share", @"square.and.arrow.up", @"share", @"9"],
-             @[@"Add to Playlist", @"text.badge.plus", @"add to playlist", @"19"],
-             @[@"Add to Queue", @"text.line.last.and.arrowtriangle.forward", @"add to queue", @"11"]];
+    return @[@[SGL(@"settings.cover_viewer.share", @"Share"), @"square.and.arrow.up", @"share", @"9"],
+             @[SGL(@"settings.context_menu.quick.add_to_playlist", @"Add to Playlist"), @"text.badge.plus", @"add to playlist", @"19"],
+             @[SGL(@"settings.localmusic.queue", @"Add to Queue"), @"text.line.last.and.arrowtriangle.forward", @"add to queue", @"11"]];
 }
 
 // Which quick items (their rows' titles) the last sheet of each kind had.
@@ -628,7 +628,7 @@ static void raiseHost(UIWindow *window) {
     if (quick) [children addObject:quick];
     NSArray<UIMenuElement *> *ours = self.items();
     if (ours.count) [children addObject:inlineGroup(ours)];
-    UIMenu *more = [UIMenu menuWithTitle:@"More" image:[UIImage systemImageNamed:@"ellipsis.circle"] identifier:kMoreMenu options:0 children:@[[self deferredRows]]];
+    UIMenu *more = [UIMenu menuWithTitle:SGL(@"settings.playlist.hide.more.title", @"More") image:[UIImage systemImageNamed:@"ellipsis.circle"] identifier:kMoreMenu options:0 children:@[[self deferredRows]]];
     [children addObject:inlineGroup(@[more])];
     return [UIMenu menuWithTitle:@"" image:nil identifier:kTopMenu options:0 children:children];
 }
@@ -702,7 +702,7 @@ static void raiseHost(UIWindow *window) {
 
 // Shown when Spotify's sheet never came, so More is not left loading.
 - (NSArray<UIMenuElement *> *)unavailable {
-    UIAction *none = [UIAction actionWithTitle:@"Spotify's options did not load" image:nil identifier:nil handler:^(UIAction *action) {}];
+    UIAction *none = [UIAction actionWithTitle:SGL(@"settings.context_menu.options_not_loaded", @"Spotify's options did not load") image:nil identifier:nil handler:^(UIAction *action) {}];
     none.attributes = UIMenuElementAttributesDisabled;
     return @[none];
 }
@@ -1153,7 +1153,7 @@ void SGRSystemMenuWatch(UIView *button, SGRMenuItems items, SGRMenuKind kind) {
         if (button.accessibilityLabel.length) front.accessibilityLabel = button.accessibilityLabel;
         button.isAccessibilityElement = NO;
     }
-    if (!front.accessibilityLabel.length) front.accessibilityLabel = @"More";
+    if (!front.accessibilityLabel.length) front.accessibilityLabel = SGL(@"settings.playlist.hide.more.title", @"More");
     if (front.superview != button) [button addSubview:front];
     else if (button.subviews.lastObject != front) [button bringSubviewToFront:front];
     if (!CGRectEqualToRect(front.frame, button.bounds)) front.frame = button.bounds;

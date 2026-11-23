@@ -72,7 +72,7 @@ static CGFloat height(float rms) {
     self.clipsToBounds = YES;
     _feedback = [UISelectionFeedbackGenerator new];
     self.isAccessibilityElement = YES;
-    self.accessibilityLabel = @"Vocals";
+    self.accessibilityLabel = SGL(@"settings.karaoke.card.vocals.a11y", @"Vocals");
     self.accessibilityTraits = UIAccessibilityTraitAdjustable;
     return self;
 }
@@ -460,9 +460,9 @@ static CGFloat height(float rms) {
 - (void)explainState {
     NSString *detail = SGSingStatusDetail();
     if (!detail) return;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Karaoke" message:detail preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.karaoke.title", @"Karaoke") message:detail preferredStyle:UIAlertControllerStyleAlert];
     if (SGSingCurrentState() == SGSingStateFailed) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"Try again" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.headgestures.teach.try_again", @"Try again") style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
             SGSetSingOn(NO);
             SGSetSingOn(YES);
         }]];

@@ -151,7 +151,7 @@ static NSString *signedNumber(double value, int decimals) {
         element.band = i;
         element.accessibilityLabel = spokenBand(_bands[i]);
         element.accessibilityTraits = UIAccessibilityTraitAdjustable;
-        element.accessibilityHint = @"Double tap and hold, then drag up or down, or swipe up or down to adjust.";
+        element.accessibilityHint = SGL(@"settings.audioeffects.curve.a11y.band_hint", @"Double tap and hold, then drag up or down, or swipe up or down to adjust.");
         [_elements addObject:element];
     }
 
@@ -178,10 +178,10 @@ static NSString *signedNumber(double value, int decimals) {
         config.imagePadding = 5;
         _presets.configuration = config;
         _presets.showsMenuAsPrimaryAction = YES;
-        _presets.accessibilityLabel = @"Preset";
+        _presets.accessibilityLabel = SGL(@"settings.audioeffects.preset.title", @"Preset");
     } else {
         _name = [UILabel new];
-        _name.text = @"Amount";
+        _name.text = SGL(@"settings.audioeffects.amount.title", @"Amount");
         _name.textColor = UIColor.whiteColor;
         _name.accessibilityTraits = UIAccessibilityTraitHeader;
         [self addSubview:_name];
@@ -416,7 +416,7 @@ static NSString *signedNumber(double value, int decimals) {
         action.state = (NSInteger)i == match ? UIMenuElementStateOn : UIMenuElementStateOff;
         [actions addObject:action];
     }];
-    _presets.menu = [UIMenu menuWithTitle:@"Presets" children:actions];
+    _presets.menu = [UIMenu menuWithTitle:SGL(@"settings.audioeffects.curve.presets", @"Presets") children:actions];
     [self setNeedsLayout];
 }
 

@@ -112,7 +112,7 @@ static BOOL keepsTitle(void) {
     // A tap on the cover beside the lines brings the full player back.
     [_thumb addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(sgr_thumbTapped)]];
     _thumb.isAccessibilityElement = YES;
-    _thumb.accessibilityLabel = @"Show the player";
+    _thumb.accessibilityLabel = SGL(@"settings.player.lyrics.thumb_a11y", @"Show the player");
     _thumb.accessibilityTraits = UIAccessibilityTraitButton;
     _cover = [[UIImageView alloc] initWithFrame:CGRectZero];
     _cover.contentMode = UIViewContentModeScaleAspectFill;

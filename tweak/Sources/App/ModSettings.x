@@ -64,7 +64,7 @@ static UIViewController *modSettingsPage(void) {
 
     // A newer Vitrine Addon inside this Vitrine than the one installed: at the top, while it is so. Only the add-on's own
     // answer from SpringBoard makes it so, so only a jailbroken phone with the add-on shows it (SGHapticRelay.h).
-    SGModRow *addonUpdate = SGWithTile(SGActionRow(@"Update Vitrine Addon", @"A newer add-on comes with this Vitrine", ^{ SGHapticAddonShareSoon(); }),
+    SGModRow *addonUpdate = SGWithTile(SGActionRow(SGL(@"ui.update.vitrine.addon.edbd38", @"Update Vitrine Addon"), SGL(@"ui.a.newer.add.on.8f31e9", @"A newer add-on comes with this Vitrine"), ^{ SGHapticAddonShareSoon(); }),
                                        @"arrow.down.circle.fill", UIColor.systemBlueColor);
     addonUpdate.visible = ^BOOL { return SGHapticAddonOutdated(); };
     [sections addObject:SGSection(nil, @[addonUpdate])];
@@ -73,66 +73,66 @@ static UIViewController *modSettingsPage(void) {
     [sections addObject:SGNotedSection(nil, @[
         SGRedesignedUIRow(),
         SGNativeRedesignRow(),
-        pageRow(@"Appearance", @"paintpalette.fill", UIColor.systemPurpleColor, ^UIViewController *{ return SGAppearancePage(); }),
-        pageRow(@"Tab bar", @"rectangle.bottomthird.inset.filled", UIColor.systemGrayColor, ^UIViewController *{ return SGNavbarPage(); }),
+        pageRow(SGL(@"settings.appearance.title", @"Appearance"), @"paintpalette.fill", UIColor.systemPurpleColor, ^UIViewController *{ return SGAppearancePage(); }),
+        pageRow(SGL(@"settings.tabbar.title", @"Tab bar"), @"rectangle.bottomthird.inset.filled", UIColor.systemGrayColor, ^UIViewController *{ return SGNavbarPage(); }),
     ], SGRestartNote)];
 
     // Home & Library holds only the native look's switches; the redesign has its album and artist pages instead.
-    SGModRow *albums = pageRow(@"Albums", @"square.stack.fill", SGColorRGB(0x34C759), ^UIViewController *{ return SGRAlbumSettingsPage(); });
+    SGModRow *albums = pageRow(SGL(@"settings.album.title", @"Albums"), @"square.stack.fill", SGColorRGB(0x34C759), ^UIViewController *{ return SGRAlbumSettingsPage(); });
     albums.visible = redesigned;
-    SGModRow *artists = pageRow(@"Artists", @"music.mic", SGColorRGB(0x30B0C7), ^UIViewController *{ return SGRArtistSettingsPage(); });
+    SGModRow *artists = pageRow(SGL(@"settings.artist.title", @"Artists"), @"music.mic", SGColorRGB(0x30B0C7), ^UIViewController *{ return SGRArtistSettingsPage(); });
     artists.visible = redesigned;
-    SGModRow *home = pageRow(@"Home & Library", @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGHomeSettingsPage(); });
+    SGModRow *home = pageRow(SGL(@"settings.main.home_library.title", @"Home & Library"), @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGHomeSettingsPage(); });
     home.visible = native;
-    SGModRow *redesignedHome = pageRow(@"Home", @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRHomeSettingsPage(); });
+    SGModRow *redesignedHome = pageRow(SGL(@"settings.home.title", @"Home"), @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRHomeSettingsPage(); });
     redesignedHome.visible = redesigned;
     [sections addObject:SGSection(nil, @[
         redesignedHome,
         home,
-        pageRow(@"Player", @"play.fill", UIColor.systemPinkColor, ^UIViewController *{ return SGPlayerSettingsPage(); }),
-        pageRow(@"Lyrics", @"quote.bubble.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGLyricsSettingsPage(); }),
+        pageRow(SGL(@"settings.player.title", @"Player"), @"play.fill", UIColor.systemPinkColor, ^UIViewController *{ return SGPlayerSettingsPage(); }),
+        pageRow(SGL(@"settings.lyrics.title", @"Lyrics"), @"quote.bubble.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGLyricsSettingsPage(); }),
         albums,
         artists,
     ])];
 
     // Sing and the audio effects work on the sound, so both looks have them; Audio effects says how many are on.
-    SGModRow *sing = pageRow(@"Karaoke", @"mic.fill", SGColorRGB(0x8C42B3), ^UIViewController *{ return SGSingSettingsPage(); });
-    SGModRow *audioEffects = pageRow(@"Audio effects", @"slider.vertical.3", UIColor.systemRedColor, ^UIViewController *{ return SGDSPSettingsPage(); });
+    SGModRow *sing = pageRow(SGL(@"settings.karaoke.title", @"Karaoke"), @"mic.fill", SGColorRGB(0x8C42B3), ^UIViewController *{ return SGSingSettingsPage(); });
+    SGModRow *audioEffects = pageRow(SGL(@"settings.audioeffects.title", @"Audio effects"), @"slider.vertical.3", UIColor.systemRedColor, ^UIViewController *{ return SGDSPSettingsPage(); });
     audioEffects.value = ^NSString *{ return SGDSPSummary(); };
     // Spatial voice is Sing's too, and shows where the iPhone reads headphone motion, as on Sing's page.
-    SGModRow *spatial = pageRow(@"Spatial voice", @"person.wave.2.fill", SGColorRGB(0x5856D6), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); });
+    SGModRow *spatial = pageRow(SGL(@"settings.spatial.title", @"Spatial voice"), @"person.wave.2.fill", SGColorRGB(0x5856D6), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); });
     spatial.visible = ^BOOL { return SGSingSpatialAvailable(); };
     // AutoMix sets Spotify's own Automix and Crossfade, which its player does under either look.
-    SGModRow *autoMix = pageRow(@"AutoMix", @"arrow.triangle.merge", SGColorRGB(0xF05D6C), ^UIViewController *{ return SGAutoMixSettingsPage(); });
+    SGModRow *autoMix = pageRow(SGL(@"settings.automix.title", @"AutoMix"), @"arrow.triangle.merge", SGColorRGB(0xF05D6C), ^UIViewController *{ return SGAutoMixSettingsPage(); });
     autoMix.value = ^NSString *{ return SGAutoMixSummary(); };
     NSMutableArray<SGModRow *> *features = [NSMutableArray arrayWithObjects:sing, spatial, audioEffects, autoMix, nil];
     // The Live Activity works under both looks, where ActivityKit's card does.
     if (@available(iOS 17.0, *)) {
-        SGModRow *liveActivity = pageRow(@"Live Activity", @"iphone", UIColor.systemOrangeColor, ^UIViewController *{ return SGLiveActivitySettingsPage(); });
+        SGModRow *liveActivity = pageRow(SGL(@"settings.liveactivity.title", @"Live Activity"), @"iphone", UIColor.systemOrangeColor, ^UIViewController *{ return SGLiveActivitySettingsPage(); });
         [features addObject:liveActivity];
     }
     [features addObjectsFromArray:@[
-        pageRow(@"AirPods gestures", @"airpods", UIColor.systemCyanColor, ^UIViewController *{ return SGHeadGesturesSettingsPage(); }),
-        pageRow(@"Listening stats", @"chart.bar.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGListeningStatsPage(); }),
+        pageRow(SGL(@"settings.headgestures.page.title", @"AirPods gestures"), @"airpods", UIColor.systemCyanColor, ^UIViewController *{ return SGHeadGesturesSettingsPage(); }),
+        pageRow(SGL(@"settings.stats.page.title", @"Listening stats"), @"chart.bar.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGListeningStatsPage(); }),
     ]];
     [sections addObject:SGSection(nil, features)];
 
-    SGModRow *mod = pageRow(@"Mod", @"info.circle", SGColorRGB(0x7D7D81), ^UIViewController *{ return SGAboutPage(); });
+    SGModRow *mod = pageRow(SGL(@"settings.mod.title", @"Mod"), @"info.circle", SGColorRGB(0x7D7D81), ^UIViewController *{ return SGAboutPage(); });
     mod.value = ^NSString *{ return SGVersionWithBuild(); };
     [sections addObjectsFromArray:@[
         SGSection(nil, @[
-            pageRow(@"Lock screen", @"lock.iphone", SGColorRGB(0x32ADE6), ^UIViewController *{ return SGLockScreenWidgetPage(); }),
+            pageRow(SGL(@"settings.main.lock_screen.title", @"Lock screen"), @"lock.iphone", SGColorRGB(0x32ADE6), ^UIViewController *{ return SGLockScreenWidgetPage(); }),
             // Vibrations hook Spotify's own controls and its audio, so they answer under either look.
-            pageRow(@"Vibrations", @"waveform", UIColor.systemGreenColor, ^UIViewController *{ return SGVibrationsSettingsPage(); }),
-            pageRow(@"Premium, ads & privacy", @"hand.raised.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGAdsSettingsPage(); }),
+            pageRow(SGL(@"settings.main.vibrations.title", @"Vibrations"), @"waveform", UIColor.systemGreenColor, ^UIViewController *{ return SGVibrationsSettingsPage(); }),
+            pageRow(SGL(@"settings.privacy.title", @"Premium, ads & privacy"), @"hand.raised.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGAdsSettingsPage(); }),
         ]),
         SGSection(nil, @[
-            pageRow(@"Labs", @"testtube.2", UIColor.systemGreenColor, ^UIViewController *{ return SGLabsPage(); }),
-            pageRow(@"All flags", @"flag.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGAllFlagsPage(); }),
+            pageRow(SGL(@"settings.labs.title", @"Labs"), @"testtube.2", UIColor.systemGreenColor, ^UIViewController *{ return SGLabsPage(); }),
+            pageRow(SGL(@"settings.main.all_flags.title", @"All flags"), @"flag.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGAllFlagsPage(); }),
         ]),
         SGSection(nil, @[mod]),
     ]];
-    SGModPage *page = [[SGModPage alloc] initWithTitle:@"Vitrine" intro:nil sections:sections footer:nil];
+    SGModPage *page = [[SGModPage alloc] initWithTitle:SGL(@"ui.vitrine.43c7e6", @"Vitrine") intro:nil sections:sections footer:nil];
     page.tiles = YES;
     return page;
 }
@@ -155,7 +155,7 @@ static UIViewController *modSettingsPage(void) {
     if (!(self = [super initWithFrame:frame])) return nil;
     _icon = SGSymbolView(@"slider.horizontal.3", 20, UIImageSymbolWeightRegular, 24);
     _title = [UILabel new];
-    _title.text = @"Mod Settings";
+    _title.text = SGL(@"settings.main.entry.title", @"Mod Settings");
     _title.textColor = UIColor.whiteColor;
     _chevron = SGSymbolView(@"chevron.right", 11, UIImageSymbolWeightSemibold, 12);
     for (UIView *v in @[_icon, _title, _chevron]) [self addSubview:v];
