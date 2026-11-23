@@ -3,6 +3,7 @@
 GitHub
 Spotify
 Retrine
+Vitrine
 App/About/Licenses.m	Vitrine
 App/About/Licenses.m	spoti.pw
 WDL

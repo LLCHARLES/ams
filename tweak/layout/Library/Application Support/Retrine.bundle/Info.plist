@@ -8,6 +8,7 @@
 	<array>
 		<string>en</string>
 		<string>ko</string>
+		<string>zh-Hans</string>
 	</array>
 	<key>CFBundleIdentifier</key>
 	<string>com.retrine.tweak.resources</string>

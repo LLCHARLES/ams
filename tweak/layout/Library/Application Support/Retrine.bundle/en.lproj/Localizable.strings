@@ -1675,6 +1675,7 @@
 "settings.mod.keychain.failed.message" = "The Keychain could not remove every key, so some are still stored on this iPhone. Please try again.";
 "settings.mod.keychain.failed.title" = "Keychain not cleared";
 "settings.mod.keychain.title" = "Clear Keychain";
+"settings.mod.language.chinese" = "简体中文";
 "settings.mod.language.english" = "English";
 "settings.mod.language.footer" = "Applies after you restart Spotify.";
 "settings.mod.language.korean" = "한국어";

@@ -80,7 +80,8 @@ UIViewController *SGAboutPage(void) {
     SGModRow *language = SGChoiceRow(SGL(@"settings.mod.language.title", @"Language"), nil, SGKeyLanguage,
         @[SGL(@"settings.mod.language.system", @"System"),
           SGL(@"settings.mod.language.english", @"English"),
-          SGL(@"settings.mod.language.korean", @"한국어")], 0);
+          SGL(@"settings.mod.language.korean", @"한국어"),
+          SGL(@"settings.mod.language.chinese", @"简体中文")], 0);
     language.choiceFooter = SGL(@"settings.mod.language.footer", @"Applies after you restart Spotify.");
     SGModRow *cacheLimit = SGSwitchRow(SGL(@"settings.mod.storage.limit", @"Show cache size limit"), SGRestartNote, SGKeyShowCacheLimit);
     SGModRow *storage = SGActionRow(SGL(@"settings.mod.storage.open", @"Open Spotify storage settings"), nil, ^{

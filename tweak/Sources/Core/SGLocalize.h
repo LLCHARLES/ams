@@ -12,7 +12,7 @@
 // (docs/tweaks.md, Localization).
 #import <Foundation/Foundation.h>
 
-// 0 or absent: System; 1: English; 2: Korean. Read once per launch.
+// 0 or absent: System; 1: English; 2: Korean; 3: Simplified Chinese. Read once per launch.
 #define SGKeyLanguage @"spotifyglass.language"
 
 // The English is a format argument, so clang checks a stringWithFormat: against it.
