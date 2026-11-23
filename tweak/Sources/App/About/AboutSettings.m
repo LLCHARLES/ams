@@ -78,11 +78,10 @@ UIViewController *SGAboutPage(void) {
         withSymbol(SGActionRow(SGL(@"settings.mod.tour.title", @"Welcome tour"), nil, ^{ SGShowOnboarding(); }), @"map"),
     ]];
     if (SGWhatsNewChanges().count) [links insertObject:withSymbol(SGActionRow(SGL(@"settings.mod.whats_new.title", @"What's New"), nil, ^{ SGShowWhatsNew(); }), @"sparkles") atIndex:links.count - 1];
-    // Language of the mod's own screens. System follows Spotify's language; the other three are explicit.
+    // Language of the mod's own screens. System follows Spotify's language; the other two are explicit.
     SGModRow *language = SGChoiceRow(SGL(@"settings.mod.language.title", @"Language"), nil, SGKeyLanguage,
         @[ SGL(@"settings.mod.language.system", @"System"),
            SGL(@"settings.mod.language.english", @"English"),
-           SGL(@"settings.mod.language.korean", @"한국어"),
            SGL(@"settings.mod.language.chinese", @"简体中文") ], 0);
     language.choiceFooter = SGL(@"settings.mod.language.footer", @"Applies after you restart Spotify.");
     NSMutableArray<SGModRow *> *build = [NSMutableArray arrayWithObjects:updates, betas, language,

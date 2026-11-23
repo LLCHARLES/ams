@@ -98,7 +98,7 @@ static void load(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSInteger choice = [NSUserDefaults.standardUserDefaults integerForKey:SGKeyLanguage];
-        NSString *wanted = choice == 1 ? @"en" : choice == 2 ? @"ko" : choice == 3 ? @"zh-Hans" : appLanguage();
+        NSString *wanted = choice == 1 ? @"en" : choice == 2 ? @"zh-Hans" : appLanguage();
         // An explicit choice must not silently fall back to English just because one bundle lacks the
         // language (an old copy left inside the app shadows the deb's). Try every location and keep the
         // first one that actually resolves the wanted localization and yields a non-empty table.

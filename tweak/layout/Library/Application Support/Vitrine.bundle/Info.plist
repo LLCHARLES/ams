@@ -7,7 +7,6 @@
 	<key>CFBundleLocalizations</key>
 	<array>
 		<string>en</string>
-		<string>ko</string>
 		<string>zh-Hans</string>
 	</array>
 	<key>CFBundleIdentifier</key>

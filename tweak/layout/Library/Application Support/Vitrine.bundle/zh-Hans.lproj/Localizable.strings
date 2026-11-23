@@ -393,7 +393,6 @@
 "settings.mod.language.chinese" = "简体中文";
 "settings.mod.language.english" = "English";
 "settings.mod.language.footer" = "重启 Spotify 后生效。";
-"settings.mod.language.korean" = "한국어";
 "settings.mod.language.system" = "跟随系统";
 "settings.mod.language.title" = "语言";
 "settings.mod.licenses.autoeq.subtitle" = "耳机校正 · MIT 许可证";
