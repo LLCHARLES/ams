@@ -155,6 +155,10 @@ UIImageView *SGRSystemCutDisc(NSString *symbol) {
 static const CGFloat kRowAboveSafeArea = 32, kRowMinBottom = 34, kRouteLineDrop = 32;
 // The add button's glyph beside the title and artist, and its touch square.
 static const CGFloat kAddGlyph = 22, kAddSide = 44;
+// Apple Music's title row, measured off the owner's 393pt screenshots: the title starts at 32pt (the progress bar
+// stays at kMargin + kBarInset), the ⋯ sits about 10pt further in than this page's old trailing margin, and the
+// white ink gap between neighbouring glyphs is about 27pt. The TV button joins the star and ⋯ on the same gap.
+static const CGFloat kTitleInset = 32, kMoreInset = 10, kRowInkGap = 27;
 // The layout from the bottom row up, still the redesigned player's chain (the volume's middle above the row's, the
 // controls' above the volume's, the times' above the controls', the progress bar's above the times'), the first three
 // gaps times controlsSpacing() (below); the header's circles in from the sides and down from the safe area; previous
@@ -2306,16 +2310,16 @@ static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
     _queueView.frame = whole;
     _queueView.headRoom = stageTop - headTop;
     [_queueView setControlsCover:_queueDragging ? 0 : _queueView.controlsHeight animated:self.view.window != nil];
-    // The add button at the trailing margin, its glyph's edge on it, centered on the title and artist; they end before it.
-    // The ⋯ at the trailing margin, the star before it, as the Music app's row has them (its owner, 2026-11-06).
-    CGFloat addInset = (kAddSide - kAddGlyph) / 2, moreRight = width - kMargin + (kAddSide - 20) / 2;
-    CGFloat addRight = moreRight - kAddSide + 4;
+    // The ⋯ inside Apple Music's trailing margin, the star before it: their glyphs keep the Music app's ink gap,
+    // and the title and artist end before the row (its owner, 2026-11-06; retuned to the screenshots 2026-11-23).
+    CGFloat addInset = (kAddSide - kAddGlyph) / 2, moreRight = width - kMargin + (kAddSide - 20) / 2 - kMoreInset;
     // Switch to Video and the DJ's button leftwards of the star, the space between the glyphs themselves the same as
     // between the star and the ⋯, not their centres: the TV glyph is wide and the ⋯ narrow, and equal steps left the TV
     // crowding the star (its owner, 2026-11-10: "are these buttons spaced out properly?").
     CGFloat moreInk = glyphWidth(nil), starInk = glyphWidth(_add.glyph);
-    CGFloat gap = (kAddSide - 4) - (starInk + moreInk) / 2;
-    CGFloat prevCentre = _add.hidden ? moreRight - kAddSide / 2 : addRight - kAddSide / 2;
+    CGFloat gap = kRowInkGap, moreCentre = moreRight - kAddSide / 2;
+    CGFloat addRight = moreCentre - (starInk + moreInk) / 2 - gap + kAddSide / 2;
+    CGFloat prevCentre = _add.hidden ? moreCentre : addRight - kAddSide / 2;
     CGFloat prevInk = _add.hidden ? moreInk : starInk;
     CGFloat switchCentre = prevCentre, djCentre = prevCentre;
     if (!_switchVideo.hidden) {
@@ -2334,7 +2338,7 @@ static const CGFloat kJamFace = 28, kJamFaceStep = 18, kJamInset = 8;
     CGFloat nextRight = (_switchVideo.hidden && _djButton.hidden) ? (_add.hidden ? addRight : addRight - kAddSide + 4) : prevCentre - kAddSide / 2 + 4;
     CGFloat textRight = nextRight + addInset - 8;
     BOOL topRow = _lyricsOpen || _queueOpen;
-    CGFloat textX = topRow ? CGRectGetMaxX(thumb) + kThumbGap : kMargin;
+    CGFloat textX = topRow ? CGRectGetMaxX(thumb) + kThumbGap : kTitleInset;
     CGFloat textY = topRow ? round(CGRectGetMidY(thumb) - (titleHeight + artistHeight) / 2) : titleY;
     CGFloat textWidth = MAX(0, textRight - textX);
     // By bounds and center, not frame: the queue's push moves the block by its transform, which a frame set over it undid,
