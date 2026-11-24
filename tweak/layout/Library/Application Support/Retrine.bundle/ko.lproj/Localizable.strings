@@ -1544,6 +1544,7 @@
 "settings.lyricslook.wave.title" = "파동";
 
 "settings.lyricssources.binilyrics.subtitle" = "Apple Music 단어 단위 싱크";
+"settings.lyricssources.amll.subtitle" = "Spotify ID 또는 제목으로 단어 단위 싱크";
 "settings.lyricssources.bugs.subtitle" = "줄 단위 싱크, 국내 음원";
 "settings.lyricssources.deezer.action.cancel" = "취소";
 "settings.lyricssources.deezer.action.remove" = "제거";
@@ -1574,6 +1575,7 @@
 "settings.lyricssources.pick.menu" = "가사 소스";
 "settings.lyricssources.pick.order" = "소스 순서대로";
 "settings.lyricssources.qqmusic.subtitle" = "줄 단위 싱크, 중국 카탈로그";
+"settings.lyricssources.luoyue.subtitle" = "단어 단위 싱크, 중국어 번역 (落月)";
 "settings.lyricssources.spicy.action.open_dashboard" = "대시보드 열기";
 "settings.lyricssources.spicy.alert.instructions" = "Spicy Lyrics for Developers에 가입하고 애플리케이션을 생성한 뒤, 'No origin header allowed'로 클라이언트 액세스를 활성화하고 공개 가능 키(sl_pk_)를 붙여넣으세요. 키는 이 iPhone에만 저장됩니다.";
 "settings.lyricssources.spicy.alert.invalid_key" = "공개 가능 키(Publishable Key)가 아닙니다.";

@@ -9,6 +9,11 @@
 #import "Core/SGOptionalWork.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "../harness-fail.h"
+
+// AMLL and 落月 are registered in the real walk but their network code is not part of this harness;
+// the walk tests drive prepared replies instead.
+SGLyricsAsk SGAMLLAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *result)) { done(nil); };
+SGLyricsAsk SGLuoyueAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *result)) { done(nil); };
 #define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "FAILED line %d: %s\n", __LINE__, #cond); exit(1); } } while (0)
 
 static void (^sg_pinnedReply)(SGLyricsResult *);
@@ -1862,13 +1867,13 @@ static void checkUntimedFailureSuppliesPage(void) {
 
 static void checkAskModeMigration(void) {
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    NSArray *expected = @[SGImportedLRCKey, SGSpicyLyricsKey, @"binilyrics", @"lyricsplus",
-        @"musixmatch", @"unison", @"deezer", @"netease", @"petitlyrics", @"lrclib", @"bugs", @"genie", @"qqmusic", @"kugou", @"genius"];
+    NSArray *expected = @[SGImportedLRCKey, SGSpicyLyricsKey, @"binilyrics", @"amll", @"lyricsplus",
+        @"musixmatch", @"unison", @"deezer", @"netease", @"petitlyrics", @"lrclib", @"bugs", @"genie", @"qqmusic", @"luoyue", @"kugou", @"genius"];
     CHECK([SGLyricsOrder() isEqual:expected]);
     // Simulate a saved order from before catalog tracking, without restoring disabled sources.
     [defaults setObject:@[@"musixmatch", @"lrclib", @"genius"] forKey:SGKeyLyricsProviders];
     [defaults removeObjectForKey:SGKeyLyricsKnownProviders];
-    NSArray *migrated = @[@"musixmatch", @"petitlyrics", @"lrclib", @"genius"];
+    NSArray *migrated = @[@"amll", @"musixmatch", @"petitlyrics", @"lrclib", @"luoyue", @"genius"];
     CHECK([SGLyricsOrder() isEqual:migrated]);
     CHECK([[defaults arrayForKey:SGKeyLyricsProviders] isEqual:migrated]);
     CHECK([SGLyricsOrder() isEqual:migrated]);

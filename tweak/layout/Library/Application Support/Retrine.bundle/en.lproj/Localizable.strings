@@ -1463,6 +1463,7 @@
 "settings.lyricslook.title" = "Lyrics Style";
 "settings.lyricslook.wave.title" = "Wave";
 
+"settings.lyricssources.amll.subtitle" = "Word timing, by Spotify id or name";
 "settings.lyricssources.binilyrics.subtitle" = "Apple Music word timing";
 "settings.lyricssources.bugs.subtitle" = "Line timing, Korean catalog";
 "settings.lyricssources.deezer.action.cancel" = "Cancel";
@@ -1484,6 +1485,7 @@
 "settings.lyricssources.intro" = "Drag to set source priority. Choose how sources are asked in Request mode & lyric types. In All at once mode, the first word-timed answer wins regardless of order. Deezer uses your own login cookie when you add it.";
 "settings.lyricssources.kugou.subtitle" = "Word timing, Chinese catalog";
 "settings.lyricssources.lrclib.subtitle" = "Line timing, open fallback";
+"settings.lyricssources.luoyue.subtitle" = "Word timing, Chinese translation (落月)";
 "settings.lyricssources.lyricsplus.subtitle" = "Word and line timing, multiple catalogs";
 "settings.lyricssources.musixmatch.subtitle" = "Spotify's licensed catalog";
 "settings.lyricssources.netease.subtitle" = "Word timing, censored";

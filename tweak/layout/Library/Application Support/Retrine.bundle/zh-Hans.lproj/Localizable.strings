@@ -1464,6 +1464,7 @@
 "settings.lyricslook.wave.title" = "波浪";
 
 "settings.lyricssources.binilyrics.subtitle" = "Apple Music 逐字同步";
+"settings.lyricssources.amll.subtitle" = "逐字同步，按 Spotify ID 或歌名查找";
 "settings.lyricssources.bugs.subtitle" = "逐行同步，韩国曲库";
 "settings.lyricssources.deezer.action.cancel" = "取消";
 "settings.lyricssources.deezer.action.remove" = "移除";
@@ -1494,6 +1495,7 @@
 "settings.lyricssources.pick.menu" = "歌词来源";
 "settings.lyricssources.pick.order" = "按排序决定";
 "settings.lyricssources.qqmusic.subtitle" = "逐行同步，中文曲库";
+"settings.lyricssources.luoyue.subtitle" = "逐字同步，中文翻译（落月）";
 "settings.lyricssources.spicy.action.open_dashboard" = "打开控制台";
 "settings.lyricssources.spicy.alert.instructions" = "在 Spicy Lyrics for Developers 注册，创建应用，开启客户端访问并允许无来源标头（No origin header allowed），然后粘贴其 publishable key（sl_pk_）。该密钥只保存在这台 iPhone 上。";
 "settings.lyricssources.spicy.alert.invalid_key" = "这不是可发布的密钥。";

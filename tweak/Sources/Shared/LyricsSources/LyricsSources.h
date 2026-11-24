@@ -137,7 +137,7 @@ void SGLyricsPageLines(NSArray<SGKaraokeLine *> *lines, NSArray<NSNumber *> **st
 @property (nonatomic, copy) NSString *name;     // "BiniLyrics", what the credit reads
 @property (nonatomic, copy) NSString *detail;   // one line under the name on the Lyrics page
 // Searches by title and artist, so it has nothing to ask with until someone has named the track.
-// Musixmatch matches by Spotify's id and can go without.
+// Musixmatch and AMLL match by Spotify's id and can go without, though AMLL falls back to a name search.
 @property (nonatomic) BOOL needsName;
 // Has only untimed lines, which never replace lines already found, so it is asked only while there are none
 // and Spotify has none of its own.
@@ -292,6 +292,7 @@ NSString *SGLyricsTranslationLanguage(void);
 
 // The sources themselves, each in its own file.
 extern SGLyricsAsk SGBiniLyricsAsk;
+extern SGLyricsAsk SGAMLLAsk;
 extern SGLyricsAsk SGMusixmatchAsk;
 // Musixmatch's community translations of a track into `language`, by SGMusixmatchLineKey of each original
 // line, or nil when there are none. Main queue, and at once when the answer is in. Asked once per
@@ -307,6 +308,7 @@ extern SGLyricsAsk SGNetEaseAsk;
 extern SGLyricsAsk SGLrcLibAsk;
 extern SGLyricsAsk SGSpicyLyricsAsk;
 extern SGLyricsAsk SGQQMusicAsk;
+extern SGLyricsAsk SGLuoyueAsk;
 extern SGLyricsAsk SGKuGouAsk;
 extern SGLyricsAsk SGBugsAsk;
 extern SGLyricsAsk SGGenieAsk;

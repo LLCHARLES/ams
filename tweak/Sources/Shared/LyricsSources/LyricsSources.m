@@ -368,13 +368,14 @@ NSArray<SGLyricsProvider *> *SGLyricsAllProviders(void) {
             provider.detail = detail;
             // A source that matches by Spotify's own track id has everything it needs from the
             // start; the rest wait for the player to name the track before they can search.
-            provider.needsName = ![key isEqualToString:@"musixmatch"] && ![key isEqualToString:SGSpicyLyricsKey];
+            provider.needsName = ![key isEqualToString:@"musixmatch"] && ![key isEqualToString:SGSpicyLyricsKey] && ![key isEqualToString:@"amll"];
             provider.untimed = [key isEqualToString:@"genius"];
             provider.ask = ask;
             return provider;
         };
         all = @[
             make(@"binilyrics", @"BiniLyrics", SGL(@"settings.lyricssources.binilyrics.subtitle", @"Apple Music word timing"), SGBiniLyricsAsk),
+            make(@"amll", @"AMLL", SGL(@"settings.lyricssources.amll.subtitle", @"Word timing, by Spotify id or name"), SGAMLLAsk),
             make(@"lyricsplus", @"LyricsPlus", SGL(@"settings.lyricssources.lyricsplus.subtitle", @"Word and line timing, multiple catalogs"), SGLyricsPlusAsk),
             make(@"musixmatch", @"Musixmatch", SGL(@"settings.lyricssources.musixmatch.subtitle", @"Spotify's licensed catalog"), SGMusixmatchAsk),
             make(@"unison", @"Unison", SGL(@"settings.lyricssources.unison.subtitle", @"Hand-timed, few tracks"), SGUnisonAsk),
@@ -385,6 +386,7 @@ NSArray<SGLyricsProvider *> *SGLyricsAllProviders(void) {
             make(@"petitlyrics", @"PetitLyrics", SGL(@"settings.lyricssources.petitlyrics.subtitle", @"Word and line timing, Japanese catalog"), SGPetitLyricsAsk),
             make(SGSpicyLyricsKey, @"Spicy Lyrics", SGL(@"settings.lyricssources.spicylyrics.subtitle", @"Community word syncs, your own key"), SGSpicyLyricsAsk),
             make(@"qqmusic", @"QQ Music", SGL(@"settings.lyricssources.qqmusic.subtitle", @"Line timing, Chinese catalog"), SGQQMusicAsk),
+            make(@"luoyue", @"落月", SGL(@"settings.lyricssources.luoyue.subtitle", @"Word timing, Chinese translation (落月)"), SGLuoyueAsk),
             make(@"kugou", @"KuGou", SGL(@"settings.lyricssources.kugou.subtitle", @"Word timing, Chinese catalog"), SGKuGouAsk),
             make(@"deezer", @"Deezer", SGL(@"settings.lyricssources.deezer.subtitle", @"Word and line timing, your own ARL"), SGDeezerAsk),
             make(SGImportedLRCKey, SGL(@"settings.lyricssources.importedlrc.title", @"Imported lyrics"), SGL(@"settings.lyricssources.importedlrc.subtitle", @"Your own LRC, TTML or text files"), SGImportedLRCAsk),
@@ -422,6 +424,10 @@ static NSArray<NSString *> *sourcesBeforeCatalogTracking(void) {
 static NSArray<NSString *> *defaultOrder(void) {
     NSMutableArray *order = [sourcesBeforeCatalogTracking() mutableCopy];
     [order insertObject:@"petitlyrics" atIndex:[order indexOfObject:@"lrclib"]];
+    // Newcomers are added here, not in the historical set above: an install with a saved order keeps
+    // its choices, and catalog tracking slips each of these in once at its neighbour's position.
+    [order insertObject:@"amll" atIndex:[order indexOfObject:@"binilyrics"] + 1];
+    [order insertObject:@"luoyue" atIndex:[order indexOfObject:@"kugou"]];
     return order;
 }
 
