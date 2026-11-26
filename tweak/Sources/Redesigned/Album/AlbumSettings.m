@@ -117,6 +117,7 @@ UIViewController *SGRAlbumSettingsPage(void) {
     SGModRow *source = SGChoiceRow(SGL(@"settings.album.play_counts.source", @"Count source"), nil, SGRKeyAlbumPlayCountsSource,
         @[SGL(@"settings.album.play_counts.your_plays", @"Your plays"), SGL(@"settings.album.play_counts.spotify_plays", @"Spotify plays")],
         SGRAlbumUsesSpotifyCounts());
+    source.visible = ^BOOL { return SGRAlbumPlayCountsWhere() != SGRAlbumPlayCountsOff; };
     SGModRow *plays = SGChoiceRow(SGL(@"settings.album.play_counts.title", @"Play counts"), nil, SGRKeyAlbumPlayCountsPlace,
                                   @[SGL(@"settings.album.play_counts.choice.off", @"Off"), SGL(@"settings.album.play_counts.choice.in_row", @"In the row"),
                                     SGL(@"settings.album.play_counts.choice.in_menu", @"In menu")], SGRAlbumPlayCountsWhere());

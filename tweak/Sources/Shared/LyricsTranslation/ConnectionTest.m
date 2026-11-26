@@ -41,7 +41,7 @@ static NSString *diagnosticLine(SGTranslationConnectionReport *report, NSInteger
 static NSURLRequest *testRequest(SGConnectionTestKind kind, NSString **problem) {
     if (kind == SGConnectionTestModels) return SGOpenAIModelsRequest(problem);
     NSString *prompt = SGLyricsTranslationPrompt(@[kSampleSentence], SGLyricsGeminiLanguage());
-    if (!prompt) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page."); return nil; }
+    if (!prompt) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI."); return nil; }
     return SGOpenAIRequest(SGLyricsTranslationInstruction(), prompt, SGLyricsReplyJSON, problem);
 }
 
@@ -87,7 +87,7 @@ static BOOL validSample(NSString *text) {
 - (void)failBeforeSending:(NSString *)problem {
     SGTranslationConnectionReport *report = [SGTranslationConnectionReport new];
     report.stage = SGConnectionCheckConfiguration;
-    report.problem = problem ?: SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page.");
+    report.problem = problem ?: SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI.");
     report.diagnostic = diagnosticLine(report, 0, nil, @"sent=no");
     dispatch_async(dispatch_get_main_queue(), ^{ [self complete:report]; });
 }
@@ -124,7 +124,7 @@ static BOOL validSample(NSString *text) {
         if (status == 401 || status == 403) {
             report.stage = SGConnectionCheckAuthentication;
             report.authenticated = SGConnectionFactNo;
-            report.problem = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it on the Lyrics page.");
+            report.problem = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it in Lyrics › Translation & AI.");
         } else if (status == 429 || (status >= 500 && status <= 599)) {
             report.stage = models ? SGConnectionCheckModels : SGConnectionCheckTranslation;
             report.problem = SGL(@"settings.translation.openai.error.busy", @"The translation service is busy right now. Try again in a minute.");
@@ -153,7 +153,7 @@ static BOOL validSample(NSString *text) {
                 report.problem = SGL(@"settings.translation.openai.test.nomodels", @"This service does not list its models. The connection works; try Test translation to check the model itself.");
             } else {
                 report.models = SGConnectionFactNo;
-                report.problem = [NSString stringWithFormat:SGL(@"settings.translation.openai.test.modelstatus", @"The model list was refused (%ld). Check the address and model on the Lyrics page."), (long)status];
+                report.problem = [NSString stringWithFormat:SGL(@"settings.translation.openai.test.modelstatus", @"The model list was refused (%ld). Check the address and model in Lyrics › Translation & AI."), (long)status];
             }
         } else {
             report.stage = SGConnectionCheckTranslation;
@@ -170,7 +170,7 @@ static BOOL validSample(NSString *text) {
                 report.translated = SGConnectionFactNo;
                 report.models = SGConnectionFactNo;
                 report.authenticated = SGConnectionFactUnknown;
-                report.problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page.");
+                report.problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI.");
             } else {
                 report.translated = SGConnectionFactNo;
                 report.problem = [NSString stringWithFormat:SGL(@"settings.translation.openai.error.status", @"The service did not translate the song (%ld)."), (long)status];

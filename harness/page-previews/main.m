@@ -72,6 +72,15 @@ static UITableView *tableOf(UIViewController *page) {
     return ((UITableViewController *)page).tableView;
 }
 
+static BOOL showsRow(UITableView *table, NSString *title) {
+    for (NSInteger s = 0; s < table.numberOfSections; s++)
+        for (NSInteger r = 0; r < [table numberOfRowsInSection:s]; r++) {
+            UITableViewCell *cell = [table.dataSource tableView:table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:r inSection:s]];
+            if ([((UIListContentConfiguration *)cell.contentConfiguration).text isEqual:title]) return YES;
+        }
+    return NO;
+}
+
 static SGRPagePreview *show(UIViewController *(^builder)(void)) {
     UIViewController *page = builder();
     nav.viewControllers = @[page];
@@ -168,6 +177,11 @@ static void runArtistField(void) {
     spin(1.0);
     if ([card.fieldColor isEqual:spotify]) HARNESS_FAIL(@"artist: the field kept Spotify's photo's color under Apple Music's");
     printf("PASS artist field follows the photo\n");
+    SGSetEnabled(SGRKeyArtistCutOutPlay, YES);
+    for (NSNumber *round in @[@NO, @YES]) {
+        SGSetEnabled(SGRKeyArtistRoundPlay, round.boolValue);
+        HARNESS_CHECK(showsRow(tableOf(SGRArtistSettingsPage()), @"Accent Play button") == round.boolValue);
+    }
 }
 
 static UIView *partNamed(UIView *view, NSString *name) {
@@ -264,6 +278,9 @@ static void runCoverChoices(void) {
     SGSetInt(SGRKeyAlbumPlayCountsSource, 0);
     spin(0.4);
     if (!visibleText(card, @"Your plays: 12")) HARNESS_FAIL(@"menu preview must restore personal source");
+    HARNESS_CHECK(showsRow(tableOf(SGRAlbumSettingsPage()), @"Count source"));
+    SGSetInt(SGRKeyAlbumPlayCountsPlace, SGRAlbumPlayCountsOff);
+    HARNESS_CHECK(!showsRow(tableOf(SGRAlbumSettingsPage()), @"Count source"));
     printf("PASS four cover combinations and both count sources in row/menu previews\n");
 }
 

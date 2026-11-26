@@ -11,8 +11,8 @@
 // off; applies as soon as the bar lays out again. Spotify's own fade under its bar stays off either way.
 #define SGRKeyNavbarFade @"spotifyglass.redesign.navbar.fade"
 // Apple symbols: the glass bar draws each of Spotify's own tabs with an SF Symbol for the page it opens (TabBar.x), on
-// the bar, the Tab bar page's preview and its list; a tab of the mod's own keeps the icon picked for it. Off unless
-// set; applies as soon as the bar lays out again.
+// the bar, the Tab bar page's preview and its list; a tab of the mod's own keeps the icon picked for it. On unless
+// switched off; applies as soon as the bar lays out again.
 #define SGRKeyNavbarSymbols @"spotifyglass.redesign.navbar.symbols"
 
 extern NSString *const SGRNavbarID;      // NSString, the entry's identity

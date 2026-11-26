@@ -27,7 +27,7 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStylePlain])) return nil;
-    self.title = SGL(@"settings.flags.title", @"Flags");
+    self.title = SGL(@"settings.main.all_flags.title", @"All flags");
     return self;
 }
 

@@ -242,7 +242,7 @@ static NSString *unreadable(void) {
         NSString *problem = nil;
         NSArray *translated = nil;
         if (error) problem = SGL(@"settings.translation.deepl.error.unreachable", @"DeepL could not be reached.");
-        else if (status == 403 || status == 401) problem = SGL(@"settings.translation.deepl.error.keyinvalid", @"DeepL turned the key down. Check it on the Lyrics page.");
+        else if (status == 403 || status == 401) problem = SGL(@"settings.translation.deepl.error.keyinvalid", @"DeepL turned the key down. Check it in Lyrics › Translation & AI.");
         else if (status == 456) problem = SGL(@"settings.translation.deepl.error.quota", @"This DeepL key's translation quota is used up.");
         else if (status == 429) problem = SGL(@"settings.translation.deepl.error.busy", @"DeepL is busy right now. Try again in a minute.");
         else if (status != 200) problem = [NSString stringWithFormat:SGL(@"settings.translation.deepl.error.status", @"DeepL did not translate the song (%ld)."), (long)status];
@@ -288,7 +288,7 @@ void SGLyricsTranslateWithDeepL(NSString *trackID, NSArray<SGKaraokeLine *> *lin
                                void (^done)(NSArray<NSString *> *, NSString *)) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *key = storedKey(), *target = SGDeepLTargetLanguage(languageTag);
-        if (!key) { done(nil, SGL(@"settings.translation.deepl.error.nokey", @"Add a DeepL API key on the Lyrics page first.")); return; }
+        if (!key) { done(nil, SGL(@"settings.translation.deepl.error.nokey", @"Add a DeepL API key in Lyrics › Translation & AI first.")); return; }
         if (!target) { done(nil, SGL(@"settings.translation.deepl.error.language", @"DeepL does not support this translation language.")); return; }
         if (![lines isKindOfClass:NSArray.class] || lines.count > 2000) { done(nil, unreadable()); return; }
         NSMutableArray *texts = [NSMutableArray array];
@@ -308,7 +308,7 @@ void SGLyricsTranslateWithDeepL(NSString *trackID, NSArray<SGKaraokeLine *> *lin
 void SGDeepLTranslateTexts(NSArray<NSString *> *texts, NSString *languageTag, void (^done)(NSArray<NSString *> *, NSString *)) {
     dispatch_async(dispatch_get_main_queue(), ^{
         NSString *key = storedKey(), *target = SGDeepLTargetLanguage(languageTag);
-        if (!key) { done(nil, SGL(@"settings.translation.deepl.error.nokey", @"Add a DeepL API key on the Lyrics page first.")); return; }
+        if (!key) { done(nil, SGL(@"settings.translation.deepl.error.nokey", @"Add a DeepL API key in Lyrics › Translation & AI first.")); return; }
         if (!target) { done(nil, SGL(@"settings.translation.deepl.error.language", @"DeepL does not support this translation language.")); return; }
         const NSUInteger maxTextUTF16Units = 16000;
         SGLyricsTranslateSegments(texts, maxTextUTF16Units, SGProseSegmentUTF16, ^(NSArray *segments, void (^finish)(NSArray *, NSString *)) {

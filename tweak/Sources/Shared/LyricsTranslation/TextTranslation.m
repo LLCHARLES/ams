@@ -145,7 +145,7 @@ void SGLyricsTranslateTexts(NSArray<NSString *> *texts, NSString *languageTag, U
         NSString *language = SGLyricsAILanguageName(languageTag);
         SGProseTranslator translator = proseTranslator(languageTag);
         if (translator < 0) {
-            done(nil, SGL(@"settings.translation.text.noservice", @"Set up a translation service on the Lyrics page first."));
+            done(nil, SGL(@"settings.translation.text.noservice", @"Set up a translation service in Lyrics › Translation & AI first."));
             return;
         }
         if (!SGLyricsProseTextsValid(texts) || !language) {

@@ -185,7 +185,7 @@ NSArray<NSString *> *SGGeminiReplyIn(id root, NSInteger status, NSError *error, 
             ? SGL(@"settings.translation.error.timeout", @"Gemini timed out. Try a longer timeout or choose another model in Mod Settings > Lyrics > Translation & AI > Gemini.")
             : SGL(@"settings.translation.error.unreachable", @"Gemini could not be reached.");
     } else if (status == 401 || status == 403 || (status == 400 && [googleSays localizedCaseInsensitiveContainsString:@"API key"])) {
-        *problem = SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it on the Lyrics page.");
+        *problem = SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it in Lyrics › Translation & AI.");
     } else if (status == 400) {
         *problem = googleSays.length ? [NSString stringWithFormat:SGL(@"settings.translation.error.badrequestformat", @"Gemini did not take the request: %@"), googleSays]
                                      : SGL(@"settings.translation.error.badrequest", @"Gemini did not take the request (400).");
@@ -275,7 +275,7 @@ void SGLyricsTranslateWithGeminiFormat(NSString *trackID, NSArray<SGKaraokeLine 
                                       SGLyricsReplyFormat format, void (^done)(NSArray<NSString *> *, NSString *)) {
     NSString *key = storedKey();
     if (!key) {
-        done(nil, SGL(@"settings.translation.error.nokey", @"Add a Gemini API key on the Lyrics page first."));
+        done(nil, SGL(@"settings.translation.error.nokey", @"Add a Gemini API key in Lyrics › Translation & AI first."));
         return;
     }
     if (!sg_done) sg_done = [NSMutableDictionary dictionary];
@@ -393,7 +393,7 @@ NSURLRequest *SGGeminiAIRequest(NSString *system, NSString *prompt, NSString **p
 }
 NSURLRequest *SGGeminiAIRequestWithFormat(NSString *system, NSString *prompt, SGLyricsReplyFormat format, NSString **problem) {
     NSString *key = storedKey();
-    if (!key) { *problem = SGL(@"settings.translation.error.nokey", @"Add a Gemini API key on the Lyrics page first."); return nil; }
+    if (!key) { *problem = SGL(@"settings.translation.error.nokey", @"Add a Gemini API key in Lyrics › Translation & AI first."); return nil; }
     return geminiRequest(key, geminiBody(system, prompt, format));
 }
 

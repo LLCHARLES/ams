@@ -1,5 +1,6 @@
 // Real settings actions, with only UIKit presentation and icon-changing replaced.
 #import <objc/runtime.h>
+#import "Core/SGPrefs.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Shared/AppIcon/AppIcon.h"
@@ -30,7 +31,12 @@ void SGCheckInformationAlerts(void) {
 
     UITableViewController *artists = (UITableViewController *)SGArtistBlockSettingsPage();
     expectedPresenter = artists;
-    [artists tableView:artists.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:2]];
+    NSIndexPath *add = [NSIndexPath indexPathForRow:0 inSection:2];
+    SGSetEnabled(SGKeyArtistBlock, NO);
+    [artists tableView:artists.tableView didSelectRowAtIndexPath:add];
+    HARNESS_CHECK(!shown && ![artists tableView:artists.tableView cellForRowAtIndexPath:add].userInteractionEnabled);
+    SGSetEnabled(SGKeyArtistBlock, YES);
+    [artists tableView:artists.tableView didSelectRowAtIndexPath:add];
     checkAlert(@"Nothing playing", @"Play a track by the artist first, then come back here.");
 
     expectedPresenter = SGTopController();

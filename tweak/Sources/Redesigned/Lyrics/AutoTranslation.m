@@ -314,10 +314,10 @@ static SGRAutoTranslationFailure failureOf(NSString *problem) {
         SGL(@"settings.translation.claude.error.unreachable", @"Claude could not be reached.")];
     if (problem && [connection containsObject:problem]) return SGRAutoTranslationFailureConnection;
     NSArray *authentication = @[
-        SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it on the Lyrics page."),
-        SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it on the Lyrics page."),
-        SGL(@"settings.translation.deepl.error.keyinvalid", @"DeepL turned the key down. Check it on the Lyrics page."),
-        SGL(@"settings.translation.claude.error.keyinvalid", @"Claude turned the key down. Check it on the Lyrics page.")];
+        SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it in Lyrics › Translation & AI."),
+        SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it in Lyrics › Translation & AI."),
+        SGL(@"settings.translation.deepl.error.keyinvalid", @"DeepL turned the key down. Check it in Lyrics › Translation & AI."),
+        SGL(@"settings.translation.claude.error.keyinvalid", @"Claude turned the key down. Check it in Lyrics › Translation & AI.")];
     if (problem && [authentication containsObject:problem]) return SGRAutoTranslationFailureAuthentication;
     NSArray *busy = @[
         SGL(@"settings.translation.openai.error.busy", @"The translation service is busy right now. Try again in a minute."),

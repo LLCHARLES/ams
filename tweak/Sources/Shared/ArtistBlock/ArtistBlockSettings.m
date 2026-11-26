@@ -99,11 +99,16 @@ typedef NS_ENUM(NSInteger, SGArtistSection) {
             SGFillCell(cell, artist[SGArtistName], artist[SGArtistURI], nil, nil);
             break;
     }
+    BOOL enabled = path.section == SGArtistSectionSwitch || SGFlag(SGKeyArtistBlock, NO);
+    cell.userInteractionEnabled = enabled;
+    cell.contentView.alpha = cell.accessoryView.alpha = enabled ? 1 : 0.45;
+    if (enabled) cell.accessibilityTraits &= ~UIAccessibilityTraitNotEnabled;
+    else cell.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
     return cell;
 }
 
 - (BOOL)tableView:(UITableView *)table canEditRowAtIndexPath:(NSIndexPath *)path {
-    return path.section == SGArtistSectionList && _blocked.count > 0;
+    return path.section == SGArtistSectionList && _blocked.count > 0 && SGFlag(SGKeyArtistBlock, NO);
 }
 
 - (NSString *)tableView:(UITableView *)table titleForDeleteConfirmationButtonForRowAtIndexPath:(NSIndexPath *)path {
@@ -111,13 +116,14 @@ typedef NS_ENUM(NSInteger, SGArtistSection) {
 }
 
 - (void)tableView:(UITableView *)table commitEditingStyle:(UITableViewCellEditingStyle)style forRowAtIndexPath:(NSIndexPath *)path {
-    if (style != UITableViewCellEditingStyleDelete) return;
+    if (style != UITableViewCellEditingStyleDelete || ![self tableView:table canEditRowAtIndexPath:path]) return;
     SGUnblockArtist(_blocked[(NSUInteger)path.row][SGArtistURI]);
     [self reload];
 }
 
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
     [table deselectRowAtIndexPath:path animated:YES];
+    if (!SGFlag(SGKeyArtistBlock, NO)) return;
     if (path.section == SGArtistSectionMode) {
         SGSetEnabled(SGKeyArtistBlockFeatured, path.row == 1);
         [self reload];
@@ -155,6 +161,7 @@ typedef NS_ENUM(NSInteger, SGArtistSection) {
 
 - (void)toggled:(UISwitch *)toggle {
     SGSetEnabled(SGKeyArtistBlock, toggle.on);
+    [self reload];
 }
 
 @end

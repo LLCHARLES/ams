@@ -8,7 +8,7 @@ SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 xcrun clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -I"$SRC" \
   -Wall -Werror -Wno-deprecated-declarations \
   "$ROOT/harness/wireguard/settings.m" "$ROOT/harness/scene.m" \
-  "$SRC/Shared/WireGuard/SGWGSettingsController.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGLog.m" "$SRC/Settings/SGPage.m" \
+  "$SRC/Shared/WireGuard/SGWGSettingsController.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGLog.m" "$SRC/Settings/SGPage.m" \
   -framework UIKit -framework UniformTypeIdentifiers -framework Foundation -o "$APP/WGSettings"
 cp -R "$ROOT/tweak/layout/Library/Application Support/Retrine.bundle" "$APP/"
 cat > "$APP/Info.plist" <<'PLIST'

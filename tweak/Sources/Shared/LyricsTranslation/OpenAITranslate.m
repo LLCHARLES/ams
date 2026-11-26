@@ -254,8 +254,8 @@ void SGLyricsTranslateWithOpenAIFormat(NSString *trackID, NSArray<SGKaraokeLine 
         NSString *base = setting(SGKeyLyricsOpenAIBaseURL, kBase);
         NSString *key = storedKey(base), *model = SGOpenAIModel();
         NSURL *endpoint = SGOpenAICompletionURL(base);
-        if (!key) { done(nil, SGL(@"settings.translation.openai.error.nokey", @"Add an OpenAI-compatible API key on the Lyrics page first.")); return; }
-        if (!endpoint) { done(nil, SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page.")); return; }
+        if (!key) { done(nil, SGL(@"settings.translation.openai.error.nokey", @"Add an OpenAI-compatible API key in Lyrics › Translation & AI first.")); return; }
+        if (!endpoint) { done(nil, SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI.")); return; }
         if (![languageTag isKindOfClass:NSString.class] || !languageTag.length || languageTag.length > 64 || ![lines isKindOfClass:NSArray.class] || lines.count > 2000) { done(nil, unreadable()); return; }
         NSMutableArray *texts = [NSMutableArray array];
         NSUInteger size = 0;
@@ -289,7 +289,7 @@ void SGLyricsTranslateWithOpenAIFormat(NSString *trackID, NSArray<SGKaraokeLine 
             NSString *problem = nil;
             NSArray *translated = nil;
             if (error) problem = SGL(@"settings.translation.openai.error.unreachable", @"The translation service could not be reached.");
-            else if (status == 401 || status == 403) problem = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it on the Lyrics page.");
+            else if (status == 401 || status == 403) problem = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it in Lyrics › Translation & AI.");
             else if (status == 429 || (status >= 500 && status <= 599)) problem = SGL(@"settings.translation.openai.error.busy", @"The translation service is busy right now. Try again in a minute.");
             else if (status != 200) problem = [NSString stringWithFormat:SGL(@"settings.translation.openai.error.status", @"The service did not translate the song (%ld)."), (long)status];
             else {
@@ -414,7 +414,7 @@ SGModRow *SGOpenAIPresetRow(void) {
 NSURLRequest *SGOpenAIModelsRequest(NSString **problem) {
     NSString *base = setting(SGKeyLyricsOpenAIBaseURL, kBase), *key = storedKey(base);
     NSURL *endpoint = SGOpenAIModelsURL(base);
-    if (!endpoint) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page."); return nil; }
+    if (!endpoint) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI."); return nil; }
     if (!key) { *problem = SGL(@"settings.translation.models.error.nokey", @"Save an API key first, and its models are listed here."); return nil; }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:endpoint];
     [request setValue:[@"Bearer " stringByAppendingString:key] forHTTPHeaderField:@"Authorization"];
@@ -425,8 +425,8 @@ NSURLRequest *SGOpenAIRequest(NSString *system, NSString *prompt, SGLyricsReplyF
     NSString *base = setting(SGKeyLyricsOpenAIBaseURL, kBase);
     NSString *key = storedKey(base), *model = SGOpenAIModel();
     NSURL *endpoint = SGOpenAICompletionURL(base);
-    if (!key) { *problem = SGL(@"settings.translation.openai.error.nokey", @"Add an OpenAI-compatible API key on the Lyrics page first."); return nil; }
-    if (!endpoint) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model on the Lyrics page."); return nil; }
+    if (!key) { *problem = SGL(@"settings.translation.openai.error.nokey", @"Add an OpenAI-compatible API key in Lyrics › Translation & AI first."); return nil; }
+    if (!endpoint) { *problem = SGL(@"settings.translation.openai.error.settings", @"Check the translation service's base URL and model in Lyrics › Translation & AI."); return nil; }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:endpoint];
     request.HTTPMethod = @"POST";
     request.timeoutInterval = 60;

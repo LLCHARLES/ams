@@ -38,7 +38,7 @@ static NSString *noteFor(SGRAutoTranslationProgress *progress, NSString **symbol
             // Retrying cannot help until a service is set up, and the lyrics view has no safe way to open Mod Settings
             // over the player, so the note says where to go.
             *symbol = @"slash.circle";
-            return SGL(@"settings.lyricstools.status.unavailable", @"Set up a translator in Mod Settings › Lyrics");
+            return SGL(@"settings.lyricstools.status.unavailable", @"Set up a translator in Lyrics › Translation & AI");
         case SGRAutoTranslationPhaseFailed: {
             *symbol = @"exclamationmark.triangle";
             *retryable = YES;

@@ -454,7 +454,7 @@ static UITableViewCell *SAPPlainSettingsCell(NSString *label,NSString *value) {
         NSDictionary *mode=self.snapshot[@"key_request_mode"];
         return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.troubleshooting",@"%@\n\nOnly change settings in this menu if downloads are not working."),mode[@"detail"]?:@""];
     }
-    if(section==4)return @"Spotify 9.1.90 · Vitrine-Pixie v1.4.";
+    if(section==4)return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.version",@"Spotify %@ · Vitrine-Pixie v1.4."),[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"—"];
     if(section==2)return SAPL(@"settings.pixie.footer.export",@"Export downloaded Spotify audio to external apps or Files from Pixie or Spotify’s Share as file option. Choose a destination in the share sheet. The selected format applies to future exports.");
     if(section==3)return SAPL(@"settings.pixie.footer.diagnostics",@"Enable Diagnostics for detailed passive events.");
     return nil;

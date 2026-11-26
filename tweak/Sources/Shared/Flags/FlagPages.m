@@ -47,7 +47,7 @@ UIViewController *SGLabsPage(void) {
     SGModRow *likely = SGOptionRow(SGL(@"settings.labs.likely_ai_badges.title", @"Likely AI badges"), nil, SGKeyLikelyAIBadges);
     likely.waitsOn = SGKeyAIBadges;
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.labs.title", @"Labs") intro:SGL(@"settings.labs.intro", @"Unreleased features; some do nothing on your version. A switch that is on forces the feature on; off leaves it to Spotify, which may still turn it on. Changes apply after you restart Spotify.") sections:known(@[
-        SGSection(nil, @[
+        SGSection(SGL(@"settings.labs.retrine.header", @"Retrine experiments"), @[
             SGOptionRow(SGL(@"settings.labs.ai_badges.title", @"AI badges"), nil, SGKeyAIBadges),
             likely,
         ]),

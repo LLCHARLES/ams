@@ -50,13 +50,18 @@ static void runChecks(void) {
         BOOL importOK = [after isEqual:@{wg: local[wg], server: local[server], ordinary: @YES}];
         if (!exportOK || !importOK) HARNESS_FAIL(@"private settings: export %d, import %d", exportOK, importOK);
         NSString *base = @"spotifyglass.lyrics.openai.baseURL";
+        NSDictionary *historyDefaults = @{SGKeySearchRecents:@[], SGKeySeenNew:@{}};
+        [NSUserDefaults.standardUserDefaults registerDefaults:historyDefaults];
+        [store registerDefaults:historyDefaults];
         NSDictionary *install = @{base:@"https://local.example", @"spotifyglass.font.files":@[@"old.ttf"],
+                                  SGKeySearchRecents:@[@[@"page.mod"]], SGKeySeenNew:@{@"reportProblem":@YES},
                                   @"spotifyglass.localFiles.lrcLinks":@{@"track":@"kept.lrc"}};
         [store setPersistentDomain:install forName:suite];
         [store registerDefaults:@{@"spotifyglass.registered":@1}];
         NSData *json = [@"{\"settings\":{\"spotifyglass.flag.bad\":[],\"spotifyglass.amoled\":{},"
             "\"spotifyglass.unrecognized\":12,\"spotifyglass.registered\":\"no\","
             "\"spotifyglass.lyrics.openai.baseURL\":\"https://other.example\","
+            "\"spotifyglass.settings.seenNew\":{},"
             "\"spotifyglass.font.files\":[\"other.ttf\"],\"spotifyglass.localFiles.lrcLinks\":{},"
             "\"spotifyglass.dsp.convolver.file\":\"other.wav\",\"spotifyglass.redesign.untested\":true,"
             "\"spotifyglass.sponsorblock.enabled\":true}}" dataUsingEncoding:NSUTF8StringEncoding];

@@ -442,14 +442,14 @@ static BOOL adFree(void) {
     // The tips of the picked look: Split Tabs is the redesign's bar's, and the lyrics preview the redesign's page's.
     _splitTip.hidden = !_redesigned.selected;
     _lyricsTip.text = _redesigned.selected
-        ? SGL(@"settings.onboarding.tips.lyrics.redesigned", @"A live preview of the look, your choice of sources, and lyrics even where Spotify has none.\nMod Settings > Lyrics")
-        : SGL(@"settings.onboarding.tips.lyrics.native", @"Your choice of sources, and lyrics even where Spotify has none.\nMod Settings > Lyrics");
+        ? SGL(@"settings.onboarding.tips.lyrics.redesigned", @"A live preview of the look, your choice of sources, and lyrics even where Spotify has none.\nScreens › Lyrics")
+        : SGL(@"settings.onboarding.tips.lyrics.native", @"Your choice of sources, and lyrics even where Spotify has none.\nScreens › Lyrics");
 }
 
 // What people miss in Mod Settings, as pointers only: the tour has no way into a page but holding Home.
 - (UIView *)tipsView {
     UIStackView *split = cardRow(@"rectangle.split.2x1", SGL(@"settings.onboarding.split_tabs.title", @"Split Tabs"),
-                                 SGL(@"settings.onboarding.split_tabs.subtitle", @"Any tab, Queue for one, on a bar of its own at the trailing end.\nMod Settings > Tab bar > Split Tabs"), nil);
+                                 SGL(@"settings.onboarding.split_tabs.subtitle", @"Any tab, Queue for one, on a bar of its own at the trailing end.\nLook & navigation › Tab bar › Split Tabs"), nil);
     _splitTip = split;
     UIStackView *lyrics = cardRow(@"quote.bubble", SGL(@"settings.main.lyrics.title", @"Lyrics"), @"", nil);
     // The row's text stack is its last arranged view, the gray line that stack's; updateNote writes the look's.
@@ -460,9 +460,9 @@ static BOOL adFree(void) {
                                    liveActivity ? SGL(@"settings.onboarding.tips.airpods.title_live", @"AirPods gestures, Live Activity")
                                                 : SGL(@"settings.onboarding.tips.airpods.title", @"AirPods gestures"),
                                    liveActivity ? SGL(@"settings.onboarding.tips.airpods.text_live", @"Nod twice or shake your head to control the music, with a chime; and the track on the "
-                                                                                                       @"lock screen. Either look.\nMod Settings > AirPods gestures, Live Activity")
+                                                                                                       @"lock screen. Either look.\nOutside Spotify & devices › AirPods gestures, Live Activity")
                                                 : SGL(@"settings.onboarding.tips.airpods.text", @"Nod twice or shake your head to control the music, with a chime. Either look."
-                                                                                                  @"\nMod Settings > AirPods gestures"), nil);
+                                                                                                  @"\nOutside Spotify & devices › AirPods gestures"), nil);
     return tipsCard(@[split, lyrics, airPods]);
 }
 
@@ -532,7 +532,7 @@ static BOOL adFree(void) {
     _sponsorCard.accessibilityValue = _sponsor.on ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off");
     _sponsorCard.accessibilityTraits = _adsCard.accessibilityTraits;
     UILabel *sponsorText = [UILabel new];
-    sponsorText.text = [NSString stringWithFormat:SGL(@"settings.onboarding.sponsorblock.note", @"Sends a five-digit episode hash prefix and selected categories to %@. Change the server and categories in Mod Settings > Premium, ads & privacy > SponsorBlock."), SGSponsorBlockServer()];
+    sponsorText.text = [NSString stringWithFormat:SGL(@"settings.onboarding.sponsorblock.note", @"Sends a five-digit episode hash prefix and selected categories to %@. Change the server and categories under Privacy, network & downloads › Premium, ads & privacy › SponsorBlock."), SGSponsorBlockServer()];
     UIStackView *sponsorNote = noteLine(SGSymbolView(@"info.circle.fill", 15, UIImageSymbolWeightSemibold, 22), sponsorText);
     sponsorNote.arrangedSubviews.firstObject.tintColor = SGGrey();
 

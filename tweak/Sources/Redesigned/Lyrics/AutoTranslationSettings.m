@@ -41,9 +41,9 @@ static NSString *autoTranslatorDestination(SGRAutoTranslator provider) {
 static NSString *autoTranslatorSkip(SGRAutoTranslator provider, SGRAutoTranslationState state) {
     switch (state) {
         case SGRAutoTranslationReady: return nil;
-        case SGRAutoTranslationNeedsKey: return SGL(@"settings.lyrics.auto_translation.skip.key", @"Skipped: no API key on the Lyrics page");
-        case SGRAutoTranslationNeedsSwitch: return SGL(@"settings.lyrics.auto_translation.skip.switch", @"Skipped: switched off on the Lyrics page");
-        case SGRAutoTranslationNeedsSettings: return SGL(@"settings.lyrics.auto_translation.skip.settings", @"Skipped: check its base URL and model on the Lyrics page");
+        case SGRAutoTranslationNeedsKey: return SGL(@"settings.lyrics.auto_translation.skip.key", @"Skipped: no API key in Lyrics › Translation & AI");
+        case SGRAutoTranslationNeedsSwitch: return SGL(@"settings.lyrics.auto_translation.skip.switch", @"Skipped: switched off in Lyrics › Translation & AI");
+        case SGRAutoTranslationNeedsSettings: return SGL(@"settings.lyrics.auto_translation.skip.settings", @"Skipped: check its base URL and model in Lyrics › Translation & AI");
         case SGRAutoTranslationUnavailableDevice:
             return provider == SGRAutoTranslatorAppleIntelligence
                 ? SGL(@"settings.lyrics.auto_translation.skip.intelligence", @"Skipped: needs Apple Intelligence on, in a language it supports")
@@ -75,7 +75,7 @@ static NSString *autoTranslatorSkip(SGRAutoTranslator provider, SGRAutoTranslati
     self.tableView.editing = YES;
     _footer = SGNote(SGL(@"settings.lyrics.auto_translation.order.footer",
         @"When lyrics show without a translation of their own, each service is asked once, from the top: lines one leaves "
-        @"untranslated, or a whole song it fails, go on to the next. Gray ones are skipped until they are set up on the Lyrics page. "
+        @"untranslated, or a whole song it fails, go on to the next. Gray ones are skipped until they are set up in Lyrics › Translation & AI. "
         @"Except on this iPhone, the lyrics go to the service, and one on your own key counts each song toward its usage and charges."));
     self.tableView.tableFooterView = _footer;
 }

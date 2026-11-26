@@ -8,6 +8,8 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/Flags/Flags.h"
 #import "Settings/SGPageStyle.h"
+#import "Settings/SGModPage.h"
+#import "Settings/SGSettingsIndex.h"
 #import "About.h"
 #import "SGDiagnosticRedaction.h"
 #import "Redesigned/Player/Player.h"
@@ -15,6 +17,7 @@
 // Install-local state must survive replacement as well as stay out of the exported document.
 static BOOL isSetting(NSString *key) {
     if (![key hasPrefix:@"spotifyglass."]) return NO;
+    if ([key isEqual:SGKeySearchRecents] || [key isEqual:SGKeySeenNew]) return NO;
     if (SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer] || [key isEqual:SGKeyLyricsOpenAIBaseURL] ||
         [key isEqual:@"spotifyglass.wireguard"] || [key isEqual:SGKeyRedesignUntested] ||
         ([key hasPrefix:@"spotifyglass.dsp."] && [key hasSuffix:@".file"])) return NO;

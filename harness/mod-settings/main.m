@@ -28,6 +28,7 @@
 #import <CoreText/SFNTLayoutTypes.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/Flags/Flags.h"
+#import "Shared/Gestures/Gestures.h"
 #import "App/About/About.h"
 #import "../harness-fail.h"
 
@@ -268,6 +269,19 @@ BOOL SGHarnessWarning;
 @end
 
 static void refactorChecks(void) {
+    UITableViewController *gestures = (id)SGGesturesSettingsPage();
+    UITableView *gestureTable = gestures.tableView;
+    NSIndexPath *split = [NSIndexPath indexPathForRow:0 inSection:1];
+    NSIndexPath *hold = [NSIndexPath indexPathForRow:0 inSection:3];
+    for (NSNumber *enabled in @[@NO, @YES]) {
+        SGSetEnabled(SGKeyGestures, enabled.boolValue);
+        SGSetInt(SGKeyGestureSplit, 1);
+        UITableViewCell *choice = [gestures tableView:gestureTable cellForRowAtIndexPath:split];
+        HARNESS_CHECK(choice.userInteractionEnabled == enabled.boolValue);
+        HARNESS_CHECK([gestures tableView:gestureTable cellForRowAtIndexPath:hold].userInteractionEnabled);
+        [gestures tableView:gestureTable didSelectRowAtIndexPath:split];
+        HARNESS_CHECK(SGGestureSplit() == (enabled.boolValue ? 0 : 1));
+    }
     // The Mod page keeps its action's symbol when row decoration is shared with Settings.
     SGModPage *about = (SGModPage *)SGAboutPage();
     SGModRow *reset = nil, *storageLink = nil;

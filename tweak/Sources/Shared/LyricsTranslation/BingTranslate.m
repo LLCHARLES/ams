@@ -82,7 +82,7 @@ static NSString *unreadable(void) {
     return SGL(@"settings.translation.bing.error.unreadable", @"Bing Translator's answer could not be read. Try again.");
 }
 static NSString *disabled(void) {
-    return SGL(@"settings.translation.bing.error.disabled", @"Turn on Bing Translator on the Lyrics page first.");
+    return SGL(@"settings.translation.bing.error.disabled", @"Turn on Bing Translator in Lyrics › Translation & AI first.");
 }
 static NSString *problemFor(NSInteger status, BOOL failed) {
     if (failed) return SGL(@"settings.translation.bing.error.unreachable", @"Bing Translator could not be reached.");
