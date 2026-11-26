@@ -29,6 +29,19 @@ on:
         default: "app.retrine.player"
         required: false
         type: string
+      runner:
+        description: "macOS runner (both have Xcode 26.6). A build not given its runner within 30 s starts again on the other one"
+        default: macos-latest
+        type: choice
+        options: [macos-latest, macos-26-intel]
+      runner_hops:
+        description: "Set by the runner watchdog: how many times this build has moved runner. Leave at 0"
+        default: 0
+        type: number
+      sha:
+        description: "Set by the runner watchdog to keep building the original commit. Leave empty"
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -37,16 +50,146 @@ env:
   THEOS: ${{ github.workspace }}/theos
 
 jobs:
+  # GitHub has no fallback for a runner label that is not acquired: the job waits in the queue (runs 13 to 16 sat
+  # there 15 min and were cancelled without a runner). This job watches the build; if it is still queued
+  # RUNNER_WAIT_SECONDS after it was created, it dispatches this workflow again with the same inputs on the next
+  # runner in FALLBACK and cancels this run (or the replacement if the build just started). The last runner has no watchdog.
+  #
+  # Only runners with the toolchain every build so far used (Xcode 26.6, iOS 26.5 SDK) are in FALLBACK, each its own
+  # pool, so a starved pool is left rather than queued on again (runner-images, November 2026):
+  #   macos-latest   = macOS 26 arm64, Xcode 26.6
+  #   macos-26-intel = macOS 26 x64,   Xcode 26.6
+  # Left out: macos-26 (the same pool as macos-latest), macOS 15 (newest Xcode 26.3, an older iOS SDK the code was
+  # never built against) and macOS 14 (no Xcode 26, retired). The two take turns up to MAX_HOPS moves, then the
+  # build waits where it is. 30 s: a healthy pool hands a macOS runner over in about 5 s (runs 1 to 35).
+  runner-watchdog:
+    if: inputs.runner_hops < 5
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: write
+    steps:
+      # GitHub prints a step's env before the step runs, so mask the inputs first (run 36 showed the IPA URL).
+      - uses: levibostian/action-hide-sensitive-inputs@39cfbde19b3251728d2357dd0648172d1202c1ee # v1
+
+      - name: Move a build that got no runner to the next macOS version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          REF: ${{ github.ref_name }}
+          BUILD_SHA: ${{ inputs.sha || github.sha }}
+          RUNNER_WAIT_SECONDS: "30"
+          FALLBACK: "macos-latest=macos-26-intel macos-26-intel=macos-latest"
+          MAX_HOPS: "5"
+          HOPS: ${{ inputs.runner_hops || 0 }}
+          CURRENT_RUNNER: ${{ inputs.runner || 'macos-latest' }}
+          IN_IPA_URL: ${{ inputs.ipa_url }}
+          IN_UPLOAD_METHOD: ${{ inputs.upload_method }}
+          IN_REMOVE_PLUGINS: ${{ inputs.remove_plugins }}
+          IN_ENABLE_WIREGUARD: ${{ inputs.enable_wireguard }}
+          IN_ENABLE_PIXIE: ${{ inputs.enable_pixie }}
+          IN_BUNDLE_ID: ${{ inputs.bundle_id }}
+        shell: bash
+        run: |
+          # The IPA URL can carry a private share token.
+          echo "::add-mask::$IN_IPA_URL"
+          python3 -B - <<'PY'
+          import json
+          import os
+          import subprocess
+          import time
+          from datetime import datetime, timezone
+
+          repo, run_id = os.environ["GH_REPO"], os.environ["RUN_ID"]
+          wait = float(os.environ["RUNNER_WAIT_SECONDS"])
+          current = os.environ["CURRENT_RUNNER"]
+          fallback = dict(pair.split("=", 1) for pair in os.environ["FALLBACK"].split())
+          after = fallback.get(current)
+          hops = int(float(os.environ["HOPS"] or 0))
+          if not after or hops >= int(os.environ["MAX_HOPS"]):
+              print(f"no further runner after {current} (moves so far: {hops}); the build waits where it is")
+              raise SystemExit(0)
+
+          def build_job():
+              out = subprocess.check_output(
+                  ["gh", "api", f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"], text=True)
+              return next((j for j in json.loads(out)["jobs"] if j["name"] == "build"), None)
+
+          def created(job):
+              return datetime.fromisoformat(job["created_at"].replace("Z", "+00:00"))
+
+          job = None
+          for _ in range(60):
+              job = build_job()
+              if job:
+                  break
+              time.sleep(1)
+          if not job:
+              print("the build job was not found; leaving the run as it is")
+              raise SystemExit(0)
+          while True:
+              if job["status"] != "queued":
+                  print(f"build got a runner ({job.get('runner_name') or job['status']}) on {current}")
+                  raise SystemExit(0)
+              elapsed = (datetime.now(timezone.utc) - created(job)).total_seconds()
+              if elapsed >= wait:
+                  break
+              time.sleep(max(1.0, min(10.0, wait - elapsed)))
+              job = build_job()
+
+          inputs = {
+              "ipa_url": os.environ["IN_IPA_URL"],
+              "upload_method": os.environ["IN_UPLOAD_METHOD"] or "artifacts",
+              "remove_plugins": os.environ["IN_REMOVE_PLUGINS"] or "false",
+              "enable_wireguard": os.environ["IN_ENABLE_WIREGUARD"] or "true",
+              "enable_pixie": os.environ["IN_ENABLE_PIXIE"] or "true",
+              "bundle_id": os.environ["IN_BUNDLE_ID"],
+              "runner": after,
+              "runner_hops": str(hops + 1),
+              "sha": os.environ["BUILD_SHA"],
+          }
+          payload = {"ref": os.environ["REF"], "inputs": inputs, "return_run_details": True}
+          job = build_job()
+          if not job or job["status"] != "queued":
+              print("build is no longer queued; leaving this run alone")
+              raise SystemExit(0)
+          print(f"::warning::build waited {elapsed:.0f} s for {current} without a runner; starting again on {after}")
+          response = subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/actions/workflows/build-ipa.yml/dispatches", "--input", "-",
+               "-H", "X-GitHub-Api-Version: 2022-11-28"], input=json.dumps(payload), text=True)
+          replacement_id = str(json.loads(response)["workflow_run_id"])
+          # Dispatched first: cancelling this run also stops this job.
+          job = build_job()
+          cancel_id = run_id if job and job["status"] == "queued" else replacement_id
+          subprocess.run(["gh", "run", "cancel", cancel_id], check=True)
+          PY
+
   build:
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.sha || github.sha }}
 
       - uses: levibostian/action-hide-sensitive-inputs@39cfbde19b3251728d2357dd0648172d1202c1ee # v1
 
       - uses: ./.github/actions/setup-theos
         with:
           brew: aria2
+
+      # Never build against an iOS SDK older than the one the code is known to build with (Xcode 26.6's): if an
+      # image ever ships an older newest Xcode, this stops here and says so instead of failing on a missing API.
+      - name: Check the iOS SDK
+        env:
+          MIN_IOS_SDK: "26.5"
+        run: |
+          sdk="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "runner ${{ inputs.runner || 'macos-latest' }} ($(uname -m)), $(xcodebuild -version | head -1), iOS SDK $sdk"
+          if [ "$(printf '%s\n%s\n' "$MIN_IOS_SDK" "$sdk" | sort -V | head -1)" != "$MIN_IOS_SDK" ]; then
+            echo "::error::this runner's newest Xcode has the iOS $sdk SDK; Retrine is built against iOS $MIN_IOS_SDK or newer. Pick another runner."
+            exit 1
+          fi
 
       - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
         if: inputs.enable_wireguard
@@ -163,12 +306,28 @@ jobs:
 
       - run: ccache --show-stats
 
+      # The artifact service is sometimes out of reach for a moment (run 35: "Failed to CreateArtifact: Unable to
+      # make request: ENOTFOUND" after a good build), so a failed upload is tried once more instead of losing the IPA.
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        id: upload
         if: inputs.upload_method != 'filebin'
+        continue-on-error: true
         with:
           name: retrine.ipa
           path: out/*.ipa
           if-no-files-found: error
+
+      - name: Wait before uploading again
+        if: steps.upload.outcome == 'failure'
+        run: sleep 30
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: steps.upload.outcome == 'failure'
+        with:
+          name: retrine.ipa
+          path: out/*.ipa
+          if-no-files-found: error
+          overwrite: true
 
       - name: Upload to filebin.net
         if: inputs.upload_method != 'artifacts'

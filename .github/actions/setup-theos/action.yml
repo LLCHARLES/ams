@@ -27,17 +27,17 @@ runs:
         echo "theos=$(git -C theos rev-parse HEAD)" >> "$GITHUB_OUTPUT"
         echo "xcode=$(xcodebuild -version | sed -n 's/^Build version //p')" >> "$GITHUB_OUTPUT"
 
-    # Theos rebuilds these only when its own commit changes (bin/swift-bootstrapper.pl's marker).
+    # swift-bootstrapper.pl's marker tracks the hash and Swift version, not the host architecture.
     - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: theos/vendor/swift-support/.theos_build
-        key: swift-support-${{ steps.keys.outputs.theos }}-${{ steps.keys.outputs.xcode }}
+        key: swift-support-${{ runner.arch }}-${{ steps.keys.outputs.theos }}-${{ steps.keys.outputs.xcode }}
 
     - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: ${{ runner.temp }}/ccache
-        key: ccache-${{ steps.keys.outputs.xcode }}-${{ github.sha }}
-        restore-keys: ccache-${{ steps.keys.outputs.xcode }}-
+        key: ccache-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-${{ github.sha }}
+        restore-keys: ccache-${{ runner.arch }}-${{ steps.keys.outputs.xcode }}-
 
     - shell: bash
       env:
