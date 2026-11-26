@@ -355,10 +355,13 @@ int main(int argc, char **argv) {
         }
         if (argc > 1 && !strcmp(argv[1], "motion")) {
             NSURL *motionOut = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"motion"] isDirectory:YES];
+            // The writer never overwrites a published clip (MediaPlayer may still hold it), so each run starts empty.
+            [NSFileManager.defaultManager removeItemAtURL:motionOut error:nil];
             [NSFileManager.defaultManager createDirectoryAtURL:motionOut withIntermediateDirectories:YES attributes:nil error:nil];
             return motionMain(motionOut, argc - 2, argv + 2);
         }
         NSURL *scenesOut = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"scenes"] isDirectory:YES];
+        [NSFileManager.defaultManager removeItemAtURL:scenesOut error:nil];
         [NSFileManager.defaultManager createDirectoryAtURL:scenesOut withIntermediateDirectories:YES attributes:nil error:nil];
         if (argc > 1 && !strcmp(argv[1], "scenes")) {
             CGImageRef cover = argc > 2 ? newImageAt([NSString stringWithUTF8String:argv[2]]) : newCover();
@@ -367,6 +370,7 @@ int main(int argc, char **argv) {
             return failed ? 1 : 0;
         }
         NSURL *out = [NSURL fileURLWithPath:[here stringByAppendingPathComponent:@"clips"] isDirectory:YES];
+        [NSFileManager.defaultManager removeItemAtURL:out error:nil];
         [NSFileManager.defaultManager createDirectoryAtURL:out withIntermediateDirectories:YES attributes:nil error:nil];
         CGImageRef cover = argc > 1 ? newImageAt([NSString stringWithUTF8String:argv[1]]) : newCover();
         // Fallbacks use the screen raster, not the independent moving-artwork download width.
