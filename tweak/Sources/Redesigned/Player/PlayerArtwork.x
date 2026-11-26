@@ -72,15 +72,40 @@ static UIView *coverCellOf(UIView *tilt) {
 static NSHashTable<UIView *> *sg_liveRows;
 // Each live row's SGRCoverRowFollower, in the player the row was laid out in.
 static char kFollowerKey;
+// The players whose bottom stack the footer's rhythm holds without the volume row's room (SGRPlayerStackWithoutVolume).
+static NSHashTable<UIView *> *sg_stacksWithoutVolume;
+
+CGFloat SGRPlayerLiveRowBottomIn(UIView *view) {
+    CGFloat bottom = -CGFLOAT_MAX;
+    for (UIView *row in sg_liveRows) {
+        UIView *player = ((UIView *)objc_getAssociatedObject(row, &kFollowerKey)).superview;
+        if (player && [view isDescendantOfView:player] && [row isDescendantOfView:player]) {
+            bottom = MAX(bottom, CGRectGetMaxY([view convertRect:row.bounds fromView:row]));
+        }
+    }
+    return bottom;
+}
+
+void SGRPlayerStackWithoutVolume(UIView *player, BOOL without) {
+    if (!sg_stacksWithoutVolume) sg_stacksWithoutVolume = [NSHashTable weakObjectsHashTable];
+    if (!player || [sg_stacksWithoutVolume containsObject:player] == without) return;
+    if (without) [sg_stacksWithoutVolume addObject:player];
+    else [sg_stacksWithoutVolume removeObject:player];
+    for (UIView *tilt in sg_tilts) {
+        if ([tilt isDescendantOfView:player]) [tilt setNeedsLayout];
+    }
+}
 
 // How far up from the top of its tilt view the cover is drawn, so its top stands kCoverTopUnderSafeArea under the
 // window's safe area as the Music app's does, where Spotify's tilt view stands lower (118 pt on a 402x874 iPhone, the
 // Music app's 95), but never above the bottom of a live header row in the cover's own player where the row is now
 // (followed as Spotify moves it, SGRCoverRowFollower), which it would draw over and take touches from; a row moved out
-// of that player limits it no more. The cell is the whole player, its top the player's, from which the grabber is
-// placed the same way (PlayerHeader.x). Positions without transforms, so the lyrics' moves and Spotify's tilt leave it
-// be. Only ever up, away from the title row, and only in a phone's portrait player: Spotify's landscape and iPad
-// layouts are its own.
+// of that player limits it no more. With the volume row off, the rhythm stands the title row SGRPlayerVolumeToRow lower
+// (PlayerFooter.x) and the cover takes half of that room, so it opens as much over the cover as under it; not over
+// Spotify's lyric preview, which keeps the cover's place. The cell is the whole player, its top the player's, from
+// which the grabber is placed the same way (PlayerHeader.x). Positions without transforms, so the lyrics' moves and
+// Spotify's tilt leave it be. Only ever up, away from the title row, and only in a phone's portrait player: Spotify's
+// landscape and iPad layouts are its own.
 static CGFloat coverLift(UIView *tilt, UIView *cell) {
     UIWindow *window = cell.window;
     if (!window || cell.traitCollection.userInterfaceIdiom != UIUserInterfaceIdiomPhone || cell.bounds.size.width >= cell.bounds.size.height) return 0;
@@ -88,11 +113,13 @@ static CGFloat coverLift(UIView *tilt, UIView *cell) {
     for (UIView *view = tilt; view && view != cell; view = view.superview) {
         top += view.center.y - view.bounds.size.height / 2 - view.superview.bounds.origin.y;
     }
-    CGFloat highest = window.safeAreaInsets.top + kCoverTopUnderSafeArea;
-    for (UIView *row in sg_liveRows) {
-        UIView *player = ((UIView *)objc_getAssociatedObject(row, &kFollowerKey)).superview;
-        if (player && [cell isDescendantOfView:player] && [row isDescendantOfView:player]) {
-            highest = MAX(highest, CGRectGetMaxY([cell convertRect:row.bounds fromView:row]));
+    CGFloat highest = MAX(window.safeAreaInsets.top + kCoverTopUnderSafeArea, SGRPlayerLiveRowBottomIn(cell));
+    BOOL preview = NO;
+    SGRPlayerPreviewLayers(tilt.superview, &preview);
+    for (UIView *player in sg_stacksWithoutVolume) {
+        if (!preview && [cell isDescendantOfView:player]) {
+            highest += SGRPlayerVolumeToRow / 2;
+            break;
         }
     }
     return MAX(0, top - highest);
@@ -666,7 +693,8 @@ static void fillParts(UIView *holder) {
     CGRect normal = CGRectNull;
     if (!side && host && tilt.bounds.size.width < tilt.superview.bounds.size.width)
         normal = SGRPlayerNormalCover(host, tilt, host.bounds.size.width - 6 * SGRGrid);
-    if ([watch stripOnlyIn:CGRectIsNull(normal) ? nil : tilt.superview]) {
+    // Watched whatever the strip: the preview coming or going moves the cover too (coverLift).
+    if ([watch stripOnlyIn:tilt.superview] && !CGRectIsNull(normal)) {
         side = normal.size.width;
         stripFill = YES;
     }

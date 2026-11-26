@@ -481,6 +481,7 @@ typedef struct {
     CGFloat lift;     // how far the title row rises
     CGFloat shift;    // how far the title slides right to clear the thumbnail, 0 when it sits under it
     CGFloat head;     // the queue page: the room from the stage's top down to its toggles, the thumbnail and title in it
+    CGFloat clear;    // how far up the thumbnail and title can go before a live header row's bottom; CGFLOAT_MAX with none
 } SGRLyricsLayout;
 
 // What a view's frame would be with the translation this file put on it left out.
@@ -537,6 +538,10 @@ static SGRLyricsLayout layoutIn(UIView *host, BOOL wide) {
         thumbTop = CGRectGetMinY(SGRPlayerVisibleSafeArea(host)) + kGrabberTopSpacing + kGrabberHeight + kArtworkToGrabberSpacing;
         if (bandBehindHeader) thumbTop = MAX(thumbTop, headerAwareTop);
     }
+    // A header row whose controls stay on show (the AI DJ's buttons, an arrow kept to close by) keeps them clear: the
+    // thumbnail stands under it, as the cover does.
+    CGFloat rowBottom = SGRPlayerLiveRowBottomIn(host), underRow = rowBottom + kThumbTop;
+    thumbTop = MAX(thumbTop, underRow);
     l.thumb = CGRectMake(leading, thumbTop, kThumbSide, kThumbSide);
     // Beside the thumbnail when the title can be moved clear of it, under it when it cannot be found.
     CGFloat top = title ? CGRectGetMidY(l.thumb) - row.size.height / 2 : CGRectGetMaxY(l.thumb) + SGRGrid;
@@ -546,12 +551,15 @@ static SGRLyricsLayout layoutIn(UIView *host, BOOL wide) {
     // in under it on their own (SGRKaraokeView's edge fade); the queue's toggles stand kQueueTop under it.
     CGFloat lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + (sg_queuePage ? kQueueTop : 0);
     if (sg_alone && keepsTitle()) {
-        l.thumb.origin.y -= kAloneRise;
-        top -= kAloneRise;
+        // The header stays with the title, so the rise stops under a live row.
+        CGFloat rise = MAX(0, MIN(kAloneRise, CGRectGetMinY(l.thumb) - underRow));
+        l.thumb.origin.y -= rise;
+        top -= rise;
         l.lift = top - CGRectGetMinY(row);
         if (title) l.shift = (rtl ? -1 : 1) * (kThumbSide + kAloneTitleGap);
         lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + kAloneLinesTop;
     }
+    l.clear = rowBottom == -CGFLOAT_MAX ? CGFLOAT_MAX : MIN(CGRectGetMinY(l.thumb), top) - rowBottom;
     // The artwork band belongs to a paging cell: on a skip its x can still be between pages.
     // Only its vertical room belongs to the lyrics. The lyric viewport and its controls belong
     // to the stationary player, not the outgoing or incoming cover.
@@ -656,10 +664,14 @@ static CGAffineTransform pageThumbTransform(SGRLyricsLayout l) {
 // The thumbnail and the title row fade as the list carries them out of the page: up past its top, or down toward the
 // progress bar, where the Music app's list fades them under its edges. They stand at the page's very top, and the Music
 // app's list (whose first item they are) clips them there, so going up they are gone within kQueueRideFade rather than
-// drawn over the grabber and the status bar.
+// drawn over the grabber and the status bar. Under a live header row (PlayerArtwork.x) they are gone as they reach its
+// bottom, sooner when there is less room, rather than drawn over its controls.
 static CGFloat pageRideAlpha(SGRLyricsLayout l) {
     CGFloat shift = pageShift();
-    if (shift > 0) return MAX(0, MIN(1, 1 - shift / kQueueRideFade));
+    if (shift > 0) {
+        CGFloat fade = MIN(kQueueRideFade, l.clear);
+        return fade > 0 ? MAX(0, MIN(1, 1 - shift / fade)) : 0;
+    }
     CGFloat room = l.stage.size.height - l.head - kQueueRideFade;
     return MAX(0, MIN(1, 1 - (-shift - room) / kQueueRideFade));
 }

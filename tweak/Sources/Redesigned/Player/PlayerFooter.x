@@ -963,6 +963,7 @@ void SGRPlayerLowerRow(UIView *row) {
     BOOL respaced;
     BOOL rhythm = keepRhythm((UIStackView *)stack, player, middle + move, !columns && height > player.bounds.size.width, &respaced);
     if (respaced) settleRhythm(player, row);
+    SGRPlayerStackWithoutVolume(player, rhythm && !SGRPlayerVolumeOn());
 
     // Only the controls, and only straight above: a volume row between them keeps its place and theirs.
     UIView *above = rowAbove(row);

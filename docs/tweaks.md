@@ -1716,7 +1716,11 @@ Redesigned:
                   where Spotify's tilt view stands lower (PlayerArtwork.x; only up, never in landscape or on an iPad,
                   never over a header row that takes touches: with Where it plays from on, Spotify's arrow live
                   or the AI DJ's buttons, it stops at the row's bottom where the row is now in its own player, followed
-                  live as the switch changes and as Spotify moves the row with no layout of it; with the row put away, a
+                  live as the switch changes and as Spotify moves the row with no layout of it, and the lyrics' and the
+                  queue's thumbnail stands 8 pt under such a row, PlayerLyrics.x, and the scrolled queue fades it and the
+                  title out before they reach the row; with Volume off, the rhythm holding
+                  the stack and no lyric preview under the cover, the cover is drawn half the volume row's room (25 pt)
+                  lower, so the room the title row's move leaves splits evenly over and under it; with the row put away, a
                   touch on the drawn cover landing in the row, off any control Spotify still shows there (an iPad's button
                   to widen the player), or on a view holding nothing but the row goes on to the cover, decided at the touch
                   from the views as they are, with nothing switched off on Spotify's (PlayerHeader.x passesTouches); the

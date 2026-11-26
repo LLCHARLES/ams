@@ -407,7 +407,7 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 @property (nonatomic, copy) void (^scrolled)(CGFloat shift);
 // Back to rest at once, unless a finger is on the list.
 - (void)goToRest;
-- (void)placeAtUpcoming;
+- (void)placeAtUpcomingForcingLayout:(BOOL)forceLayout;
 @end
 
 @implementation SGRPlayerQueueController {
@@ -729,7 +729,7 @@ static NSArray *reportKey(SPTPlayerState *state) {
             }
         }
         [self.tableView reloadData];
-        [self placeAtUpcoming];
+        [self placeAtUpcomingForcingLayout:YES];
     }
     [self showBlend];
 }
@@ -835,7 +835,7 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
 
 // The Music app's list opens at rest, and goes back to it for each new song while nobody is scrolling it. The rows
 // under the toggles always reach the bottom of the list, so the rest can be scrolled to however few songs are left.
-- (void)placeAtUpcoming {
+- (void)placeAtUpcomingForcingLayout:(BOOL)forceLayout {
     if (!_musicStyle || !self.isViewLoaded || _reordering) return;
     UITableView *table = self.tableView;
     if (table.bounds.size.height < 1) return;
@@ -844,7 +844,7 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
         [self reportScroll];
         return;
     }
-    [table layoutIfNeeded];
+    if (forceLayout) [table layoutIfNeeded];
     NSUInteger controls = [self controlsSection];
     CGFloat below = controls == NSNotFound ? 0 : table.contentSize.height - CGRectGetMinY([table rectForSection:(NSInteger)controls]);
     CGFloat room = MAX(0, table.bounds.size.height - table.adjustedContentInset.top - below);
@@ -878,7 +878,7 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
     }
     table.contentOffset = CGPointMake(0, rest);
     [self reportScroll];
-    [self slideRowsBy:slide];
+    [self slideRowsBy:slide forcingLayout:forceLayout];
     [self risePicked];
 }
 
@@ -914,7 +914,7 @@ static const CFTimeInterval kSlideDuration = 0.45;
 // ones rising to the top of the list. Only transforms, so the list's offset stays at rest. The player's state and its
 // queue report one after the other and each reloads the rows: one that comes while the slide is on its way, with nothing
 // new to slide, takes the rest of the distance up from the rows it replaces. Not under Reduce Motion.
-- (void)slideRowsBy:(CGFloat)delta {
+- (void)slideRowsBy:(CGFloat)delta forcingLayout:(BOOL)forceLayout {
     UITableView *table = self.tableView;
     CFTimeInterval now = CACurrentMediaTime(), elapsed = now - _slideStart;
     if (delta < 0.5 && _slideDelta > 0 && elapsed < kSlideDuration) delta = _slideDelta * (1 - elapsed / kSlideDuration);
@@ -922,7 +922,7 @@ static const CFTimeInterval kSlideDuration = 0.45;
     if (delta < 0.5 || delta > table.bounds.size.height || !table.window || SGRReduceMotion()) return;
     _slideDelta = delta;
     _slideStart = now;
-    [table layoutIfNeeded];
+    if (forceLayout) [table layoutIfNeeded];
     NSMutableArray<UIView *> *moving = [NSMutableArray arrayWithArray:table.visibleCells];
     // A heading standing at the top under the toggles stays where it is, as the Music app pins it there (its layout's
     // boundary items, setPinToVisibleBounds:): it slid up from below with the rows, so Continue Playing seemed to come
@@ -946,7 +946,7 @@ static const CFTimeInterval kSlideDuration = 0.45;
     SGLog(@"redesign queue: the page asks the list back to rest (the room over the toggles is %.0f); offset %.0f, rest %.0f",
           self.headHeight, self.isViewLoaded ? self.tableView.contentOffset.y : 0, self.isViewLoaded ? [self restOffset] : 0);
     _placedFor = nil;
-    [self placeAtUpcoming];
+    [self placeAtUpcomingForcingLayout:YES];
 }
 
 - (void)reportScroll {
@@ -1199,7 +1199,7 @@ static const CGFloat kSnapDistance = 200;
     _headHeight = headHeight;
     if (!self.isViewLoaded || _reordering) return;
     [self.tableView reloadData];
-    [self placeAtUpcoming];
+    [self placeAtUpcomingForcingLayout:YES];
 }
 
 // The Music app's page with no song to come: the message under the toggles, as the list's footer, so it rides with the
@@ -1221,11 +1221,11 @@ static const CGFloat kSnapDistance = 200;
     UIEdgeInsets margins = table.layoutMargins;
     CGFloat width = table.bounds.size.width, textWidth = MAX(1, width - margins.left - margins.right);
     CGFloat height = ceil([_empty sizeThatFits:CGSizeMake(textWidth, CGFLOAT_MAX)].height);
-    CGRect frame = CGRectMake(0, 0, width, kMusicHeadTop + height + kMusicHeadBottom);
+    CGFloat footerHeight = kMusicHeadTop + height + kMusicHeadBottom;
     _empty.frame = CGRectMake(margins.left, kMusicHeadTop, textWidth, height);
-    if (table.tableFooterView != footer || !CGRectEqualToRect(footer.frame, frame)) {
-        footer.frame = frame;
-        // Set again for the table to take the new height.
+    // UITableView sets the footer's origin below the sections and fits its width. Only its height is ours.
+    if (table.tableFooterView != footer || footer.bounds.size.height != footerHeight) {
+        footer.frame = (CGRect){footer.frame.origin, CGSizeMake(width, footerHeight)};
         table.tableFooterView = footer;
     }
 }
@@ -1233,7 +1233,7 @@ static const CGFloat kSnapDistance = 200;
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     if (_musicStyle && self.tableView.tableFooterView) [self placeEmpty];
-    [self placeAtUpcoming];
+    [self placeAtUpcomingForcingLayout:NO];
 }
 
 - (void)refreshQueue {
@@ -1552,7 +1552,7 @@ static const CGFloat kMusicHistoryGap = 25;
         if (!self->_signature) {
             self->_signature = [self signature];
             [self.tableView reloadData];
-            [self placeAtUpcoming];
+            [self placeAtUpcomingForcingLayout:YES];
             [self showBlend];
         }
     });

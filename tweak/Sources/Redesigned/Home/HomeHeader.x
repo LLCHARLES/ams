@@ -443,18 +443,35 @@ static void layoutTint(UIView *page) {
     }
 }
 
+static UIStackView *stackIn(UIView *header) {
+    UIStackView *stack = nil;
+    for (UIView *sub in header.subviews) {
+        if ([sub isKindOfClass:UIStackView.class]) stack = (UIStackView *)sub;
+    }
+    return stack;
+}
+
+// The class of Spotify's header view, so a layout pass can tell a header apart without a lookup on every view.
+static Class sg_headerClass;
+
+// The page's header, its stack and scrim are published together, only once the header has a stack: the globals never pair
+// one page's header with another page's stack.
 static BOOL findHeader(UIView *view) {
-    if (sg_stack && [sg_stack isDescendantOfView:view]) return YES;
+    if (sg_stack && sg_stack.superview == sg_header && [sg_stack isDescendantOfView:view]) return YES;
+    UIView *scrim = nil;
     for (UIView *wrapper in view.subviews) {
-        UIView *scrim = SGRChildNamed(wrapper, @"GradientView");
-        if (scrim) sg_scrim = scrim;
+        UIView *found = SGRChildNamed(wrapper, @"GradientView");
+        if (found) scrim = found;
     }
     UIView *header = SGRChildNamed(SGRChildNamed(view, @"HomeHeaderElement"), @"HomeHeaderView");
-    for (UIView *sub in header.subviews) {
-        if ([sub isKindOfClass:UIStackView.class]) sg_stack = (UIStackView *)sub;
+    UIStackView *stack = stackIn(header);
+    if (stack) {
+        sg_header = header;
+        sg_stack = stack;
+        sg_scrim = scrim;
+        sg_headerClass = header.class;
+        return YES;
     }
-    sg_header = header;
-    if (sg_stack) return YES;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"redesign home: header stack not found, header left as Spotify's"); });
     return NO;
@@ -577,6 +594,33 @@ static void follow(UIView *view) {
 
 static void layoutHeader(UIViewController *page);
 
+// The title row around the avatar where the stack has laid it out. With the Home look off, the avatar stands alone in
+// the stack and the title ends before it; it rises and fades with the title either way.
+static void placeRow(UIView *header, UIStackView *stack, UIView *face, UILabel *title) {
+    CGFloat pillLeading = face ? CGRectGetMinX(facePlace(stack, face)) : header.bounds.size.width - SGRSideMargin + SGRGrid;
+    if (SGRHomeLook()) pillLeading = layoutPill(header, stack, face);
+    CGFloat trailing = pillLeading - SGRGrid;
+    CGFloat height = ceil(title.font.lineHeight);
+    place(title, CGRectMake(SGRSideMargin, round(CGRectGetMidY(untransformed(stack)) - height / 2), MAX(0, trailing - SGRSideMargin), height));
+}
+
+static UIView *faceIn(UIStackView *stack) {
+    for (UIView *part in stack.arrangedSubviews) {
+        if (SGRIsAvatar(part)) return part;
+    }
+    return nil;
+}
+
+// After a pass of a header layoutHeader has placed (its title marks it), or of its stack: the row follows that header's
+// own avatar, wherever its page is in the order of passes. The page's pass runs before its header's, and on a turn or a
+// resize the stack lays the avatar out in its own pass after the page's, or the header moves the stack in its pass without
+// the stack laying out again, with no pass of the page after either.
+static void followStack(UIView *header, UIStackView *stack) {
+    if (!stack || ![header isKindOfClass:sg_headerClass]) return;
+    UILabel *title = objc_getAssociatedObject(header, &kTitleKey);
+    if (title) placeRow(header, stack, faceIn(stack), title);
+}
+
 // The page's own pass can run before Spotify has sized its header at all (the header's view 0 by 0, its stack still
 // a width to the left and centered on the origin: seen on a 440pt phone, with no pass of the page after, which
 // left the pill beside the title). While the header has no size, this comes back a little later, for a few seconds
@@ -611,10 +655,9 @@ static void layoutHeader(UIViewController *page) {
     syncPodcastChips(stack);
     layoutHeaderOnceSized(page, header);
 
-    UIView *face = nil;
+    UIView *face = faceIn(stack);
     for (UIView *part in stack.arrangedSubviews) {
-        if (SGRIsAvatar(part) && !face) face = part;
-        else SGRVanish(part);
+        if (part != face) SGRVanish(part);
     }
     // A face that stopped being the avatar drops the scroll's transform and fade.
     if (sg_face && sg_face != face) rise(sg_face, CGAffineTransformIdentity, 1);
@@ -629,15 +672,6 @@ static void layoutHeader(UIViewController *page) {
         stack.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
         [stack setNeedsLayout];
     }
-    // The page's pass runs before its header's: on a turn or a resize the header still has its old width here, its
-    // stack the new one about the old center, and the header's own pass that puts the stack right comes after this
-    // one with no pass of the page after it, which left the pill half the change in width away from the avatar. Laid
-    // out from what holds it, the header, its stack and the avatar in it take the page's new size before they are read.
-    [header.superview layoutIfNeeded];
-    // With the Home look off, the avatar stands alone in the stack and the title ends before it; it rises and fades
-    // with the title either way.
-    CGFloat pillLeading = face ? CGRectGetMinX(facePlace(stack, face)) : header.bounds.size.width - SGRSideMargin + SGRGrid;
-    if (SGRHomeLook()) pillLeading = layoutPill(header, stack, face);
 
     UILabel *title = SGRLargeTitleIn(header, &kTitleKey);
     NSString *text = tabName(header.window);
@@ -647,20 +681,31 @@ static void layoutHeader(UIViewController *page) {
     }
     UIFont *font = SGCategoryCappedFont(UIFontTextStyleLargeTitle, UIFontWeightBold, UIContentSizeCategoryLarge);
     if (![title.font isEqual:font]) title.font = font;
-
-    CGFloat trailing = pillLeading - SGRGrid;
-    CGFloat height = ceil(font.lineHeight);
-    CGRect frame = CGRectMake(SGRSideMargin, round(CGRectGetMidY(untransformed(stack)) - height / 2), MAX(0, trailing - SGRSideMargin), height);
-    place(title, frame);
+    placeRow(header, stack, face, title);
     follow(view);
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         SGLog(@"redesign home: header %@, avatar %@ in the stack %@, title %@, scrim %@", NSStringFromCGRect(header.frame),
-              face ? NSStringFromCGRect(face.frame) : @"not found", NSStringFromCGRect(stack.frame), NSStringFromCGRect(frame),
+              face ? NSStringFromCGRect(face.frame) : @"not found", NSStringFromCGRect(stack.frame), NSStringFromCGRect(untransformed(title)),
               sg_scrim ? @"found" : @"not found");
     });
 }
+
+%hook UIStackView
+- (void)layoutSubviews {
+    %orig;
+    followStack(self.superview, (UIStackView *)self);
+}
+%end
+
+// The header's pass as a whole, after whatever its subclass does in layoutSubviews.
+%hook UIView
+- (void)layoutSublayersOfLayer:(CALayer *)layer {
+    %orig;
+    if ([self isKindOfClass:sg_headerClass]) followStack(self, stackIn(self));
+}
+%end
 
 // The feed can come after the header's last pass (its page loads while the header is laid out, a few seconds on
 // a slow account), and the page's view has no pass of its own after; a feed that replaces another (a filter) comes

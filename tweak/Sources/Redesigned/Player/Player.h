@@ -137,6 +137,12 @@ void SGRPlayerSetCoverHidden(BOOL hidden);
 // player's own view holding it, or nil: the cover, lifted to the Music app's top, stays under every live row in its own
 // player, wherever the row is moved in it.
 void SGRPlayerCoverUnderRow(UIView *row, BOOL live, UIView *player);
+// The lowest bottom, in `view`'s coordinates, of those live rows in the player holding `view`, where each is now;
+// -CGFLOAT_MAX when there is none. The cover stays under it, and so does the lyrics' thumbnail (PlayerLyrics.x).
+CGFloat SGRPlayerLiveRowBottomIn(UIView *view);
+// The footer's rhythm holds `player`'s bottom stack without the volume row's room, the title row SGRPlayerVolumeToRow
+// lower (`without`), or no longer (PlayerFooter.x): the covers in `player` lay out again, taking half of that room.
+void SGRPlayerStackWithoutVolume(UIView *player, BOOL without);
 // A header row in `view`'s window shows something to read besides the grabber: where it plays from, Spotify's live
 // arrow, the AI DJ's buttons (the rows SGRPlayerCoverUnderRow is told are live). The clip's dim covers it
 // (PlayerMotion.x), which hears of each change through SGRPlayerMotionHeaderChanged.

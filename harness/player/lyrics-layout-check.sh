@@ -13,9 +13,11 @@ constants = source[source.index("static const CGFloat kThumbSide"):source.index(
 measurements = source[source.index("typedef struct {", source.index("#pragma mark - the measurements")):
                       source.index("#pragma mark - the title row")]
 fade = source[source.index("static void fadeControls("):source.index("// Where the lines go on their own")]
+ride = (source[source.index("// How far the queue page's list has moved from rest"):source.index("static void placeTitleRow(")] +
+        source[source.index("// The thumbnail and the title row fade as the list"):source.index("// The corners as they will be drawn")])
 header = pathlib.Path(sys.argv[1]).with_name("Player.h").read_text()
 safe = header[header.index("static inline CGRect SGRPlayerVisibleSafeArea"):header.index("#pragma mark - the lyrics")]
-pathlib.Path(sys.argv[2]).write_text(constants + "\n" + safe + "\n" + measurements + "\n" + fade)
+pathlib.Path(sys.argv[2]).write_text(constants + "\n" + safe + "\n" + measurements + "\n" + ride + "\n" + fade)
 PY
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
