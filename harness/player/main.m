@@ -1121,7 +1121,7 @@ static void loadLyrics(void) {
         bottom.frame = CGRectMake(0, 64 - bottomHeight - 61.33, W, bottomHeight);
     }
     // The player has not been opened yet: its background plane is laid out only when it is.
-    if ([scenario() isEqualToString:@"motion"]) {
+    if ([scenario() isEqual:@"motion"] || [scenario() isEqual:@"motion-mirror"]) {
         [plane removeFromSuperview];
         _units = @[headerUnit, info, duration, floating, playback, footer, scrollUnit, player];
     }
@@ -1313,7 +1313,7 @@ static void loadLyrics(void) {
     else if ([scenario() isEqualToString:@"controls"]) [self runControlsChecks];
     else if ([scenario() isEqualToString:@"landscape-owner"]) [self runLandscapeOwner];
     else if ([scenario() isEqualToString:@"landscape"]) [self runLandscape];
-    else if ([scenario() isEqualToString:@"motion"]) [self runMotionChecks];
+    else if ([scenario() isEqual:@"motion"] || [scenario() isEqual:@"motion-mirror"]) [self runMotionChecks];
     else if ([scenario() hasPrefix:@"lyric-line"]) after(4, ^{
         UIView *line = firstOfClass(host, @"SGRLyricLineView");
         UILabel *words = (UILabel *)line.subviews.firstObject;
@@ -2350,8 +2350,9 @@ static BOOL motionDeepensDown(NSURL *file, NSString **detail) {
 }
 
 - (void)runMotionChecks {
+    BOOL mirrorOnly = [scenario() isEqual:@"motion-mirror"];
     // The clip comes in before the player has laid out, as for the track restored at launch.
-    after(3, ^{
+    if (!mirrorOnly) after(3, ^{
         [self expect:SGRPlayerMotionShowing() && !SGRPlayerField() step:@"before the player opened"
               detail:[NSString stringWithFormat:@"clip %@, field %@", SGRPlayerMotionShowing() ? @"in" : @"missing", SGRPlayerField() ? @"made" : @"not made"]];
     });
@@ -2363,6 +2364,27 @@ static BOOL motionDeepensDown(NSURL *file, NSString **detail) {
     after(5, ^{
         UIView *motion = motionView();
         CALayer *foot = [motion valueForKey:@"_foot"], *clip = [motion valueForKey:@"_clip"];
+        if (mirrorOnly) {
+            CAReplicatorLayer *soft = [motion valueForKey:@"_soft"];
+            AVPlayerLayer *video = [motion valueForKey:@"_softClip"];
+            if (soft.hidden || soft.instanceCount < 2 || !video.readyForDisplay || !video.player)
+                HARNESS_FAIL(@"3:4 mirror fixture needs a visible, playing replica");
+            CGRect source = [video convertRect:video.bounds toLayer:soft];
+            CGFloat anchorY = soft.anchorPoint.y * CGRectGetHeight(soft.bounds);
+            CGRect mirrored = CGRectOffset(CGRectApplyAffineTransform(CGRectOffset(source, 0, -anchorY),
+                CATransform3DGetAffineTransform(soft.instanceTransform)), 0, anchorY);
+            CALayer *window = self.window.layer;
+            mirrored = [soft convertRect:mirrored toLayer:window];
+            CGFloat edge = CGRectGetMaxY([clip convertRect:clip.bounds toLayer:window]), bottom = CGRectGetMaxY(window.bounds);
+            if (fabs(source.size.height * 3 / 4 - source.size.width) > 1 || edge >= bottom ||
+                fabs(CGRectGetMinY(mirrored) - edge) > 1 || CGRectGetMaxY(mirrored) < bottom)
+                HARNESS_FAIL(@"mirror %@ does not span %.0f to %.0f", NSStringFromCGRect(mirrored), edge, bottom);
+            NSLog(@"[harness] mirror %@ spans %.0f to %.0f", NSStringFromCGRect(mirrored), edge, bottom);
+            if (!getenv("HARNESS_MOTION_SCREENSHOT")) exit(0);
+            [video.player pause];
+            [video.player seekToTime:CMTimeMake(736, 1000) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero];
+            return;
+        }
         UIVisualEffectView *seam = [motion valueForKey:@"_seamBlur"];
         // The lyrics' blur is a filter on the clip, there only while the lyrics are up.
         BOOL lyricsBlurred = ((UIView *)[motion valueForKey:@"_picture"]).layer.filters.count > 0;
@@ -2440,7 +2462,7 @@ static BOOL motionDeepensDown(NSURL *file, NSString **detail) {
         reportPower();
         setThermal(NSProcessInfoThermalStateSerious);
     });
-    if (getenv("HARNESS_MOTION_SCREENSHOT")) return;
+    if (mirrorOnly || getenv("HARNESS_MOTION_SCREENSHOT")) return;
     after(6, ^{
         [self expect:!SGRPlayerMotionShowing() && !motionView() && !self->_covers.layer.mask
               step:@"serious heat" detail:@"the clip should be cleared for the cover"];
@@ -6709,7 +6731,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
         SGRSetPlayerLineSmall(NO);
         [NSUserDefaults.standardUserDefaults setInteger:4 forKey:@"spotifyglass.redesign.lyricsSize.underCover"]; // retired choice is ignored
     }
-    if ([scenario() isEqualToString:@"motion"] || [scenario() isEqualToString:@"settings"] ||
+    if ([scenario() isEqual:@"motion"] || [scenario() isEqual:@"motion-mirror"] || [scenario() isEqualToString:@"settings"] ||
         [scenario() isEqualToString:@"lyric-line-clip"] || [scenario() isEqual:@"lyric-line-chip-clip"] || [scenario() isEqual:@"lyric-line-owner-clip"] || [scenario() isEqualToString:@"lyric-line-switch"]) {
         [NSUserDefaults.standardUserDefaults setInteger:3 forKey:@"spotifyglass.redesign.player.background"];
         setenv("HARNESS_CANVAS", "https://canvas.harness/clip.mp4", 1);

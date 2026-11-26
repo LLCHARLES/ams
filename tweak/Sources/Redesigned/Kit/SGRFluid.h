@@ -5,7 +5,7 @@
 //
 // The Player page tunes it with six sliders (Redesigned/Player/PlayerSettings.m), stored as whole numbers under
 // spotifyglass.redesign.fluid.<speed|warp|blur|saturation|brightness|grain>. Every layer follows a change at once.
-// spotifyglass.redesign.fluid.renderer chooses preblurred Light copies (default) or the Smooth GPU pipeline.
+// spotifyglass.redesign.fluid.renderer chooses the Smooth GPU pipeline (default) or preblurred Light copies.
 //
 // Threading: main thread only; the cover's preparation runs off it.
 #import <UIKit/UIKit.h>
@@ -28,8 +28,8 @@ void SGRResetFluidSettings(void);   // all six back to their standard values, on
 extern NSNotificationName const SGRFluidSettingsDidChangeNotification;
 
 typedef NS_ENUM(NSInteger, SGRFluidRenderer) {
-    SGRFluidRendererLight,    // Core Animation's turning copies: the standard
-    SGRFluidRendererSmooth,   // the GPU's flow (SGRFluidGPU.h), a little more battery
+    SGRFluidRendererLight,    // Core Animation's turning copies, a little less battery; shown wherever Metal is missing
+    SGRFluidRendererSmooth,   // the GPU's flow (SGRFluidGPU.h): the standard
 };
 SGRFluidRenderer SGRFluidRendererChosen(void);
 // Stores the choice and posts SGRFluidSettingsDidChangeNotification on the main thread. Reset leaves it.

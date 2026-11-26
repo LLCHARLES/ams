@@ -146,7 +146,7 @@ void SGRResetFluidSettings(void) {
 static NSString *const kRendererKey = @"spotifyglass.redesign.fluid.renderer";
 
 SGRFluidRenderer SGRFluidRendererChosen(void) {
-    return SGInt(kRendererKey, SGRFluidRendererLight) == SGRFluidRendererSmooth ? SGRFluidRendererSmooth : SGRFluidRendererLight;
+    return SGInt(kRendererKey, SGRFluidRendererSmooth) == SGRFluidRendererLight ? SGRFluidRendererLight : SGRFluidRendererSmooth;
 }
 
 void SGRSetFluidRenderer(SGRFluidRenderer renderer) {

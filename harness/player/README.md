@@ -230,6 +230,9 @@ come late, out of order, or not at all.
   `settings` checks that Size immediately follows Lyrics Line and offers just 19 and 17 pt.
   Set `HARNESS_SIZE_SCREENSHOT=1` to stop on the two rows instead of continuing the settings suite.
 
+- `motion-mirror` takes a 3:4 `HARNESS_CANVAS_FILE` on a tall portrait phone. It checks that the mirrored
+  video starts at the cover's bottom edge and reaches the screen's foot. `HARNESS_MOTION_SCREENSHOT=1`
+  holds the checked player at 0.736 seconds for a comparison capture.
 - `motion` is Animated artwork. The clip, `HARNESS_CANVAS_FILE` (any mp4, `harness/fluid-clip` writes one),
   is served as the track's Canvas before the player's background has laid out; then the background lays
   out, the lyrics open and close, the background is built again, and the ⋯ menu's switch goes off, on, and

@@ -316,8 +316,48 @@ static void checkBarcode(void) {
         hit[@"relationships"] = @{@"albums": @{@"data": albums}};
         return @{@"data": @[hit]};
     };
-    songsReply = replyWithAlbums(@[record, second]);
-    CHECK(!coverWithURI(name, song, @"spotify:album:0000000000000000000005"));
+    // Two exact barcodes for November Rain; three soundtrack editions for How Far I'll Go.
+    // After delivery another track on the same URI must still consult its identifiers.
+    NSDictionary *(^candidate)(NSString *, NSString *, NSString *, NSNumber *, NSString *) =
+        ^NSDictionary *(NSString *identifier, NSString *album, NSString *upc, NSNumber *tracks, NSString *clip) {
+            NSMutableDictionary *attrs = [@{@"name":album, @"isSingle":@NO, @"trackCount":tracks, @"upc":upc} mutableCopy];
+            if (clip) attrs[@"editorialVideo"] = clipRelease(album, @"", NO, @[], clip)[@"attributes"][@"editorialVideo"];
+            return @{@"id":identifier, @"attributes":attrs};
+        };
+    NSString *rain = @"Use Your Illusion I", *moana = @"Moana (Original Motion Picture Soundtrack)";
+    NSString *rainURI = @"spotify:album:0000000000000000000031", *moanaURI = @"spotify:album:0000000000000000000032";
+    NSDictionary *savedBarcode = barcodeReply;
+    spotifyUPC = @"720642441527";
+    NSDictionary *rainA = candidate(@"114561", rain, spotifyUPC, @16, @"P359497653");
+    BOOL (^confirmedDuplicate)(NSString *, NSArray *) = ^BOOL(NSString *uri, NSArray *rows) {
+        barcodeReply = @{@"data":rows};
+        __block BOOL finished = NO, confirmed = NO;
+        SGMotionPageIdentifierCover(uri, @"Guns N' Roses", rain, 720, ^(NSURL *file, SGMotionIdentifierOutcome outcome) {
+            confirmed = outcome == SGMotionIdentifierClip && [file.path isEqual:@"/P359497653/clip.mp4"];
+            finished = YES;
+        });
+        waitFor(^BOOL { return finished; });
+        return confirmed;
+    };
+    BOOL skipStill = confirmedDuplicate(@"spotify:album:0000000000000000000033", @[candidate(@"114561", rain, spotifyUPC, @16, nil), rainA]);
+    BOOL keepFirst = confirmedDuplicate(@"spotify:album:0000000000000000000034", @[rainA, candidate(@"114561", rain, spotifyUPC, @16, @"different")]);
+    fprintf(stderr, "same UPC ID: still then video %s; first of two videos %s\n", skipStill ? "PASS" : "FAIL", keepFirst ? "PASS" : "FAIL");
+    CHECK(skipStill && keepFirst);
+    barcodeReply = @{@"data":@[rainA, candidate(@"1440896026", rain, spotifyUPC, @16, @"P359497653")]};
+    BOOL rainClip = [coverWithURI(rain, @"November Rain", rainURI).path isEqual:@"/P359497653/clip.mp4"];
+    barcodeReply = @{@"data":@[rainA, candidate(@"1440896026", rain, spotifyUPC, @16, nil)]};
+    CHECK(!coverForTrack(rain, @"Another track", rainURI, @"spotify:track:0000000000000000000001"));
+    spotifyUPC = nil;
+    NSDictionary *a = candidate(@"40", moana, @"", @40, @"P561704611"), *b = candidate(@"59", moana, @"", @59, @"P561704611");
+    songsReply = replyWithAlbums(@[a, b, candidate(@"66", moana, @"", @66, @"P561704611")]);
+    BOOL moanaClip = [coverWithURI(moana, @"How Far I'll Go", moanaURI).path isEqual:@"/P561704611/clip.mp4"];
+    songsReply = replyWithAlbums(@[a, b, candidate(@"66", moana, @"", @66, @"different")]);
+    expectedTrack = @"spotify:track:0000000000000000000001";
+    CHECK(!coverForTrack(moana, @"Another track", moanaURI, expectedTrack));
+    fprintf(stderr, "issue 67: November Rain %s; How Far I'll Go %s\n", rainClip ? "PASS" : "FAIL", moanaClip ? "PASS" : "FAIL");
+    CHECK(rainClip && moanaClip);
+    expectedTrack = @"spotify:track:0000000000000000000002";
+    barcodeReply = savedBarcode;
     NSMutableDictionary *attributes = [second[@"attributes"] mutableCopy];
     attributes[@"isSingle"] = @YES;
     second[@"attributes"] = attributes;

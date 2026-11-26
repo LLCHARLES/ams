@@ -809,12 +809,31 @@ static NSString *firstTrackURI(id album) {
 
 typedef void (^CoverAnswer)(id result, BOOL keep);
 
-static void identifiedCover(NSString *video, CGFloat pixels, CoverAnswer answer) {
-    if (!video) { answer(@NO, YES); return; }
-    masterFile(video, pixels, ^(NSURL *file) { answer(file, file != nil); });
+@interface SGMotionSelection : NSObject
+@property(nonatomic, copy) NSString *video;
+@property(nonatomic) BOOL uniqueRelease;
+@end
+@implementation SGMotionSelection
+@end
+
+// A complete, nonempty set of identifier matches can agree on the picture without proving the release.
+static void selectIdentifierCover(NSArray *records, CoverAnswer answer) {
+    NSMutableDictionary<NSString *, NSString *> *byID = [NSMutableDictionary dictionary];
+    for (NSDictionary *record in records) {
+        NSString *identifier = record[@"id"];
+        if (!byID[identifier].length) byID[identifier] = videoOf(dig(record, @"attributes/editorialVideo")) ?: @"";
+    }
+    BOOL unique = byID.count == 1;
+    NSSet<NSString *> *videos = [NSSet setWithArray:byID.allValues];
+    NSString *video = videos.anyObject;
+    if (videos.count != 1 || !video.length) { answer(unique ? @NO : @(SGMotionIdentifierAmbiguous), YES); return; }
+    SGMotionSelection *selection = [SGMotionSelection new];
+    selection.video = video;
+    selection.uniqueRelease = unique;
+    answer(selection, NO); // Only a verified, downloaded clip is kept for the release.
 }
 
-static void recordingCover(NSString *track, NSString *album, CGFloat pixels, NSUInteger generation, CoverAnswer answer) {
+static void recordingCover(NSString *track, NSString *album, NSUInteger generation, CoverAnswer answer) {
     if (!SGSpotifyValidURI(track, @"track")) {
         SGLog(@"motion: ISRC not read for %@: no track URI", album);
         answer(nil, NO);
@@ -831,7 +850,7 @@ static void recordingCover(NSString *track, NSString *album, CGFloat pixels, NSU
         askCatalogJSON(url, YES, ^(NSDictionary *json, NSInteger status) {
             if (generation != sg_generation || !SGMotionAppleMusicOn()) { answer(nil, NO); return; }
             NSString *wanted = SGMotionNameKey(album);
-            NSMutableDictionary *albums = [NSMutableDictionary dictionary], *singles = [NSMutableDictionary dictionary];
+            NSMutableArray *albums = [NSMutableArray array], *singles = [NSMutableArray array];
             NSArray *songs = json[@"data"];
             BOOL complete = status == 200 && [songs isKindOfClass:NSArray.class] && !json[@"next"];
             if (complete) for (id song in songs) {
@@ -848,15 +867,14 @@ static void recordingCover(NSString *track, NSString *album, CGFloat pixels, NSU
                     if (!single && (wanted.length && key.length ? ![key isEqual:wanted] : ![coverKey(name) isEqual:coverKey(album)])) continue;
                     NSString *identifier = dig(record, @"id");
                     if (![identifier isKindOfClass:NSString.class] || !identifier.length) { complete = NO; break; }
-                    (single ? singles : albums)[identifier] = record;
+                    [(single ? singles : albums) addObject:record];
                 }
             }
             if (!albums.count) albums = singles;
-            NSString *chosen = complete && albums.count == 1 ? albums.allKeys.firstObject : nil;
-            SGLog(@"motion: %@ ISRC %@: %lu matching albums, %@", track, isrc, (unsigned long)albums.count,
-                  chosen ?: (!complete ? @"incomplete catalog reply" : albums.count ? @"ambiguous" : @"no matching album"));
-            if (!chosen) { answer(complete && albums.count ? @(SGMotionIdentifierAmbiguous) : nil, complete); return; }
-            identifiedCover(videoOf(dig(albums[chosen], @"attributes/editorialVideo")), pixels, answer);
+            SGLog(@"motion: %@ ISRC %@: %lu matching records (%@)", track, isrc, (unsigned long)albums.count,
+                  complete ? @"complete" : @"incomplete catalog reply");
+            if (!complete || !albums.count) { answer(nil, complete); return; }
+            selectIdentifierCover(albums, answer);
         });
     });
 }
@@ -929,7 +947,13 @@ static void identifierCover(NSString *uri, NSString *album, NSString *track, CGF
     // A string means no UPC match; it carries the first track for a page without a playing track.
     void (^deliver)(id, BOOL) = ^(id result, BOOL miss) {
         if (generation != sg_generation) done(nil, SGMotionIdentifierUnavailable);
-        else if ([result isKindOfClass:NSURL.class]) done(result, SGMotionIdentifierClip);
+        else if ([result isKindOfClass:SGMotionSelection.class]) {
+            SGMotionSelection *selection = result;
+            masterFile(selection.video, pixels, ^(NSURL *file) {
+                if (generation != sg_generation || !file) done(nil, SGMotionIdentifierUnavailable);
+                else done(file, selection.uniqueRelease ? SGMotionIdentifierClip : SGMotionIdentifierAmbiguous);
+            });
+        }
         else if ([result isEqual:@NO]) done(nil, SGMotionIdentifierStill);
         else if ([result isEqual:@(SGMotionIdentifierAmbiguous)]) done(nil, SGMotionIdentifierAmbiguous);
         else done(nil, miss ? SGMotionIdentifierMiss : SGMotionIdentifierUnavailable);
@@ -939,13 +963,9 @@ static void identifierCover(NSString *uri, NSString *album, NSString *track, CGF
         NSString *recording = track ?: result;
         NSString *key = [NSString stringWithFormat:@"album\nrecording\n%@\n%@\n%@", uri, recording, coverKey(album)];
         lookUp(key, ^(id record) { deliver(record, sg_kept[key] == NSNull.null); }, ^(CoverAnswer resolve) {
-            recordingCover(recording, album, pixels, generation, ^(id value, BOOL keep) {
-                resolve(value, keep && ![value isKindOfClass:NSURL.class]);
-            });
+            recordingCover(recording, album, generation, resolve);
         });
-    }, ^(void (^resolve)(id, BOOL)) {
-        // Only a successfully downloaded release clip becomes album identity. A failed transfer can be retried.
-        CoverAnswer answer = ^(id value, BOOL keep) { resolve(value, keep && ![value isKindOfClass:NSURL.class]); };
+    }, ^(CoverAnswer answer) {
         SGSpotifyMetadataRequestAllowConstrained(path, nil, SGFlag(SGKeyMotionLowData, NO), ^(NSData *data, NSInteger status, NSError *error) {
             id json = status == 200 && !error && data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
             NSString *upc = albumUPC(json);
@@ -962,17 +982,15 @@ static void identifierCover(NSString *uri, NSString *album, NSString *track, CGF
                     if (generation != sg_generation || !SGMotionAppleMusicOn()) { answer(nil, NO); return; }
                     NSArray *records = reply[@"data"];
                     if (status != 200 || ![records isKindOfClass:NSArray.class] || reply[@"next"]) { answer(nil, NO); return; }
-                    NSString *wanted = barcodeKey(upc), *video = nil;
-                    NSString *identifier = nil;
+                    NSString *wanted = barcodeKey(upc);
+                    NSMutableArray *matches = [NSMutableArray array];
                     for (id record in records) {
                         if (![barcodeKey(dig(record, @"attributes/upc")) isEqual:wanted]) continue;
                         NSString *candidate = dig(record, @"id");
                         if (![candidate isKindOfClass:NSString.class] || !candidate.length) { answer(nil, NO); return; }
-                        if (identifier && ![identifier isEqual:candidate]) { answer(@(SGMotionIdentifierAmbiguous), YES); return; }
-                        identifier = candidate;
-                        video = video ?: videoOf(dig(record, @"attributes/editorialVideo"));
+                        [matches addObject:record];
                     }
-                    if (identifier) identifiedCover(video, pixels, answer);
+                    if (matches.count) selectIdentifierCover(matches, answer);
                     else answer(firstTrack, YES);
                 });
             });

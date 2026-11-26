@@ -647,6 +647,7 @@ static void arcRamp(CAGradientLayer *mask, CGFloat width, CGFloat total, CGFloat
 
 static CAReplicatorLayer *softCopy(void) {
     CAReplicatorLayer *copy = [CAReplicatorLayer layer];
+    copy.anchorPoint = CGPointZero; // layoutSoftFor: reflects about the cover's edge in top-origin coordinates.
     copy.instanceCount = 2;
     copy.hidden = YES;
     CAFilter *blur = [NSClassFromString(@"CAFilter") filterWithType:@"gaussianBlur"];

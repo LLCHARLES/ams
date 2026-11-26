@@ -778,7 +778,9 @@ Shared:
                   with none, exactly one "X - Single" whose whole name (less the suffix) is the album's.
                   A confirmed identifier miss permits the title lookup (and, on the album page, matching track rows).
                   A recording miss applies only to that track; the next track may identify the release.
-                  An unanswered request remains retryable; multiple candidate release IDs do not select a clip.
+                  An unanswered request remains retryable. If a complete UPC or ISRC reply has multiple qualifying
+                  release IDs, the track gets a clip only if every candidate selects the same video URL. That agreement
+                  does not verify the release or store the clip for other songs on the album.
                   For an identified still edition only a title match within one year of Spotify's release year can move;
                   without a year it stays still. Only an identifier-verified clip that downloaded successfully is kept
                   for all songs by Spotify album URI. Header and track share the
@@ -2696,8 +2698,8 @@ a later clip replaces it, Black and Your Photo win, and Low Power Mode, Reduce M
 PlayerMotion.x, harness/player/ `still`),
 while Fluid is chosen a Style menu, Light or Smooth (spotifyglass.redesign.fluid.renderer, offered where Metal exists),
 its sliders and a red Reset (Redesigned/Kit/SGRFluid.h, spotifyglass.redesign.fluid.*).
-Light (the default) turns preblurred Core Animation copies, with no Metal renderer or music analysis.
-Smooth draws on the GPU (Redesigned/Kit/SGRFluidGPU.m):
+Light turns preblurred Core Animation copies, with no Metal renderer or music analysis; it is what shows where Metal is
+missing. Smooth, the default, draws on the GPU (Redesigned/Kit/SGRFluidGPU.m):
 three copies of the cover, 1.4, 0.7 and 0.7 units across (a unit half the visible rect's height on a phone) at (0, 0),
 (-0.25, 0.15) and (0.7, 0.7), each turning clockwise about its own center once in 120, 70 and 90 s, the third carried
 about the middle by the first's turn, drawn opaque into a quarter-size half-float picture (as the Music app's, so what the saturation pushes past 0 or 1 is
