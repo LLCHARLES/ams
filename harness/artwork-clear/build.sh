@@ -9,7 +9,7 @@ SRC=../../tweak/Sources
 ART=$SRC/Shared/AnimatedArtwork
 mkdir -p "$OUT"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi \
     -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -I $SRC -I $ART \
     -framework UIKit -framework Foundation -framework CoreGraphics -framework AVFoundation -framework CoreMedia -framework CoreVideo \

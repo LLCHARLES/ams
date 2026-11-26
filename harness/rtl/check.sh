@@ -22,7 +22,7 @@ APP=$OUT/RTLCheck.app
 mkdir -p "$OUT/gen" "$APP"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/ListeningStats/ListeningStats.x" > "$OUT/gen/ListeningStats.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     -Wno-undeclared-selector -I"$SRC" -I"$SRC/Shared/ListeningStats" "$HERE/check.m" \
     "$HERE/../sing/button/sing-stubs.m" "$HERE/../listening-stats/sim/stubs.m" "$OUT/gen/ListeningStats.m" \
     "$SRC"/Shared/Sing/SGSingCard.m "$SRC"/Settings/SGMarquee.m \

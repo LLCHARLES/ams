@@ -11,7 +11,7 @@ for f in Shared/AnimatedArtwork/LockScreenMotion.x Shared/ArtistBlock/ArtistSkip
     "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$src/$f" > "$out/gen/$(basename "$f" .x).m"
 done
 sdk=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios26.0-macabi -isysroot "$sdk" -iframework "$sdk/System/iOSSupport/System/Library/Frameworks" \
+xcrun clang -target $(uname -m)-apple-ios26.0-macabi -isysroot "$sdk" -iframework "$sdk/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -I"$out/gen" -I"$src" -I"$src/Shared/ArtistBlock" -I"$src/Shared/LockScreenLyrics" \
     -I"$src/Shared/AnimatedArtwork" -I"$src/Shared/LiveActivity" clip-main.m clip-unavailable.m "$np/activity.m" \
     "$out"/gen/{LockScreenMotion,ArtistSkip,LockScreenLyrics,LyricsArtwork,NowPlayingExtras}.m "$np/activity-clock-driver.m" \

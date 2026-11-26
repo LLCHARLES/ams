@@ -18,7 +18,7 @@ fi
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 # Link the actual switch callback and holder registry without the unrelated search/sync sheets.
 sed -n '/^#pragma mark - Keep screen on/,$p' "$SRC/Redesigned/Lyrics/LyricsTools.m" > "$OUT/awake-row-under-check.inc"
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g ${OPT:--O0} \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g ${OPT:--O0} \
     -I"$OUT" -I"$SRC" -I"$SRC/Redesigned/Lyrics" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/stubs.m" "$HERE/translation-check.m" \
     "$SRC"/Redesigned/Lyrics/AutoTranslatorName.m \

@@ -13,7 +13,7 @@ LOCAL=${LOCAL:-"$SRC/Shared/LocalFiles"}
 rm -rf "$OUT/gen" "$OUT/EditInfoHarness.app"; mkdir -p "$OUT/gen" "$OUT/EditInfoHarness.app" "$OUT/shots"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$LOCAL/EditInfoMenu.x" > "$OUT/gen/EditInfoMenu.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall \
     -I"$SRC" -I"$SRC/Shared/LocalFiles" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../../scene.m" "$OUT/gen/EditInfoMenu.m" "$LOCAL/LocalFiles.m" "$LOCAL/LocalInfoLookup.m" "$LOCAL/LocalInfoReview.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGGlass.m" "$SRC/Core/SGViewTree.m" \
     "$SRC/Settings/SGPageStyle.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGLocalize.m" \

@@ -13,7 +13,7 @@ rm -rf "$OUT"
 mkdir -p "$APP"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
     -I"$SRC" -Wall -Wno-unused-function -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/stubs.m" "$HERE/../page-style-with-presenter-stubs.m" \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGGlass.m \

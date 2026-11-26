@@ -10,7 +10,7 @@ APP=$OUT/LyricsPageHarness.app
 rm -rf "$OUT"; mkdir -p "$APP"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_HARNESS_SETTINGS \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_HARNESS_SETTINGS \
     -I"$SRC" -I"$SRC/Redesigned/Lyrics" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/../lyrics/stubs.m" "$HERE/../sing/button/sing-stubs.m" \
     "$SRC"/Redesigned/Lyrics/LyricsLookSettings.m "$SRC"/Redesigned/Lyrics/LyricsLook.m "$SRC"/Redesigned/Lyrics/LyricsStyle.m "$SRC"/Redesigned/Lyrics/LyricsTextSettings.m \

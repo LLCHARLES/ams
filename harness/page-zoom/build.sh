@@ -5,7 +5,7 @@ OUT=$HARNESS_BUILD_DIR
 mkdir -p "$OUT/PageZoomHarness.app"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 perl "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Redesigned/Navigation/PageZoom.x" > "$OUT/PageZoom.x.m"
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios26.0-simulator -fobjc-arc -isysroot "$SDK" \
+xcrun --sdk iphonesimulator clang -target $(uname -m)-apple-ios26.0-simulator -fobjc-arc -isysroot "$SDK" \
     -I"$SRC" -I"$SRC/Redesigned/Navigation" \
     "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" \
     "$SRC/Redesigned/Navigation/PageZoom.m" "$OUT/PageZoom.x.m" \

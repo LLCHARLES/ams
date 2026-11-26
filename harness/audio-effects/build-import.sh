@@ -7,7 +7,7 @@ OUT=${OUT:-"$HERE/build/import"}
 APP="$OUT/ImportHarness.app"
 mkdir -p "$APP"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -O1 -g \
     -isysroot "$SDK" -I"$SRC" -I"$FX" \
     "$HERE/import.m" "$HERE/../scene.m" "$FX/AudioEffectsSettings.m" \
     "$SRC/Core/SGPrefs.m" "$SRC/Core/SGLocalize.m" \

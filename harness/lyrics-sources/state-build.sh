@@ -12,7 +12,7 @@ sed -n '/^static const NSTimeInterval kLyricsGrace =/p; /^static const NSTimeInt
     "$SRC/Redesigned/Player/PlayerLyrics.x" > "$OUT/player-lyrics-watcher.inc"
 sed '/^#pragma mark - hooks/,$d' "$SRC/Shared/LyricsSources/LyricsHook.x" > "$OUT/lyrics-hook.inc"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -g -Wall -Wno-unused-function -Wno-unused-variable \
     -I"$SRC" -I"$SRC/Shared/Lyrics" -I"$SRC/Shared/LyricsSources" -I"$OUT" -DSG_VERSION=\"0.0.0\" \
     "$SRC/Shared/LyricsSources/SGBoundedRequest.m" "$HERE/pixie-boundaries.m" \

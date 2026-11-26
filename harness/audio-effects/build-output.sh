@@ -7,7 +7,7 @@ APP="$OUT/OutputHarness.app"
 mkdir -p "$OUT/gen" "$APP"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Player/SpeedPitch.x" > "$OUT/gen/SpeedPitch.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -O1 -g \
     -isysroot "$SDK" -I"$SRC" -I"$SRC/Shared/Player" -I"$OUT/gen" -Wno-deprecated-declarations \
     "$HERE/output.m" "$HERE/../scene.m" "$SRC/Shared/Player/SGTimePitch.m" \
     "$SRC/Core/SGRebind.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGFlagForce.m" \

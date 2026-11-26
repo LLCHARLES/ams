@@ -7,7 +7,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/AddTabHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Navigation/Links.x" > "$OUT/gen/Links.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Shared/Navigation" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/stubs.m" "$OUT/gen/Links.m" \
     "$SRC"/Shared/Navigation/AddTabSheet.m "$SRC"/Shared/Navigation/TabIcons.m "$SRC"/Shared/Navigation/LinkURL.m "$SRC"/Shared/Navigation/InboundLinks.m \

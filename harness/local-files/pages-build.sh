@@ -5,7 +5,7 @@ SRC="$HERE/../../tweak/Sources"
 OUT=${BUILD_DIR:?Set BUILD_DIR to an isolated output directory}
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 mkdir -p "$OUT/home"
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -g -Wall -Werror -Wno-deprecated-declarations -I"$SRC" "$HERE/pages-check.m" "$SRC/Shared/LocalFiles/LocalMusicIndex.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \
     "$SRC/Shared/LocalFiles/LocalMusicCache.m" "$SRC/Shared/LocalFiles/LocalMusicPlaybackRules.m" "$SRC/Core/SGLocalize.m" \
     -framework UIKit -framework Foundation -framework CoreGraphics -framework ImageIO -framework AVFoundation -framework CoreMedia "$SRC/Core/SGDataRoot.m" -o "$OUT/pages"
@@ -14,7 +14,7 @@ CFFIXED_USER_HOME="$OUT/home" "$OUT/pages"
 APP="$OUT/LocalPagesHarness.app"
 mkdir -p "$APP" "$OUT/shots"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -isysroot "$SDK" \
     -fobjc-arc -g -Wall -Werror -Wno-deprecated-declarations -I"$SRC" \
     "$HERE/sim/pages-main.m" "$SRC/Shared/LocalFiles/LocalMusicIndex.m" "$SRC/Shared/LocalFiles/LocalMusicStore.m" \
     "$SRC/Shared/LocalFiles/LocalMusicPages.m" "$SRC/Shared/LocalFiles/LocalFiles.m" "$SRC/Shared/LocalFiles/LocalAudioImport.m" \

@@ -6,7 +6,7 @@ OUT=${OUT:-"$HERE/build-upgrade"}
 mkdir -p "$OUT"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 cc() {
-    xcrun clang -fobjc-arc -target arm64-apple-ios26.0-macabi -isysroot "$SDK" \
+    xcrun clang -fobjc-arc -target $(uname -m)-apple-ios26.0-macabi -isysroot "$SDK" \
         -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"${HEADERS:-$SRC}" -I"$SRC" \
         -I"$SRC/Shared/AnimatedArtwork" "$@"
 }

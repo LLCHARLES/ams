@@ -8,7 +8,7 @@ SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
 OUT=${OUT:-$HERE/build}
 mkdir -p "$OUT"
 compile() {
-    xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -iframework "$(xcrun --sdk macosx --show-sdk-path)/System/iOSSupport/System/Library/Frameworks" -DSecItemCopyMatching=SGLyricsTestKey -DSecItemAdd=SGLyricsTestKeyAdd -DSecItemUpdate=SGLyricsTestKeyUpdate -DSecItemDelete=SGLyricsTestKeyDelete -fobjc-arc -g -Wall -I"$SRC" "$@"
+    xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -iframework "$(xcrun --sdk macosx --show-sdk-path)/System/iOSSupport/System/Library/Frameworks" -DSecItemCopyMatching=SGLyricsTestKey -DSecItemAdd=SGLyricsTestKeyAdd -DSecItemUpdate=SGLyricsTestKeyUpdate -DSecItemDelete=SGLyricsTestKeyDelete -fobjc-arc -g -Wall -I"$SRC" "$@"
 }
 compile -DSGLyricsTranslationSendRequest=SGLyricsTranslationRealSendRequest -DSGLyricsTranslationSendOnce=SGLyricsTranslationRealSendOnce -DSGLyricsTranslationSendOnceUpTo=SGLyricsTranslationRealSendOnceUpTo -c "$SRC/Shared/LyricsTranslation/DeepL.m" -o "$OUT/DeepL.o"
 compile -DSG_LYRICS_TEST_STORE \

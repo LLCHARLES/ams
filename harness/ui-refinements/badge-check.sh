@@ -13,7 +13,7 @@ mkdir -p "$APP/Contents/MacOS"
 "$LOGOS" -c generator=internal "$SRC/Native/Appearance/Repaint.x" > "$OUT/Repaint.m"
 "$LOGOS" -c generator=internal "${REDESIGN_BADGE:-$SRC/Redesigned/Kit/SGRExplicitBadge.x}" > "$OUT/Redesign.m"
 "$LOGOS" -c generator=internal "$SRC/Redesigned/Kit/SGRRepaint.x" > "$OUT/SGRRepaint.m"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$SRC/Native/Appearance" -I"$SRC/Redesigned/Kit" \
     "$HERE/badge-check.m" "$OUT/Native.m" "$OUT/Repaint.m" "$OUT/Redesign.m" "$OUT/SGRRepaint.m" "$SRC/Core/SGPrefs.m" \
     "$SRC/Core/SGViewTree.m" -framework UIKit -framework QuartzCore -framework CoreGraphics -framework Foundation -o "$APP/Contents/MacOS/check"

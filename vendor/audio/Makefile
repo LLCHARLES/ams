@@ -9,10 +9,10 @@ ifeq ($(PLATFORM),ios)
   TARGET := arm64-apple-ios16.0
 else ifeq ($(PLATFORM),sim)
   SDK := iphonesimulator
-  TARGET := arm64-apple-ios17.0-simulator
+  TARGET := $(shell uname -m)-apple-ios17.0-simulator
 else ifeq ($(PLATFORM),mac)
   SDK := macosx
-  TARGET := arm64-apple-macos13.0
+  TARGET := $(shell uname -m)-apple-macos13.0
 else
   $(error PLATFORM is ios, sim or mac)
 endif

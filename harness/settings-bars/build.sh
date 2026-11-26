@@ -12,7 +12,7 @@ export TMPDIR="$OUT/tmp"
 mkdir -p "$CFFIXED_USER_HOME/Library/Preferences"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 python3 "$HERE/audit-fixtures.py" "$SRC" "$OUT"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O1 -g -Wall -Wextra -Werror -Wno-unused-parameter \
     -Wno-deprecated-declarations -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -I "$SRC" -I "$HERE/.." -I "$OUT" \
     "$HERE/check.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGPrefs.m" \

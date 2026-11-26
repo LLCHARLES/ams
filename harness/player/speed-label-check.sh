@@ -9,7 +9,7 @@ trap 'rm -rf "$OUT"' EXIT
 APP=$OUT/Check.app
 mkdir -p "$APP/Contents/MacOS"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -I"$SRC" -I"$SRC/Redesigned/Player" -I"$HERE" -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
     "$SRC/Redesigned/Player/PlayerSpeedLabel.m" "$HERE/speed-label-check.m" "$SRC/Redesigned/Kit/SGRRestyle.m" "$SRC/Redesigned/Kit/SGRRollingDigits.m" "$SRC/Redesigned/Kit/SGRTokens.m" \

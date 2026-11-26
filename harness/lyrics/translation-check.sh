@@ -11,7 +11,7 @@ mkdir -p "$APP/Contents/MacOS"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 # As build.sh: main.m drives the real Keep screen on row, which stubs.m includes from here.
 sed -n '/^#pragma mark - Keep screen on/,$p' "$SRC/Redesigned/Lyrics/LyricsTools.m" > "$OUT/awake-row-under-check.inc"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$OUT" -I"$SRC" -I"$SRC/Redesigned/Lyrics" -Wall -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/stubs.m" "$HERE/translation-check.m" "$HERE/../sing/button/sing-stubs.m" \
     "$SRC"/Redesigned/Lyrics/AutoTranslatorName.m \

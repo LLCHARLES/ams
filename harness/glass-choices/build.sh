@@ -12,7 +12,7 @@ mkdir -p "$APP" "$OUT/gen"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Redesigned/Kit/SGRPlainCheck.x" > "$OUT/gen/SGRPlainCheck.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios26.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios26.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
     -I"$SRC" -iquote "$SRC/Redesigned/Kit" -Wall -Werror -Wno-deprecated-declarations -Wno-unused-parameter \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/../tabbar/touch.m" "$OUT/gen/SGRPlainCheck.m" \
     "$SRC/Redesigned/Kit/SGRGlass.m" "$SRC/Redesigned/Kit/SGRRefinements.m" \

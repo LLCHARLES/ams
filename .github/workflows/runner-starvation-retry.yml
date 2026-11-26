@@ -15,16 +15,15 @@ concurrency:
 
 jobs:
   retry:
-    # Most completions are successes or later attempts; skip them without starting a runner.
     if: >-
       github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.run_attempt == 1 &&
+      github.event.workflow_run.run_attempt < 4 &&
       (github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       # Only this default-branch inline code runs: no checkout, artifacts or run logs.
-      - name: Retry only an entirely unacquired first attempt
+      - name: Retry an attempt ended by runner starvation
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -35,21 +34,36 @@ jobs:
           import os
           import subprocess
 
+          WATCH = "Runner watchdog / Watch queue"
+
           def decision(run, jobs, annotations):
-              if run["run_attempt"] != 1:
-                  return False, "attempt is not 1"
-              if run["conclusion"] not in ("failure", "cancelled"):
-                  return False, "run did not fail or cancel"
-              unsuccessful = [j for j in jobs if j["conclusion"] != "success"]
-              if not unsuccessful:
-                  return False, "no unsuccessful jobs"
-              for job in unsuccessful:
-                  if job["steps"]:
-                      return False, f"job {job['id']} has steps"
-                  if not any("was not acquired by Runner" in a["message"]
-                             for a in annotations[str(job["id"])]):
-                      return False, f"job {job['id']} lacks the starvation annotation"
-              return True, "every unsuccessful job was unacquired with no steps"
+              if (run["event"] != "pull_request" or not 1 <= run["run_attempt"] < 4
+                      or run["conclusion"] not in ("failure", "cancelled")):
+                  return False
+              # An intentionally skipped watchdog (notably on forks) isn't a workload.
+              unsuccessful = [j for j in jobs if j["conclusion"] != "success"
+                              and not (j["conclusion"] == "skipped" and j["name"] in
+                                       ("Runner watchdog", WATCH))]
+              if not unsuccessful or any(j["steps"] for j in unsuccessful):
+                  return False
+              if all(any("was not acquired by Runner" in a["message"]
+                         for a in annotations[j["id"]]) for j in unsuccessful):
+                  return True
+              if (run["conclusion"] != "cancelled" or
+                      (run["head_repository"] or {}).get("full_name") != os.environ["GH_REPO"]):
+                  return False
+              # Only accept the same-repo watchdog's receipt for these exact, untouched jobs.
+              # A marker on a workload, a previous attempt, or beside a real failure is not evidence.
+              protected = [j for j in jobs if j["name"].startswith("Harnesses ")
+                           or j["name"] in ("apple", "engine")]
+              if (not protected or {j["id"] for j in protected} != {j["id"] for j in unsuccessful}
+                      or any(j["conclusion"] != "cancelled" or j["runner_id"] for j in protected)):
+                  return False
+              receipt = "Retrine runner starvation: cancelled queued jobs " + ",".join(
+                  str(i) for i in sorted(j["id"] for j in protected))
+              return any(j["name"] == WATCH and j["conclusion"] == "success"
+                         and any(a["annotation_level"] == "warning" and a["message"] == receipt
+                                 for a in annotations[j["id"]]) for j in jobs)
 
           def api(endpoint):
               return json.loads(subprocess.check_output(
@@ -62,35 +76,32 @@ jobs:
           def main():
               with open(os.environ["GITHUB_EVENT_PATH"]) as event_file:
                   run = json.load(event_file)["workflow_run"]
-              if run["run_attempt"] != 1 or run["conclusion"] not in ("failure", "cancelled"):
-                  print("No retry:", decision(run, [], {})[1])
-                  return
+              attempt = run["run_attempt"]
               base = f"repos/{os.environ['GH_REPO']}"
               endpoint = f"{base}/actions/runs/{run['id']}"
               current = api(endpoint)
-              if current["run_attempt"] != 1 or current["status"] != "completed":
+              if current["run_attempt"] != attempt or current["status"] != "completed":
                   print("No retry: run has already advanced or is not completed")
                   return
-              jobs = [job for page in pages(endpoint + "/attempts/1/jobs?per_page=100")
+              jobs = [job for page in pages(endpoint + f"/attempts/{attempt}/jobs?per_page=100")
                       for job in page["jobs"]]
               annotations = {}
               for job in jobs:
-                  if job["conclusion"] != "success":
+                  if job["conclusion"] != "success" or job["name"] == WATCH:
                       check_id = int(job["check_run_url"].rsplit("/", 1)[1])
-                      annotations[str(job["id"])] = [
+                      annotations[job["id"]] = [
                           annotation
                           for page in pages(f"{base}/check-runs/{check_id}/annotations?per_page=100")
                           for annotation in page]
-              retry, reason = decision(current, jobs, annotations)
-              print("Retry:" if retry else "No retry:", reason)
-              if not retry:
+              if not decision(current, jobs, annotations):
+                  print("No retry: not a verified starvation attempt")
                   return
               # A manual retry may have started while annotations were being read.
               current = api(endpoint)
-              if current["run_attempt"] != 1 or current["status"] != "completed":
+              if current["run_attempt"] != attempt or current["status"] != "completed":
                   print("No retry: run advanced during inspection")
                   return
-              subprocess.run(["gh", "run", "rerun", str(run["id"]), "--failed"], check=True)
+              subprocess.run(["gh", "run", "rerun", str(run["id"])], check=True)
 
           if __name__ == "__main__":
               main()

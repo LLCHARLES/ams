@@ -24,7 +24,7 @@ if [ "$1" = battery ]; then
     ENGINE=
     EXTRA="-DSING_BATTERY -I$OUT/gen"
 fi
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios18.0-simulator -fobjc-arc -g -O1 -isysroot "$SDK" -Wno-deprecated-declarations \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios18.0-simulator -fobjc-arc -g -O1 -isysroot "$SDK" -Wno-deprecated-declarations \
     -I"$SRC" -I"$SING" -I"$SRC/Shared/Player" \
     $EXTRA sim/main.m ../scene.m "$OUT/gen/SpeedPitch.m" "$CONTROL" "$SRC/Shared/Player/SGTimePitch.m" \
     "$SING/SGSingModel.m" "$SING/SGSingLoader.m" "$SING/SGSingSeparator.m" $ENGINE "$SING/SGSingCommands.m" "$SRC/Shared/AudioEffects/SGDSPReverb.m" "$SRC/Core/SGFileHash.m" \

@@ -14,7 +14,7 @@ SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Native/LocalFiles/LocalLyricsButton.x" > "$OUT/footer.inc"
 python3 "$HERE/../embedded-fixtures.py" "$OUT/tags"
 cp "$OUT/tags/flac-plain" "$OUT/LocalLyricsHarness.app/tagged.flac"
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall -Werror -Wno-deprecated-declarations \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall -Werror -Wno-deprecated-declarations \
     -I"$SRC" -I"$SRC/Native/LocalFiles" -I"$OUT" -isysroot "$SDK" \
     "$HERE/main.m" "$HERE/../../scene.m" "$HERE/footer.m" "$SRC/Native/LocalFiles/LocalLyricsPage.m" \
     "$SRC/Shared/LocalFiles/LocalLyricsPage.m" "$SRC/Shared/LocalFiles/LocalLyrics.m" "$SRC/Shared/LocalFiles/EmbeddedLyrics.m" "$SRC/Shared/LocalFiles/LyricRetirement.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \

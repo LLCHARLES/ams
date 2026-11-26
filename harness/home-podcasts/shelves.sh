@@ -12,13 +12,13 @@ SDK=$(xcrun --sdk macosx --show-sdk-path)
 for SOURCE in "$HERE/shelves.m" "$HERE/../scene.m" "$SRC/Redesigned/Home/HomeShelves.m" \
     "$SRC/Redesigned/Kit/SGRRestyle.m" "$SRC/Redesigned/Kit/SGRTokens.m" \
     "$SRC/Core/SGLocalize.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGPrefs.m"; do
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -I"$SRC" -I"$SRC/Redesigned/Home" -I"$HERE/.." -I"$OUT" -Wall -Werror \
     -Wno-unused-parameter -Wno-unused-function -Wno-deprecated-declarations \
     -c "$SOURCE" -o "$OUT/$(basename "$SOURCE").o"
 done
-xcrun swiftc -target arm64-apple-ios17.0-macabi -sdk "$SDK" \
+xcrun swiftc -target $(uname -m)-apple-ios17.0-macabi -sdk "$SDK" \
     -F "$SDK/System/iOSSupport/System/Library/Frameworks" \
     "$SRC/Shared/AlbumQueue/AlbumPage.swift" "$SRC/Redesigned/Home/HomeFeed.swift" "$HERE/ShelfFeedFixture.swift" "$OUT/"*.o \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreText -framework Foundation \

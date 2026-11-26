@@ -2,6 +2,7 @@
 """Build/run the real engine; negative mutations require explicit manual opt-in."""
 import argparse
 import pathlib
+import platform
 import subprocess
 import tempfile
 
@@ -22,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix="retrine-liveprog-guard-") as directory:
     out = pathlib.Path(directory)
     run(["make", "-s", "-C", VENDOR, "PLATFORM=mac", f"BUILD={out / 'vendor'}", "-j8"])
     flags = ["xcrun", "clang", "-fobjc-arc", "-O2", "-g", "-Wall", "-Werror",
-             "-target", "arm64-apple-macos13.0", "-I", ROOT / "tweak/Sources", "-I", FX]
+             "-target", f"{platform.machine()}-apple-macos13.0", "-I", ROOT / "tweak/Sources", "-I", FX]
     for include in ("libbs2b", "eel2-parser", "wdl/eel2"):
         flags += ["-isystem", VENDOR / include]
     objects = []

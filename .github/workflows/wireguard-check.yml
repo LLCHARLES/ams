@@ -4,7 +4,7 @@ on:
   push:
     paths: ['WireGuard/**', 'tweak/Sources/Shared/WireGuard/**', 'tweak/Sources/Core/SGRebind.h', 'tweak/Sources/Core/SGRebind.m', 'tweak/Sources/App/ModSettings.x', 'tweak/layout/**/Localizable.strings', 'harness/wireguard/**', 'scripts/spotify-transport-scan.py', 'scripts/quick.sh', 'tweak/Makefile', '.github/workflows/wireguard-check.yml']
   pull_request:
-    paths: ['WireGuard/**', 'tweak/Sources/Shared/WireGuard/**', 'tweak/Sources/Core/SGRebind.h', 'tweak/Sources/Core/SGRebind.m', 'tweak/Sources/App/ModSettings.x', 'tweak/layout/**/Localizable.strings', 'harness/wireguard/**', 'scripts/spotify-transport-scan.py', 'scripts/quick.sh', 'tweak/Makefile', '.github/workflows/wireguard-check.yml']
+    paths: ['WireGuard/**', 'tweak/Sources/Shared/WireGuard/**', 'tweak/Sources/Core/SGRebind.h', 'tweak/Sources/Core/SGRebind.m', 'tweak/Sources/App/ModSettings.x', 'tweak/layout/**/Localizable.strings', 'harness/wireguard/**', 'scripts/spotify-transport-scan.py', 'scripts/quick.sh', 'tweak/Makefile', '.github/workflows/wireguard-check.yml', '.github/workflows/runner-queue-watchdog.yml']
 permissions:
   contents: read
 env:
@@ -25,9 +25,19 @@ jobs:
           test "$(go env GOVERSION)" = "go$(awk '$1 == "go" {print $2}' go.mod)"
           go mod verify && go test -race ./...
       - run: python3 -B harness/wireguard/test_transport_scan.py
+  runner-watchdog:
+    name: Runner watchdog
+    if: >-
+      always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' && fromJSON(github.run_attempt) < 4
+    permissions:
+      actions: write
+    uses: ./.github/workflows/runner-queue-watchdog.yml
   apple:
     if: github.event_name == 'pull_request'
-    runs-on: macos-latest
+    runs-on: >-
+      ${{ (endsWith(github.run_attempt, '0') || endsWith(github.run_attempt, '2') || endsWith(github.run_attempt, '4') ||
+           endsWith(github.run_attempt, '6') || endsWith(github.run_attempt, '8')) && 'macos-26-intel' || 'macos-latest' }}
     env:
       THEOS: ${{ github.workspace }}/theos
     steps:

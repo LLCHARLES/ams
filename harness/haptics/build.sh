@@ -9,7 +9,7 @@ system)
 SRC=../../tweak/Sources
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${SYSTEM_HAPTICS:-$SRC/Shared/Haptics/SystemMusicHaptics.x}" > "$OUT/SystemMusicHaptics.m"
-xcrun clang -fobjc-arc -target arm64-apple-ios18.0-macabi -isysroot "$SDK" \
+xcrun clang -fobjc-arc -target $(uname -m)-apple-ios18.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$OUT" -I"$SRC" -I"$SRC/Shared/Haptics" \
     system-check.m "$SRC/Shared/Haptics/SGHapticTrack.m" "$SRC/Shared/AdBlock/Protobuf.m" \
     -framework UIKit -framework MediaPlayer -framework Foundation -o "$OUT/system"

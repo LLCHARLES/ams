@@ -12,7 +12,7 @@ for f in PlaylistField PlaylistHeader PlaylistRows PlaylistMenu; do
 done
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/Playlist" -I"$SRC/Redesigned/Kit" -I"$OUT" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$HERE/rows-check.m" "$HERE/stubs.m" \
     "$OUT/gen/PlaylistField.m" "$OUT/gen/PlaylistHeader.m" "$OUT/gen/PlaylistMenu.m" \

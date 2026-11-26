@@ -44,13 +44,20 @@ is 27m23s, leaving 17m37s within the unchanged 45-minute timeout for variability
 and newer checks (SponsorBlock was not present in that measured run).
 These are projections, not a measured three-shard run.
 
-`.github/workflows/runner-starvation-retry.yml` inspects completed Mac harnesses
-and WireGuard checks runs of pull requests. It retries failed jobs once, only on attempt 1
-of a failed/cancelled run when **every** non-successful job has no steps and a
-check-run annotation containing `was not acquired by Runner`. Real failures,
-mixed failures, missing annotations and later attempts are logged without retry.
-The privileged workflow runs only its own inline code, with no checkout or
-execution of code/artifacts from the triggering run.
+On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
+Host, Catalyst and simulator harnesses build for the runner's architecture;
+iPhone device libraries still target arm64. On same-repo PRs the Ubuntu watchdog
+cancels only if **all** Mac jobs have been queued for at least 90 seconds and no
+workload has started (including WireGuard's Linux `engine`, excluding the harness
+planner). Forks and Dependabot PRs wait for GitHub's natural starvation failure.
+
+`.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
+including its watchdog, up to four attempts total. It requires either GitHub's
+`was not acquired by Runner` annotation on every unsuccessful workload with no
+steps, or a successful watchdog's warning naming the exact cancelled jobs,
+all without runners or steps. It does not retry mixed or real failures. The
+last attempt waits in the queue normally. The privileged retry workflow runs
+default-branch inline code only; it doesn't check out PR code or read artifacts.
 
 Locally, the same script explains and runs selections from the repo root:
 

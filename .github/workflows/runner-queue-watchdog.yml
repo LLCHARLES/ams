@@ -1,0 +1,74 @@
+name: Watch the macOS queue
+on:
+  workflow_call:
+    inputs:
+      shards:
+        description: Harness shard labels, comma-separated. Empty for WireGuard.
+        type: string
+        default: ''
+
+permissions:
+  actions: write
+
+jobs:
+  watch:
+    name: Watch queue
+    # Finish recording the receipt even when our own cancellation is being processed.
+    if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel only an entirely queued workload
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHARDS: ${{ inputs.shards }}
+        shell: bash
+        run: |
+          python3 -B - <<'PY'
+          import json
+          import os
+          import subprocess
+          import time
+          from datetime import datetime, timezone
+
+          def state(jobs, mac, protected, now):
+              batch = [j for j in jobs if j["name"] in protected]
+              if any(j["status"] != "queued" or j.get("runner_id") or j.get("steps") for j in batch):
+                  return "started", []
+              if {j["name"] for j in batch} != protected or len(batch) != len(protected):
+                  return "wait", []
+              # 90 s from the youngest mac job's creation allows ordinary matrix scheduling jitter.
+              if any((now - datetime.fromisoformat(j["created_at"].replace("Z", "+00:00"))
+                      ).total_seconds() < 90 for j in batch if j["name"] in mac):
+                  return "wait", []
+              return "starved", sorted(j["id"] for j in batch)
+
+          def main():
+              endpoint = f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+              attempt = os.environ["GITHUB_RUN_ATTEMPT"]
+              shards = os.environ["SHARDS"]
+              mac = {"Harnesses " + s for s in shards.split(",")} if shards else {"apple"}
+              protected = mac if shards else mac | {"engine"}
+
+              def inspect():
+                  pages = json.loads(subprocess.check_output([
+                      "gh", "api", "--paginate", "--slurp", endpoint + f"/attempts/{attempt}/jobs?per_page=100"]))
+                  return state([j for p in pages for j in p["jobs"]], mac, protected, datetime.now(timezone.utc))
+
+              until = time.monotonic() + 180
+              while time.monotonic() < until:
+                  status, ids = inspect()
+                  if status == "started":
+                      return
+                  if status == "starved":
+                      if inspect() == (status, ids):
+                          subprocess.run(["gh", "api", "--silent", "-X", "POST", endpoint + "/cancel"], check=True)
+                          print("::warning::Retrine runner starvation: cancelled queued jobs " +
+                                ",".join(map(str, ids)), flush=True)
+                      return
+                  time.sleep(5)
+
+          if __name__ == "__main__":
+              main()
+          PY

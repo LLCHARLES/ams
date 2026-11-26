@@ -29,7 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></array></dict></dict>
 </dict></plist>
 PLIST
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -Wno-deprecated-declarations \
     "$HERE/cutout-check.m" \
     "$SRC/Redesigned/Kit/SGRActionRow.m" "$SRC/Redesigned/Kit/SGRHeaderInfo.m" "$SRC/Redesigned/Kit/SGRGlass.m" \

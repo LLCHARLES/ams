@@ -6,7 +6,7 @@ SRC=${SRC:-$(cd "$HERE/../../tweak/Sources" && pwd)}
 OUT=${OUT:-$HERE/build}
 mkdir -p "$OUT"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -g -Wall -Wextra \
     -Wno-unused-parameter -I"$SRC" -I"$HERE/.." \
     "$HERE/main.m" "$SRC/Redesigned/Player/PlayerLyricFit.m" \
