@@ -30,6 +30,8 @@
 #import "Shared/Flags/Flags.h"
 #import "Shared/Gestures/Gestures.h"
 #import "App/About/About.h"
+#import "App/Pages.h"
+#import "Shared/LocalFiles/LocalAudioImport.h"
 #import "../harness-fail.h"
 
 // Spotify's page protocol, so SGRegisterPages finds one and the page is pushed as on the phone.
@@ -81,8 +83,9 @@ static NSUInteger searchControllerChecks(void) {
     };
     // Two places to show on the empty field, stored the way the results would store them.
     SGSearchForgetRecents();
-    SGSearchRememberPlace(@[@"page.liveactivity"]);
-    SGSearchRememberPlace(@[@"spotifyglass.harness.search.plain"]);
+    SGSettingsIndex *history = [SGSettingsIndex new];
+    [history rememberPlace:@[@"page.liveactivity"]];
+    [history rememberPlace:@[@"spotifyglass.harness.search.plain"]];
 
     SGModPage *page = searchHarnessPage();
     page.searchable = YES;
@@ -192,22 +195,40 @@ static NSUInteger searchPlacesChecks(void) {
                                                 : SGL(@"settings.privacy.hide_search_carousel.title", @"Hide the video carousel in Search");
         check([[index hitsForQuery:libraryQuery].firstObject.place isEqual:libraryPlace], @"Search & Library indexes the selected look's settings");
         SGSearchForgetRecents();
-        SGSearchRememberPlace(look.boolValue ? @[@"page.library.redesigned", @"spotifyglass.redesign.library.hideChips"]
-                                             : @[@"page.ads", @"spotifyglass.adblock.searchVideos"]);
+        // Seed as the previous release wrote them, without the current root's redirects.
+        SGSettingsIndex *legacy = [SGSettingsIndex new];
+        [legacy rememberPlace:look.boolValue ? @[@"page.library.redesigned", @"spotifyglass.redesign.library.hideChips"]
+                                             : @[@"page.ads", @"spotifyglass.adblock.searchVideos"]];
         check([index.recentHits.firstObject.place isEqual:libraryPlace], @"a saved Library or carousel result now leads to its new page");
-        SGSearchRememberPlace(@[look.boolValue ? @"page.player.redesigned" : @"page.player.native", @"page.player.localfiles"]);
-        check([index.recentHits.firstObject.place isEqual:@[@"page.playback", @"page.player.localfiles"]], @"the old Player recent opens Local files in Playback");
-        SGSearchRememberPlace(@[@"page.mod", SGKeyShowCacheLimit]);
+        [legacy rememberPlace:@[look.boolValue ? @"page.player.native" : @"page.player.redesigned", @"page.player.localfiles"]];
+        check([index.recentHits.firstObject.place isEqual:@[@"page.playback", @"page.player.localfiles"]], @"the other look's old Player recent opens Local files in Playback");
+        [legacy rememberPlace:@[look.boolValue ? @"page.lyrics.native" : @"page.lyrics.redesigned", @"page.lyrics.sing"]];
+        check([index.recentHits.firstObject.place isEqual:@[@"page.sing"]], @"the other look's old Karaoke recent opens the shared destination");
+        [legacy rememberPlace:@[@"page.mod", SGKeyShowCacheLimit]];
         check([index.recentHits.firstObject.place isEqual:@[@"page.mod", @"page.mod.storage", SGKeyShowCacheLimit]], @"the old cache setting resolves inside Mod Storage");
         NSArray *translation = @[look.boolValue ? @"page.lyrics.redesigned" : @"page.lyrics.native", @"page.lyrics.translation", @"spotifyglass.lyrics.translationPrompt"];
-        if (look.boolValue)
-            SGSearchRememberPlace(@[translation[0], translation[1], @"page.lyrics.gemini", translation[2]]);
-        else
-            SGSearchRememberPlace(translation);
+        [legacy rememberPlace:@[@"page.lyrics.redesigned", translation[1], @"page.lyrics.gemini", translation[2]]];
         check([index.recentHits.firstObject.place isEqual:translation], @"both looks resolve the shared translation prompt");
     }
     SGSearchForgetRecents();
     SGSetEnabled(SGKeyRedesign, savedLook);
+    // One real import and one stale record. Read the parent first: visiting Imported files prunes stale records.
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    NSURL *input = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+    HARNESS_CHECK([NSData.data writeToURL:input atomically:YES]);
+    NSArray *failed;
+    NSString *copied = SGLocalAudioImport(@[input], SGLocalAudioFolder(), store, &failed).firstObject;
+    HARNESS_CHECK(copied && !failed.count);
+    NSArray *records = [store arrayForKey:SGKeyLocalAudioImported];
+    [store setObject:[records arrayByAddingObject:@{@"name":@"missing.mp3", @"inode":@0}] forKey:SGKeyLocalAudioImported];
+    SGModPage *playback = (id)SGPlaybackSettingsPage();
+    SGModRow *local = nil;
+    for (SGModSection *group in playback.sections) for (SGModRow *row in group.rows)
+        if ([row.searchIdentifier isEqual:@"page.player.localfiles"]) local = row;
+    check(local.value && [local.value() isEqual:@"1"], @"Local files summary counts existing imports, not stale records");
+    HARNESS_CHECK(SGLocalAudioDelete(copied, SGLocalAudioFolder(), store));
+    [store removeObjectForKey:SGKeyLocalAudioImported];
+    HARNESS_CHECK([NSFileManager.defaultManager removeItemAtURL:input error:nil]);
     window.hidden = YES;
     fprintf(stderr, "[harness] search places checks: %lu failure(s)\n", (unsigned long)failures);
     return failures;

@@ -91,6 +91,8 @@ static SGModRow *foundByLook(NSMutableArray<NSArray *> *looked, SGModRow *row, N
 static NSArray *canonicalPlace(NSArray *place) {
     NSString *root = place.firstObject;
     NSString *child = place.count > 1 ? place[1] : nil;
+    BOOL lyrics = [root isEqual:@"page.lyrics.native"] || [root isEqual:@"page.lyrics.redesigned"];
+    BOOL player = [root isEqual:@"page.player.native"] || [root isEqual:@"page.player.redesigned"];
     NSArray *prefix = nil;
     if ([root isEqual:@"page.library.redesigned"]) prefix = @[@"page.search.redesigned"];
     else if (([root isEqual:@"page.albums.redesigned"] || [root isEqual:@"page.playlists.redesigned"]) && [child isEqual:SGRKeyCoverBeside])
@@ -98,19 +100,21 @@ static NSArray *canonicalPlace(NSArray *place) {
     else if (([root isEqual:@"page.albums.redesigned"] || [root isEqual:@"page.player.redesigned"] || [root isEqual:@"page.lockscreen"]) && [child isEqual:SGKeyMotionLowData])
         prefix = @[@"page.playback"];
     else if ([root isEqual:@"page.lyrics.redesigned"] && [child isEqual:SGKeyLyricsSimplifyTitles]) prefix = @[@"page.player.redesigned"];
-    else if ([root isEqual:@"page.lyrics.redesigned"] && [child isEqual:@"page.lyrics.translation"] && place.count == 4 &&
+    else if (lyrics && [child isEqual:@"page.lyrics.translation"] && place.count == 4 &&
              [@[@"page.lyrics.gemini", @"page.lyrics.claude", @"page.lyrics.openai"] containsObject:place[2]] &&
              [place.lastObject isEqual:SGKeyLyricsTranslationPrompt])
-        return @[root, child, place.lastObject];
-    else if ([root isEqual:namedForLook(@"lyrics")] && [child isEqual:SGKeyLockScreenLyrics]) prefix = @[@"page.lockscreen"];
-    else if ([root isEqual:namedForLook(@"lyrics")] && [child isEqual:@"page.lyrics.sing"])
+        return @[namedForLook(@"lyrics"), child, place.lastObject];
+    else if (lyrics && [child isEqual:@"page.lyrics.translation"] && [place.lastObject isEqual:SGKeyLyricsTranslationPrompt])
+        prefix = @[namedForLook(@"lyrics")];
+    else if (lyrics && [child isEqual:SGKeyLockScreenLyrics]) prefix = @[@"page.lockscreen"];
+    else if (lyrics && [child isEqual:@"page.lyrics.sing"])
         return [@[@"page.sing"] arrayByAddingObjectsFromArray:[place subarrayWithRange:NSMakeRange(2, place.count - 2)]];
     else if ([root isEqual:@"page.mod"] && [child isEqual:SGKeyUpdateBetas]) prefix = @[@"page.mod", @"page.mod.updates"];
     else if ([root isEqual:@"page.mod"] && ([child isEqual:SGKeyShowCacheLimit] || [child isEqual:@"action.spotifyStorage"]))
         prefix = @[@"page.mod", @"page.mod.storage"];
     else if ([root isEqual:@"page.spatialvoice"]) prefix = @[@"page.sing", @"page.spatialvoice"];
     else if ([root isEqual:@"page.ads"] && [child isEqual:SGKeyHideSearchVideos]) prefix = @[@"page.search.native"];
-    else if ([root isEqual:namedForLook(@"player")] && child &&
+    else if (player && child &&
              [@[@"page.player.blockedartists", @"page.player.blockedsongs", @"page.player.localfiles", SGKeyLoadAhead, SGKeyLossless] containsObject:child])
         prefix = @[@"page.playback"];
     else if ([root isEqual:@"page.workshop"]) {

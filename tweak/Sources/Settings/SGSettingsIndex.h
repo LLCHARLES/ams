@@ -27,15 +27,13 @@ BOOL SGSearchStartsTitle(NSString *query, NSString *foldedTitle, NSString *initi
 // two places. A place with a page row in it that has no name is not stored at all.
 #define SGKeySearchRecents @"spotifyglass.search.recents"
 NSArray<NSArray<NSString *> *> *SGSearchRecents(void);
-// Puts a place at the front, once, and keeps at most six.
-void SGSearchRememberPlace(NSArray<NSString *> *place);
 void SGSearchForgetRecents(void);
 
 // A page whose rows are named by something that can change while the page stays open (the stored look) gives the
 // search the block that names them again; every start of the index runs it before reading the page, so a place is
 // always made of the names the rows have now.
 void SGSettingsIndexRenamesWith(SGModPage *page, void (^rename)(void));
-// Resolve a saved trail after a page moves, without rewriting defaults or matching translated titles.
+// Resolve moved trails by identifier, both on lookup and when the next selection saves recents.
 void SGSettingsIndexMovesWith(SGModPage *page, NSArray *(^resolve)(NSArray *));
 
 #pragma mark - a row the search finds
@@ -78,4 +76,5 @@ void SGSettingsIndexMovesWith(SGModPage *page, NSArray *(^resolve)(NSArray *));
 - (NSArray<SGSettingsHit *> *)hitsForQuery:(NSString *)query;
 // The stored places the rows read so far hold, in the stored order, at most six.
 - (NSArray<SGSettingsHit *> *)recentHits;
+- (void)rememberPlace:(NSArray<NSString *> *)place;
 @end

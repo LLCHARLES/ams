@@ -133,7 +133,10 @@ UIViewController *SGAppearancePage(void) {
     foundBy(everywhere, SGL(@"settings.search.appearance.everywhere.keywords", @"typeface font app icon"));
     [sections addObject:SGSection(SGL(@"settings.appearance.font_icon.header", @"Font & app icon"), everywhere)];
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.appearance.title", @"Appearance")
-        intro:SGL(@"settings.appearance.intro", @"Badge changes apply at once. Some color and layout changes require restarting Spotify.") sections:sections footer:nil];
+        intro:SGRedesignedUIStored()
+            ? SGL(@"settings.appearance.intro", @"Hide explicit badge applies immediately. Restart Spotify to apply Saved mark and some color and layout changes.")
+            : SGL(@"settings.appearance.native.intro", @"Hide explicit badge applies immediately. Some color and layout changes require restarting Spotify.")
+        sections:sections footer:nil];
 }
 
 UIViewController *SGNavbarPage(void) {
@@ -157,22 +160,20 @@ UIViewController *SGSearchLibrarySettingsPage(void) {
 static UIViewController *translationPage(BOOL redesigned) {
     // The on-device translators lead the services: they need no key or account.
     SGModRow *prompt = SGLyricsTranslationPromptRow();
-    prompt.subtitle = SGL(@"settings.translation.prompt.shared", @"Shared by all AI services");
     NSMutableArray *services = [NSMutableArray arrayWithObject:prompt];
     [services addObjectsFromArray:SGOnDeviceTranslatorRows()];
     [services addObjectsFromArray:
         @[SGLyricsAIServiceRow(SGLyricsAIGemini), SGLyricsAIServiceRow(SGLyricsAIClaude), SGLyricsAIServiceRow(SGLyricsAIOpenAI),
           SGDeepLKeyRow(), SGBingTranslateRow(), SGGoogleTranslateRow()]];
-    NSMutableArray *language = [NSMutableArray arrayWithObject:SGLyricsTranslationLanguageRow()];
+    NSMutableArray *language = [NSMutableArray arrayWithObjects:SGLyricsTranslationLanguageRow(), SGRAutoTranslationRow(), SGRAutoTranslationOrderRow(), nil];
     NSMutableArray *options = [NSMutableArray array];
     if (redesigned) {
-        [language addObjectsFromArray:@[SGRAutoTranslationRow(), SGRAutoTranslationOrderRow(),
-            SGTranslateEverySongRow(), SGLyricsLanguageRulesRow(), SGTranslateTitlesRow()]];
+        [language addObjectsFromArray:@[SGTranslateEverySongRow(), SGLyricsLanguageRulesRow(), SGTranslateTitlesRow()]];
         [options addObjectsFromArray:@[SGLyricsPronunciationNotationRow(), SGLyricsCulturalNotesRow()]];
     }
     [options addObject:SGSavedTranslationsRow()];
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.lyrics.translation_ai.title", @"Translation & AI") intro:nil sections:@[
-        SGSection(redesigned ? SGL(@"settings.lyrics.translation_ai.automatic.header", @"Automatic translation") : nil, language),
+        SGSection(SGL(@"settings.lyrics.translation_ai.automatic.header", @"Automatic translation"), language),
         SGNotedSection(SGL(@"settings.lyrics.translation_ai.services.header", @"Services"), services,
                        redesigned ? SGL(@"settings.lyrics.ai.footer", @"Write Pronunciation and Explain References in the lyrics' menu use Gemini, Claude or your AI service, on your own key. What they write is kept for the song.") : nil),
         SGSection(SGL(@"settings.lyrics.translation_ai.options", @"Options & storage"), options),
@@ -188,14 +189,15 @@ static UIViewController *lyricsPage(void) {
                          @"Sync in the lyrics' corner menu adds an offset for one song, and one for the headphones it plays through. Applies at once.")
                    : SGL(@"settings.lyrics.timing.footer", @"Every line shows this much later than the song, for Bluetooth headphones that play a little behind the lyrics. Applies at once."));
     if (redesigned) {
-        [sections addObject:SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[
+        [sections addObject:SGNotedSection(SGL(@"settings.lyrics.display.header", @"Display"), @[
                 SGWithNew(named(SGPageRow(SGL(@"settings.lyricsstyle.title", @"Lyrics styles"), ^UIViewController *{ return SGRLyricsStylesSettingsPage(); }), @"lyricsstyles"), @"lyricsStyles"),
                 SGRLyricsTextSizesRow(), SGLyricsWordTimingRow(), SGLyricsRomanisedRow(),
                 SGLyricsAlphabetRow(), SGLyricsJapaneseReadingRow(), SGLyricsFuriganaRow(), SGRLyricsKeepAwakeRow(), SGRLyricsFullRateRow(),
                 SGOptionRow(SGL(@"settings.lyrics.break_labels.title", @"Name the breaks"), SGL(@"settings.lyrics.break_labels.subtitle", @"Intro, Interlude or Outro beside the dots"), SGRKeyLyricsBreakLabels),
                 SGRLyricsHideRow(),
                 SGRLyricsKeepMicRow(),
-                SGSwitchRow(SGL(@"settings.lyrics.landscape.title", @"Landscape lyrics"), SGL(@"settings.lyrics.landscape.subtitle", @"Turn the phone with the lyrics open"), SGRKeyLyricsLandscape)])];
+                SGSwitchRow(SGL(@"settings.lyrics.landscape.title", @"Landscape lyrics"), SGL(@"settings.lyrics.landscape.subtitle", @"Turn the phone with the lyrics open"), SGRKeyLyricsLandscape)],
+                SGL(@"settings.lyrics.pronunciation.alphabet.footer", @"Hangul reads Japanese and Chinese offline, replacing the Japanese reading choice. Other languages keep their usual readings. Applies at once."))];
     } else {
         [sections addObject:SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[SGGlassLyricsRow()])];
     }
@@ -219,11 +221,11 @@ UIViewController *SGPlaybackSettingsPage(void) {
     blocked.value = ^NSString *{
         return SGFlag(SGKeyArtistBlock, NO) ? @(SGBlockedArtists().count).stringValue : SGL(@"common.off", @"Off");
     };
-    SGModRow *songs = named(SGPageRow(SGL(@"settings.songblock.title", @"Blocked Songs"), ^UIViewController *{ return SGSongBlockSettingsPage(); }), @"player.blockedsongs");
+    SGModRow *songs = named(SGPageRow(SGL(@"settings.songblock.title", @"Blocked songs"), ^UIViewController *{ return SGSongBlockSettingsPage(); }), @"player.blockedsongs");
     songs.value = ^NSString *{ return @(SGBlockedSongs().count).stringValue; };
 
     SGModRow *local = named(SGPageRow(SGL(@"settings.localfiles.title", @"Local files"), ^UIViewController *{ return SGLocalFilesSettingsPage(); }), @"player.localfiles");
-    local.value = ^NSString *{ return @([NSUserDefaults.standardUserDefaults arrayForKey:SGKeyLocalAudioImported].count).stringValue; };
+    local.value = ^NSString *{ return @(SGLocalAudioImportedNames(SGLocalAudioFolder(), NSUserDefaults.standardUserDefaults).count).stringValue; };
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.playback.title", @"Playback & local files") intro:nil sections:@[
         SGPlaybackRulesSection(blocked, songs),
         SGNotedSection(SGL(@"settings.playback.local", @"Local audio & lossless"), @[

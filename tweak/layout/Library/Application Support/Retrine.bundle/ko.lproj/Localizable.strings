@@ -2695,13 +2695,13 @@
 "settings.appearance.accent.header" = "강조 색상";
 "settings.appearance.font_icon.header" = "서체 및 앱 아이콘";
 "settings.appearance.glass.header" = "글래스";
-"settings.appearance.intro" = "배지 변경은 즉시 적용됩니다. 일부 색상 및 레이아웃 변경은 Spotify를 다시 시작해야 적용됩니다.";
+"settings.appearance.intro" = "유해 콘텐츠 배지 숨기기는 즉시 적용됩니다. 저장 표시와 일부 색상 및 레이아웃 변경은 Spotify를 다시 시작해야 적용됩니다.";
+"settings.appearance.native.intro" = "유해 콘텐츠 배지 숨기기는 즉시 적용됩니다. 일부 색상 및 레이아웃 변경은 Spotify를 다시 시작해야 적용됩니다.";
 "settings.appearance.pages.header" = "페이지 및 배지";
 "settings.appearance.theme.header" = "테마";
 "settings.mod.support" = "지원 및 진단";
 "settings.privacy.statistics.summary" = "광고 %@ · 원격 측정 %@";
 "settings.privacy.statistics.title" = "차단 통계";
-"settings.translation.prompt.shared" = "모든 AI 서비스에 공통으로 적용됩니다.";
 "settings.player.photo.choose" = "사진 선택";
 "settings.player.play_next_menu.title" = "컨텍스트 메뉴의 다음에 재생";
 "settings.player.player_screen.header" = "플레이어 화면";

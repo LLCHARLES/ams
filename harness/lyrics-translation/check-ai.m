@@ -978,6 +978,7 @@ static void checkAsyncTranslationMutation(void) {
 static void checkSavedSummary(void) {
     SGLyricsDeleteSavedTranslations();
     SGModRow *row = SGSavedTranslationsRow();
+    CHECK(row.searchIdentifier.length && row.page && [row.page().title isEqual:@"Saved library fixture"]);
     NSUInteger enumerations = mainStoreEnumerations;
     for (NSUInteger i = 0; i < 100; i++) row.value();
     CHECK(mainStoreEnumerations == enumerations);

@@ -178,7 +178,9 @@ static UIAlertController *keyPrompt;
 @end
 static UIViewController *testPresenter;
 UIViewController *SGTopController(void) { return testPresenter; }
-UIViewController *SGSavedTranslationsPage(void) { return nil; }
+UIViewController *SGSavedTranslationsPage(void) {
+    UIViewController *library = [UIViewController new]; library.title = @"Saved library fixture"; return library;
+}
 void SGShowPage(UIViewController *owner, UIViewController *page) {}
 
 #define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "FAILED line %d: %s\n", __LINE__, #cond); exit(1); } } while (0)

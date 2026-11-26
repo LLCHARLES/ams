@@ -51,7 +51,7 @@ static char kSearchKey;
         usingBlock:^(NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 // A switch flipped outside the results can hide or show a row, so the pages are read again. The recents
-                // are one of the things written this way (SGSearchRememberPlace) and need no re-read, but they come
+                // are one of the things written this way and need no re-read, but they come
                 // with the same write, and a results table that is not up needs no index at all.
                 if (!weakSelf.keysUp) return;
                 [weakSelf readPages];
@@ -222,7 +222,7 @@ static char kSearchKey;
     SGSettingsHit *hit = (path.section == 0 ? _recents : _hits)[(NSUInteger)path.row];
     SGModPage *owner = self.owner;
     // A row whose place says nothing (its page or the row has no name) opens all the same, it is just not remembered.
-    if (hit.place) SGSearchRememberPlace(hit.place);
+    [_index rememberPlace:hit.place];
     UIViewController *page = hit.open ? hit.open() : nil;
     if (!page) {
         // A row of the searched page itself: the results go, and the row is shown where it is.

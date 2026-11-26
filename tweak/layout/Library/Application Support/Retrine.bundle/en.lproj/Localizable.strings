@@ -205,7 +205,8 @@
 "settings.appearance.glass_touch.title" = "Glass touch response";
 "settings.appearance.hide_explicit.subtitle" = "Hide the E mark, without changing content restrictions or VoiceOver";
 "settings.appearance.hide_explicit.title" = "Hide explicit badge";
-"settings.appearance.intro" = "Badge changes apply at once. Some color and layout changes require restarting Spotify.";
+"settings.appearance.intro" = "Hide explicit badge applies immediately. Restart Spotify to apply Saved mark and some color and layout changes.";
+"settings.appearance.native.intro" = "Hide explicit badge applies immediately. Some color and layout changes require restarting Spotify.";
 "settings.appearance.page_zoom.subtitle" = "Albums and playlists grow from the cover you tap and return to it when you go back. Restart to apply";
 "settings.appearance.page_zoom.title" = "Open pages from their artwork";
 "settings.appearance.pages.header" = "Pages & badges";
@@ -2960,7 +2961,7 @@
 "settings.songblock.block" = "Block This Song";
 "settings.songblock.empty" = "No blocked songs";
 "settings.songblock.footer" = "Block a song from the player's ⋯ menu. Blocked songs are skipped wherever they come up. Swipe to unblock. After five skips in ten seconds, a blocked track is left playing to prevent an endless skip loop.";
-"settings.songblock.title" = "Blocked Songs";
+"settings.songblock.title" = "Blocked songs";
 "settings.songblock.unblock" = "Unblock This Song";
 
 "settings.songlanguage.automatic" = "Automatic";
@@ -3450,7 +3451,6 @@
 "settings.translation.prompt.help" = "{language} is replaced with the target language. The app adds the reply format and line-preservation rules. Applies to lyric translation with all three AI services, not pronunciation or notes.";
 "settings.translation.prompt.limit" = "%lu / %lu characters";
 "settings.translation.prompt.restore" = "Restore default";
-"settings.translation.prompt.shared" = "Shared by all AI services";
 "settings.translation.prompt.title" = "Translation prompt";
 "settings.translation.pronunciation.ipa" = "IPA";
 "settings.translation.pronunciation.latin" = "Latin letters";

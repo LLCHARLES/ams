@@ -2625,7 +2625,7 @@ under it and their sliders in Tune look (Text size, Line spacing, Blur, Glow, Wa
 Display contains the redesigned lyrics controls or Native's Glass lyrics. Pronunciation enables the inline alphabet
 menu; Japanese reading (Romaji or Hiragana) appears for Latin, not Hangul. Both looks offer Timing, Translation & AI,
 Sources, Source accounts, and Offline & imported lyrics. Translation language and the shared prompt are available
-in either look, while automatic translation remains a redesigned lyrics feature.
+in either look, as are the automatic translation switch and provider order used for lock screen lyrics.
 Karaoke, under either look, is on the main page, its row reading out On,
 Off or how far the voice model's download has come, kept up to date while the page shows: Karaoke's switch, which turns
 the mic on and off at once, a card at its top (SGSingCard.m: the song, what Karaoke is doing, a tap saying more, the vocals

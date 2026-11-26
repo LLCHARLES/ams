@@ -130,7 +130,6 @@ SGModRow *SGLyricsAlphabetRow(void) {
             });
     alphabet.waitsOn = SGKeyLyricsRomanised;
     alphabet.searchIdentifier = SGKeyLyricsPronunciationHangul;
-    alphabet.info = SGL(@"settings.lyrics.pronunciation.alphabet.footer", @"Hangul reads Japanese and Chinese offline, replacing the Japanese reading choice. Other languages keep their usual readings. Applies at once.");
     return alphabet;
 }
 

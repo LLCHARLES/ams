@@ -417,10 +417,12 @@ static void refreshSummary(void) {
 SGModRow *SGSavedTranslationsRow(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{ dispatch_async(writes(), ^{ refreshSummary(); }); });
-    return SGStatActionRow(SGL(@"settings.translation.savedtranslations.title", @"Saved translations"), SGL(@"settings.translation.savedtranslations.aisubtitle", @"Saved translations, pronunciations and cultural notes"),
-                           ^NSString *{ return sg_savedSummary; }, ^{
-        SGShowPage(SGTopController(), SGSavedTranslationsPage());
-    });
+    SGModRow *row = SGPageRow(SGL(@"settings.translation.savedtranslations.title", @"Saved translations"),
+                             ^UIViewController *{ return SGSavedTranslationsPage(); });
+    row.subtitle = SGL(@"settings.translation.savedtranslations.aisubtitle", @"Saved translations, pronunciations and cultural notes");
+    row.value = ^NSString *{ return sg_savedSummary; };
+    row.searchIdentifier = @"page.savedtranslations";
+    return row;
 }
 
 // Hash the tuple instead of cleaning characters: a slash in a track ID cannot escape the folder,

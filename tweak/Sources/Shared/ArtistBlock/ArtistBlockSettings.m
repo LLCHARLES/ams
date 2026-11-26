@@ -180,7 +180,7 @@ UIViewController *SGArtistBlockSettingsPage(void) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStyleInsetGrouped])) return nil;
-    self.title = SGL(@"settings.songblock.title", @"Blocked Songs");
+    self.title = SGL(@"settings.songblock.title", @"Blocked songs");
     return self;
 }
 

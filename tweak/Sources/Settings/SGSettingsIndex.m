@@ -90,24 +90,20 @@ static BOOL isPlace(id value) {
     return YES;
 }
 
-NSArray<NSArray<NSString *> *> *SGSearchRecents(void) {
+static NSArray<NSArray<NSString *> *> *recentPlaces(NSArray *newest, NSArray *(^resolve)(NSArray *)) {
     NSMutableArray<NSArray<NSString *> *> *places = [NSMutableArray array];
+    if (newest) [places addObject:resolve ? resolve(newest) : newest];
     for (id entry in [NSUserDefaults.standardUserDefaults arrayForKey:SGKeySearchRecents] ?: @[]) {
         if (places.count == kMostRecents) break;
-        if (isPlace(entry)) [places addObject:entry];
+        if (!isPlace(entry)) continue;
+        NSArray *place = resolve ? resolve(entry) : entry;
+        if (![places containsObject:place]) [places addObject:place];
     }
     return places;
 }
 
-void SGSearchRememberPlace(NSArray<NSString *> *place) {
-    if (!isPlace(place)) return;
-    NSMutableArray<NSArray<NSString *> *> *places = [NSMutableArray arrayWithObject:place];
-    for (NSArray<NSString *> *older in SGSearchRecents()) {
-        if ([older isEqualToArray:place]) continue;
-        [places addObject:older];
-    }
-    while (places.count > kMostRecents) [places removeLastObject];
-    [NSUserDefaults.standardUserDefaults setObject:places forKey:SGKeySearchRecents];
+NSArray<NSArray<NSString *> *> *SGSearchRecents(void) {
+    return recentPlaces(nil, nil);
 }
 
 void SGSearchForgetRecents(void) {
@@ -302,13 +298,16 @@ void SGSettingsIndexMovesWith(SGModPage *page, NSArray *(^resolve)(NSArray *)) {
     return hits.count > kMostHits ? [hits subarrayWithRange:NSMakeRange(0, kMostHits)] : hits;
 }
 
+- (void)rememberPlace:(NSArray<NSString *> *)place {
+    if (isPlace(place)) [NSUserDefaults.standardUserDefaults setObject:recentPlaces(place, _resolve) forKey:SGKeySearchRecents];
+}
+
 - (NSArray<SGSettingsHit *> *)recentHits {
     NSMutableArray<SGSettingsHit *> *hits = [NSMutableArray array];
-    for (NSArray<NSString *> *stored in SGSearchRecents()) {
-        NSArray *place = _resolve ? _resolve(stored) : stored;
+    for (NSArray<NSString *> *place in recentPlaces(nil, _resolve)) {
         for (SGSettingsHit *hit in _all) {
             if (![hit.place isEqualToArray:place]) continue;
-            if (![hits containsObject:hit]) [hits addObject:hit];
+            [hits addObject:hit];
             break;
         }
     }
