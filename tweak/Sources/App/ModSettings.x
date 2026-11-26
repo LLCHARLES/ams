@@ -31,6 +31,9 @@
 #import "Shared/Haptics/Haptics.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/LockScreenLyrics/LockScreenLyrics.h"
+#import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsTranslation/LyricsTranslation.h"
+#import "Redesigned/Album/SGRCoverBeside.h"
 #import "Shared/LyricsPiP/LyricsPiP.h"
 #import "Shared/Lossless/SGLossless.h"
 #import "Shared/ArtistBlock/ArtistBlock.h"
@@ -90,6 +93,21 @@ static NSArray *canonicalPlace(NSArray *place) {
     NSString *child = place.count > 1 ? place[1] : nil;
     NSArray *prefix = nil;
     if ([root isEqual:@"page.library.redesigned"]) prefix = @[@"page.search.redesigned"];
+    else if (([root isEqual:@"page.albums.redesigned"] || [root isEqual:@"page.playlists.redesigned"]) && [child isEqual:SGRKeyCoverBeside])
+        prefix = @[@"page.appearance.redesigned"];
+    else if (([root isEqual:@"page.albums.redesigned"] || [root isEqual:@"page.player.redesigned"] || [root isEqual:@"page.lockscreen"]) && [child isEqual:SGKeyMotionLowData])
+        prefix = @[@"page.playback"];
+    else if ([root isEqual:@"page.lyrics.redesigned"] && [child isEqual:SGKeyLyricsSimplifyTitles]) prefix = @[@"page.player.redesigned"];
+    else if ([root isEqual:@"page.lyrics.redesigned"] && [child isEqual:@"page.lyrics.translation"] && place.count == 4 &&
+             [@[@"page.lyrics.gemini", @"page.lyrics.claude", @"page.lyrics.openai"] containsObject:place[2]] &&
+             [place.lastObject isEqual:SGKeyLyricsTranslationPrompt])
+        return @[root, child, place.lastObject];
+    else if ([root isEqual:namedForLook(@"lyrics")] && [child isEqual:SGKeyLockScreenLyrics]) prefix = @[@"page.lockscreen"];
+    else if ([root isEqual:namedForLook(@"lyrics")] && [child isEqual:@"page.lyrics.sing"])
+        return [@[@"page.sing"] arrayByAddingObjectsFromArray:[place subarrayWithRange:NSMakeRange(2, place.count - 2)]];
+    else if ([root isEqual:@"page.mod"] && [child isEqual:SGKeyUpdateBetas]) prefix = @[@"page.mod", @"page.mod.updates"];
+    else if ([root isEqual:@"page.mod"] && ([child isEqual:SGKeyShowCacheLimit] || [child isEqual:@"action.spotifyStorage"]))
+        prefix = @[@"page.mod", @"page.mod.storage"];
     else if ([root isEqual:@"page.spatialvoice"]) prefix = @[@"page.sing", @"page.spatialvoice"];
     else if ([root isEqual:@"page.ads"] && [child isEqual:SGKeyHideSearchVideos]) prefix = @[@"page.search.native"];
     else if ([root isEqual:namedForLook(@"player")] && child &&

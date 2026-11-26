@@ -28,4 +28,5 @@ NSArray<NSNumber *> *SGAccentRecentAdding(NSArray<NSNumber *> *recent, NSInteger
 void SGPickAccent(NSString *title, NSInteger current, NSArray<NSNumber *> *recent, void (^chosen)(NSInteger rgb));
 
 @class SGModRow;
-NSArray<SGModRow *> *SGNativeAppearanceRows(void);   // AMOLED and the accent color, for the Appearance page
+@class SGModSection;
+NSArray<SGModSection *> *SGNativeAppearanceSections(void);

@@ -153,11 +153,11 @@ void SGMotionCacheClear(void (^done)(BOOL complete));
 // The first frame of a local video. Main queue.
 void SGMotionPoster(NSURL *file, void (^done)(UIImage *poster));
 
-// Settings: what the lock screen shows, the lyrics' style and Low Data Mode; below iOS 26 the one row
+// Settings: what the lock screen shows and the lyrics' style; below iOS 26 the one row
 // SGLockScreenArtworkNeedsRow, which says the setting needs iOS 26 and, tapped, why.
 NSArray *SGLockScreenMotionRows(void);
 SGModRow *SGLockScreenArtworkNeedsRow(void);
-// The page's last row: the size of the downloaded covers and artist photos, and a tap that clears them after asking.
+// Mod > Storage: downloaded covers and artist photos, cleared only after confirmation.
 SGModRow *SGArtworkCacheRow(void);
 
 // Pure steps, for the harness.

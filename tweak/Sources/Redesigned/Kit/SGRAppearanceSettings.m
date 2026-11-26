@@ -7,6 +7,7 @@
 #import "SGRHeaderInfo.h"
 #import "SGRHeroVeil.h"
 #import "Redesigned/Navigation/PageZoom.h"
+#import "Redesigned/Album/SGRCoverBeside.h"
 
 // The preset is read off the color stored, so the hooks keep the one key they read and a color set before
 // presets existed stays in effect: Apple Music's red reads as Apple Music, Spotify's own (-1) as Spotify, and
@@ -43,7 +44,7 @@ static void chooseColor(NSInteger rgb) {
 // The redesign's rows of the Appearance page (App/Pages.m): the preset from a menu, then the color in effect,
 // which opens the sheet of recent colors and the picker; a color stored from there is Custom. AMOLED has no row:
 // the redesign is always black.
-NSArray<SGModRow *> *SGRAppearanceRows(void) {
+NSArray<SGModSection *> *SGRAppearanceSections(void) {
     NSArray *modes = @[SGL(@"settings.appearance.accent.mode.picked", @"Picked"),
                        SGL(@"settings.appearance.accent.mode.automatic", @"Automatic")];
     SGModRow *mode = SGMenuRow(SGL(@"settings.appearance.accent.mode.title", @"Accent source"), modes,
@@ -85,15 +86,24 @@ NSArray<SGModRow *> *SGRAppearanceRows(void) {
         ^NSString *{ return marks[(NSUInteger)SGRSavedMarkFrom(SGInt(SGRKeySavedMark, -1), SGHidden(SGRKeyPlainCheck))]; },
         ^(NSInteger index) { SGSetInt(SGRKeySavedMark, index); });
     mark.subtitle = SGL(@"settings.appearance.saved_mark.subtitle", @"How a saved song shows: Spotify's circled tick, or a tick or a dot in the accent");
-    return @[
-        SGWithSymbol(mode, @"paintbrush"),
-        SGWithSymbol(menu, @"paintpalette"),
-        SGWithSymbol(colour, @"eyedropper"),
+    SGModSection *accent = SGSection(SGL(@"settings.appearance.accent.header", @"Accent"), @[
+        SGWithSymbol(SGSearchIdentified(mode, SGRKeyAccentAuto), @"paintbrush"),
+        SGWithSymbol(SGSearchIdentified(menu, @"menu.redesigned.accentPreset"), @"paintpalette"),
+        SGWithSymbol(SGSearchIdentified(colour, SGRKeyAccent), @"eyedropper"),
+    ]);
+    NSMutableArray *sections = [NSMutableArray arrayWithObject:accent];
+    if (SGRedesignAvailable()) [sections addObject:SGSection(SGL(@"settings.appearance.glass.header", @"Glass"), @[
         SGWithSymbol(SGSearchIdentified(material, SGRKeyGlassMaterial), @"cube.transparent"),
         SGWithSymbol(SGSearchIdentified(tint, SGRKeyGlassTint), @"circle.lefthalf.filled"),
         SGWithSymbol(touch, @"hand.tap"),
+    ])];
+    SGModRow *beside = SGSwitchRow(SGL(@"settings.pages.cover_beside", @"Cover beside the title"),
+        SGL(@"settings.pages.cover_beside.subtitle", @"Albums and playlists in wide iPad windows. Applies immediately."), SGRKeyCoverBeside);
+    beside.visible = ^BOOL { return UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad; };
+    [sections addObject:SGSection(SGL(@"settings.appearance.pages.header", @"Pages & badges"), @[
         SGWithSymbol(SGSearchIdentified(mark, SGRKeySavedMark), @"checkmark"),
         SGWithSymbol(explicit, @"e.square"),
+        SGWithSymbol(beside, @"rectangle.split.2x1"),
         // The album, playlist and artist headers (Kit/SGRHeroVeil.h, Kit/SGRHeaderInfo.h), read at launch.
         SGWithSymbol(SGOptionRow(SGL(@"settings.appearance.scroll_veil.title", @"Blur covers on scroll"),
             SGL(@"settings.appearance.scroll_veil.subtitle", @"Album, playlist and artist pictures blur and dim into the page's color as you scroll, and the title is cut off under the top bar"),
@@ -108,5 +118,6 @@ NSArray<SGModRow *> *SGRAppearanceRows(void) {
             SGL(@"settings.appearance.play_page_color.subtitle", @"The Play button's symbol and word take the page's color. Off, they take the accent color"),
             SGRKeyPlayInPageColour), @"play.fill"),
         // Round artist Play lives on the Artists page with its cut-out (Artist/ArtistSettings.m).
-    ];
+    ])];
+    return sections;
 }

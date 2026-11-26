@@ -266,10 +266,7 @@
 "settings.album.hide_track_artists.title" = "중복되는 트랙 아티스트";
 "settings.album.hide_under_tracks.header" = "앨범 트랙 아래에서 숨기기";
 "settings.album.hide_under_tracks.note" = "섹션은 영어 이름으로 구분됩니다. Spotify가 다른 언어로 설정되어 있으면 '기타 모든 항목'이 모든 섹션에 적용됩니다.";
-"settings.album.motion_low_data.subtitle" = "Retrine 전체의 움직이는 아트워크에 적용됩니다.";
-"settings.album.motion_low_data.title" = "저데이터 모드에서 다운로드";
 "settings.album.native.hide_on_page.header" = "페이지에서 숨기기";
-"settings.album.native.title" = "앨범";
 "settings.album.notes.off" = "끔";
 "settings.album.notes.open" = "전체 앨범 소개 읽기";
 "settings.album.notes.title" = "앨범 소개";
@@ -384,7 +381,6 @@
 "settings.artist.motion.title" = "움직이는 아티스트 아트워크";
 "settings.artist.native.hide.music_videos.title" = "뮤직비디오";
 "settings.artist.native.hide_on_page.header" = "페이지에서 숨기기";
-"settings.artist.native.title" = "아티스트";
 "settings.artist.photo.header" = "사진";
 "settings.artist.photo_fade.title" = "흐림 효과로 페이드";
 "settings.artist.play.header" = "재생";
@@ -1320,8 +1316,6 @@
 "settings.lockscreen.artwork.title" = "전체 화면 아트워크";
 "settings.lockscreen.dim_artwork.subtitle" = "움직이는 아트워크를 포함해 아트워크 전체를 흐리고 어둡게 한 뒤, 가사 주변만 어둡게 하는 대신 그 위에 가사를 띄웁니다.";
 "settings.lockscreen.dim_artwork.title" = "아트워크 전체 어둡게";
-"settings.lockscreen.low_data.subtitle" = "움직이는 아트워크, 노래당 최대 약 7MB. Retrine 전체의 움직이는 아트워크에 적용됩니다.";
-"settings.lockscreen.low_data.title" = "저데이터 모드에서 다운로드";
 "settings.lockscreen.lyrics_layout.choice.centered" = "가운데 정렬";
 "settings.lockscreen.lyrics_layout.choice.messages" = "메시지";
 "settings.lockscreen.lyrics_layout.choice.vinyl" = "바이닐";
@@ -1491,14 +1485,15 @@
 "settings.lyrics.pip.sample.original" = "별빛을 따라 걸어요";
 "settings.lyrics.pip.sample.song" = "밤을 위한 노래";
 "settings.lyrics.pip.show" = "화면 속 화면으로 보기";
-"settings.lyrics.pip.size" = "크기";
+"settings.lyrics.pip.role_size" = "%@ 크기";
 "settings.lyrics.pip.square" = "정사각형";
 "settings.lyrics.pip.subtitle" = "가사 화면에서 다른 앱 위에 가사를 표시합니다. 변경 후 Spotify를 다시 시작하세요.";
 "settings.lyrics.pip.text" = "텍스트";
 "settings.lyrics.pip.title" = "화면 속 화면 가사";
 "settings.lyrics.pip.translation" = "번역";
 "settings.lyrics.pip.untimed" = "시간 정보가 없는 가사입니다";
-"settings.lyrics.pip.weight" = "굵기";
+"settings.lyrics.pip.role_weight" = "%@ 굵기";
+"settings.lyrics.pip.typography" = "글자 크기 및 굵기";
 "settings.lyrics.pip.weight.bold" = "굵게";
 "settings.lyrics.pip.weight.medium" = "중간";
 "settings.lyrics.pip.weight.regular" = "보통";
@@ -1517,7 +1512,6 @@
 "settings.lyrics.simplify_titles.title" = "곡 제목 간단히";
 "settings.lyrics.simulate_word_timing.subtitle" = "줄 단위로만 맞춘 가사를 단어별 추정 타이밍으로 표시합니다. 바로 적용";
 "settings.lyrics.simulate_word_timing.title" = "단어 단위 싱크 추정";
-"settings.lyrics.sing.title" = "노래방";
 "settings.lyrics.sources.eevee_conflict.footer" = "EeveeSpotify의 가사가 켜져 있어 Spotify 가사를 처리하므로 이 소스는 꺼진 상태로 유지됩니다. 둘 다 응답하면 실행 후 Spotify가 멈출 수 있습니다. 이 소스를 사용하려면 EeveeSpotify 자체 설정에서 가사를 끄세요.";
 "settings.lyrics.sources.header" = "소스";
 "settings.lyrics.sources.row.title" = "소스";
@@ -1527,7 +1521,9 @@
 "settings.lyrics.timing.header" = "타이밍";
 "settings.lyrics.title" = "가사";
 "settings.lyrics.translation_ai.automatic.header" = "자동 번역";
-"settings.lyrics.translation_ai.saved.header" = "저장된 번역";
+"settings.lyrics.translation_ai.options" = "옵션 및 저장 공간";
+"settings.lyrics.accounts.header" = "가사 소스 계정";
+"settings.lyrics.files.header" = "오프라인 및 가져온 가사";
 "settings.lyrics.translation_ai.services.header" = "서비스";
 "settings.lyrics.translation_ai.title" = "번역 및 AI";
 "settings.lyrics.translation_language.footer" = "특정 언어를 선택하면 번역이 없는 가사에 Musixmatch 커뮤니티 번역이 적용되며, 이 과정에서 Musixmatch로 각 노래의 ID가 전송됩니다. '모두'는 가사와 함께 제공되는 첫 번째 번역을 표시합니다. 또한 가사의 번역 메뉴에서 번역할 대상 언어가 되며, 다른 언어로 된 노래에만 제공됩니다. '모두'로 설정하면 iPhone의 기본 언어로 번역됩니다.";
@@ -1560,7 +1556,7 @@
 "settings.lyricslook.preview.a11y" = "가사 미리보기";
 "settings.lyricslook.size.title" = "텍스트 크기";
 "settings.lyricslook.spacing.title" = "줄 간격";
-"settings.lyricslook.title" = "가사 스타일";
+"settings.lyricslook.title" = "모양 조정";
 "settings.lyricslook.wave.title" = "파동";
 
 "settings.lyricssources.binilyrics.subtitle" = "Apple Music 단어 단위 싱크";
@@ -1847,21 +1843,20 @@
 "settings.nowplayingbar.device_button.subtitle" = "탭 사이 막대에 유지";
 "settings.nowplayingbar.device_button.title" = "최소화된 막대의 기기 버튼";
 "settings.nowplayingbar.hide_connect.title" = "기기 버튼 숨기기";
-"settings.nowplayingbar.hide_device_button.subtitle" = "전체 재생 중 막대에서 숨김";
-"settings.nowplayingbar.hide_device_button.title" = "기기 버튼 숨기기";
-"settings.nowplayingbar.hide_like.title" = "좋아요 버튼 숨기기";
+"settings.nowplayingbar.hide_device_button.subtitle" = "미니 플레이어를 펼쳤을 때 표시합니다.";
+"settings.nowplayingbar.hide_device_button.title" = "기기 버튼";
+"settings.nowplayingbar.hide_like.title" = "좋아요 버튼";
 "settings.nowplayingbar.inline_artist.subtitle" = "탭 사이 막대에 공간이 될 때 두 번째 줄로 표시";
 "settings.nowplayingbar.inline_artist.title" = "최소화했을 때 제목 아래 아티스트";
 "settings.nowplayingbar.hold_drag_resize.title" = "길게 누르고 드래그하여 크기 조절";
 "settings.nowplayingbar.minimize.subtitle" = "페이지를 아래로 스크롤할 때 두 탭 사이에 배치";
 "settings.nowplayingbar.minimize.title" = "스크롤할 때 최소화";
 "settings.nowplayingbar.miniplayer_transition_animations.title" = "미니 플레이어 전환 애니메이션";
-"settings.nowplayingbar.next_button.subtitle" = "전체 재생 중 막대에서 재생 버튼 뒤에 표시";
+"settings.nowplayingbar.next_button.subtitle" = "미니 플레이어를 펼쳤을 때 재생 버튼 뒤에 표시합니다.";
 "settings.nowplayingbar.next_button.title" = "다음 곡 버튼";
 "settings.nowplayingbar.queue_badge.title" = "대기열 배지";
 "settings.nowplayingbar.save_button.title" = "저장 버튼";
 "settings.nowplayingbar.spotify_flags.header" = "Spotify 플래그";
-"settings.nowplayingbar.title" = "재생 중 막대";
 "settings.nowplayingbar.two_lines_info.title" = "두 줄 트랙 정보";
 "settings.nowplayingbar.video_miniplayer.title" = "미니 플레이어의 비디오";
 
@@ -2615,7 +2610,7 @@
 "settings.player.buttons.video" = "비디오";
 "settings.player.connect_bottom_sheet.title" = "하단 시트 형태의 연결";
 "settings.player.connect_sheet_switcher.title" = "비디오 전환기에서 연결 시트 열기";
-"settings.player.controls.footer" = "음량 설정은 이 iPhone의 음량 슬라이더를 컨트롤 아래에 추가하고, 다른 기기에서 재생 중일 때는 스피커 음량 슬라이더를 추가합니다. '커버 색상 따르기'를 켜면 좋아요, 셔플, 반복 버튼이 재생 중인 노래의 색상으로 표시됩니다.";
+"settings.player.controls.footer" = "음량 설정은 이 iPhone의 음량 슬라이더를 컨트롤 아래에 추가하고, 다른 기기에서 재생 중일 때는 스피커 음량 슬라이더를 추가합니다. '커버 색상 따르기'를 켜면 좋아요, 셔플, 반복 버튼이 재생 중인 노래의 색상으로 표시됩니다. 모든 컨트롤 변경 사항을 적용하려면 Spotify를 다시 시작하세요.";
 "settings.player.controls.header" = "컨트롤";
 "settings.player.disable_canvas.title" = "Canvas 비활성화";
 "settings.player.expand_sticky_header.title" = "탭하여 고정 헤더 펼치기";
@@ -2638,8 +2633,8 @@
 "settings.player.glass_lyrics.title" = "글래스 가사";
 "settings.player.header_glass.subtitle" = "AI DJ 플레이어 상단의 닫기 및 ⋯ 버튼 뒤에 글래스 원형 배경을 표시합니다. 일반 플레이어 상단에는 그래버만 있습니다.";
 "settings.player.header_glass.title" = "헤더 글래스";
-"settings.player.hide_context.title" = "재생 출처 숨기기";
-"settings.player.hide_context.subtitle" = "플레이어 상단의 아티스트, 앨범 또는 플레이리스트 이름을 숨깁니다.";
+"settings.player.hide_context.title" = "재생 출처";
+"settings.player.hide_context.subtitle" = "플레이어 상단에 아티스트, 앨범 또는 플레이리스트 이름을 표시합니다.";
 "settings.player.hide.about_artist.title" = "아티스트 정보";
 "settings.player.hide.add_to_playlist.title" = "플레이리스트에 추가";
 "settings.player.hide.connect.title" = "기기에 연결";
@@ -2673,7 +2668,7 @@
 "settings.player.lyric_line.hint" = "가사를 엽니다.";
 "settings.player.lyric_line.subtitle" = "커버 아래에 지금 부르는 가사를 보여 줍니다. 탭하면 가사가 열립니다.";
 "settings.player.lyric_line.title" = "가사 한 줄";
-"settings.player.lyric_line.size" = "크기";
+"settings.player.lyric_line.size" = "가사 줄 크기";
 "settings.player.lyric_line.size_17" = "17 pt";
 "settings.player.lyric_line.size_19" = "19 pt";
 "settings.player.music_close.subtitle" = "미니 플레이어로 단계적으로 접히며 닫힙니다. Spotify를 다시 시작하면 적용됩니다.";
@@ -2683,7 +2678,7 @@
 "settings.player.lyrics_line.choice.translation" = "번역";
 "settings.player.lyrics_line.subtitle" = "번역이 없는 줄은 원문으로 표시합니다";
 "settings.player.lyrics_line.title" = "가사 줄";
-"settings.player.mini_player.footer" = "Apple Music 스타일은 아래로 스크롤할 때 재생 중 막대를 두 탭 사이로 이동시킵니다.";
+"settings.player.mini_player.footer" = "Apple Music 스타일은 아래로 스크롤할 때 미니 플레이어를 두 탭 사이로 이동시킵니다.";
 "settings.player.mini_player.header" = "미니 플레이어";
 "settings.player.motion_low_data.subtitle" = "노래당 최대 약 7MB. Retrine 전체의 움직이는 아트워크에 적용됩니다.";
 "settings.player.motion_low_data.title" = "저데이터 모드에서 다운로드";
@@ -2696,7 +2691,16 @@
 "settings.player.no_clip.full_screen" = "전체 화면 커버";
 "settings.player.no_clip.title" = "클립이 없는 노래";
 "settings.player.not_playing" = "재생 중이 아님";
-"settings.player.now_playing_bar.title" = "재생 중 막대";
+"settings.appearance.accent.header" = "강조 색상";
+"settings.appearance.font_icon.header" = "서체 및 앱 아이콘";
+"settings.appearance.glass.header" = "글래스";
+"settings.appearance.intro" = "배지 변경은 즉시 적용됩니다. 일부 색상 및 레이아웃 변경은 Spotify를 다시 시작해야 적용됩니다.";
+"settings.appearance.pages.header" = "페이지 및 배지";
+"settings.appearance.theme.header" = "테마";
+"settings.mod.support" = "지원 및 진단";
+"settings.privacy.statistics.summary" = "광고 %@ · 원격 측정 %@";
+"settings.privacy.statistics.title" = "차단 통계";
+"settings.translation.prompt.shared" = "모든 AI 서비스에 공통으로 적용됩니다.";
 "settings.player.photo.choose" = "사진 선택";
 "settings.player.play_next_menu.title" = "컨텍스트 메뉴의 다음에 재생";
 "settings.player.player_screen.header" = "플레이어 화면";

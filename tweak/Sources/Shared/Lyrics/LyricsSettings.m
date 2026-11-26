@@ -25,9 +25,7 @@
 }
 @end
 
-SGModSection *SGLyricsSourcesSection(BOOL namingSource) {
-    SGModRow *offline = SGSwitchRow(SGL(@"settings.lyrics.offline.title", @"Keep lyrics for offline listening"),
-        SGL(@"settings.lyrics.offline.subtitle", @"Saved lyrics play without a connection."), SGKeyLyricsOffline);
+SGModRow *SGDeleteSavedLyricsRow(dispatch_block_t openOfflineSettings) {
     SGModRow *deleteSaved = SGActionRow(SGL(@"settings.lyrics.offline.delete", @"Delete saved lyrics"),
         SGL(@"settings.lyrics.offline.none", @"None"), nil);
     __weak SGModRow *weakDelete = deleteSaved;
@@ -38,7 +36,14 @@ SGModSection *SGLyricsSourcesSection(BOOL namingSource) {
         if ([top isKindOfClass:SGModPage.class]) [((SGModPage *)top).tableView reloadData];
     };
     SGLyricsStoreSize(showSize);
-    deleteSaved.action = ^{ SGPixieLyricsDeleteSaved(showSize); };
+    deleteSaved.action = openOfflineSettings ?: ^{ SGPixieLyricsDeleteSaved(showSize); };
+    deleteSaved.searchIdentifier = @"action.lyrics.deleteSaved";
+    return deleteSaved;
+}
+
+NSArray<SGModSection *> *SGLyricsSourcesSections(BOOL namingSource) {
+    SGModRow *offline = SGSwitchRow(SGL(@"settings.lyrics.offline.title", @"Keep lyrics for offline listening"),
+        SGL(@"settings.lyrics.offline.subtitle", @"Saved lyrics play without a connection."), SGKeyLyricsOffline);
     SGModRow *sources = SGPageRow(SGL(@"settings.lyrics.sources.row.title", @"Sources"), ^UIViewController *{ return SGLyricsSourcesPage(); });
     sources.value = ^NSString *{
         // The first one asked and how many follow it, short enough to sit beside the title.
@@ -48,13 +53,16 @@ SGModSection *SGLyricsSourcesSection(BOOL namingSource) {
         return order.count == 1 ? first : [NSString stringWithFormat:SGL(@"settings.lyrics.sources.summary.format", @"%@ +%lu"), first, (unsigned long)order.count - 1];
     };
     SGModRow *imported = SGPageRow(SGL(@"settings.lyrics.imported_lrc.title", @"Imported lyrics files"), ^UIViewController *{ return SGImportedLRCPage(); });
+    imported.searchIdentifier = @"page.lyrics.imported";
+    sources.searchIdentifier = @"page.lyrics.sources";
     imported.value = ^NSString *{
         NSUInteger count = SGImportedLRCFiles().count;
         return count ? @(count).stringValue : SGL(@"settings.lyrics.imported_lrc.value.none", @"None");
     };
     SGModRow *words = SGOptionRow(SGL(@"settings.lyrics.prefer_words.title", @"Prefer word-by-word timing"), SGL(@"settings.lyrics.prefer_words.subtitle", @"In In order mode, keep looking past line-timed lyrics"), SGKeyLyricsPreferWordTiming);
-    NSMutableArray<SGModRow *> *rows = [NSMutableArray arrayWithObjects:sources, SGLyricsTypesRow(), words, imported, offline, deleteSaved,
-        SGSwitchRow(SGL(@"settings.lyrics.all_tracks.title", @"Lyrics for every track"), SGL(@"settings.lyrics.all_tracks.subtitle", @"Even where Spotify has none"), SGKeyLyricsAllTracks), SGSpicyLyricsKeyRow(), SGDeezerARLRow(), nil];
+    NSMutableArray *files = [NSMutableArray arrayWithObjects:imported, offline, SGDeleteSavedLyricsRow(nil), nil];
+    NSMutableArray<SGModRow *> *rows = [NSMutableArray arrayWithObjects:sources, SGLyricsTypesRow(), words,
+        SGSwitchRow(SGL(@"settings.lyrics.all_tracks.title", @"Lyrics for every track"), SGL(@"settings.lyrics.all_tracks.subtitle", @"Even where Spotify has none"), SGKeyLyricsAllTracks), nil];
     // Spicy Lyrics' terms ask for its credit wherever its lines show (Shared/LyricsSources/SpicyLyrics.m), so the switch
     // says so, or its credit under the lyrics reads as the switch not working (issue #20).
     if (SGPixieLyricsAvailable() && SGLyricsEnabled()) {
@@ -70,16 +78,19 @@ SGModSection *SGLyricsSourcesSection(BOOL namingSource) {
         pause.visible = status.visible = ^BOOL { return SGFlag(SGKeyPixieLyrics,NO) && SGFlag(SGKeyLyricsOffline,YES); };
         [NSNotificationCenter.defaultCenter addObserver:status selector:@selector(refresh:) name:SGPixieLyricsProgress object:nil];
         [status refresh:nil];
-        [rows addObjectsFromArray:@[bulk,pause,status]];
+        [files addObjectsFromArray:@[bulk,pause,status]];
     }
     if (namingSource) [rows addObject:SGOptionRow(SGL(@"settings.lyrics.show_source.title", @"Show source"), SGL(@"settings.lyrics.show_source.subtitle", @"Spicy Lyrics is always credited after the last line: its terms ask for it"), SGKeyLyricsCredit)];
+    NSString *note = nil;
     if (SGEeveeLyricsOn()) {
         [rows addObject:SGOptionRow(SGL(@"settings.lyrics.use_beside_eevee.title", @"Use these sources anyway"), SGL(@"settings.lyrics.use_beside_eevee.subtitle", @"Only if EeveeSpotify's lyrics are really off"), SGKeyLyricsBesideEevee)];
-        return SGNotedSection(SGL(@"settings.lyrics.sources.header", @"Sources"), rows, SGL(@"settings.lyrics.sources.eevee_conflict.footer", @"EeveeSpotify's lyrics are on, so it answers Spotify's lyrics and these sources stay "
+        note = SGL(@"settings.lyrics.sources.eevee_conflict.footer", @"EeveeSpotify's lyrics are on, so it answers Spotify's lyrics and these sources stay "
                                                 @"off: both answering froze Spotify after launch. Turn its lyrics off in its own "
-                                                @"settings to use these."));
+                                                @"settings to use these.");
     }
-    return SGSection(SGL(@"settings.lyrics.sources.header", @"Sources"), rows);
+    return @[SGNotedSection(SGL(@"settings.lyrics.sources.header", @"Sources"), rows, note),
+             SGSection(SGL(@"settings.lyrics.accounts.header", @"Source accounts"), @[SGSpicyLyricsKeyRow(), SGDeezerARLRow()]),
+             SGSection(SGL(@"settings.lyrics.files.header", @"Offline & imported lyrics"), files)];
 }
 
 SGModRow *SGLockScreenLyricsRow(void) {
@@ -108,29 +119,32 @@ SGModRow *SGLyricsRomanisedRow(void) {
     return row;
 }
 
-SGModRow *SGLyricsJapaneseReadingRow(void) {
+SGModRow *SGLyricsAlphabetRow(void) {
     NSString *title = SGL(@"settings.lyrics.pronunciation.alphabet", @"Pronunciation alphabet");
     NSArray<NSString *> *alphabets = @[SGL(@"settings.lyrics.pronunciation.latin", @"Latin"),
                                       SGL(@"settings.lyrics.pronunciation.hangul", @"Hangul")];
-    SGModRow *row = SGPageRow(title, ^UIViewController *{
-        SGModRow *alphabet = SGMenuRow(title, alphabets,
+    SGModRow *alphabet = SGMenuRow(title, alphabets,
             ^NSString *{ return alphabets[SGFlag(SGKeyLyricsPronunciationHangul, NO) ? 1 : 0]; }, ^(NSInteger index) {
                 SGSetEnabled(SGKeyLyricsPronunciationHangul, index == 1);
                 [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsRomanisedDidChangeNotification object:nil];
             });
-        NSArray<NSString *> *choices = @[SGL(@"settings.lyrics.japanese_reading.romaji", @"Romaji"),
+    alphabet.waitsOn = SGKeyLyricsRomanised;
+    alphabet.searchIdentifier = SGKeyLyricsPronunciationHangul;
+    alphabet.info = SGL(@"settings.lyrics.pronunciation.alphabet.footer", @"Hangul reads Japanese and Chinese offline, replacing the Japanese reading choice. Other languages keep their usual readings. Applies at once.");
+    return alphabet;
+}
+
+SGModRow *SGLyricsJapaneseReadingRow(void) {
+    NSArray<NSString *> *choices = @[SGL(@"settings.lyrics.japanese_reading.romaji", @"Romaji"),
                                         SGL(@"settings.lyrics.japanese_reading.hiragana", @"Hiragana")];
-        SGModRow *japanese = SGMenuRow(SGL(@"settings.lyrics.japanese_reading.title", @"Japanese reading"), choices,
+    SGModRow *japanese = SGMenuRow(SGL(@"settings.lyrics.japanese_reading.title", @"Japanese reading"), choices,
             ^NSString *{ return choices[SGFlag(SGKeyLyricsJapaneseKana, NO) ? 1 : 0]; }, ^(NSInteger index) {
                 SGSetEnabled(SGKeyLyricsJapaneseKana, index == 1);
                 [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsRomanisedDidChangeNotification object:nil];
             });
-        return [[SGModPage alloc] initWithTitle:title intro:nil sections:@[SGSection(nil, @[alphabet, japanese])]
-            footer:SGL(@"settings.lyrics.pronunciation.alphabet.footer", @"Hangul reads Japanese and Chinese offline, replacing the Japanese reading choice. Other languages keep their usual readings. Applies at once.")];
-    });
-    row.value = ^NSString *{ return alphabets[SGFlag(SGKeyLyricsPronunciationHangul, NO) ? 1 : 0]; };
-    row.waitsOn = SGKeyLyricsRomanised;
-    return row;
+    japanese.searchIdentifier = SGKeyLyricsJapaneseKana;
+    japanese.visible = ^BOOL { return SGFlag(SGKeyLyricsRomanised, NO) && !SGFlag(SGKeyLyricsPronunciationHangul, NO); };
+    return japanese;
 }
 
 // Only the redesign's lyrics view sweeps words, and it restyles as the switch flips.

@@ -196,6 +196,14 @@ static NSUInteger searchPlacesChecks(void) {
         check([index.recentHits.firstObject.place isEqual:libraryPlace], @"a saved Library or carousel result now leads to its new page");
         SGSearchRememberPlace(@[look.boolValue ? @"page.player.redesigned" : @"page.player.native", @"page.player.localfiles"]);
         check([index.recentHits.firstObject.place isEqual:@[@"page.playback", @"page.player.localfiles"]], @"the old Player recent opens Local files in Playback");
+        SGSearchRememberPlace(@[@"page.mod", SGKeyShowCacheLimit]);
+        check([index.recentHits.firstObject.place isEqual:@[@"page.mod", @"page.mod.storage", SGKeyShowCacheLimit]], @"the old cache setting resolves inside Mod Storage");
+        NSArray *translation = @[look.boolValue ? @"page.lyrics.redesigned" : @"page.lyrics.native", @"page.lyrics.translation", @"spotifyglass.lyrics.translationPrompt"];
+        if (look.boolValue)
+            SGSearchRememberPlace(@[translation[0], translation[1], @"page.lyrics.gemini", translation[2]]);
+        else
+            SGSearchRememberPlace(translation);
+        check([index.recentHits.firstObject.place isEqual:translation], @"both looks resolve the shared translation prompt");
     }
     SGSearchForgetRecents();
     SGSetEnabled(SGKeyRedesign, savedLook);
@@ -262,22 +270,26 @@ BOOL SGHarnessWarning;
 static void refactorChecks(void) {
     // The Mod page keeps its action's symbol when row decoration is shared with Settings.
     SGModPage *about = (SGModPage *)SGAboutPage();
-    SGModRow *reset = nil;
+    SGModRow *reset = nil, *storageLink = nil;
     for (SGModSection *section in about.sections) {
         for (SGModRow *row in section.rows) {
-            if ([row.title isEqualToString:@"Reset all settings"]) reset = row;
+            if ([row.title isEqualToString:SGL(@"settings.mod.reset.title", @"Reset all settings")]) reset = row;
+            if ([row.searchIdentifier isEqualToString:@"page.mod.storage"]) storageLink = row;
         }
     }
     HARNESS_CHECK([reset.symbol isEqualToString:@"trash"]);
 
     extern NSURL *SGHarnessStorageURI;
-    NSUInteger storage = [about.sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
+    HARNESS_CHECK(storageLink.page);
+    SGModPage *hub = (id)storageLink.page();
+    HARNESS_CHECK([hub.sections.lastObject.title isEqualToString:@"Retrine"] && hub.sections.lastObject.rows.count == 4);
+    NSUInteger storage = [hub.sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
         return [section.rows.firstObject.key isEqualToString:SGKeyShowCacheLimit];
     }];
     HARNESS_CHECK(storage != NSNotFound);
-    SGModSection *group = about.sections[storage];
+    SGModSection *group = hub.sections[storage];
     HARNESS_CHECK(group.rows.count == 2 && group.rows.firstObject.defaultOn && group.footer.length);
-    UITableView *table = about.tableView;
+    UITableView *table = hub.tableView;
     table.frame = CGRectMake(0, 0, 375, 667);
     NSIndexPath *firstRow = [NSIndexPath indexPathForRow:0 inSection:storage];
     NSIndexPath *action = [NSIndexPath indexPathForRow:1 inSection:storage];

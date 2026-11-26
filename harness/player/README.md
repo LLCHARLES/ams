@@ -174,7 +174,7 @@ come late, out of order, or not at all.
 - `cover` is issue #27. The cover is checked untouched first, drawn as the Music app's (24 pt in from the
   sides, its top 33 pt under the safe area, on a 402 pt iPhone), taking touches where it is drawn (5 pt under its
   top, through the header row, the stack of elements inside it and the stack holding it, as 9.2.0's are) with VoiceOver's frame and activation point there; with
-  Hide where it plays from switched off through the Player page's row, under the header row, which keeps its
+  Where it plays from switched on through the Player page's row, under the header row, which keeps its
   touches, and under where the row is now as its stack is moved 8 and 48 pt lower and back with no layout of the
   row (never below Spotify's own place), and no longer under it once it is moved out of the player within the window,
   and back at the Music app's top once switched on again; then given Spotify's layout for a track with lyrics, a

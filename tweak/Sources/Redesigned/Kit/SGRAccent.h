@@ -81,4 +81,5 @@ void SGRPickAccent(NSString *title, NSInteger current, NSArray<NSNumber *> *rece
 #define SGRPlainCheckIdentifier @"spotifyglass.plainCheck"
 
 @class SGModRow;
-NSArray<SGModRow *> *SGRAppearanceRows(void);   // the accent color, for the Appearance page
+@class SGModSection;
+NSArray<SGModSection *> *SGRAppearanceSections(void);

@@ -3054,16 +3054,16 @@ static void installSettingsWorkProbes(void) {
     SGModRow *contextRow = nil;
     for (SGModSection *section in ((SGModPage *)SGRPlayerSettingsPage(@[])).sections)
         for (SGModRow *row in section.rows)
-            if ([row.title isEqualToString:@"Hide where it plays from"]) contextRow = row;
+            if ([row.title isEqualToString:@"Where it plays from"]) contextRow = row;
     SGSetEnabled(SGRKeyPlayerHideContext, YES);
-    if (contextRow.changed) contextRow.changed(YES);
+    if (contextRow.changed) contextRow.changed(NO);
     [headerUnit.view layoutIfNeeded];
     BOOL concealed = context.alpha == 0 && !context.isAccessibilityElement && context.accessibilityElementsHidden
         && !context.hidden && CGRectEqualToRect(context.frame, contextFrame);
     SGSetEnabled(SGRKeyPlayerHideContext, NO);
-    if (contextRow.changed) contextRow.changed(NO);
+    if (contextRow.changed) contextRow.changed(YES);
     [headerUnit.view layoutIfNeeded];
-    [self expect:contextRow && defaultConcealed && concealed && context.alpha == 1
+    [self expect:contextRow.inverted && contextRow.defaultOn && defaultConcealed && concealed && context.alpha == 1
                  && context.isAccessibilityElement && !context.accessibilityElementsHidden
                  && CGRectEqualToRect(close.frame, closeFrame) && CGRectEqualToRect(more.frame, moreFrame)
             step:@"context hidden by default; its switch hides and restores text and VoiceOver live, keeping header slots"
@@ -3185,7 +3185,8 @@ static void installSettingsWorkProbes(void) {
         [self.window.rootViewController presentViewController:nav animated:NO completion:^{
             [nav.view layoutIfNeeded];
             NSIndexPath *linePath = pathOf(rowTitled(@"Lyrics Line"));
-            SGModRow *size = rowTitled(@"Size");
+            SGModRow *size = rowTitled(@"Lyrics line size");
+            HARNESS_CHECK([size.waitsOn isEqual:SGRKeyPlayerLyricLine]);
             HARNESS_CHECK(size && linePath && [pathOf(size) isEqual:[NSIndexPath indexPathForRow:linePath.row + 1 inSection:linePath.section]]);
             HARNESS_CHECK(([size.menu isEqual:@[@"19 pt", @"17 pt"]]));
             size.chosen(size.menu.count - 1);
@@ -4482,17 +4483,17 @@ static UIView *controlSlot(UIStackView *row, CGFloat side, Class cls, NSString *
         check(@"same-sized page after its band moves back", CGRectEqualToRect(CGRectIntegral(returned), musicCover()),
               NSStringFromCGRect(returned));
     });
-    // Where it plays from shown (Hide where it plays from switched off on the Player page, the switch's own path): the
-    // row takes its touches again and the cover stays under it; switched on again, the cover is back at the Music app's
+    // Where it plays from shown: the
+    // row takes its touches again and the cover stays under it; switched off again, the cover is back at the Music app's
     // top, all without a relaunch.
     UIView *header = _units.firstObject.view;
     SGModRow *contextRow = nil;
     for (SGModSection *section in ((SGModPage *)SGRPlayerSettingsPage(@[])).sections)
         for (SGModRow *row in section.rows)
-            if ([row.title isEqualToString:@"Hide where it plays from"]) contextRow = row;
+            if ([row.title isEqualToString:@"Where it plays from"]) contextRow = row;
     void (^hideContext)(BOOL) = ^(BOOL on) {
         SGSetEnabled(SGRKeyPlayerHideContext, on);
-        contextRow.changed(on);
+        contextRow.changed(!on);
     };
     // The row's band over the cover, left of the grabber, and just under the row.
     NSString *(^band)(CGPoint *, CGPoint *) = ^NSString *(CGPoint *inRow, CGPoint *underRow) {

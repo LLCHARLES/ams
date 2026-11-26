@@ -1,5 +1,6 @@
 #import "Core/SGCore.h"
 #import "Core/SGOptionalWork.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/AppIcon/AppIcon.h"
 #import "Shared/Fonts/Fonts.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
@@ -126,13 +127,13 @@ UIViewController *SGAppearancePage(void) {
     NSMutableArray<SGModRow *> *everywhere = [NSMutableArray arrayWithArray:SGAppFontRows()];
     SGModRow *icon = SGAppIconRow();
     if (icon) [everywhere addObject:icon];
-    NSArray<SGModRow *> *look = SGRedesignedUIStored() ? SGRAppearanceRows() : SGNativeAppearanceRows();
-    foundBy(look, SGL(@"settings.search.appearance.look.keywords", @"theme colour color accent typeface amoled black dark"));
+    NSMutableArray *sections = [(SGRedesignedUIStored() ? SGRAppearanceSections() : SGNativeAppearanceSections()) mutableCopy];
+    for (SGModSection *section in sections)
+        foundBy(section.rows, SGL(@"settings.search.appearance.look.keywords", @"theme colour color accent typeface amoled black dark"));
     foundBy(everywhere, SGL(@"settings.search.appearance.everywhere.keywords", @"typeface font app icon"));
-    return [[SGModPage alloc] initWithTitle:SGL(@"settings.appearance.title", @"Appearance") intro:SGRestartNote sections:@[
-        SGSection(nil, look),
-        SGSection(nil, everywhere),
-    ] footer:nil];
+    [sections addObject:SGSection(SGL(@"settings.appearance.font_icon.header", @"Font & app icon"), everywhere)];
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.appearance.title", @"Appearance")
+        intro:SGL(@"settings.appearance.intro", @"Badge changes apply at once. Some color and layout changes require restarting Spotify.") sections:sections footer:nil];
 }
 
 UIViewController *SGNavbarPage(void) {
@@ -153,65 +154,62 @@ UIViewController *SGSearchLibrarySettingsPage(void) {
     ] footer:nil];
 }
 
-static UIViewController *translationPage(void) {
+static UIViewController *translationPage(BOOL redesigned) {
     // The on-device translators lead the services: they need no key or account.
-    NSArray<SGModRow *> *services = [SGOnDeviceTranslatorRows() arrayByAddingObjectsFromArray:
+    SGModRow *prompt = SGLyricsTranslationPromptRow();
+    prompt.subtitle = SGL(@"settings.translation.prompt.shared", @"Shared by all AI services");
+    NSMutableArray *services = [NSMutableArray arrayWithObject:prompt];
+    [services addObjectsFromArray:SGOnDeviceTranslatorRows()];
+    [services addObjectsFromArray:
         @[SGLyricsAIServiceRow(SGLyricsAIGemini), SGLyricsAIServiceRow(SGLyricsAIClaude), SGLyricsAIServiceRow(SGLyricsAIOpenAI),
-          SGLyricsTranslationPromptRow(), SGDeepLKeyRow(), SGBingTranslateRow(), SGGoogleTranslateRow(), SGLyricsPronunciationNotationRow(), SGLyricsCulturalNotesRow()]];
+          SGDeepLKeyRow(), SGBingTranslateRow(), SGGoogleTranslateRow()]];
+    NSMutableArray *language = [NSMutableArray arrayWithObject:SGLyricsTranslationLanguageRow()];
+    NSMutableArray *options = [NSMutableArray array];
+    if (redesigned) {
+        [language addObjectsFromArray:@[SGRAutoTranslationRow(), SGRAutoTranslationOrderRow(),
+            SGTranslateEverySongRow(), SGLyricsLanguageRulesRow(), SGTranslateTitlesRow()]];
+        [options addObjectsFromArray:@[SGLyricsPronunciationNotationRow(), SGLyricsCulturalNotesRow()]];
+    }
+    [options addObject:SGSavedTranslationsRow()];
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.lyrics.translation_ai.title", @"Translation & AI") intro:nil sections:@[
-        SGSection(SGL(@"settings.lyrics.translation_ai.automatic.header", @"Automatic translation"),
-                  @[SGLyricsTranslationLanguageRow(), SGRAutoTranslationRow(), SGRAutoTranslationOrderRow(),
-                    SGTranslateEverySongRow(), SGLyricsLanguageRulesRow(), SGTranslateTitlesRow()]),
+        SGSection(redesigned ? SGL(@"settings.lyrics.translation_ai.automatic.header", @"Automatic translation") : nil, language),
         SGNotedSection(SGL(@"settings.lyrics.translation_ai.services.header", @"Services"), services,
-                       SGL(@"settings.lyrics.ai.footer", @"Write Pronunciation and Explain References in the lyrics' menu use Gemini, Claude or your AI service, on your own key. What they write is kept for the song.")),
-        SGSection(SGL(@"settings.lyrics.translation_ai.saved.header", @"Saved translations"), @[SGSavedTranslationsRow()]),
+                       redesigned ? SGL(@"settings.lyrics.ai.footer", @"Write Pronunciation and Explain References in the lyrics' menu use Gemini, Claude or your AI service, on your own key. What they write is kept for the song.") : nil),
+        SGSection(SGL(@"settings.lyrics.translation_ai.options", @"Options & storage"), options),
     ] footer:nil];
 }
 
 // Pronunciation, romanized lines, translation, word sweeping and line meanings exist only in the redesign's lyrics view.
 static UIViewController *lyricsPage(void) {
     BOOL redesigned = SGRedesignedUIStored();
-    NSMutableArray<SGModRow *> *more = [NSMutableArray arrayWithObject:SGLockScreenLyricsRow()];
-    if (!redesigned) [more insertObject:SGGlassLyricsRow() atIndex:0];
-    SGModRow *sing = SGPageRow(SGL(@"settings.lyrics.sing.title", @"Karaoke"), ^UIViewController *{ return SGSingSettingsPage(); });
-    sing.value = ^NSString *{ return SGSingSummary(); };
-    // The main page's own Karaoke row is page.sing; this one is the Lyrics page's.
-    named(sing, @"lyrics.sing");
-    NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:SGSection(nil, @[SGWithTile(sing, @"music.mic", UIColor.systemRedColor)]),
-                                                SGLyricsSourcesSection(redesigned), nil];
+    NSMutableArray<SGModSection *> *sections = [NSMutableArray array];
     SGModSection *timing = SGNotedSection(SGL(@"settings.lyrics.timing.header", @"Timing"), @[SGLyricsDelayRow()],
         redesigned ? SGL(@"settings.lyrics.timing.footer.redesigned", @"Every line shows this much later than the song, for Bluetooth headphones that play a little behind the lyrics. "
                          @"Sync in the lyrics' corner menu adds an offset for one song, and one for the headphones it plays through. Applies at once.")
                    : SGL(@"settings.lyrics.timing.footer", @"Every line shows this much later than the song, for Bluetooth headphones that play a little behind the lyrics. Applies at once."));
     if (redesigned) {
-        SGModRow *translation = SGPageRow(SGL(@"settings.lyrics.translation_ai.title", @"Translation & AI"), ^UIViewController *{ return translationPage(); });
-        // Reuse the language row's value reader, including its fallback for an unset selection.
-        translation.value = SGLyricsTranslationLanguageRow().value;
-        named(translation, @"lyrics.translation");
-        [sections addObjectsFromArray:@[
-            SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[
+        [sections addObject:SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[
                 SGWithNew(named(SGPageRow(SGL(@"settings.lyricsstyle.title", @"Lyrics styles"), ^UIViewController *{ return SGRLyricsStylesSettingsPage(); }), @"lyricsstyles"), @"lyricsStyles"),
                 SGRLyricsTextSizesRow(), SGLyricsWordTimingRow(), SGLyricsRomanisedRow(),
-                SGLyricsJapaneseReadingRow(), SGLyricsFuriganaRow(), SGRLyricsKeepAwakeRow(), SGRLyricsFullRateRow(),
+                SGLyricsAlphabetRow(), SGLyricsJapaneseReadingRow(), SGLyricsFuriganaRow(), SGRLyricsKeepAwakeRow(), SGRLyricsFullRateRow(),
                 SGOptionRow(SGL(@"settings.lyrics.break_labels.title", @"Name the breaks"), SGL(@"settings.lyrics.break_labels.subtitle", @"Intro, Interlude or Outro beside the dots"), SGRKeyLyricsBreakLabels),
-                SGSimplifyTitlesRow(),
                 SGRLyricsHideRow(),
                 SGRLyricsKeepMicRow(),
-                SGSwitchRow(SGL(@"settings.lyrics.landscape.title", @"Landscape lyrics"), SGL(@"settings.lyrics.landscape.subtitle", @"Turn the phone with the lyrics open"), SGRKeyLyricsLandscape)]),
-            timing,
-            SGSection(nil, @[translation]),
-            SGSection(nil, @[SGLyricsMeaningsRow()]),
-        ]];
+                SGSwitchRow(SGL(@"settings.lyrics.landscape.title", @"Landscape lyrics"), SGL(@"settings.lyrics.landscape.subtitle", @"Turn the phone with the lyrics open"), SGRKeyLyricsLandscape)])];
     } else {
-        [sections addObject:timing];
+        [sections addObject:SGSection(SGL(@"settings.lyrics.display.header", @"Display"), @[SGGlassLyricsRow()])];
     }
-    [sections addObject:SGSection(nil, more)];
+    [sections addObject:timing];
+    SGModRow *translation = named(SGPageRow(SGL(@"settings.lyrics.translation_ai.title", @"Translation & AI"),
+        ^UIViewController *{ return translationPage(redesigned); }), @"lyrics.translation");
+    translation.value = SGLyricsTranslationLanguageRow().value;
+    [sections addObject:SGSection(nil, redesigned ? @[translation, SGLyricsMeaningsRow()] : @[translation])];
+    [sections addObjectsFromArray:SGLyricsSourcesSections(redesigned)];
     // The redesign's page leads with its lyrics playing in the look the page sets, and that look's presets.
     if (redesigned) return SGRLyricsSettingsPage(SGL(@"settings.lyrics.title", @"Lyrics"), SGL(@"settings.lyrics.intro", @"The look, romanization, furigana, estimated word timing, delay and automatic translation apply without restarting. Other changes may need a Spotify restart."), sections);
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.lyrics.title", @"Lyrics") intro:SGRestartNote sections:sections footer:nil];
 }
 
-// Lyrics has its own row on Mod Settings' main page, beside Sing.
 UIViewController *SGLyricsSettingsPage(void) {
     return lyricsPage();
 }
@@ -235,7 +233,10 @@ UIViewController *SGPlaybackSettingsPage(void) {
            @"and its sound matches what Spotify plays, from about 4 s after the song starts or you seek. Spotify still "
            @"streams its own copy, at its lowest quality while the next song has a file. Karaoke and speeds other than "
            @"1x keep Spotify's sound. Applies after you restart Spotify.")),
-        SGSection(SGL(@"settings.playback.data", @"Data & prefetch"), @[SGLoadAheadRow()]),
+        SGSection(SGL(@"settings.playback.data", @"Data & prefetch"), @[SGLoadAheadRow(),
+            SGOptionRow(SGL(@"settings.player.motion_low_data.title", @"Download in Low Data Mode"),
+                SGL(@"settings.player.motion_low_data.subtitle", @"Up to about 7 MB a song. Applies to animated artwork throughout Retrine."), SGKeyMotionLowData),
+            SGSearchIdentified(SGMotionSourcesRow(), SGKeyMotionSources)]),
     ] footer:nil];
 }
 
@@ -243,20 +244,18 @@ UIViewController *SGPlayerSettingsPage(void) {
     BOOL native = !SGRedesignedUIStored();
     // AirPods gestures, the lock screen widget and Vibrations have rows of their own on Mod Settings' main page.
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObject:SGSection(nil, @[
-        SGWithTile(named(SGPageRow(SGL(@"settings.player.gestures.title", @"Gestures"), ^UIViewController *{ return SGGesturesSettingsPage(); }), @"player.gestures"), @"hand.tap", UIColor.systemBlueColor),
+        named(SGPageRow(SGL(@"settings.player.gestures.title", @"Gestures"), ^UIViewController *{ return SGGesturesSettingsPage(); }), @"player.gestures"),
     ])];
     if (native) {
         [sections addObject:SGSection(nil, @[
-            SGWithTile(named(SGPageRow(SGL(@"settings.player.now_playing_bar.title", @"Now playing bar"), ^UIViewController *{ return SGNowPlayingBarSettingsPage(); }), @"player.nowplayingbar"), @"rectangle.bottomthird.inset.filled", UIColor.systemPinkColor),
-            SGWithTile(named(SGPageRow(SGL(@"settings.player.queue_devices.title", @"Queue & devices"), ^UIViewController *{ return SGQueueSettingsPage(); }), @"player.queue"), @"text.line.first.and.arrowtriangle.forward", UIColor.systemIndigoColor),
+            named(SGPageRow(SGL(@"settings.player.mini_player.header", @"Mini player"), ^UIViewController *{ return SGNowPlayingBarSettingsPage(); }), @"player.nowplayingbar"),
+            named(SGPageRow(SGL(@"settings.player.queue_devices.title", @"Queue & devices"), ^UIViewController *{ return SGQueueSettingsPage(); }), @"player.queue"),
         ])];
         [sections addObjectsFromArray:SGNativePlayerScreenSections()];
     }
     // Switch to video is the same chip of Spotify's player under either look: a row here, and in the redesign one of the
     // Buttons chips with its Shuffle and Repeat (the native look's are in its Hide on the player section, with their own keys).
-    if (native) {
-        [sections addObject:SGSection(nil, @[SGNativeVideoSwitchRow()])];
-    } else [sections addObject:SGRPlayerButtonsSection()];
+    if (!native) [sections addObject:SGRPlayerButtonsSection()];
     // Spotify's full screen cover a tap on the player's cover opens, under either look.
     [sections addObject:SGSection(nil, @[
         SGShownRow(SGL(@"settings.player.full_screen_cover.title", @"Full screen cover on tap"),

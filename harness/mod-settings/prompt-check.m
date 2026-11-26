@@ -128,7 +128,7 @@ void SGCheckTranslationPromptUI(UINavigationController *nav) {
     [nav pushViewController:page animated:NO];
     SGModRow *row = promptRow(page, SGKeyLyricsTranslationPrompt);
     HARNESS_CHECK(row && (!row.visible || row.visible()));
-    BOOL korean = [NSUserDefaults.standardUserDefaults integerForKey:@"spotifyglass.language"] == 2;
+    BOOL korean = [SGLanguage() isEqualToString:@"ko"];
     HARNESS_CHECK([row.title isEqual:korean ? @"번역 프롬프트" : @"Translation prompt"]);
     HARNESS_CHECK([row.value() isEqual:korean ? @"기본값" : @"Default"]);
     promptValue(page, row, korean ? @"기본값" : @"Default");

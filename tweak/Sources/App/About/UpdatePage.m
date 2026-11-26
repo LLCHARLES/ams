@@ -8,6 +8,7 @@
 #import "Settings/SGPage.h"
 #import "Settings/SGPageStyle.h"
 #import "Settings/SGModPage.h"
+#import "Settings/SGSettingsIndex.h"
 #import "About.h"
 
 // "2026-09-18T17:25:02Z" written out, and the empty string for a release GitHub never dated. Every
@@ -37,7 +38,7 @@ static NSString *longDate(NSString *published) {    // 18 September 2026
 
 #pragma mark - the page
 
-@interface SGUpdatePageController : SGPage
+@interface SGUpdatePageController : SGPage <SGSettingsSearchPages>
 @end
 
 @implementation SGUpdatePageController {
@@ -105,11 +106,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
                                                          [SGRepoURL stringByAppendingString:@"/releases"]), @"clock.arrow.circlepath")];
     [groups addObject:SGSection(nil, top)];
 
-    SGModRow *notice = [SGModRow new];
-    notice.title = SGL(@"settings.mod.update.auto_check.title", @"Auto check updates");
-    notice.symbol = @"bell";
-    notice.key = SGKeyUpdateNotice;
-    [groups addObject:SGSection(nil, @[notice])];
+    [groups addObject:SGSection(nil, self.sg_searchPageRows)];
 
     for (SGUpdateRelease *release in releasesToShow()) {
         NSMutableArray<NSString *> *kinds = [NSMutableArray array];
@@ -144,6 +141,14 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
         }];
     }
     return groups;
+}
+
+- (NSArray<SGModRow *> *)sg_searchPageRows {
+    SGModRow *notice = SGWithSymbol(SGSwitchRow(SGL(@"settings.mod.update.auto_check.title", @"Auto check updates"), nil, SGKeyUpdateNotice), @"bell");
+    SGModRow *betas = SGSwitchRow(SGL(@"settings.mod.include_betas.title", @"Include betas"), SGL(@"settings.mod.include_betas.subtitle", @"Offer test builds ahead of each release"), SGKeyUpdateBetas);
+    betas.defaultOn = SGBuildIsBeta();
+    betas.changed = ^(BOOL on) { SGCheckForUpdate(YES); };
+    return @[notice, betas];
 }
 
 - (void)viewDidLoad {
@@ -236,7 +241,7 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     if (row.key) {
         UISwitch *toggle = [UISwitch new];
         toggle.onTintColor = SGGreen();
-        toggle.on = SGEnabled(row.key);
+        toggle.on = SGFlag(row.key, row.defaultOn);
         toggle.accessibilityLabel = row.title;
         [toggle addTarget:self action:@selector(toggled:) forControlEvents:UIControlEventValueChanged];
         cell.accessoryView = toggle;
@@ -258,7 +263,10 @@ static NSArray<SGUpdateRelease *> *releasesToShow(void) {
     UIView *view = toggle;
     while (view && ![view isKindOfClass:UITableViewCell.class]) view = view.superview;
     SGModRow *row = [self rowAt:[self.tableView indexPathForCell:(UITableViewCell *)view]];
-    if (row.key) SGSetEnabled(row.key, toggle.on);
+    if (row.key) {
+        SGSetEnabled(row.key, toggle.on);
+        if (row.changed) row.changed(toggle.on);
+    }
 }
 
 - (BOOL)tableView:(UITableView *)table shouldHighlightRowAtIndexPath:(NSIndexPath *)path {

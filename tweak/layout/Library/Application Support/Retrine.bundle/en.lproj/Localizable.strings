@@ -152,10 +152,7 @@
 "settings.album.hide_track_artists.title" = "Repeated track artists";
 "settings.album.hide_under_tracks.header" = "Hide under an album's tracks";
 "settings.album.hide_under_tracks.note" = "Sections are told apart by their English names. With Spotify in another language, Everything else covers them all.";
-"settings.album.motion_low_data.subtitle" = "Applies to animated artwork throughout Retrine.";
-"settings.album.motion_low_data.title" = "Download in Low Data Mode";
 "settings.album.native.hide_on_page.header" = "Hide on the page";
-"settings.album.native.title" = "Album";
 "settings.album.notes.off" = "Off";
 "settings.album.notes.open" = "Read the full album note";
 "settings.album.notes.title" = "Album notes";
@@ -182,6 +179,7 @@
 "settings.album.tracks.header" = "Tracks";
 
 "settings.appearance.accent.choice.custom" = "Custom";
+"settings.appearance.accent.header" = "Accent";
 "settings.appearance.accent.mode.automatic" = "Automatic";
 "settings.appearance.accent.mode.picked" = "Picked";
 "settings.appearance.accent.mode.subtitle" = "Automatic follows the page in front, then the playing cover. Picked restores your color";
@@ -192,6 +190,8 @@
 "settings.appearance.accent_preset.title" = "Accent color preset";
 "settings.appearance.accent_recent.header" = "Recent colors";
 "settings.appearance.amoled_background.title" = "AMOLED background";
+"settings.appearance.font_icon.header" = "Font & app icon";
+"settings.appearance.glass.header" = "Glass";
 "settings.appearance.glass_material.clear" = "Clear";
 "settings.appearance.glass_material.regular" = "Regular";
 "settings.appearance.glass_material.subtitle" = "Clear lets more of what is behind the buttons through. On iOS 26";
@@ -205,8 +205,10 @@
 "settings.appearance.glass_touch.title" = "Glass touch response";
 "settings.appearance.hide_explicit.subtitle" = "Hide the E mark, without changing content restrictions or VoiceOver";
 "settings.appearance.hide_explicit.title" = "Hide explicit badge";
+"settings.appearance.intro" = "Badge changes apply at once. Some color and layout changes require restarting Spotify.";
 "settings.appearance.page_zoom.subtitle" = "Albums and playlists grow from the cover you tap and return to it when you go back. Restart to apply";
 "settings.appearance.page_zoom.title" = "Open pages from their artwork";
+"settings.appearance.pages.header" = "Pages & badges";
 "settings.appearance.play_page_color.subtitle" = "The Play button's symbol and word take the page's color. Off, they take the accent color";
 "settings.appearance.play_page_color.title" = "Play in the page's color";
 "settings.appearance.round_artist_play.subtitle" = "On artist pages, Play is a round button with its symbol alone";
@@ -220,6 +222,7 @@
 "settings.appearance.scroll_veil.title" = "Blur covers on scroll";
 "settings.appearance.scrolled_title.subtitle" = "Show the small title between Back and More on playlists, albums, artists and profiles";
 "settings.appearance.scrolled_title.title" = "Page title when scrolled";
+"settings.appearance.theme.header" = "Theme";
 "settings.appearance.title" = "Appearance";
 
 "settings.appicon.choice.default" = "Default";
@@ -270,7 +273,6 @@
 "settings.artist.motion.title" = "Animated artist artwork";
 "settings.artist.native.hide.music_videos.title" = "Music videos";
 "settings.artist.native.hide_on_page.header" = "Hide on the page";
-"settings.artist.native.title" = "Artist";
 "settings.artist.photo.header" = "Photo";
 "settings.artist.photo_fade.title" = "Fade into a blur";
 "settings.artist.play.header" = "Play";
@@ -1218,8 +1220,6 @@
 "settings.lockscreen.artwork.title" = "Full-screen artwork";
 "settings.lockscreen.dim_artwork.subtitle" = "Blurs and darkens the whole artwork, moving artwork included, and floats the lyrics over it instead of shading only around them.";
 "settings.lockscreen.dim_artwork.title" = "Dim the whole artwork";
-"settings.lockscreen.low_data.subtitle" = "Moving artwork, up to about 7 MB a song. Applies to animated artwork throughout Retrine.";
-"settings.lockscreen.low_data.title" = "Download in Low Data Mode";
 "settings.lockscreen.lyrics_layout.choice.centered" = "Centered";
 "settings.lockscreen.lyrics_layout.choice.left" = "Left";
 "settings.lockscreen.lyrics_layout.choice.messages" = "Messages";
@@ -1244,6 +1244,7 @@
 "settings.lossless.files.title" = "Lossless files";
 "settings.lossless.footer" = "Put FLAC or ALAC files in Files › Spotify › Lossless. A file plays when its title and length match the song and its sound matches what Spotify plays, from about 4 s after the song starts or you seek. Spotify still streams its own copy, at its lowest quality while the next song has a file. Karaoke and speeds other than 1x keep Spotify's sound. Applies after you restart Spotify.";
 
+"settings.lyrics.accounts.header" = "Source accounts";
 "settings.lyrics.ai.footer" = "Write Pronunciation and Explain References in the lyrics' menu use Gemini, Claude or your AI service, on your own key. What they write is kept for the song.";
 "settings.lyrics.all_tracks.subtitle" = "Even where Spotify has none";
 "settings.lyrics.all_tracks.title" = "Lyrics for every track";
@@ -1293,6 +1294,7 @@
 "settings.lyrics.delay.format" = "%ld ms";
 "settings.lyrics.delay.title" = "Delay";
 "settings.lyrics.display.header" = "Display";
+"settings.lyrics.files.header" = "Offline & imported lyrics";
 "settings.lyrics.full_rate.subtitle" = "Off draws the lyrics at up to 60 Hz to use less battery. Only ProMotion displays show a difference.";
 "settings.lyrics.full_rate.title" = "Smooth lyrics (120 Hz)";
 "settings.lyrics.furigana.subtitle" = "Readings over the kanji of Japanese songs";
@@ -1382,19 +1384,20 @@
 "settings.lyrics.pip.reset" = "Reset layout and text";
 "settings.lyrics.pip.reset.note" = "Background and the enable switch are kept.";
 "settings.lyrics.pip.right" = "Right";
+"settings.lyrics.pip.role_size" = "%@ size";
+"settings.lyrics.pip.role_weight" = "%@ weight";
 "settings.lyrics.pip.sample.credit" = "Sample lyrics · Retrine";
 "settings.lyrics.pip.sample.next" = "A new day is on its way";
 "settings.lyrics.pip.sample.original" = "별빛을 따라 걸어요";
 "settings.lyrics.pip.sample.song" = "A song for the night";
 "settings.lyrics.pip.show" = "Show in Picture in Picture";
-"settings.lyrics.pip.size" = "Size";
 "settings.lyrics.pip.square" = "Square";
 "settings.lyrics.pip.subtitle" = "Show lyrics over other apps from the lyrics screen. Restart Spotify after changing this.";
 "settings.lyrics.pip.text" = "Text";
 "settings.lyrics.pip.title" = "Picture in Picture lyrics";
 "settings.lyrics.pip.translation" = "Translation";
+"settings.lyrics.pip.typography" = "Text sizes & weights";
 "settings.lyrics.pip.untimed" = "These lyrics are not synced";
-"settings.lyrics.pip.weight" = "Weight";
 "settings.lyrics.pip.weight.bold" = "Bold";
 "settings.lyrics.pip.weight.medium" = "Medium";
 "settings.lyrics.pip.weight.regular" = "Regular";
@@ -1421,7 +1424,6 @@
 "settings.lyrics.simplify_titles.title" = "Simplify song titles";
 "settings.lyrics.simulate_word_timing.subtitle" = "Sweeps lines timed only by the line on estimated words. Applies at once";
 "settings.lyrics.simulate_word_timing.title" = "Simulate word timing";
-"settings.lyrics.sing.title" = "Karaoke";
 "settings.lyrics.sources.eevee_conflict.footer" = "EeveeSpotify's lyrics are on, so it answers Spotify's lyrics and these sources stay off: both answering froze Spotify after launch. Turn its lyrics off in its own settings to use these.";
 "settings.lyrics.sources.header" = "Sources";
 "settings.lyrics.sources.row.title" = "Sources";
@@ -1431,7 +1433,7 @@
 "settings.lyrics.timing.header" = "Timing";
 "settings.lyrics.title" = "Lyrics";
 "settings.lyrics.translation_ai.automatic.header" = "Automatic translation";
-"settings.lyrics.translation_ai.saved.header" = "Saved translations";
+"settings.lyrics.translation_ai.options" = "Options & storage";
 "settings.lyrics.translation_ai.services.header" = "Services";
 "settings.lyrics.translation_ai.title" = "Translation & AI";
 "settings.lyrics.translation_language.footer" = "A language brings Musixmatch's community translations to lyrics that have none, which sends Musixmatch each song's ID. Any shows the first translation the lyrics come with. It is also the language the lyrics' translate menu translates into, offered only for songs in another one; with Any, the iPhone's own language.";
@@ -1464,7 +1466,7 @@
 "settings.lyricslook.preview.a11y" = "Preview of the lyrics";
 "settings.lyricslook.size.title" = "Text size";
 "settings.lyricslook.spacing.title" = "Line spacing";
-"settings.lyricslook.title" = "Lyrics Style";
+"settings.lyricslook.title" = "Tune look";
 "settings.lyricslook.wave.title" = "Wave";
 
 "settings.lyricssources.binilyrics.subtitle" = "Apple Music word timing";
@@ -1716,6 +1718,7 @@
 "settings.mod.storage.limit" = "Show cache size limit";
 "settings.mod.storage.open" = "Open Spotify storage settings";
 "settings.mod.storage.title" = "Storage";
+"settings.mod.support" = "Support & diagnostics";
 "settings.mod.title" = "Mod";
 "settings.mod.tour.title" = "Welcome tour";
 "settings.mod.update.all_releases.subtitle" = "Every version, this one and the ones before it";
@@ -1758,21 +1761,20 @@
 "settings.nowplayingbar.device_button.subtitle" = "Kept on the bar between the tabs";
 "settings.nowplayingbar.device_button.title" = "Device button when minimized";
 "settings.nowplayingbar.hide_connect.title" = "Hide the device button";
-"settings.nowplayingbar.hide_device_button.subtitle" = "On the full now playing bar";
-"settings.nowplayingbar.hide_device_button.title" = "Hide the device button";
-"settings.nowplayingbar.hide_like.title" = "Hide the like button";
+"settings.nowplayingbar.hide_device_button.subtitle" = "On the full mini player";
+"settings.nowplayingbar.hide_device_button.title" = "Device button";
+"settings.nowplayingbar.hide_like.title" = "Like button";
 "settings.nowplayingbar.hold_drag_resize.title" = "Hold and drag to resize";
 "settings.nowplayingbar.inline_artist.subtitle" = "A second line on the bar between the tabs, when it fits";
 "settings.nowplayingbar.inline_artist.title" = "Artist under the title when minimized";
 "settings.nowplayingbar.minimize.subtitle" = "Between two tabs as a page scrolls down";
 "settings.nowplayingbar.minimize.title" = "Minimize while scrolling";
 "settings.nowplayingbar.miniplayer_transition_animations.title" = "Mini player transition animations";
-"settings.nowplayingbar.next_button.subtitle" = "After play on the full now playing bar";
+"settings.nowplayingbar.next_button.subtitle" = "After play on the full mini player";
 "settings.nowplayingbar.next_button.title" = "Next button";
 "settings.nowplayingbar.queue_badge.title" = "Queue badge";
 "settings.nowplayingbar.save_button.title" = "Save button";
 "settings.nowplayingbar.spotify_flags.header" = "Spotify's flags";
-"settings.nowplayingbar.title" = "Now playing bar";
 "settings.nowplayingbar.two_lines_info.title" = "Two lines of track info";
 "settings.nowplayingbar.video_miniplayer.title" = "Video in the mini player";
 
@@ -2605,7 +2607,7 @@
 "settings.player.buttons.video" = "Video";
 "settings.player.connect_bottom_sheet.title" = "Connect as a bottom sheet";
 "settings.player.connect_sheet_switcher.title" = "Connect sheet from the video switcher";
-"settings.player.controls.footer" = "Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. Follow the cover paints the like, shuffle and repeat in the color of the song playing.";
+"settings.player.controls.footer" = "Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. Follow the cover paints the like, shuffle and repeat in the color of the song playing. Restart Spotify to apply all control changes.";
 "settings.player.controls.header" = "Controls";
 "settings.player.disable_canvas.title" = "Disable Canvas";
 "settings.player.expand_sticky_header.title" = "Expand the sticky header on tap";
@@ -2645,8 +2647,8 @@
 "settings.player.hide.shuffle.title" = "Shuffle";
 "settings.player.hide.song_dna.title" = "SongDNA";
 "settings.player.hide_cards.header" = "Hide cards below the player";
-"settings.player.hide_context.subtitle" = "Hide the artist, album or playlist name at the top of the player.";
-"settings.player.hide_context.title" = "Hide where it plays from";
+"settings.player.hide_context.subtitle" = "The artist, album or playlist name at the top of the player.";
+"settings.player.hide_context.title" = "Where it plays from";
 "settings.player.hide_on_player.header" = "Hide on the player";
 "settings.player.hide_video_switch.subtitle" = "The chip over the title of a song with a music video";
 "settings.player.hide_video_switch.title" = "Switch to video";
@@ -2663,7 +2665,7 @@
 "settings.player.like_dislike.title" = "Like and dislike buttons";
 "settings.player.lockscreen.title" = "Lock screen";
 "settings.player.lyric_line.hint" = "Opens the lyrics.";
-"settings.player.lyric_line.size" = "Size";
+"settings.player.lyric_line.size" = "Lyrics line size";
 "settings.player.lyric_line.size_17" = "17 pt";
 "settings.player.lyric_line.size_19" = "19 pt";
 "settings.player.lyric_line.subtitle" = "The line being sung, under the cover. Tap it to open the lyrics.";
@@ -2676,7 +2678,7 @@
 "settings.player.menu.show_animated" = "Show Animated Artwork";
 "settings.player.menu.show_fluid" = "Show Fluid Artwork";
 "settings.player.menu.show_visualizer" = "Show Visualizer";
-"settings.player.mini_player.footer" = "Apple Music style moves the now playing bar in between two tabs as you scroll down.";
+"settings.player.mini_player.footer" = "Apple Music style moves the mini player between two tabs as you scroll down.";
 "settings.player.mini_player.header" = "Mini player";
 "settings.player.motion_low_data.subtitle" = "Up to about 7 MB a song. Applies to animated artwork throughout Retrine.";
 "settings.player.motion_low_data.title" = "Download in Low Data Mode";
@@ -2691,7 +2693,6 @@
 "settings.player.no_clip.hold" = "Keep background still";
 "settings.player.no_clip.title" = "Song without a clip";
 "settings.player.not_playing" = "Not Playing";
-"settings.player.now_playing_bar.title" = "Now playing bar";
 "settings.player.photo.choose" = "Choose Photo";
 "settings.player.play_next_menu.title" = "Play next in the context menu";
 "settings.player.player_screen.header" = "Player screen";
@@ -2837,6 +2838,8 @@
 "settings.privacy.section.header" = "Privacy";
 "settings.privacy.spoof_premium.title" = "Spoof Premium";
 "settings.privacy.spoof_premium.warning" = "This is the part of EeveeSpotify Spotify's takedown went after, and it has not been tested here. It can end in a forced logout or worse for the account. A Premium account gains nothing from it.";
+"settings.privacy.statistics.summary" = "Ads %@ · Telemetry %@";
+"settings.privacy.statistics.title" = "Blocked statistics";
 "settings.privacy.telemetry_stats.header" = "Telemetry blocked so far";
 "settings.privacy.telemetry_total.title" = "Total";
 "settings.privacy.title" = "Premium, ads & privacy";
@@ -3446,6 +3449,7 @@
 "settings.translation.prompt.help" = "{language} is replaced with the target language. The app adds the reply format and line-preservation rules. Applies to lyric translation with all three AI services, not pronunciation or notes.";
 "settings.translation.prompt.limit" = "%lu / %lu characters";
 "settings.translation.prompt.restore" = "Restore default";
+"settings.translation.prompt.shared" = "Shared by all AI services";
 "settings.translation.prompt.title" = "Translation prompt";
 "settings.translation.pronunciation.ipa" = "IPA";
 "settings.translation.pronunciation.latin" = "Latin letters";

@@ -35,7 +35,7 @@ dispatch_queue_t SGLyricsPiPPreviewQueue(void) {
 @interface SGLyricsPiPSettingsPage : SGModPage
 @property (nonatomic) BOOL pinned;
 // 1 or 2 on the pronunciation or translation page: says when that line is hidden by the lyrics screen.
-@property (nonatomic) NSUInteger role;
+@property (nonatomic) BOOL typography;
 @property (nonatomic, strong) UIView *header;
 @property (nonatomic, strong) UIImageView *preview;
 @property (nonatomic, strong) UILabel *sampleLabel;
@@ -120,12 +120,11 @@ dispatch_queue_t SGLyricsPiPPreviewQueue(void) {
         pronunciation ? @"Byeolbicheul ttara georeoyo" : @"", translation ? @"We walk beneath the stars" : @"",
         SGL(@"settings.lyrics.pip.sample.song", @"A song for the night"), @"Retrine"];
     NSString *label = SGL(@"settings.lyrics.pip.preview", @"Sample preview");
-    NSString *hidden = self.role == 1 && !pronunciation ?
-            SGL(@"settings.lyrics.pip.preview.hidden.pronunciation", @"Pronunciation is off on the lyrics screen, so it is hidden.") :
-        self.role == 2 && !translation ?
-            SGL(@"settings.lyrics.pip.preview.hidden.translation", @"Translation is off on the lyrics screen, so it is hidden.") : nil;
+    NSMutableArray *hidden = [NSMutableArray array];
+    if (self.typography && !pronunciation) [hidden addObject:SGL(@"settings.lyrics.pip.preview.hidden.pronunciation", @"Pronunciation is off on the lyrics screen, so it is hidden.")];
+    if (self.typography && !translation) [hidden addObject:SGL(@"settings.lyrics.pip.preview.hidden.translation", @"Translation is off on the lyrics screen, so it is hidden.")];
     self.sampleLabel.text = label;
-    self.hiddenNote = hidden;
+    self.hiddenNote = hidden.count ? [hidden componentsJoinedByString:@"\n"] : nil;
     self.preview.accessibilityLabel = label;
     // Read in the order the frame shows them: song, artist, then the lyric lines, the next line and the credit.
     NSMutableArray<NSString *> *spoken = [NSMutableArray array];
@@ -207,10 +206,10 @@ dispatch_queue_t SGLyricsPiPPreviewQueue(void) {
 - (void)dealloc { [NSNotificationCenter.defaultCenter removeObserver:self]; }
 @end
 
-static SGLyricsPiPSettingsPage *previewPage(NSString *title, NSArray<SGModSection *> *sections, NSString *footer, NSUInteger role) {
+static SGLyricsPiPSettingsPage *previewPage(NSString *title, NSArray<SGModSection *> *sections, NSString *footer, BOOL typography) {
     SGLyricsPiPSettingsPage *page = [[SGLyricsPiPSettingsPage alloc] initWithTitle:title intro:nil sections:sections footer:footer];
     page.pinned = YES;
-    page.role = role;
+    page.typography = typography;
     return page;
 }
 
@@ -250,20 +249,19 @@ static SGModRow *fontRow(void) {
     };
     return row;
 }
-static SGModRow *roleRow(NSUInteger role, NSString *title) {
-    return SGPageRow(title, ^UIViewController *{
-        SGModRow *size = SGSliderRow(SGL(@"settings.lyrics.pip.size", @"Size"), nil,
+static SGModSection *roleSection(NSUInteger role, NSString *title) {
+        SGModRow *size = SGSliderRow([NSString stringWithFormat:SGL(@"settings.lyrics.pip.role_size", @"%@ size"), title], nil,
             role == 0 ? 24 : 16, role == 0 ? 64 : 48, 1,
             ^double { return SGLyricsPiPReadStyle().sizes[role].doubleValue; },
             ^(double value) { [NSUserDefaults.standardUserDefaults setDouble:value forKey:SGLyricsPiPRoleKey(role, @"size")]; },
             ^NSString *(double value) { return [NSString stringWithFormat:@"%.0f", value]; });
         // Picked on the page itself, not a list pushed over it, so the pinned preview shows each weight.
-        SGModRow *weight = SGMenuRow(SGL(@"settings.lyrics.pip.weight", @"Weight"), weights(),
+        SGModRow *weight = SGMenuRow([NSString stringWithFormat:SGL(@"settings.lyrics.pip.role_weight", @"%@ weight"), title], weights(),
             ^NSString *{ return weights()[SGLyricsPiPReadStyle().weights[role].unsignedIntegerValue]; },
             ^(NSInteger index) { [NSUserDefaults.standardUserDefaults setInteger:index forKey:SGLyricsPiPRoleKey(role, @"weight")]; });
-        return previewPage(title, @[SGSection(nil, @[size, weight])],
-            SGL(@"settings.lyrics.pip.fit.note", @"Sizes are maximums in the rendered frame. Long text wraps and shrinks to fit; an ellipsis marks text that still cannot fit."), role);
-    });
+        size.searchIdentifier = SGLyricsPiPRoleKey(role, @"size");
+        weight.searchIdentifier = SGLyricsPiPRoleKey(role, @"weight");
+        return SGSection(title, @[size, weight]);
 }
 
 SGModRow *SGLyricsPiPRow(void) {
@@ -276,6 +274,15 @@ SGModRow *SGLyricsPiPRow(void) {
               SGL(@"settings.lyrics.pip.portrait", @"Portrait")], 0);
         SGModRow *info = SGOptionRow(SGL(@"settings.lyrics.pip.info", @"Cover and song info"), nil, SGKeyPiPInfo);
         info.defaultOn = YES;
+        NSString *typeTitle = SGL(@"settings.lyrics.pip.typography", @"Text sizes & weights");
+        SGModRow *type = SGPageRow(typeTitle, ^UIViewController *{
+            return previewPage(typeTitle, @[
+                roleSection(0, SGL(@"settings.lyrics.pip.original", @"Original")),
+                roleSection(1, SGL(@"settings.lyrics.pip.pronunciation", @"Pronunciation")),
+                roleSection(2, SGL(@"settings.lyrics.pip.translation", @"Translation"))],
+                SGL(@"settings.lyrics.pip.fit.note", @"Sizes are maximums in the rendered frame. Long text wraps and shrinks to fit; an ellipsis marks text that still cannot fit."), YES);
+        });
+        type.searchIdentifier = @"page.pip.typography";
         SGModRow *alignment = SGChoiceRow(SGL(@"settings.lyrics.pip.alignment", @"Text alignment"), nil, SGKeyPiPAlignment,
             @[SGL(@"settings.lyrics.pip.left", @"Left"), SGL(@"settings.lyrics.pip.center", @"Center"),
               SGL(@"settings.lyrics.pip.right", @"Right")], 1);
@@ -285,10 +292,7 @@ SGModRow *SGLyricsPiPRow(void) {
             intro:SGL(@"settings.lyrics.pip.live", @"Layout, text and background apply live, even while paused. Only the enable switch requires restarting Spotify.")
             sections:@[SGSection(nil, @[enabled]),
                 SGSection(SGL(@"settings.lyrics.pip.layout", @"Layout"), @[aspect, info]),
-                SGSection(SGL(@"settings.lyrics.pip.text", @"Text"), @[alignment, fontRow(),
-                    roleRow(0, SGL(@"settings.lyrics.pip.original", @"Original")),
-                    roleRow(1, SGL(@"settings.lyrics.pip.pronunciation", @"Pronunciation")),
-                    roleRow(2, SGL(@"settings.lyrics.pip.translation", @"Translation")), reset]),
+                SGSection(SGL(@"settings.lyrics.pip.text", @"Text"), @[alignment, fontRow(), type, reset]),
                 SGSection(SGL(@"settings.lyrics.pip.background", @"Background"), SGLyricsBackgroundRows(SGKeyLyricsPiPBackground))]
             footer:SGL(@"settings.lyrics.pip.extras.note", @"Shows available pronunciation and translation using your lyrics display and language rules. Opening Picture in Picture never starts translation or AI.")];
     });

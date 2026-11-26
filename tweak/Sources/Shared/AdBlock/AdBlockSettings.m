@@ -61,7 +61,7 @@ static NSString *counterTitle(NSString *label) {
     return titles[label] ?: label;
 }
 
-UIViewController *SGAdsSettingsPage(void) {
+static UIViewController *statisticsPage(void) {
     NSMutableArray<SGModRow *> *counts = [NSMutableArray array];
     for (NSString *label in SGAdBlockLabels()) {
         [counts addObject:SGStatRow(counterTitle(label), ^NSString *{
@@ -74,7 +74,19 @@ UIViewController *SGAdsSettingsPage(void) {
         return @(SGAdBlockCount(nil)).stringValue;
     })];
     [counts addObject:SGActionRow(SGL(@"settings.privacy.reset_counters.action", @"Reset the counters"), nil, ^{ SGResetAdBlock(); })];
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.privacy.statistics.title", @"Blocked statistics") intro:nil sections:@[
+        SGNotedSection(SGL(@"settings.privacy.blocked_stats.header", @"Ads blocked so far"), counts,
+                       SGL(@"settings.privacy.blocked_stats.footer", @"\"3 of 214\" is 3 stopped of 214 checked. 0 of 0 means Spotify never asked, so that part does nothing on this version.")),
+        SGPrivacyCountersSection(),
+    ] footer:nil];
+}
 
+UIViewController *SGAdsSettingsPage(void) {
+    SGModRow *statistics = SGSearchIdentified(SGPageRow(SGL(@"settings.privacy.statistics.title", @"Blocked statistics"),
+        ^UIViewController *{ return statisticsPage(); }), @"page.ads.statistics");
+    statistics.value = ^NSString *{
+        return [NSString stringWithFormat:SGL(@"settings.privacy.statistics.summary", @"Ads %@ · Telemetry %@"), @(SGAdBlockCount(nil)), @(SGBlockedCount(nil))];
+    };
     SGModRow *fakePremium = SGOptionRow(SGL(@"settings.privacy.spoof_premium.title", @"Spoof Premium"), nil, SGKeyFakePremium);
     fakePremium.warning = SGFakePremiumWarning;
 
@@ -90,8 +102,6 @@ UIViewController *SGAdsSettingsPage(void) {
         ], SGL(@"settings.privacy.premium.footer", @"Free accounts only.")),
         SGSponsorBlockSettingsSection(),
         SGPrivacySection(),
-        SGNotedSection(SGL(@"settings.privacy.blocked_stats.header", @"Ads blocked so far"), counts,
-                       SGL(@"settings.privacy.blocked_stats.footer", @"\"3 of 214\" is 3 stopped of 214 checked. 0 of 0 means Spotify never asked, so that part does nothing on this version.")),
-        SGPrivacyCountersSection(),
+        SGSection(nil, @[statistics]),
     ] footer:nil];
 }

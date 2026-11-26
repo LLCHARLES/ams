@@ -87,6 +87,8 @@ ROW(SGGeminiKeyRow) ROW(SGGlassLyricsRow) ROW(SGLockScreenLyricsRow) ROW(SGLyric
 ROW(SGLyricsTranslationLanguageRow) ROW(SGLyricsWordTimingRow) ROW(SGRLyricsTextSizesRow) ROW(SGLyricsDelayRow)
 ROW(SGBingTranslateRow) ROW(SGDeepLKeyRow) ROW(SGGoogleTranslateRow) ROW(SGLyricsCulturalNotesRow)
 ROW(SGLyricsFuriganaRow) ROW(SGLyricsJapaneseReadingRow) ROW(SGLyricsLanguageRulesRow) ROW(SGLyricsPiPRow)
+ROW(SGLyricsAlphabetRow)
+SGModRow *SGDeleteSavedLyricsRow(dispatch_block_t open) { return SGActionRow(@"Delete saved lyrics", nil, open); }
 ROW(SGLyricsPronunciationNotationRow) ROW(SGRAutoTranslationOrderRow) ROW(SGRAutoTranslationRow)
 ROW(SGRLyricsKeepAwakeRow) ROW(SGRLyricsFullRateRow) ROW(SGSavedTranslationsRow) ROW(SGSimplifyTitlesRow) ROW(SGTranslateEverySongRow)
 ROW(SGRLyricsHideRow) ROW(SGRLyricsKeepMicRow)
@@ -109,9 +111,9 @@ void SGMotionCacheBytes(void (^done)(uint64_t bytes)) { done(0); }
 void SGMotionCacheClear(void (^done)(BOOL complete)) { done(YES); }
 SGAppFont SGAppFontChosen(void) { return SGAppFontSpotify; }
 NSArray<SGModRow *> *SGAppFontRows(void) { return @[]; }
-NSArray<SGModRow *> *SGNativeAppearanceRows(void) { return @[]; }
-NSArray<SGModRow *> *SGRAppearanceRows(void) { return @[]; }
-SGModSection *SGLyricsSourcesSection(BOOL namingSource) { return SGSection(nil, @[]); }
+NSArray<SGModSection *> *SGNativeAppearanceSections(void) { return @[]; }
+NSArray<SGModSection *> *SGRAppearanceSections(void) { return @[]; }
+NSArray<SGModSection *> *SGLyricsSourcesSections(BOOL namingSource) { return @[]; }
 NSArray<SGModSection *> *SGNativePlayerScreenSections(void) { return @[]; }
 NSArray<NSDictionary *> *SGBlockedArtists(void) { return @[]; }
 NSArray<NSDictionary *> *SGPlayingArtists(void) { return @[]; }

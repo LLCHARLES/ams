@@ -7,7 +7,7 @@ font keys the way the Logos files do.
 
     ./build.sh
     xcrun simctl install <udid> build/AppearancePageHarness.app
-    xcrun simctl launch --console <udid> com.vojta.appearancepageharness accent=123456 menu=1.1:0 dump menu=1.1:2 dump
+    xcrun simctl launch --console <udid> com.vojta.appearancepageharness accent=123456 menu=1.0:0 dump menu=1.0:2 dump
     xcrun simctl io <udid> screenshot shot.png
 
 Make a simulator of your own (`xcrun simctl create`) and address it by UDID. `main.m` lists the setup words

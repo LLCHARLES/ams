@@ -3,6 +3,7 @@
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "NowPlaying.h"
+#import "Shared/Player/PlayerSettings.h"
 
 NSArray<SGModSection *> *SGNativePlayerScreenSections(void) {
     return @[
@@ -27,6 +28,7 @@ NSArray<SGModSection *> *SGNativePlayerScreenSections(void) {
             SGHideRow(SGL(@"settings.player.hide.recommendations.title", @"Recommendations"), nil, SGHideRecommendations),
         ]),
         SGSection(SGL(@"settings.player.hide_on_player.header", @"Hide on the player"), @[
+            SGNativeVideoSwitchRow(),
             SGHideRow(SGL(@"settings.player.hide.lyrics_preview.title", @"Lyrics preview"), nil, SGHideLyricsInline),
             SGHideRow(SGL(@"settings.player.hide.shuffle.title", @"Shuffle"), nil, SGHideShuffle),
             SGHideRow(SGL(@"settings.player.hide.repeat.title", @"Repeat"), nil, SGHideRepeat),

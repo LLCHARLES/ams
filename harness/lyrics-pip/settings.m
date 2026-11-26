@@ -191,8 +191,7 @@ void SGTestSettings(void) {
     SGTestAssert(role.sections[0].rows[0].minimum == 24 && role.sections[0].rows[0].maximum == 64 &&
         role.sections[0].rows[1].menu.count == 4 && [role.sections[0].rows[1].value() isEqual:@"Semibold"],
         @"original settings use bounded role-specific controls with an on-page weight menu");
-    role = (id)page.sections[2].rows[3].page();
-    SGTestAssert(role.sections[0].rows[0].minimum == 16 && role.sections[0].rows[0].maximum == 48,
+    SGTestAssert(role.sections.count == 3 && role.sections[1].rows[0].minimum == 16 && role.sections[2].rows[0].maximum == 48,
         @"secondary role settings have smaller bounded range");
     NSArray<SGModRow *> *rows = page.sections[3].rows;
     SGTestAssert(rows.count == 4 && [rows[0].key isEqual:@"spotifyglass.lyrics.pip.background.mode"] && rows[0].menu.count == 5,
@@ -237,21 +236,18 @@ void SGTestSettings(void) {
     SGTestAssert(SGTestPump(^BOOL { return shows(fontPreview, sample(NO, YES)); }) &&
         [fontPreview.accessibilityValue containsString:@"We walk beneath the stars"] && ![fontPreview.accessibilityValue containsString:@"Byeolbicheul"],
         @"switching translation on in lyrics shows only translation in the preview");
-    SGModPage *pronunciation = (id)page.sections[2].rows[3].page();
+    SGModPage *pronunciation = role;
     UIImageView *pronunciationPreview = previewIn(pronunciation, CGSizeMake(320, 568));
-    SGModPage *translation = (id)page.sections[2].rows[4].page();
-    UIImageView *translationPreview = previewIn(translation, CGSizeMake(320, 568));
     NSString *hiddenNote = @"Pronunciation is off on the lyrics screen, so it is hidden.";
-    SGTestAssert(SGTestPump(^BOOL { return shows(pronunciationPreview, sample(NO, YES)) && shows(translationPreview, sample(NO, YES)); }) && [labelIn(pronunciation.tableView.tableHeaderView).text isEqual:hiddenNote] &&
-        !translation.tableView.tableHeaderView,
-        @"supplement pages say when their line is hidden and stay quiet when it shows");
+    SGTestAssert(SGTestPump(^BOOL { return shows(pronunciationPreview, sample(NO, YES)); }) && [labelIn(pronunciation.tableView.tableHeaderView).text isEqual:hiddenNote],
+        @"shared typography preview names only the hidden supplement");
     pinnedLayout(pronunciation, pronunciationPreview, @"pronunciation", hiddenNote);
     NSDictionary *now = [defaults persistentDomainForName:domain];
     SGTestAssert(same(now[pronunciationKey], saved[pronunciationKey]) && same(now[translationKey], saved[translationKey]),
         @"previews never write the lyrics screen's switches");
     SGModPage *original = (id)page.sections[2].rows[2].page();
     UIImageView *originalPreview = previewIn(original, CGSizeMake(375, 667));
-    pinnedLayout(original, originalPreview, @"original", nil);
+    pinnedLayout(original, originalPreview, @"original", hiddenNote);
     original.sections[0].rows[0].setNumber(64);
     SGTestAssert(SGLyricsPiPReadStyle().sizes[0].doubleValue == 64, @"role size setter reaches production style");
     SGTestAssert(SGTestPump(^BOOL { return shows(originalPreview, sample(NO, YES)); }), @"size slider redraws the pinned preview while dragged");
@@ -301,7 +297,7 @@ void SGTestSettings(void) {
     SGTestAssert(mainPreview.superview == page.tableView.tableHeaderView && SGTestPump(^BOOL { return shows(mainPreview, sample(NO, YES)); }),
         @"main page keeps its scrolling sample header with the same supplement rule");
     [defaults setBool:YES forKey:pronunciationKey]; // a stored lyrics-screen choice the reset must keep
-    page.sections[2].rows[5].action();
+    page.sections[2].rows[3].action();
     SGTestAssert(SGLyricsPiPReadStyle().sizes[0].doubleValue == 40 && SGLyricsPiPReadStyle().weights[0].integerValue == 2 &&
         ![defaults objectForKey:SGKeyPiPFont] && rows[1].number() == 33 && [[defaults persistentDomainForName:domain][pronunciationKey] boolValue],
         @"reset restores layout/text defaults without changing background or lyrics switches");

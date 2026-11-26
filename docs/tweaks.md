@@ -571,8 +571,8 @@ Shared:
                   in the translation language's letters, Latin letters or IPA (SGKeyLyricsPronunciationNotation), and a
                   one-sentence cultural note for the few lines a listener would miss (SGKeyLyricsCulturalNotes, off);
                   The lyrics menu keeps its translator choices after a generated translation, under Translate Again.
-                  Lyrics → Translation & AI has a shared Translation prompt row, also beside each AI service's key
-                  and model. It edits the style instruction for Gemini, Claude and OpenAI-compatible lyric jobs;
+                  Lyrics → Translation & AI → Services has one shared Translation prompt row.
+                  It edits the style instruction for Gemini, Claude and OpenAI-compatible lyric jobs;
                   titles, prose, pronunciation and cultural notes stay unchanged. The app retains the indexed-row
                   contract, exact count/order, empty rows and untrusted-lyrics rules. Edited text is explicitly
                   subordinate style guidance, followed by the fixed format/data rules. An unset prompt produces the
@@ -1714,7 +1714,7 @@ Redesigned:
                   app opened on a video podcast, is asked for another pass a second on), the cover keeps Spotify's tilt view's size (24 pt
                   in on a 402 pt iPhone, 354 pt, as the Music app's) and is drawn up to 33 pt under the window's safe area
                   where Spotify's tilt view stands lower (PlayerArtwork.x; only up, never in landscape or on an iPad,
-                  never over a header row that takes touches: with Hide where it plays from off, Spotify's arrow live
+                  never over a header row that takes touches: with Where it plays from on, Spotify's arrow live
                   or the AI DJ's buttons, it stops at the row's bottom where the row is now in its own player, followed
                   live as the switch changes and as Spotify moves the row with no layout of it; with the row put away, a
                   touch on the drawn cover landing in the row, off any control Spotify still shows there (an iPad's button
@@ -1803,9 +1803,9 @@ Redesigned:
                   account). Header glass (spotifyglass.redesign.player.headerGlass, on until switched off) keeps the glass circles
                   behind the AI DJ's header down arrow and ⋯ (PlayerHeader.x; the ordinary player's has only the grabber); off, only
                   the circles go, and the buttons draw as Spotify's own with their actions, touches and accessibility, the
-                  grabber staying. Hide where it plays from (spotifyglass.redesign.player.hideContext, on until switched off, as the Music app's header has only the grabber)
-                  hides the header's artist, album or playlist context and its VoiceOver announcement without moving
-                  the close or ⋯ buttons; switching it off restores the text live (PlayerHeader.x). Redesigned only:
+                  grabber staying. Where it plays from is off by default (the underlying hideContext preference defaults to on).
+                  Turning it on restores the header's artist, album or playlist and its VoiceOver announcement live,
+                  without moving the close or ⋯ buttons (PlayerHeader.x). Redesigned only:
                   Native keeps its own header hooks. Playing Next in the ⋯ menu (PlayerQueue.m) reads Spotify's whole queue:
                   up to ten recently played songs, oldest first, as read-only History above Now Playing,
                   then fifty Up Next songs with the existing skip-ahead action. Empty History is omitted. Each row
@@ -2337,7 +2337,7 @@ App:
     Pages.m        Redesigned UI's switch, the Appearance, Vibrations, Player and Lyrics pages, which Tab bar page opens
     About/         the update check against the repo's GitHub Releases, the Updates page it fills (the state, and
                    the changelog of every release newer than the build, a line per commit), betas counted only
-                   while Mod > Include betas is on (unset, on for a beta build), and the sheet a newer
+                   while Mod > Updates > Include betas is on (unset, on for a beta build), and the sheet a newer
                    release brings up on its own a few seconds after Spotify opens, once per release; backup, the
                    signing warning, the date the provisioning profile runs out (on the Mod page, and at the top of
                    Mod Settings for a free Apple ID's week) and the Mod page with the reset
@@ -2621,21 +2621,19 @@ Audio effects has the shareable presets and AutoEq headphone corrections; Appear
 and on-device custom fonts. In the redesign, Player's Visualizer background links to its styles and Lyrics
 links to Lyrics styles. Tab bar: the tab editor of the stored look, each with
 its own list of tabs. Lyrics, on the main page of its own: in the redesign a live preview of the lyrics first, with the presets of their look
-under it and their sliders in a sheet (Text size, Line spacing, Blur, Glow, Wave), applying at once; then Karaoke, then the ordered list of lyrics sources,
-lyrics for every track, naming the source in the redesign, the lock screen, and glass lyrics in the native look; in
-the redesign also which of the lyrics, their pronunciation and their translation is set largest, Pronunciation
-(applied at once); its Pronunciation alphabet row, grayed out while that is off, reads out Latin or Hangul and opens
-a page of the two choices and the Japanese reading (Romaji or Hiragana), with a note that Hangul reads Japanese and
-Chinese offline and replaces the Japanese reading; then a Translation & AI subpage grouped into Automatic
-translation, Services and Saved translations.
-Request mode & lyric types and Timing remain on Lyrics. Karaoke, under either look, on the main page and as Lyrics' first row, the row reading out On,
+under it and their sliders in Tune look (Text size, Line spacing, Blur, Glow, Wave), applying at once.
+Display contains the redesigned lyrics controls or Native's Glass lyrics. Pronunciation enables the inline alphabet
+menu; Japanese reading (Romaji or Hiragana) appears for Latin, not Hangul. Both looks offer Timing, Translation & AI,
+Sources, Source accounts, and Offline & imported lyrics. Translation language and the shared prompt are available
+in either look, while automatic translation remains a redesigned lyrics feature.
+Karaoke, under either look, is on the main page, its row reading out On,
 Off or how far the voice model's download has come, kept up to date while the page shows: Karaoke's switch, which turns
 the mic on and off at once, a card at its top (SGSingCard.m: the song, what Karaoke is doing, a tap saying more, the vocals
 and the rest traced live from the engine's loudness, Karaoke running on the playing song while they show even at As sung, still under Reduce Motion, play and pause, and a tall Vocals slider
 from gone through as sung to the vocals alone, with Sing along, Original and Vocals only under it), Spatial voice
 (where the iPhone reads headphone motion; a page of its own, reading out On or Off, with a live preview at its top that
 follows the head through AirPods, or sways gently without them and holds still under Reduce Motion, a line under it
-saying which, then the switch; its row is on the main page too, under Karaoke's), a Voice model section (Best quality
+saying which, then the switch), a Voice model section (Best quality
 and Light, a checkmark against the chosen one, each with its size; then the chosen model's download, Paused and Checking
 among its states, and its removal; and Remove the other model, with its size, while the one not chosen, or the old
 model with the full one, is on the iPhone), Toggle from lyrics (the redesign's mic, issue #12; until switched, on where Karaoke can run and off below iOS 18,
@@ -2645,9 +2643,9 @@ beside the CPU; CPU only), Prepare after updates, Ignore heat warnings and Ignor
 page under either look, opens the lock screen widget's page, titled Lock screen: Widget (the line in place of the artist,
 its Lyrics line, Original or Translation, and Spotify's like and dislike buttons' flag, locked off while the star is on) then
 Artwork (Off, Moving artwork, Lyrics, Every song or Moving artwork with lyrics, the lyrics' style, Still or Animated,
-fallback Background with darkening, blur strength or solid color, Translations, Switch with the star,
-the sources and Low Data Mode; below iOS 26
-one row saying why not), and last under either Clear Downloaded Covers and Artist Photos (AnimatedArtworkSettings.m's
+fallback Background with darkening, blur strength or solid color, Translations, Switch with the star;
+below iOS 26 one row saying why not). Playback & local files → Data & prefetch holds Artwork sources and Download in Low Data Mode.
+Mod → Storage contains Clear Downloaded Covers and Artist Photos (AnimatedArtworkSettings.m's
 SGArtworkCacheRow): their size measured off the main queue, and after an alert with Cancel only the store's own clip
 files (SGMotionStoreClear, a clip in use left in place) and the album answers file (SGMotionCacheClear) removed; a
 transfer or lookup begun before it delivers to its own caller but keeps and starts nothing; songs, a chosen cover,
@@ -2656,7 +2654,7 @@ Playback & local files holds the sleep timer fade, blocked artists and songs, Lo
 (`spotifyglass.loadAhead`, on until switched off: only the advance work on the next track's artwork and lyrics stops).
 Player has Gestures, Full screen cover on tap (`spotifyglass.hide.fullScreenCover`, shown until switched off, live) and Audio quality (the badge under the progress bar,
 `spotifyglass.player.audioQuality`, off until switched on, live; Shared/Player/AudioQuality.h), which work with either look, including below iOS 17;
-in the native look also Now playing bar (its device button and its flags), Queue & devices, and
+in the native look also Mini player (its device button and its flags), Queue & devices, and
 Spotify's own player screen (artwork background, glass header buttons, Disable Canvas and the sheet,
 header, slider and sticky header flags, the cards under the player and the lyrics preview and player
 buttons to hide); in the redesign the page instead leads with a card of the player (Redesigned/Player/
@@ -2686,10 +2684,10 @@ for each new track while the Visualizer is on screen with the app in front and n
 kept under `spotifyglass.visualizer.shuffle.home` and comes back when shuffle is switched off. Visualizer motion pauses
 while hidden, backgrounded, in Low Power Mode, under serious heat (unless Ignore heat warnings,
 `spotifyglass.visualizer.ignoreHeat`, off) or during player transitions,
-and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`). Artwork sources, Song without a clip (one
+and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`). Song without a clip (one
 choice: Cover art, Full-screen cover or Visualizer, written through the two keys below; Cover art also offers
-Keep background still, off by default) and Download in Low Data Mode
-appear while Animated is chosen (Visualizer when there's no clip, `spotifyglass.redesign.player.animatedVisualizer`, off: once the track's clip lookup has answered
+Keep background still, off by default)
+appears while Animated is chosen (Visualizer when there's no clip, `spotifyglass.redesign.player.animatedVisualizer`, off: once the track's clip lookup has answered
 none, the Visualizer stands where the clip would be, taken down by a later clip or a new track, the ordinary cover
 under Low Power Mode, Reduce Motion or the heat stand-down; it and the full-screen cover turn each other off, the
 full-screen cover kept when both are found on; harness/player/ `autoviz`. The full-screen cover,

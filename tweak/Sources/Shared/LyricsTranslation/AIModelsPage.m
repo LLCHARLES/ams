@@ -261,15 +261,15 @@ static UIViewController *servicePage(SGLyricsAI service) {
     NSArray<SGModSection *> *sections = nil;
     switch (service) {
         case SGLyricsAIGemini:
-            sections = @[SGNotedSection(nil, [@[SGGeminiKeyRow(), modelRow(service), SGLyricsTranslationPromptRow()] arrayByAddingObjectsFromArray:SGGeminiTuningRows()],
+            sections = @[SGNotedSection(nil, [@[SGGeminiKeyRow(), modelRow(service)] arrayByAddingObjectsFromArray:SGGeminiTuningRows()],
                 SGL(@"settings.translation.ai.gemini.footer", @"Translations, pronunciations and notes send the song's lyrics to Google, on your own key from Google AI Studio. The key stays on this iPhone."))];
             break;
         case SGLyricsAIClaude:
-            sections = @[SGNotedSection(nil, @[SGClaudeKeyRow(), modelRow(service), SGLyricsTranslationPromptRow()],
+            sections = @[SGNotedSection(nil, @[SGClaudeKeyRow(), modelRow(service)],
                 SGL(@"settings.translation.ai.claude.footer", @"Translations, pronunciations and notes send the song's lyrics to Anthropic, on your own key from the Claude Console. The key stays on this iPhone."))];
             break;
         case SGLyricsAIOpenAI:
-            sections = @[SGNotedSection(nil, @[SGOpenAIPresetRow(), SGOpenAIBaseURLRow(), SGOpenAIKeyRow(), modelRow(service), SGLyricsTranslationPromptRow()],
+            sections = @[SGNotedSection(nil, @[SGOpenAIPresetRow(), SGOpenAIBaseURLRow(), SGOpenAIKeyRow(), modelRow(service)],
                              SGL(@"settings.translation.ai.openai.footer", @"Translations, pronunciations and notes send the song's lyrics to the service at this address, on your own key. A service sets the address and a model; each host keeps its own key on this iPhone.")),
                          SGSection(nil, @[SGOpenAIConnectionTestRow(), SGOpenAITranslationTestRow()])];
             break;
@@ -279,6 +279,7 @@ static UIViewController *servicePage(SGLyricsAI service) {
 
 SGModRow *SGLyricsAIServiceRow(SGLyricsAI service) {
     SGModRow *row = SGPageRow(serviceTitle(service), ^UIViewController *{ return servicePage(service); });
+    row.searchIdentifier = @[@"page.lyrics.gemini", @"page.lyrics.claude", @"page.lyrics.openai"][service];
     row.value = ^NSString *{
         return [SGLyricsAIAvailable() containsObject:@(service)] ? SGLyricsAIModel(service) : SGL(@"settings.translation.ai.key_required", @"API key required");
     };
