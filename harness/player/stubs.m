@@ -484,7 +484,10 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
         void (^answer)(NSURL *, NSString *) = [done copy];
         NSMutableArray *held = sg_heldLookups[uri];
         done = ^(NSURL *file, NSString *source) {
-            [held addObject:^{ answer(file, source); }];
+            // A second consumer can finish after the first answer opened the gate.
+            // Don't enqueue its answer on an array that will never be drained again.
+            if (sg_heldLookups[uri] == held) [held addObject:^{ answer(file, source); }];
+            else answer(file, source);
         };
     } else if (sg_lookupDelay > 0) {
         void (^answer)(NSURL *, NSString *) = [done copy];
@@ -494,6 +497,11 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
         };
     }
     void (^apple)(void) = ^{ SGMotionAlbumCover(artist, album, pixels, ^(NSURL *file) { done(file, file ? @"applemusic" : nil); }); };
+    if (!canvas && [uri isEqual:@"spotify:track:noClip"]) {
+        // The settings scenario supplies a known catalog miss, not a live Apple Music search.
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil, nil); });
+        return;
+    }
     if (!canvas) { apple(); return; }
     SGMotionFile(canvas, ^(NSURL *file) { if (file) done(file, @"canvas"); else apple(); });
 }

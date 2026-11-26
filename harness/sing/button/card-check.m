@@ -2,6 +2,7 @@
 #import "Shared/Player/SGLastTrack.h"
 #import "Shared/Sing/Sing.h"
 #import "../../harness-fail.h"
+#import "../../reduce-motion-fixture.h"
 
 UIView *SGSingCardView(void);
 static __weak id<SGPlayerStateObserver> listener;
@@ -30,6 +31,7 @@ BOOL SGSingReadLevels(float *v, float *r, int count) {
 }
 
 void SGCheckSingCard(UIView *root) {
+    harnessMotion = allowMotion;
     player = [SPTPlayerState new];
     SPTPlayerTrack *track = [SPTPlayerTrack new];
     [track setValue:@"spotify:track:harness" forKey:@"URI"];

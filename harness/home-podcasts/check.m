@@ -8,16 +8,22 @@
 #import "Redesigned/Kit/SGRMotionBudget.h"
 #import "Home.h"
 
-// HomeHeader.x reads Reduce Motion from the harness, which switches it without touching the Mac's own setting.
-static BOOL sg_reduceMotion;
-static BOOL harnessReduceMotion(void) { return sg_reduceMotion; }
-#define SGRReduceMotion harnessReduceMotion
+#import "../reduce-motion-fixture.h"
+// Drive the application state read alongside the lifecycle notifications we send.
+static UIApplicationState fixtureState = UIApplicationStateActive;
+@interface UIApplication (FridayCheck)
+- (UIApplicationState)fridayFixtureState;
+@end
+@implementation UIApplication (FridayCheck)
+- (UIApplicationState)fridayFixtureState { return fixtureState; }
+@end
+#define applicationState fridayFixtureState
 static BOOL lowPower;
 static NSProcessInfoThermalState heat;
 #define SGRMotionHeldForPowerOrHeat() SGRMotionHeldFor(lowPower, heat)
 #include "HomeHeader.gen.m"
 #undef SGRMotionHeldForPowerOrHeat
-#undef SGRReduceMotion
+#undef applicationState
 
 #pragma mark - helpers
 
@@ -161,7 +167,7 @@ static CAAnimation *ringTurn(CALayer *ring) {
 }
 
 static void switchReduceMotion(BOOL on) {
-    sg_reduceMotion = on;
+    harnessMotion = on ? reduceMotion : allowMotion;
     [NSNotificationCenter.defaultCenter postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
     spin(0.1);
 }
@@ -187,11 +193,20 @@ static void checkFriday(void) {
     CHECK(objc_getAssociatedObject(glass, &kFridayKey) == nil);
 
     answerWeekday(6);
+    harnessMotion = reduceMotion;
     layoutFriday(glass, size);
     CALayer *ring = objc_getAssociatedObject(glass, &kFridayKey);
     CHECK(ring && !ring.hidden && ring.superlayer == glass.layer && ring.opacity == 1);
     CHECK(CGRectEqualToRect(ring.frame, CGRectMake(0, 0, 100, 44)));
+    NSLog(@"[harness] Friday ring: host Reduce Motion %d, fixture %d, turn %@",
+          hostReducesMotion(), SGRReduceMotion(), ringTurn(ring) ? @"on" : @"off");
+    CHECK(SGRReduceMotion() && !ringTurn(ring));
+    switchReduceMotion(NO);
     CABasicAnimation *turn = (CABasicAnimation *)ringTurn(ring);
+    NSLog(@"[harness] Friday ring: host/app state %ld/%ld, host/fixture Reduce Motion %d/%d, window %d, resigning %d, glass %d, power %d, heat %ld, turn %@, duration %.1f max FPS %.0f",
+          (long)UIApplication.sharedApplication.applicationState, (long)fixtureState, hostReducesMotion(), SGRReduceMotion(),
+          glass.window != nil, ((SGRHomeGlassHolder *)glass).resigning, sg_glassShown, lowPower, (long)heat,
+          turn ? @"on" : @"off", turn.duration, turn.preferredFrameRateRange.maximum);
     CHECK(turn.duration == 6 && turn.preferredFrameRateRange.maximum == 30);
 
     extern __weak UIView *harnessSettledPlayerField;
@@ -210,6 +225,10 @@ static void checkFriday(void) {
     CHECK(ringTurn(ring));
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
     CHECK(!ringTurn(ring));
+    fixtureState = UIApplicationStateInactive;
+    layoutFriday(glass, size);
+    CHECK(!ringTurn(ring));
+    fixtureState = UIApplicationStateActive;
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
     CHECK(ringTurn(ring));
     lowPower = YES;
@@ -245,6 +264,7 @@ static void checkFriday(void) {
     CHECK(ringTurn(ring) == nil);
     answerWeekday(0);
     [glass removeFromSuperview];
+    harnessMotion = useHostMotion;
 }
 
 static void run(void) {

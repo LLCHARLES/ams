@@ -11,6 +11,7 @@
 //   a title too long for its line starting at the leading edge and gliding toward the trailing side
 //   (Settings/SGMarquee.m)
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "Settings/SGGlowSwitch.h"
 #import "Settings/SGPageStyle.h"
 #import "Settings/SGModPage.h"
@@ -227,6 +228,7 @@ static void checkRecapTaps(UIView *host) {
 }
 
 static void checkMarquee(UIView *host) {
+    harnessMotion = allowMotion;
     SGMarqueeLabel *title = [[SGMarqueeLabel alloc] initWithFrame:CGRectMake(20, 600, 100, 24)];
     title.text = @"And the voice should come out clean, every word of it";
     [host addSubview:title];
@@ -247,6 +249,7 @@ static void checkMarquee(UIView *host) {
     BOOL toward = rtl ? furthest > 0 : furthest < 0;
     if (!starts || !toward) HARNESS_FAIL(@"marquee: text at %@, glides %.0f", NSStringFromCGRect(text.frame), furthest);
     [title removeFromSuperview];
+    harnessMotion = useHostMotion;
 }
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>

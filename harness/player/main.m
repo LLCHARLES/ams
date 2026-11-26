@@ -60,6 +60,7 @@
 #import <OSLog/OSLog.h>
 #import <MediaPlayer/MediaPlayer.h>
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import <dlfcn.h>
 #import "Redesigned/Kit/SGRTokens.h"
 #import "../harness-fail.h"
@@ -119,6 +120,10 @@ void SGRHarnessPlayFrom(NSInteger ms);
 void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused);
 // stubs.m: every clip lookup answers this many seconds late (0, the default, at once).
 void SGRHarnessSetLookupDelay(NSTimeInterval seconds);
+void SGRHarnessSetReduceMotion(BOOL reduced) {
+    harnessMotion = reduced ? reduceMotion : allowMotion;
+    [NSNotificationCenter.defaultCenter postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
+}
 void SGRHarnessHoldLookups(NSString *uri);
 BOOL SGRHarnessLookupReady(NSString *uri);
 void SGRHarnessDeliverLookups(NSString *uri);
@@ -1953,6 +1958,7 @@ static void runScript(NSArray<NSArray *> *script, NSUInteger index) {
                 runScript(script, index + 1);
             } else if (NSProcessInfo.processInfo.systemUptime >= deadline) {
                 fprintf(stderr, "FAIL player scenario condition timed out at step %lu\n", (unsigned long)index);
+                if (script[index].count > 2) NSLog(@"[harness] %@", ((NSString *(^)(void))script[index][2])());
                 exit(1);
             }
         }];
@@ -3497,13 +3503,14 @@ static void installSettingsWorkProbes(void) {
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:noClip"); }, ^{
         SGRHarnessDeliverLookups(@"spotify:track:noClip");
     });
-    when(^BOOL { return SGRPlayerField().motionHeld && [(SGRArtworkField *)[card() valueForKey:@"_field"] motionHeld]; }, ^{
+    [script addObject:@[^BOOL { return SGRPlayerField().motionHeld && [(SGRArtworkField *)[card() valueForKey:@"_field"] motionHeld]; }, ^{
         [self expect:!SGRPlayerMotionShowing() && !SGRPlayerVisualiserShowing() && !SGPlayerState().isPaused
                 step:@"confirmed miss holds the playing field and preview" detail:cardState()];
         SGRHarnessHoldLookups(@"spotify:track:pending");
         setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/pending-%d.mp4", getpid()].UTF8String, 1);
         [self playTrack:@"spotify:track:pending" image:imageURI(@"cccc")];
-    });
+    }, ^{ return [NSString stringWithFormat:@"waiting for confirmed miss: trackMiss=%d holdEnabled=%d playerFieldHeld=%d; %@",
+                    SGRPlayerTrackHasNoClip(), SGRPlayerNoClipHoldEnabled(), SGRPlayerField().motionHeld, cardState()]; }]];
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:pending"); }, ^{
         [self expect:!SGRPlayerField().motionHeld step:@"next track releases the hold before its clip answer" detail:cardState()];
         SGRHarnessDeliverLookups(@"spotify:track:pending");
@@ -6689,6 +6696,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     // automix: Fluid behind the player, AutoMix and its three player options at their standard (all off) until the
     // scenario turns them on, so it starts from what a user who never opened the page has.
     if ([scenario() isEqualToString:@"automix"]) {
+        harnessMotion = allowMotion;
         NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
         [store setInteger:SGRPlayerBackgroundFluid forKey:@"spotifyglass.redesign.player.background"];
         for (NSString *key in @[@"spotifyglass.automix", @"spotifyglass.automix.style", @"spotifyglass.automix.show-progress",
@@ -6707,6 +6715,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     // lookup 1.5 s late. shuffle and heat: the Visualizer as the background (shuffle moves to Animated at the end),
     // their switches off, the style at its default.
     if ([scenario() isEqualToString:@"autoviz"] || [scenario() isEqualToString:@"shuffle"] || [scenario() isEqualToString:@"heat"]) {
+        harnessMotion = allowMotion;
         NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
         BOOL animated = [scenario() isEqualToString:@"autoviz"];
         SGRPlayerBackgroundKind kind = animated ? SGRPlayerBackgroundAnimated : SGRPlayerBackgroundVisualiser;
@@ -6721,6 +6730,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     // settings: Animated, Song without a clip, the Buttons chips and the look switches at their standard (the app's defaults
     // outlive a run).
     if ([scenario() isEqualToString:@"settings"]) {
+        harnessMotion = allowMotion;
         NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
         [store setInteger:SGRPlayerBackgroundAnimated forKey:SGRKeyPlayerArtworkBackground];
         for (NSString *key in @[SGRKeyPlayerAnimatedStill, SGRKeyPlayerAnimatedVisualiser, SGRKeyPlayerHoldNoClip, SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat,

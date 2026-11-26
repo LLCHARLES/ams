@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import <objc/runtime.h>
 #import "Redesigned/Navigation/PageZoom.h"
 #import "../harness-fail.h"
@@ -280,6 +281,7 @@ void SGRequireClasses(NSArray *names) {
 @end
 @implementation App
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    harnessMotion = allowMotion;
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [[SPNavigationController alloc] initWithRootViewController:[SourcePage new]];
     return YES;

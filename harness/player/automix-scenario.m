@@ -335,11 +335,7 @@ static void reportInactiveWhenAsked(void) {
     }));
 }
 
-// The accessibility setting itself, through the simulator's accessibility library: the check says when it did not take.
-static void setReduceMotion(BOOL on) {
-    void (*set)(BOOL) = (void (*)(BOOL))dlsym(RTLD_DEFAULT, "_AXSSetReduceMotionEnabled");
-    if (set) set(on);
-}
+extern void SGRHarnessSetReduceMotion(BOOL reduced);
 
 #pragma mark - layouts and band moves, counted
 
@@ -978,7 +974,7 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
         @[@"held back: the wide layout", ^{ window.traitOverrides.verticalSizeClass = UIUserInterfaceSizeClassCompact; },
           ^{ [window.traitOverrides removeTrait:UITraitVerticalSizeClass.class]; }],
         @[@"held back: the player not on screen", ^{ tilt.superview.hidden = YES; }, ^{ tilt.superview.hidden = NO; }],
-        @[@"held back: Reduce Motion", ^{ setReduceMotion(YES); }, ^{ setReduceMotion(NO); }],
+        @[@"held back: Reduce Motion", ^{ SGRHarnessSetReduceMotion(YES); }, ^{ SGRHarnessSetReduceMotion(NO); }],
     ];
     for (NSArray *hold in holds) {
         step(0.2, ((dispatch_block_t)hold[1]));

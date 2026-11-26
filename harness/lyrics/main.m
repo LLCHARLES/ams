@@ -32,6 +32,7 @@
 // lines on the estimate), -spotifyglass.redesign.lyricsPronunciation 1,
 // -spotifyglass.redesign.lyricsTranslation 1, -spotifyglass.lyricsRomanised 1, -spotifyglass.redesign.lyricsTextOrder '(translation, lyrics, pronunciation)'.
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
@@ -625,6 +626,8 @@ static void checkFailureUI(SGRKaraokeView *view) {
 @implementation SGHarnessDelegate
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     NSUserDefaults *args = NSUserDefaults.standardUserDefaults;
+    // The held-word wave and the interlude's frame-rate checks require motion.
+    if ([args boolForKey:@"check"] || [args boolForKey:@"frameRateCheck"]) harnessMotion = allowMotion;
 #ifdef SGRKeyLyricsTextOrder
     // Each launch starts from its own arguments, not from what the menu stored on the last one.
     for (NSString *key in @[SGRKeyLyricsPronunciation, SGRKeyLyricsTranslation, SGRKeyLyricsTextOrder]) [args removeObjectForKey:key];

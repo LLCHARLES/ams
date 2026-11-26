@@ -4,7 +4,7 @@
 // statics are reachable; the player state, the view tree of Spotify's page and the stubs it links against are
 // doubles. A failed check exits 1 with its name.
 #import <UIKit/UIKit.h>
-#import <dlfcn.h>
+#import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
 #import "Shared/Player/PlayerState.h"
 #include "repeat.inc"
@@ -211,18 +211,11 @@ static void checkTextSize(void) {
     HARNESS_CHECK([textLook(kept) isEqualToString:small]);
 }
 
-// Set the accessibility input only for this fixture, never the Mac's preference.
-static _Thread_local enum { useHostMotion, motionOn, motionReduced } marqueeMotion;
-BOOL UIAccessibilityIsReduceMotionEnabled(void) {
-    if (marqueeMotion != useHostMotion) return marqueeMotion == motionReduced;
-    return ((BOOL (*)(void))dlsym(RTLD_NEXT, "UIAccessibilityIsReduceMotionEnabled"))();
-}
-
 // The pager lays out its neighbour before scrolling it into view. No placeText or
 // title layout occurs between that scroll and the first visible frame.
 static void checkPagedMarquee(BOOL reduced) {
     BOOL hostReduced = UIAccessibilityIsReduceMotionEnabled();
-    marqueeMotion = reduced ? motionReduced : motionOn;
+    harnessMotion = reduced ? reduceMotion : allowMotion;
     UIView *host = [(id)UIApplication.sharedApplication.delegate window].rootViewController.view;
     UIScrollView *pager = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 300, 60)];
     [host addSubview:pager];
@@ -248,7 +241,7 @@ static void checkPagedMarquee(BOOL reduced) {
     }
     sg_checks++;
     [pager removeFromSuperview];
-    marqueeMotion = useHostMotion;
+    harnessMotion = useHostMotion;
 }
 
 #pragma mark - the artist under the title in the minimized row
