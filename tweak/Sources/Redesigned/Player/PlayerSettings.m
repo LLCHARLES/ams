@@ -1170,6 +1170,9 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     };
     SGModRow *visualiserStyle = SGRVisualiserStyleRow();
     visualiserStyle.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundVisualiser; };
+    SGModRow *visualizers = SGSearchIdentified(SGPageRow(SGL(@"settings.player.visualizers.title", @"Visualizers"),
+        ^UIViewController *{ return SGRVisualiserSettingsPage(); }), @"page.visualizers");
+    visualizers.visible = visualiserStyle.visible;
 
     // Black or a photo in place of the artwork; the photo is asked for the first time it is chosen.
     SGModRow *behind = SGMenuRow(SGL(@"settings.player.behind.title", @"Behind the Player"), behindNames(), ^NSString *{
@@ -1270,7 +1273,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
         SGSection(nil, @[behind, choosePhoto]),
         SGNotedSection(nil, @[sources, noClip, holdNoClip, lowData],
                        SGL(@"settings.player.no_clip.footer", @"Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.")),
-        SGSection(nil, @[visualiserStyle]),
+        SGSection(nil, @[visualiserStyle, visualizers]),
         SGNotedSection(nil, fluid, SGL(@"settings.player.fluid.footer", @"Smooth lets the cover flow and carries the next song's cover in through it, "
                                    @"using a little more battery. Brightness above 100% can make white text harder to read. A paused song holds the "
                                    @"background still. Animated and Visualizer use these where they show Fluid.")),

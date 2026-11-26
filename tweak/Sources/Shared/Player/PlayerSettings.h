@@ -4,13 +4,12 @@
 #import "Core/SGUIMode.h"
 
 UIViewController *SGLockScreenWidgetPage(void);
-@class SGModSection;
-SGModSection *SGSleepTimerSettingsSection(void);
+@class SGModRow, SGModSection;
+SGModSection *SGPlaybackRulesSection(SGModRow *blockedArtists, SGModRow *blockedSongs);
 
 // YES hides Spotify's chip. With no override, only the redesigned player hides it.
 #define SGKeyHideVideoSwitch @"spotifyglass.hide.videoSwitch"
 #define SGVideoSwitchIdentifier @"nowplaying-npv-musicvideos-switch"
-@class SGModRow;
 SGModRow *SGNativeVideoSwitchRow(void);
 static inline BOOL SGVideoSwitchHiddenForLook(BOOL redesigned) { return SGFlag(SGKeyHideVideoSwitch, redesigned); }
 static inline BOOL SGVideoSwitchHidden(void) { return SGVideoSwitchHiddenForLook(SGRedesignedUI()); }

@@ -163,6 +163,12 @@ static NSUInteger searchPlacesChecks(void) {
     SGModPage *page = (SGModPage *)nav.topViewController;
     [page loadViewIfNeeded];
     SGSettingsIndex *index = [SGSettingsIndex new];
+    NSArray *headings = @[SGL(@"settings.main.look.header", @"Look & navigation"), SGL(@"settings.main.screens.header", @"Screens"),
+        SGL(@"settings.main.audio.header", @"Audio & playback"), SGL(@"settings.main.outside.header", @"Outside Spotify & devices"),
+        SGL(@"settings.main.privacy.header", @"Privacy, network & downloads"), SGL(@"settings.main.advanced.header", @"Advanced & about")];
+    NSMutableArray *namedSections = [NSMutableArray array];
+    for (SGModSection *section in page.sections) if (section.title.length) [namedSections addObject:section.title];
+    check([namedSections isEqual:headings], @"six root headings in navigation order");
     // Search the visible language, but keep the stored place independent of it. Reindex the same open
     // page after a look switch, as live search does when settings change.
     BOOL savedLook = SGRedesignedUIStored();
@@ -179,7 +185,19 @@ static NSUInteger searchPlacesChecks(void) {
         check(!titled, @"no place is a row's title");
         NSArray *place = look.boolValue ? @[@"page.appearance.redesigned"] : @[@"page.appearance.native"];
         check([hits.firstObject.place isEqualToArray:place], @"the Appearance row's place names the stored look");
+        NSArray *libraryPlace = look.boolValue ? @[@"page.search.redesigned", @"spotifyglass.redesign.library.hideChips"]
+                                               : @[@"page.search.native", @"spotifyglass.adblock.searchVideos"];
+        NSString *libraryQuery = look.boolValue ? SGL(@"settings.library.compact.title", @"Compact library")
+                                                : SGL(@"settings.privacy.hide_search_carousel.title", @"Hide the video carousel in Search");
+        check([[index hitsForQuery:libraryQuery].firstObject.place isEqual:libraryPlace], @"Search & Library indexes the selected look's settings");
+        SGSearchForgetRecents();
+        SGSearchRememberPlace(look.boolValue ? @[@"page.library.redesigned", @"spotifyglass.redesign.library.hideChips"]
+                                             : @[@"page.ads", @"spotifyglass.adblock.searchVideos"]);
+        check([index.recentHits.firstObject.place isEqual:libraryPlace], @"a saved Library or carousel result now leads to its new page");
+        SGSearchRememberPlace(@[look.boolValue ? @"page.player.redesigned" : @"page.player.native", @"page.player.localfiles"]);
+        check([index.recentHits.firstObject.place isEqual:@[@"page.playback", @"page.player.localfiles"]], @"the old Player recent opens Local files in Playback");
     }
+    SGSearchForgetRecents();
     SGSetEnabled(SGKeyRedesign, savedLook);
     window.hidden = YES;
     fprintf(stderr, "[harness] search places checks: %lu failure(s)\n", (unsigned long)failures);

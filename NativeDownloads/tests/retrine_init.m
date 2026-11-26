@@ -45,14 +45,27 @@ static NSUInteger mode;
 @end
 
 // Keep the actual navigation factory in the row, as the host does.
+@interface FixtureRow : NSObject
+@property(nonatomic,copy) NSString *title, *searchIdentifier, *searchKeywords;
+@property(nonatomic,copy) UIViewController *(^page)(void);
+@end
+@implementation FixtureRow @end
+@interface FixtureGroup : NSObject
+@property(nonatomic,copy) NSArray<FixtureRow *> *rows;
+@end
+@implementation FixtureGroup @end
 __attribute__((visibility("default")))
-id SGPageRow(NSString *title,UIViewController *(^page)(void)) {return @[title,[page copy]];}
+FixtureRow *SGPageRow(NSString *title,UIViewController *(^page)(void)) {
+    FixtureRow *row=[FixtureRow new];row.title=title;row.page=page;return row;
+}
 __attribute__((visibility("default")))
-id SGActionRow(NSString *title,NSString *subtitle,void (^action)(void)) {return title;}
+id SGSearchIdentified(FixtureRow *row,NSString *identifier) {row.searchIdentifier=identifier;return row;}
+__attribute__((visibility("default")))
+id SGSearchKeywords(FixtureRow *row,NSString *keywords) {row.searchKeywords=keywords;return row;}
 __attribute__((visibility("default")))
 id SGWithTile(id row,NSString *symbol,UIColor *color) {return row;}
 __attribute__((visibility("default")))
-id SGSection(NSString *title,NSArray *rows) {return rows;}
+FixtureGroup *SGSection(NSString *title,NSArray *rows) {FixtureGroup *group=[FixtureGroup new];group.rows=rows;return group;}
 
 int main(void) {
     @autoreleasepool {
@@ -63,18 +76,19 @@ int main(void) {
             @autoreleasepool {
                 SGModPage *page=[SGModPage alloc];
                 allocatedReceiver=page;
-                page=[page initWithTitle:title intro:nil sections:@[@"existing"] footer:nil];
+                FixtureRow *ads=SGSearchIdentified(SGPageRow(@"Ads",nil),@"page.ads");
+                FixtureGroup *privacy=SGSection(nil,@[ads]), *advanced=SGSection(nil,@[]);
+                page=[page initWithTitle:title intro:nil sections:@[privacy,advanced] footer:nil];
                 result=page;
                 HARNESS_CHECK(receivedSections.count==2);
-                HARNESS_CHECK([receivedSections[0] isEqual:@"existing"]);
-                HARNESS_CHECK([receivedSections[1] count]==2);
+                HARNESS_CHECK(receivedSections.firstObject==privacy && receivedSections.lastObject==advanced);
+                HARNESS_CHECK(privacy.rows.count==2 && privacy.rows.firstObject==ads);
                 if(mode==0) {
                     HARNESS_CHECK(page==allocatedReceiver && destroyed==before);
-                    NSArray *row=receivedSections[1][0];
-                    HARNESS_CHECK([row[0] isEqual:@"Pixie Download Manager"]);
-                    UIViewController *(^open)(void)=row[1];
+                    FixtureRow *row=privacy.rows.lastObject;
+                    HARNESS_CHECK([row.title isEqual:@"Pixie downloads"] && [row.searchIdentifier isEqual:@"page.pixie"] && row.searchKeywords.length);
                     UINavigationController *nav=[[UINavigationController alloc] initWithRootViewController:UIViewController.new];
-                    [nav pushViewController:open() animated:NO];
+                    [nav pushViewController:row.page() animated:NO];
                     [nav.topViewController loadViewIfNeeded];
                     HARNESS_CHECK([nav.topViewController.title isEqual:@"Pixie Download Manager"]);
                 }

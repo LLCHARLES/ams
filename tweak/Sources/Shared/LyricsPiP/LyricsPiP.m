@@ -91,7 +91,7 @@ void SGLyricsPiPToggle(UIView *from) {
             return;
         }
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.lyrics.pip.title", @"Picture in Picture lyrics")
-            message:SGL(@"settings.lyrics.pip.disabled", @"Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify.")
+            message:SGL(@"settings.lyrics.pip.disabled", @"Enable lyrics in Mod Settings → Picture in Picture, then restart Spotify.")
             preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleDefault handler:nil]];
         SGPresentDark(alert);

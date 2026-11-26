@@ -770,7 +770,7 @@ NSString *SGSingSummary(void) {
         case SGSingStateNoModel: return SGL(@"common.off", @"Off");
         case SGSingStateDownloading: return [NSString stringWithFormat:SGL(@"settings.karaoke.status.download_percent", @"%.0f%%"), SGSingModelProgress() * 100];
         case SGSingStateOff: return SGL(@"common.off", @"Off");
-        default: return SGL(@"common.on", @"On");
+        default: return SGSingSpatialAvailable() && SGSingSpatial() ? SGL(@"settings.karaoke.status.spatial", @"On · Spatial") : SGL(@"common.on", @"On");
     }
 }
 

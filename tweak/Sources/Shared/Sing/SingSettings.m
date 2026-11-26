@@ -259,6 +259,8 @@ UIViewController *SGSingSettingsPage(void) {
     other.color = SGRed();
     other.visible = ^BOOL { return SGSingOtherModelBytes() > 0; };
     SGModRow *spatial = SGPageRow(SGL(@"settings.spatial.title", @"Spatial voice"), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); });
+    SGSearchIdentified(spatial, @"page.spatialvoice");
+    SGSearchKeywords(spatial, SGL(@"settings.search.spatial_voice.keywords", @"spatial audio surround head tracking headphone motion"));
     spatial.subtitle = SGL(@"settings.spatial.subtitle", @"With AirPods, the voice stays in front of you as you turn your head");
     spatial.value = ^NSString *{ return SGSingSpatial() ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off"); };
     // Facts about the iPhone, which do not change while the page shows.

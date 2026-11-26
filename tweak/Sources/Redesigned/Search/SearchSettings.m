@@ -128,12 +128,19 @@ static SGRPagePreview *searchPreview(NSString *videosName, NSString *otherName, 
     return card;
 }
 
-UIViewController *SGRSearchSettingsPage(void) {
+SGRPagePreview *SGRSearchPreview(void) {
+    return searchPreview(SGL(@"settings.search_tab.hide.watch_feeds.title", @"Video carousels"),
+                         SGL(@"settings.search_tab.hide.other.title", @"Everything else"),
+                         SGL(@"settings.search_tab.cards.header", @"Category cards"),
+                         SGL(@"settings.search_tab.glass_cards.title", @"Tinted glass"));
+}
+
+NSArray<SGModSection *> *SGRSearchSections(void) {
     NSString *videosName = SGL(@"settings.search_tab.hide.watch_feeds.title", @"Video carousels");
     NSString *otherName = SGL(@"settings.search_tab.hide.other.title", @"Everything else");
     NSString *cardsName = SGL(@"settings.search_tab.cards.header", @"Category cards");
     NSString *glassName = SGL(@"settings.search_tab.glass_cards.title", @"Tinted glass");
-    return SGRPagePreviewPage(SGL(@"settings.search_tab.title", @"Search"), searchPreview(videosName, otherName, cardsName, glassName), SGRestartNote, @[
+    return @[
         SGNotedSection(SGL(@"settings.search_tab.hide.header", @"Hide on Search"), @[
             SGSwitchRow(videosName, SGL(@"settings.search_tab.hide.watch_feeds.subtitle", @"Playlists you can watch, Explore episodes for you"),
                         SGRKeySearchHideWatchFeeds),
@@ -144,5 +151,5 @@ UIViewController *SGRSearchSettingsPage(void) {
             SGSwitchRow(glassName, SGL(@"settings.search_tab.glass_cards.subtitle", @"Each card as Liquid Glass in its own color. Off, the cards are Spotify's own."),
                         SGRKeySearchGlassCards),
         ]),
-    ]);
+    ];
 }

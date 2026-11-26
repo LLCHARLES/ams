@@ -10,6 +10,7 @@
 #import "Core/SGCore.h"
 #import "Core/SGDataRoot.h"
 #import "Settings/SGModPage.h"
+#import "Settings/SGSettingsIndex.h"
 #import "Settings/SGPageStyle.h"
 #import "Shared/Fonts/FontLibrary.h"
 #import "Shared/Fonts/Fonts.h"
@@ -421,7 +422,7 @@ static NSString *chosenLabel(void) {
 
 typedef NS_ENUM(NSInteger, SGFontSection) { SGFontBuiltIn, SGFontMore, SGFontFree, SGFontYours };
 
-@interface SGFontPage : SGPage
+@interface SGFontPage : SGPage <SGSettingsSearchPages>
 @end
 
 @implementation SGFontPage {
@@ -598,7 +599,7 @@ typedef NS_ENUM(NSInteger, SGFontSection) { SGFontBuiltIn, SGFontMore, SGFontFre
         [NSUserDefaults.standardUserDefaults setObject:_free[(NSUInteger)path.row].identifier forKey:SGKeyAppFontLibrary];
         SGSetInt(SGKeyAppFont, SGAppFontLibrary);
     } else if (path.section == SGFontFree) {
-        SGShowPage(self, SGFontLibraryPage());
+        SGShowPage(self, self.sg_searchPageRows.firstObject.page());
         return;
     } else if (path.row == 0 && _displayedImport) {
         SGSetInt(SGKeyAppFont, SGAppFontCustom);
@@ -625,10 +626,14 @@ typedef NS_ENUM(NSInteger, SGFontSection) { SGFontBuiltIn, SGFontMore, SGFontFre
     return [UISwipeActionsConfiguration configurationWithActions:@[delete]];
 }
 
+- (NSArray<SGModRow *> *)sg_searchPageRows {
+    return @[SGSearchIdentified(SGPageRow(SGL(@"settings.font.free.header", @"Free fonts"),
+        ^UIViewController *{ return SGFontLibraryPage(); }), @"page.freefonts")];
+}
 @end
 
 NSArray<SGModRow *> *SGAppFontRows(void) {
     SGModRow *font = SGPageRow(SGL(@"settings.font.row.title", @"Font"), ^UIViewController *{ return [SGFontPage new]; });
     font.value = ^NSString *{ return chosenLabel(); };
-    return @[font];
+    return @[SGSearchIdentified(font, @"page.font")];
 }

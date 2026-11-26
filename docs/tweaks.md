@@ -1429,7 +1429,7 @@ Native:
                   (LocalLyrics.h lists its files); the file's metadata says has_lyrics. Checked in the simulator
                   against harness/local-files/lyrics/. And the file's own cover where the player shows
                   Spotify's placeholder (LocalCover.x)
-    Home/         the Home gradient, Home's sections and pills hidden (HomeDeclutter.x), the Home & Library page
+    Home/         the Home gradient, Home's sections and pills hidden (HomeDeclutter.x), the native Library flag rows
     Playlist/     the playlist header and pills, hidden one switch each
     Album/, Artist/ their pages' parts hidden, and the cover or photo behind their headers
 
@@ -2160,7 +2160,7 @@ Redesigned:
                   inside the library on glass capsules (Library.h lists its files). The filter chips under the row stay
                   Spotify's: they were taken out when this was first built and put back in 0.21 (issue #20), since
                   sorting a library is not something the page can do without, and Spotify already draws them on the
-                  system's own glass. Compact library (the Library page of Mod Settings, redesign only,
+                  system's own glass. Compact library (Mod Settings > Search & Library, redesign only,
                   spotifyglass.redesign.library.hideChips, off, read at launch; LibrarySettings.m, over a preview of Your
                   Library) takes the root page's chips away, closes the header up by what they leave, and puts a menu button
                   (LibraryMenu.m) before the trailing controls. The title and menu follow the row even when only the
@@ -2379,14 +2379,15 @@ change shows after Spotify restarts; the tab editor on the Navbar page is the ex
 out again, as are the Home gradient's color, strength and height, but not the switch that turns it on, and Vibrations
 and Live Activity. The root page in `App/ModSettings.x` links the Appearance page and the page of each part of Spotify, and only the stored look's.
 A search field heads it (`Settings/SGSettingsSearch.m`, `SGModPage.searchable`): the first letter typed (or the field
-opening with stored places to show) starts reading the pages its rows open, two levels down, one page to a pass of the
+opening with stored places to show) starts reading the pages its rows open, three levels down, one page to a pass of the
 main run loop (`Settings/SGSettingsIndex.m`), so the pages read so far answer at once and the rest join them as each
 pass ends; leaving the field or its page stops the reading, and a setting changed meanwhile reads the pages again. Every
 word of the query is matched against each showing row's title, subtitle, keywords (`SGModRow.searchKeywords`, set with
 `SGSearchKeywords`: the names a setting is looked for by that its title does not hold) and the pages above it, case,
 diacritics and width folded and Hangul initials taken for a word of initials. The best 60 show, a title starting with
 the query first, then one holding it. Picking a row opens its page scrolled to it and lit for
-a moment (`-revealRowTitled:`); a page that is not an `SGModPage` (All flags, Audio effects) is found by its own row only.
+a moment (`-revealRowTitled:`); custom tables are found by their own row unless they expose destinations
+through `SGSettingsSearchPages` (Audio effects' Presets and Headphones, and Font's Free fonts).
 An empty field shows the places opened from the results before, newest first and at most six, under
 `spotifyglass.search.recents`, with a way to forget them. A place is the names of the rows the results led through, never
 their titles (translated) or the text typed: a row's `SGModRow.searchIdentifier` (`SGSearchIdentified`), else its key.
@@ -2482,11 +2483,12 @@ Spotify behind a symbol on a tile of its own color, gray chevrons and footnote h
 page. It sorts every
 setting by the part of Spotify it changes, so a part's glass, its hide switches and its flags sit on
 one page, the mod's own rows first and Spotify's flags below them or on a sub page named after what
-they change. Its main page groups the rows by what they are, in cards with no headings as Settings has its own,
-under the signing and environment warnings: Redesigned UI, Appearance and Tab bar, with a restart note; Home (Home &
-Library in the native look), Player, Lyrics, Albums, Artists and Playlists, plus Search and Library in the redesign; Karaoke, Spatial voice (where the iPhone reads headphone
-motion), Audio effects, AutoMix, Live Activity, AirPods gestures and Listening stats; Lock screen, Vibrations and Premium, ads &
-privacy; Libraries & presets, Labs and All flags; Mod. It is checked in the simulator
+they change. Under any signing and environment warnings, both looks have six sections:
+Look & navigation (Redesigned UI first, Appearance and Tab bar); Screens (Home, Search & Library, Player, Lyrics,
+Albums, Artists and Playlists); Audio & playback (Audio effects, Karaoke including Spatial voice, AutoMix, Playback &
+local files and Listening stats); Outside Spotify & devices (Lock screen, Live Activity on iOS 17+, Picture in Picture,
+AirPods gestures and Vibrations); Privacy, network & downloads (Premium, ads & privacy, plus WireGuard and Pixie
+in builds that include them); Advanced & about (Labs, All flags and Mod). It is checked in the simulator
 against harness/mod-settings/. The Appearance page has, in the native look, AMOLED (the redesign is always black), then the stored look's Accent color
 preset, a pull-down of Spotify, Apple Music and Custom read off the color stored (a color set before the presets
 existed reads as Custom, Apple Music's red as Apple Music), and Accent color, the hex and a swatch of the color in
@@ -2573,7 +2575,7 @@ spotifyglass.font.file) moves to spotifyglass.font.files and the family name on 
 the free families on this iPhone, each drawn in itself once FontLibrary.m has registered it off main and announced it, as is the imported family once its
 files are registered (opening the page or finishing a download never waits for Core Text; SGRegisteredCustomFont and
 SGFontLibraryRegisteredFamily give the names the Lyrics PiP font choices use; the launch registers them synchronously
-in Fonts.x, as the global font hook needs them first), and opens the free fonts page (Shared/Fonts/FontLibraryPage.m, also in Libraries & presets): sixteen SIL Open
+in Fonts.x, as the global font hook needs them first), and opens the free fonts page (Shared/Fonts/FontLibraryPage.m): sixteen SIL Open
 Font License families from github.com/google/fonts pinned to one commit, Korean first, each file and its OFL.txt checked against its
 size and SHA-256 (FontLibrary.m) before the family moves from a hidden folder into Application Support/Retrine/Font Library, one
 download at a time with its progress on the row and a tap stopping it. A family downloaded becomes the app's font
@@ -2581,9 +2583,9 @@ download at a time with its progress on the row and a tap stopping it. A family 
 Spotify's font comes back when its files are gone. Then the App icon. Everything on the page applies after a restart. Redesigned UI, the main page's
 first row, is the one switch between the two looks (see Layers): it glows (Settings/SGGlowSwitch), its ⓘ says what
 it changes, and flipping it offers to restart Spotify. The pages show only what the stored look has: a page opened
-after flipping the switch already shows what the restart will bring, and the main page swaps Home & Library for
-Home as it is flipped. Albums and Artists open each look's own pages. In the redesign, the Playlists, Home, Search,
-Albums, Artists and Library pages lead with a live preview of the page their settings change (Kit/SGRPagePreview.h, drawn
+after flipping the switch already shows what the restart will bring. Albums and Artists open each look's own pages.
+In the redesign, Playlists, Home, Search & Library, Albums and Artists lead with a live preview of the page
+their settings change (switchable between Search and Library on their combined page; Kit/SGRPagePreview.h, drawn
 over local placeholder art and following the switches as they are flipped, in the table's header with the page's
 intro note under it, as the Lyrics page keeps its preview), described under Redesigned/Kit/. The Albums page's
 Album notes row picks Under Play, Under tracks or Off for Apple's editorial notes; a Cover layout row (Card or Full
@@ -2615,9 +2617,9 @@ the player and haptics harnesses cover slider routing, signature rejection, curr
 With Volume shown, the controls keep Spotify's vertical position rather than lifting 10 pt into the time row;
 `harness/player/volume-layout-check.sh` runs real placement at 402×874 and 375×667 (SE), checking unobstructed
 time/playback controls and clean omission when there is no room.
-Libraries & presets collects Retrine's existing local and open libraries: audio presets,
-shared as files, public AutoEq headphone corrections, free fonts to download and on-device custom fonts
-under either look, plus visualizer styles when Redesigned UI is selected. Lyrics looks stay on Lyrics. Tab bar: the tab editor of the stored look, each with
+Audio effects has the shareable presets and AutoEq headphone corrections; Appearance's Font page has free
+and on-device custom fonts. In the redesign, Player's Visualizer background links to its styles and Lyrics
+links to Lyrics styles. Tab bar: the tab editor of the stored look, each with
 its own list of tabs. Lyrics, on the main page of its own: in the redesign a live preview of the lyrics first, with the presets of their look
 under it and their sliders in a sheet (Text size, Line spacing, Blur, Glow, Wave), applying at once; then Karaoke, then the ordered list of lyrics sources,
 lyrics for every track, naming the source in the redesign, the lock screen, and glass lyrics in the native look; in
@@ -2649,10 +2651,10 @@ one row saying why not), and last under either Clear Downloaded Covers and Artis
 SGArtworkCacheRow): their size measured off the main queue, and after an alert with Cancel only the store's own clip
 files (SGMotionStoreClear, a clip in use left in place) and the album answers file (SGMotionCacheClear) removed; a
 transfer or lookup begun before it delivers to its own caller but keeps and starts nothing; songs, a chosen cover,
-edits and lyrics are untouched; harness/artwork-clear/. Spotify's podcast, audiobook and artwork flags stay in All flags. Player: Gestures, Blocked artists (with the count on the row), Sleep timer's Fade-out duration, Full screen cover on tap (a tap on the player's cover opens Spotify's full screen
-cover; `spotifyglass.hide.fullScreenCover`, shown until switched off, live), Load ahead (spotifyglass.loadAhead, on
-until switched off: the next track's artwork and lyrics are prepared ahead; off, only that advance work stops, the current
-track is untouched, and a change applies at once) and Audio quality (the badge under the progress bar,
+edits and lyrics are untouched; harness/artwork-clear/. Spotify's podcast, audiobook and artwork flags stay in All flags.
+Playback & local files holds the sleep timer fade, blocked artists and songs, Lossless files, Local files and Load ahead
+(`spotifyglass.loadAhead`, on until switched off: only the advance work on the next track's artwork and lyrics stops).
+Player has Gestures, Full screen cover on tap (`spotifyglass.hide.fullScreenCover`, shown until switched off, live) and Audio quality (the badge under the progress bar,
 `spotifyglass.player.audioQuality`, off until switched on, live; Shared/Player/AudioQuality.h), which work with either look, including below iOS 17;
 in the native look also Now playing bar (its device button and its flags), Queue & devices, and
 Spotify's own player screen (artwork background, glass header buttons, Disable Canvas and the sheet,

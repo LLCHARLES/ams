@@ -26,7 +26,7 @@ Nebula (cover-palette clouds), and Halo (a dim current cover and spectrum ring).
 `spotifyglass.visualizer.shader` is a compatibility exception to the redesign prefix rule; its values
 are `builtin:hills`, `builtin:bars`, `builtin:nebula`, `builtin:halo`. Missing/invalid values read as
 Hills without rewriting storage. `SGRVisualiserStyleRow` is a reusable string-backed menu and
-`SGRVisualiserSettingsPage` exposes it to Workshop without changing the background choice.
+`SGRVisualiserSettingsPage` opens from Player while Visualizer is the selected background.
 
 Every style shares the existing reader count and display link. Detached windows, background,
 Low Power Mode, serious/critical thermal state and player transitions stop the link and reader.

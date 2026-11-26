@@ -1,7 +1,7 @@
 #import "SGSettingsIndex.h"
 #import <objc/runtime.h>
 
-static const NSUInteger kDepth = 2;       // the page itself, then two levels of pages under it
+static const NSUInteger kDepth = 3;
 static const NSUInteger kMostHits = 60;
 static const NSUInteger kMostRecents = 6;
 
@@ -183,25 +183,31 @@ static SGSettingsHit *hitFor(SGModRow *row, SGModRow *lead, NSArray<NSString *> 
 @implementation SGSettingsPending
 @end
 
-static char kRenameKey;
+static char kRenameKey, kPlacesKey;
 
 void SGSettingsIndexRenamesWith(SGModPage *page, void (^rename)(void)) {
     objc_setAssociatedObject(page, &kRenameKey, rename, OBJC_ASSOCIATION_COPY_NONATOMIC);
 }
 
+void SGSettingsIndexMovesWith(SGModPage *page, NSArray *(^resolve)(NSArray *)) {
+    objc_setAssociatedObject(page, &kPlacesKey, resolve, OBJC_ASSOCIATION_COPY_NONATOMIC);
+}
+
 @implementation SGSettingsIndex {
     NSMutableArray<SGSettingsHit *> *_all;
     NSMutableArray<SGSettingsPending *> *_todo;
+    NSArray *(^_resolve)(NSArray *);
 }
 
 - (void)startWithRoot:(SGModPage *)root {
     _generation++;
     _all = [NSMutableArray array];
     _todo = [NSMutableArray array];
+    _resolve = objc_getAssociatedObject(root, &kPlacesKey);
     if (!root) return;
     void (^rename)(void) = objc_getAssociatedObject(root, &kRenameKey);
     if (rename) rename();
-    [self read:root trail:@[] names:@[] opener:nil top:nil depth:0];
+    [self read:root.sections trail:@[] names:@[] opener:nil top:nil depth:0];
 }
 
 - (BOOL)running {
@@ -243,14 +249,18 @@ void SGSettingsIndexRenamesWith(SGModPage *page, void (^rename)(void)) {
 
 - (void)readPending:(SGSettingsPending *)pending {
     UIViewController *child = pending.factory ? pending.factory() : nil;
-    if ([child isKindOfClass:SGModPage.class])
-        [self read:(SGModPage *)child trail:pending.trail names:pending.names opener:pending.opener top:pending.top depth:pending.depth];
+    NSArray *sections;
+    if ([child isKindOfClass:SGModPage.class]) sections = ((SGModPage *)child).sections;
+    else if ([child conformsToProtocol:@protocol(SGSettingsSearchPages)])
+        sections = @[SGSection(nil, [(id<SGSettingsSearchPages>)child sg_searchPageRows])];
+    else return;
+    [self read:sections trail:pending.trail names:pending.names opener:pending.opener top:pending.top depth:pending.depth];
 }
 
 // Reads a page's rows, adds their hits, and puts the page each of them opens in line to be read, within reach.
-- (void)read:(SGModPage *)page trail:(NSArray<NSString *> *)trail names:(NSArray<NSString *> *)names opener:(UIViewController *(^)(void))opener
+- (void)read:(NSArray<SGModSection *> *)sections trail:(NSArray<NSString *> *)trail names:(NSArray<NSString *> *)names opener:(UIViewController *(^)(void))opener
          top:(SGModRow *)top depth:(NSUInteger)depth {
-    for (SGModSection *section in page.sections) {
+    for (SGModSection *section in sections) {
         for (SGModRow *row in section.rows) {
             // A row that shows only under some other setting is left out while it would not show.
             if (!row.title.length || (row.visible && !row.visible())) continue;
@@ -294,10 +304,11 @@ void SGSettingsIndexRenamesWith(SGModPage *page, void (^rename)(void)) {
 
 - (NSArray<SGSettingsHit *> *)recentHits {
     NSMutableArray<SGSettingsHit *> *hits = [NSMutableArray array];
-    for (NSArray<NSString *> *place in SGSearchRecents()) {
+    for (NSArray<NSString *> *stored in SGSearchRecents()) {
+        NSArray *place = _resolve ? _resolve(stored) : stored;
         for (SGSettingsHit *hit in _all) {
             if (![hit.place isEqualToArray:place]) continue;
-            [hits addObject:hit];
+            if (![hits containsObject:hit]) [hits addObject:hit];
             break;
         }
     }

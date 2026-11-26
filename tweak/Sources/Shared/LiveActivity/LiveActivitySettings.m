@@ -11,6 +11,13 @@ static NSArray<NSString *> *viewNames(void) {
     return @[SGL(@"settings.liveactivity.shows.choice.lyrics", @"Lyrics"), SGL(@"settings.liveactivity.shows.choice.queue", @"Queue"), SGL(@"settings.liveactivity.shows.choice.controlmenu", @"Control menu")];
 }
 
+NSString *SGLiveActivitySummary(void) {
+    if (!SGFlag(SGKeyLiveActivity, NO) || !SGLiveActivityAllowedByInstall()) return SGL(@"common.off", @"Off");
+    NSArray *names = viewNames();
+    NSUInteger index = (NSUInteger)SGInt(SGKeyLiveActivityView, SGLiveActivityLyrics);
+    return index < names.count ? names[index] : names.firstObject;
+}
+
 @interface SGLiveActivityPage : SGModPage
 @property (nonatomic, strong) SGLiveActivityPreview *preview;
 @end

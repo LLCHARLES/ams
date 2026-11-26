@@ -77,7 +77,8 @@ static void expectReadingOrder(SGRPagePreview *card) {
 }
 
 void SGRRunSettingsChecks(UIWindow *window) {
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:SGRLibrarySettingsPage()];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:
+        SGRPagePreviewPage(@"Library", SGRLibraryPreview(), SGRestartNote, @[SGRLibrarySection()])];
     window.rootViewController = nav;
     [nav.view layoutIfNeeded];
     settle(0.5);

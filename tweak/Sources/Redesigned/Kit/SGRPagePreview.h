@@ -34,6 +34,9 @@
 #import <UIKit/UIKit.h>
 
 @class SGModSection;
+@class SGRPagePreview;
+UIViewController *SGRPairedPreviewPage(NSString *title, SGRPagePreview *first, SGRPagePreview *second,
+                                      NSArray<NSString *> *labels, NSString *note, NSArray<SGModSection *> *sections);
 
 extern const CGFloat SGRPagePreviewMargin;   // 12, the mock page's side margin
 

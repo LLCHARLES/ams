@@ -20,7 +20,7 @@ typedef NS_ENUM(NSInteger, SGSleepTimerMode) {
     SGSleepTimerEndOfAlbum,  // just before the end of the last track of the album or playlist playing
 };
 
-// The fade's length, an index into SGSleepTimerFadeNames() (Player page, Sleep timer section). Read
+// The fade's length, an index into SGSleepTimerFadeNames() (Playback & local files). Read
 // on every check, so a change applies to a timer already running. For a time it fades over the last seconds
 // before the end; at the end of the track or the album over the last seconds of the (last) track, by the
 // player's position and the track's length, and over the whole track when the track is shorter.

@@ -816,7 +816,6 @@
 "settings.home.hide.previews.title" = "Preview cards";
 "settings.home.hide.promo.title" = "Promo cards";
 "settings.home.hide.shortcuts.title" = "Shortcuts grid";
-"settings.home.home_and_library.title" = "Home & Library";
 "settings.home.keep_title.subtitle" = "The title, the avatar and the pill stay at the top as Home scrolls under them";
 "settings.home.keep_title.title" = "Title stays on scroll";
 "settings.home.library.denser_rows.title" = "Denser rows";
@@ -825,10 +824,8 @@
 "settings.home.library.library_settings.title" = "Library settings";
 "settings.home.library.recents.title" = "Recents";
 "settings.home.library.recents_sort_order.title" = "Recents sort order";
-"settings.home.library.row.title" = "Library";
 "settings.home.library.sort_artists_recent.title" = "Sort artists by recently updated";
 "settings.home.library.sort_playlists_recent.title" = "Sort playlists by recently updated";
-"settings.home.library.title" = "Library";
 "settings.home.look.subtitle" = "Top picks and its color, and the title's glass pill; off, Home as the redesign had it";
 "settings.home.look.title" = "Home look";
 "settings.home.on_home.header" = "On Home";
@@ -1002,6 +999,7 @@
 "settings.karaoke.status.preparing_neural_engine" = "Preparing for the Neural Engine";
 "settings.karaoke.status.ready" = "Ready";
 "settings.karaoke.status.songs_only" = "Songs only";
+"settings.karaoke.status.spatial" = "On · Spatial";
 "settings.karaoke.status.stopped" = "Stopped";
 "settings.karaoke.status.too_slow" = "Too slow";
 "settings.karaoke.status.unavailable" = "Unavailable";
@@ -1088,7 +1086,6 @@
 "settings.liveactivity.colors.choice.plain" = "Plain";
 "settings.liveactivity.colors.choice.spotify" = "Spotify";
 "settings.liveactivity.colors.title" = "Colors";
-"settings.liveactivity.fadeout.title" = "Fade-out duration";
 "settings.liveactivity.missing.alert.message" = "iOS shows a Live Activity only for an app that says it has one, and only Retrine's IPA build writes that into Spotify. This Spotify was put together another way, such as with Retrine's .deb injected by hand, so iOS turns the card down. Build the IPA with Retrine to get it.";
 "settings.liveactivity.missing.alert.title" = "Live Activity is missing";
 "settings.liveactivity.missing.extension.message" = "The lock screen Live Activity is unavailable in this install. App extensions may have been removed during signing or left out of the IPA; LiveContainer also cannot register them. To use Live Activity, keep app extensions when signing and install an IPA that includes them directly, outside LiveContainer. The rest of Retrine still works.";
@@ -1128,7 +1125,6 @@
 "settings.liveactivity.sleep.in_minutes" = "Spotify will pause in %ld minutes.";
 "settings.liveactivity.sleep.off" = "The sleep timer is off.";
 "settings.liveactivity.sleeptimer.footer" = "How long the sound fades before a sleep timer pauses Spotify: the one set from the Timer tab, the Sleep Timer shortcut or Control Center, and Spotify's own from the player's ⋯ menu.";
-"settings.liveactivity.sleeptimer.header" = "Sleep timer";
 "settings.liveactivity.textsize.choice.large" = "Large";
 "settings.liveactivity.textsize.choice.medium" = "Medium";
 "settings.liveactivity.textsize.choice.small" = "Small";
@@ -1247,7 +1243,6 @@
 "settings.lossless.files.subtitle" = "Your own FLACs in place of Spotify's stream";
 "settings.lossless.files.title" = "Lossless files";
 "settings.lossless.footer" = "Put FLAC or ALAC files in Files › Spotify › Lossless. A file plays when its title and length match the song and its sound matches what Spotify plays, from about 4 s after the song starts or you seek. Spotify still streams its own copy, at its lowest quality while the next song has a file. Karaoke and speeds other than 1x keep Spotify's sound. Applies after you restart Spotify.";
-"settings.lossless.header" = "Lossless";
 
 "settings.lyrics.ai.footer" = "Write Pronunciation and Explain References in the lyrics' menu use Gemini, Claude or your AI service, on your own key. What they write is kept for the song.";
 "settings.lyrics.all_tracks.subtitle" = "Even where Spotify has none";
@@ -1359,7 +1354,7 @@
 "settings.lyrics.pip.center" = "Center";
 "settings.lyrics.pip.close" = "Close Picture in Picture";
 "settings.lyrics.pip.credit_links" = "View source credits";
-"settings.lyrics.pip.disabled" = "Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify.";
+"settings.lyrics.pip.disabled" = "Enable lyrics in Mod Settings → Picture in Picture, then restart Spotify.";
 "settings.lyrics.pip.extras.note" = "Shows available pronunciation and translation using your lyrics display and language rules. Opening Picture in Picture never starts translation or AI.";
 "settings.lyrics.pip.failed" = "Picture in Picture could not start. This device or Spotify's current playback session may not support it. Keep Spotify in front and try again.";
 "settings.lyrics.pip.fit.note" = "Sizes are maximums in the rendered frame. Long text wraps and shrinks to fit; an ellipsis marks text that still cannot fit.";
@@ -1643,31 +1638,38 @@
 "settings.lyricstools.sync.value.format" = "%@ ms";
 "settings.lyricstools.translation.kept" = "Lines that could not be translated keep their previous translation.";
 
+"settings.main.advanced.header" = "Advanced & about";
 "settings.main.airpods_gestures.title" = "AirPods gestures";
 "settings.main.albums.title" = "Albums";
 "settings.main.all_flags.title" = "All flags";
 "settings.main.appearance.title" = "Appearance";
 "settings.main.artists.title" = "Artists";
+"settings.main.audio.header" = "Audio & playback";
 "settings.main.audio_effects.title" = "Audio effects";
 "settings.main.automix.title" = "AutoMix";
 "settings.main.entry.title" = "Mod Settings";
 "settings.main.home.title" = "Home";
-"settings.main.home_library.title" = "Home & Library";
 "settings.main.labs.title" = "Labs";
-"settings.main.library.title" = "Library";
 "settings.main.listening_stats.title" = "Listening stats";
 "settings.main.live_activity.title" = "Live Activity";
 "settings.main.lock_screen.title" = "Lock screen";
+"settings.main.look.header" = "Look & navigation";
 "settings.main.lyrics.title" = "Lyrics";
 "settings.main.mod.title" = "Mod";
+"settings.main.outside.header" = "Outside Spotify & devices";
+"settings.main.pip.title" = "Picture in Picture";
 "settings.main.player.title" = "Player";
 "settings.main.premium_ads_privacy.title" = "Premium, ads & privacy";
-"settings.main.search.title" = "Search";
+"settings.main.privacy.header" = "Privacy, network & downloads";
+"settings.main.proxy.applied" = "Proxy applied";
+"settings.main.proxy.blocked" = "Blocked";
+"settings.main.proxy.waiting" = "Waiting for unlock";
+"settings.main.screens.header" = "Screens";
+"settings.main.search_library.title" = "Search & Library";
 "settings.main.sing.title" = "Karaoke";
-"settings.main.spatial_voice.title" = "Spatial voice";
 "settings.main.tabbar.title" = "Tab bar";
 "settings.main.vibrations.title" = "Vibrations";
-"settings.main.workshop.title" = "Libraries & presets";
+"settings.main.wireguard.title" = "WireGuard & proxy";
 
 "settings.mod.backup.action.import_and_restart" = "Import and restart";
 "settings.mod.backup.import_confirm.alert.message" = "Your settings are replaced by the file's, exported from version %@. Anything it does not have goes back to its default, and Spotify restarts.";
@@ -2030,6 +2032,8 @@
 "settings.pixie.diagnostics.track_scope" = "Unique tracks by final observed state. This is the retained journal snapshot, not your entire library.";
 "settings.pixie.download.init_failed" = "Pixie downloads could not initialize (%@). This DEB requires the verified Spotify 9.1.90 executable. Detected version: %@.";
 "settings.pixie.download.start_failed" = "Could not start download";
+"settings.pixie.downloads.keywords" = "downloads offline files diagnostics send log";
+"settings.pixie.downloads.title" = "Pixie downloads";
 "settings.pixie.entry.manage_downloads.subtitle" = "Current track, mode and download status";
 "settings.pixie.entry.manage_downloads.title" = "Manage downloads";
 "settings.pixie.entry.send_log.title" = "Send log";
@@ -2563,7 +2567,12 @@
 "settings.pixie.ui.unavailable" = "Unavailable";
 "settings.pixie.ui.unknown_error" = "unknown error";
 "settings.pixie.ui.waiting" = "Waiting";
-"settings.pixie.vitrine.send_log.subtitle" = "Report, actions, download history and Retrine diagnostics";
+
+"settings.playback.data" = "Data & prefetch";
+"settings.playback.local" = "Local audio & lossless";
+"settings.playback.rules" = "Playback";
+"settings.playback.timer_fade" = "Sleep timer fade-out";
+"settings.playback.title" = "Playback & local files";
 
 "settings.player.artwork.header" = "Artwork";
 "settings.player.artwork_background.title" = "Artwork background";
@@ -2889,28 +2898,28 @@
 "settings.search.artists.keywords" = "artist header photo bio";
 "settings.search.audio_effects.keywords" = "equalizer eq bass treble crossfeed reverb compressor limiter";
 "settings.search.automix.keywords" = "automix crossfade gapless transition mix";
-"settings.search.home.keywords" = "library your library home page gradient";
+"settings.search.home.keywords" = "home page gradient";
 "settings.search.labs.keywords" = "experimental experiments flags";
-"settings.search.library.keywords" = "your library filter chips sort grid list compact";
 "settings.search.listening_stats.keywords" = "statistics history top songs streaks charts";
 "settings.search.live_activity.keywords" = "dynamic island lock screen apple watch carplay card activity";
 "settings.search.lock_screen.keywords" = "lock screen wallpaper moving artwork lyrics widget";
 "settings.search.lyrics.keywords" = "karaoke translation romanization furigana sync delay";
 "settings.search.mod.keywords" = "about version update export import backup diagnostics";
 "settings.search.none" = "No Results";
+"settings.search.pip.keywords" = "PiP floating lyrics video";
 "settings.search.placeholder" = "Search";
-"settings.search.player.keywords" = "now playing shuffle repeat gestures sleep timer queue";
+"settings.search.playback.keywords" = "sleep timer blocked artists songs lossless import load ahead prefetch";
+"settings.search.player.keywords" = "now playing shuffle repeat gestures queue";
 "settings.search.playlists.keywords" = "playlist page album cover";
 "settings.search.premium_ads_privacy.keywords" = "ads adverts block telemetry tracking privacy sponsors";
 "settings.search.recent.clear" = "Clear";
 "settings.search.recent.header" = "Recently Opened";
-"settings.search.search.keywords" = "browse categories chips";
-"settings.search.sing.keywords" = "sing karaoke vocals voice remove";
+"settings.search.search_library.keywords" = "browse categories chips sort grid compact carousel";
+"settings.search.sing.keywords" = "sing karaoke vocals voice remove spatial headphones";
 "settings.search.spatial_voice.keywords" = "spatial audio surround head tracking headphone motion";
 "settings.search.tabbar.keywords" = "navigation bar tabs bottom";
 "settings.search.vibrations.keywords" = "haptics vibration haptic feedback buzz";
 "settings.search.wireguard.keywords" = "lyrics requests Genius direct blocked sources tunnel proxy VPN";
-"settings.search.workshop.keywords" = "presets headphones autoeq fonts visualizers download";
 
 "settings.search_tab.cards.header" = "Category cards";
 "settings.search_tab.glass_cards.subtitle" = "Each card as Liquid Glass in its own color. Off, the cards are Spotify's own.";
@@ -3468,6 +3477,7 @@
 "settings.vibrations.alert.system_off.title" = "Turn On Music Haptics";
 "settings.vibrations.background.info" = "Keeps the vibrations going on the lock screen and in other apps, where iOS stops Spotify's own. The mod tells iOS which recording is playing, by its ISRC code from Apple Music's catalog (no sound leaves the phone), and iOS's own Music Haptics, the one Apple Music uses, plays Apple's haptic track for it.\n\nIt needs Settings > Accessibility > Music Haptics on, and only songs Apple has a haptic track for vibrate. While Spotify is open, Music Haptics above plays the others, if it is on.";
 "settings.vibrations.background.title" = "In the Background";
+"settings.vibrations.both" = "Controls & music";
 "settings.vibrations.controls.title" = "Controls";
 "settings.vibrations.follows.bass" = "Bass";
 "settings.vibrations.follows.bass.note" = "A tap on each kick, and a rumble under the bass";
@@ -3605,14 +3615,3 @@
 "settings.wireguard.username" = "User name";
 "settings.wireguard.version_unsupported" = "This Spotify version has not passed the WireGuard transport check. Use an inspected IPA before enabling this connection.";
 "settings.wireguard.yes" = "yes";
-
-"settings.workshop.audio_presets.title" = "Audio presets";
-"settings.workshop.free_fonts.title" = "Free fonts";
-"settings.workshop.headphones.title" = "Headphones";
-"settings.workshop.intro.native.v2" = "Built-in and open libraries Retrine can use without an account. Visualizers appear here when Redesigned UI is selected. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.";
-"settings.workshop.intro.redesigned.v2" = "Built-in and open libraries Retrine can use without an account. Headphone corrections come from AutoEq, free fonts from Google Fonts. Presets can be shared as files.";
-"settings.workshop.look.header" = "Look";
-"settings.workshop.sound.header" = "Sound";
-"settings.workshop.title" = "Libraries & presets";
-"settings.workshop.type.header" = "Type";
-"settings.workshop.visualizers.title" = "Visualizers";

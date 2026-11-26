@@ -435,7 +435,7 @@ static void runMirrors(void) {
         layouts = [NSMutableDictionary dictionary];
     }
     runMirror(@"playlist", ^UIViewController *{ return SGRPlaylistSettingsPage(); }, nil);
-    runMirror(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); }, nil);
+    runMirror(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); }, nil);
     runMirror(@"home", ^UIViewController *{ return SGRHomeSettingsPage(); }, nil);
     runMirror(@"home-plain", ^UIViewController *{ return SGRHomeSettingsPage(); }, ^{ SGSetEnabled(SGRKeyHomeLook, NO); });
     runMirror(@"album", ^UIViewController *{ return SGRAlbumSettingsPage(); }, nil);
@@ -491,7 +491,7 @@ static void runChecks(void) {
                 SGSetEnabled(SGRKeyPlaylistMenuSortMix, NO);
             }, @"Curation pills");
 
-    runPage(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); },
+    runPage(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); },
             @"Tinted glass",
             ^{
                 SGSetEnabled(SGRKeySearchHideWatchFeeds, NO);
@@ -547,7 +547,7 @@ static void runChecks(void) {
     runReveal(@"artist", ^UIViewController *{ return SGRArtistSettingsPage(); }, ^{ SGSetEnabled(SGRKeyArtistHideVideos, NO); }, @"Videos");
 
     runLooks(@"playlist", ^UIViewController *{ return SGRPlaylistSettingsPage(); });
-    runLooks(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); });
+    runLooks(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); });
     runLooks(@"home", ^UIViewController *{ return SGRHomeSettingsPage(); });
     runLooks(@"album", ^UIViewController *{ return SGRAlbumSettingsPage(); });
     runLooks(@"artist", ^UIViewController *{ return SGRArtistSettingsPage(); });

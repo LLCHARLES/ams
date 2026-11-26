@@ -1,7 +1,12 @@
 // What Mod Settings' search reads and matches, apart from the field and its table (SGSettingsSearch.m): the rows of
-// the searched page and of the pages its rows open, two pages deep, read a page at a time, and the words a row is
+// the searched page and of the pages its rows open, three pages deep, read a page at a time, and the words a row is
 // found by. Threading: main thread only, like the pages it builds.
 #import "SGModPage.h"
+
+// Custom tables expose just their navigable destinations, without loading the table's view.
+@protocol SGSettingsSearchPages <NSObject>
+- (NSArray<SGModRow *> *)sg_searchPageRows;
+@end
 
 #pragma mark - matching
 
@@ -30,6 +35,8 @@ void SGSearchForgetRecents(void);
 // search the block that names them again; every start of the index runs it before reading the page, so a place is
 // always made of the names the rows have now.
 void SGSettingsIndexRenamesWith(SGModPage *page, void (^rename)(void));
+// Resolve a saved trail after a page moves, without rewriting defaults or matching translated titles.
+void SGSettingsIndexMovesWith(SGModPage *page, NSArray *(^resolve)(NSArray *));
 
 #pragma mark - a row the search finds
 

@@ -15,7 +15,8 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "${APP_ICON_SOURCE:-$SRC/Shared/AppIcon/AppIcon.m}" "$SRC"/Shared/ArtistBlock/ArtistBlockSettings.m \
     "$SRC"/Settings/SGPage.m "${PAGE_STYLE_SOURCE:-$SRC/Settings/SGPageStyle.m}" "$SRC"/Settings/SGModPage.m "$SRC"/Settings/SGSettingsSearch.m "$SRC"/Settings/SGSettingsIndex.m \
     "$SRC"/Settings/SGGlowSwitch.m \
-    "$SRC"/Redesigned/Playlist/PlaylistSettings.m "$SRC"/Redesigned/Search/SearchSettings.m \
+    "$SRC"/Redesigned/Playlist/PlaylistSettings.m "$SRC"/Redesigned/Search/SearchSettings.m "$SRC"/Redesigned/Library/LibrarySettings.m \
+    "$SRC"/Native/Home/HomeSettings.m "$SRC"/Native/Home/HomeGradientChoices.m \
     "$SRC"/Redesigned/Kit/SGRPagePreview.m "$SRC"/Redesigned/Kit/SGRTokens.m "$SRC"/Redesigned/Kit/SGRPalette.m \
     "$SRC"/Redesigned/Kit/SGRAccentContext.m "$SRC"/Core/SGTopController.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLocalize.m "$SRC"/Core/SGGlass.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGFlagForce.m "$SRC"/Core/SGUIMode.m \

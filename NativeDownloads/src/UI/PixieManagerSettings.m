@@ -713,16 +713,33 @@ static void SAPSettingsLayout(id self,SEL selector) {originalSettingsLayout(self
 static void *SAPModPageInit(void *self,SEL selector,NSString *title,NSString *intro,NSArray *sections,NSString *footer) {
     if([title isEqualToString:@"Retrine"] || [title isEqualToString:@"Vitrine"]) {
         id (*pageRow)(NSString *,UIViewController *(^)(void))=dlsym(RTLD_DEFAULT,"SGPageRow");
-        id (*actionRow)(NSString *,NSString *,void (^)(void))=dlsym(RTLD_DEFAULT,"SGActionRow");
+        id (*identify)(id,NSString *)=dlsym(RTLD_DEFAULT,"SGSearchIdentified");
+        id (*keywords)(id,NSString *)=dlsym(RTLD_DEFAULT,"SGSearchKeywords");
         id (*withTile)(id,NSString *,UIColor *)=dlsym(RTLD_DEFAULT,"SGWithTile");
         id (*section)(NSString *,NSArray *)=dlsym(RTLD_DEFAULT,"SGSection");
-        if(pageRow && actionRow && withTile && section) {
-            id row=pageRow(SAPL(@"settings.pixie.manager.title",@"Pixie Download Manager"),^UIViewController *{return [SAPDownloadsSettings new];});
+        if(pageRow && withTile && section) {
+            id row=pageRow(SAPL(@"settings.pixie.downloads.title",@"Pixie downloads"),^UIViewController *{return [SAPDownloadsSettings new];});
             row=withTile(row,@"arrow.down.circle.fill",UIColor.systemGreenColor);
-            id log=actionRow(SAPL(@"settings.pixie.entry.send_log.title",@"Send log"),SAPL(@"settings.pixie.vitrine.send_log.subtitle",@"Report, actions, download history and Retrine diagnostics"),^{[SAPSettingsActions perform:SAPSettingsSendLog];});
-            log=withTile(log,@"square.and.arrow.up",UIColor.systemTealColor);
-            id group=section(nil,@[row,log]);
-            if(group){sections=[sections arrayByAddingObject:group];SAP_TRACE("ui","pixie_rows_added_to_retrine",0,@{@"added_rows":@2,@"root_title":title});}
+            if(identify)identify(row,@"page.pixie");
+            if(keywords)keywords(row,SAPL(@"settings.pixie.downloads.keywords",@"downloads offline files diagnostics send log"));
+            // Find Privacy by its stable page ID, not its translated heading or the number of warning cards.
+            BOOL placed=NO;
+            for(id group in sections) {
+                if(![group respondsToSelector:@selector(rows)] || ![group respondsToSelector:@selector(setRows:)])continue;
+                NSArray *rows=[group valueForKey:@"rows"];
+                for(id entry in rows) {
+                    if(![entry respondsToSelector:@selector(searchIdentifier)] || ![[entry valueForKey:@"searchIdentifier"] isEqual:@"page.ads"])continue;
+                    [group setValue:[rows arrayByAddingObject:row] forKey:@"rows"];
+                    placed=YES;break;
+                }
+                if(placed)break;
+            }
+            if(!placed) {
+                NSMutableArray *groups=[sections mutableCopy] ?: [NSMutableArray array];
+                [groups insertObject:section(nil,@[row]) atIndex:groups.count ? groups.count-1 : 0];
+                sections=groups;
+            }
+            SAP_TRACE("ui","pixie_rows_added_to_retrine",0,@{@"added_rows":@1,@"root_title":title});
         }else {
             settingsInstallStatus=@"retrine_row_factories_unavailable";
         }

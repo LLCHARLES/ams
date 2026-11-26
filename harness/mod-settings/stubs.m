@@ -40,14 +40,13 @@ UIViewController *SGAllFlagsPage(void) {
     page.title = @"All flags";
     return page;
 }
-PAGE(SGGesturesSettingsPage) PAGE(SGHeadGesturesSettingsPage) PAGE(SGHomeSettingsPage) PAGE(SGLabsPage)
+PAGE(SGGesturesSettingsPage) PAGE(SGHeadGesturesSettingsPage) PAGE(SGLabsPage)
 PAGE(SGListeningStatsPage) PAGE(SGLiveActivitySettingsPage) PAGE(SGLockScreenWidgetPage) PAGE(SGNavbarSettingsPage)
 PAGE(SGNowPlayingBarSettingsPage) PAGE(SGQueueSettingsPage) PAGE(SGRAlbumSettingsPage) PAGE(SGRArtistSettingsPage)
 PAGE(SGRNavbarSettingsPage)
 PAGE(SGLocalFilesSettingsPage)
 PAGE(SGAlbumSettingsPage) PAGE(SGArtistSettingsPage) PAGE(SGPlaylistSettingsPage)
-PAGE(SGDSPHeadphonesPage) PAGE(SGDSPPresetsPage) PAGE(SGFontLibraryPage)
-PAGE(SGRHomeSettingsPage) PAGE(SGRLibrarySettingsPage) PAGE(SGRVisualiserSettingsPage)
+PAGE(SGRHomeSettingsPage)
 PAGE(SGSingSettingsPage) PAGE(SGSpatialVoiceSettingsPage) PAGE(SGVibrationsSettingsPage)
 UIViewController *SGRPlayerSettingsPage(NSArray *more) { return blank(@"SGRPlayerSettingsPage"); }
 UIViewController *SGRLyricsSettingsPage(NSString *title, NSString *intro, NSArray<SGModSection *> *sections) {
@@ -90,7 +89,7 @@ ROW(SGBingTranslateRow) ROW(SGDeepLKeyRow) ROW(SGGoogleTranslateRow) ROW(SGLyric
 ROW(SGLyricsFuriganaRow) ROW(SGLyricsJapaneseReadingRow) ROW(SGLyricsLanguageRulesRow) ROW(SGLyricsPiPRow)
 ROW(SGLyricsPronunciationNotationRow) ROW(SGRAutoTranslationOrderRow) ROW(SGRAutoTranslationRow)
 ROW(SGRLyricsKeepAwakeRow) ROW(SGRLyricsFullRateRow) ROW(SGSavedTranslationsRow) ROW(SGSimplifyTitlesRow) ROW(SGTranslateEverySongRow)
-ROW(SGRLyricsHideRow)
+ROW(SGRLyricsHideRow) ROW(SGRLyricsKeepMicRow)
 ROW(SGTranslateTitlesRow)
 NSString *SGLyricsAIName(SGLyricsAI service) { return @[@"Gemini", @"Claude", @"OpenAI"][service]; }
 SGModRow *SGLyricsAIServiceRow(SGLyricsAI service) { return SGPageRow(SGLyricsAIName(service), ^UIViewController *{ return nil; }); }
@@ -103,7 +102,7 @@ NSArray<SGModRow *> *SGOnDeviceTranslatorRows(void) {
     for (SGModRow *row in rows) row.changed = ^(BOOL on) {};
     return rows;
 }
-SGModSection *SGSleepTimerSettingsSection(void) { return SGSection(nil, @[]); }
+SGModSection *SGPlaybackRulesSection(SGModRow *artists, SGModRow *songs) { return SGSection(nil, @[artists, songs]); }
 SGModSection *SGSponsorBlockSettingsSection(void) { return SGSection(nil, @[]); }
 SGModSection *SGRPlayerButtonsSection(void) { return SGSection(nil, @[]); }
 void SGMotionCacheBytes(void (^done)(uint64_t bytes)) { done(0); }
@@ -124,6 +123,10 @@ NSDictionary<NSString *, NSArray<NSString *> *> *SGBlockedSongs(void) { return @
 void SGSetSongBlocked(NSString *uri, NSString *title, NSString *artist, BOOL blocked) {}
 
 NSString *SGDSPSummary(void) { return @"Off"; }
+NSString *SGLiveActivitySummary(void) { return @"Off"; }
+NSString *SGListeningStatsSummary(void) { return @"On"; }
+BOOL SGMusicHapticsOn(void) { return NO; }
+BOOL SGMusicHapticsInBackground(void) { return NO; }
 NSString *SGAutoMixSummary(void) { return @"Off"; }
 NSString *SGSingSummary(void) { return @"Off"; }
 // An iPhone that reads headphone motion, with Spatial voice off.

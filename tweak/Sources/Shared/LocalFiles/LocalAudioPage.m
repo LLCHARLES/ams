@@ -1,4 +1,4 @@
-// The Local files page on the Player page: Import audio files, which opens Files and copies what is picked
+// The Local files page under Playback & local files: Import audio files, which opens Files and copies what is picked
 // into Documents (LocalAudioImport.h), and the Imported files page listing those copies, a swipe deleting one
 // after asking.
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>

@@ -24,7 +24,9 @@
 #define SGRKeyLibraryHideChips @"spotifyglass.redesign.library.hideChips"
 BOOL SGRLibraryCompact(void);
 
-UIViewController *SGRLibrarySettingsPage(void);   // LibrarySettings.m, in Mod Settings
+@class SGRPagePreview, SGModSection;
+SGRPagePreview *SGRLibraryPreview(void);
+SGModSection *SGRLibrarySection(void);
 
 // LibraryMenu.m. The menu button the root header shows while Compact library is on, made once per header and
 // kept on it; LibraryHeader.x places it. Its menu is built as it opens, from the library page the header is in then

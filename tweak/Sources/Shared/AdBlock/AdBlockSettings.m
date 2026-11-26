@@ -78,11 +78,9 @@ UIViewController *SGAdsSettingsPage(void) {
     SGModRow *fakePremium = SGOptionRow(SGL(@"settings.privacy.spoof_premium.title", @"Spoof Premium"), nil, SGKeyFakePremium);
     fakePremium.warning = SGFakePremiumWarning;
 
-    // The redesign's Search keeps only its category cards, so the video carousel switch is the native look's.
     NSMutableArray<SGModRow *> *ads = [NSMutableArray arrayWithObjects:
         SGWithSymbol(SGOptionRow(SGL(@"settings.privacy.hide_ads.title", @"Hide ads"), nil, SGKeyHideAds), @"speaker.slash"),
         SGWithSymbol(SGOptionRow(SGL(@"settings.privacy.hide_upsells.title", @"Hide upsells"), nil, SGKeyHideUpsells), @"hand.raised"), nil];
-    if (!SGRedesignedUIStored()) [ads addObject:SGWithSymbol(SGOptionRow(SGL(@"settings.privacy.hide_search_carousel.title", @"Hide the video carousel in Search"), nil, SGKeyHideSearchVideos), @"play.rectangle.on.rectangle")];
     [ads addObject:SGWithSymbol(SGPageRow(SGL(@"settings.privacy.ad_flags.row.title", @"Ad and upsell flags"), ^UIViewController *{ return adFlagsPage(); }), @"flag")];
 
     return [[SGModPage alloc] initWithTitle:SGL(@"settings.privacy.title", @"Premium, ads & privacy") intro:SGRestartNote sections:@[

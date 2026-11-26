@@ -1,10 +1,5 @@
 // Settings: a Mod Settings row at the end of Spotify's settings list opens the mod's own page, its rows
-// grouped by what they are as the system Settings app groups its own, in cards with no headings: what the
-// app looks like (Redesigned UI's switch, Appearance, Tab bar), the screens a page of its own changes
-// (Home & Library in the native look, Player, Lyrics, Albums, Artists and Playlists, and Search in the redesign), the features
-// that work under either look (Sing, Spatial voice, Audio effects, AutoMix, Live Activity, AirPods gestures, Listening
-// stats), the system's side (Lock screen, Vibrations; Premium, ads & privacy), the advanced pages (Labs, All flags, a
-// searchable list of every flag with an override per flag) and Mod, the build, its updates and links. The
+// grouped by purpose under six headings, below any signing or environment warnings. The
 // same row leads the side drawer's list (trees/test6.txt), above Your plan, so the page is a tap from
 // Home, and holding Home on the tab bar opens it too. The tweaks read the switches when they run, so a
 // change shows after Spotify restarts; the tab editor on the Tab bar page applies as soon as the bar lays
@@ -34,16 +29,21 @@
 #import "Shared/Player/PlayerSettings.h"
 #import "Shared/Sing/Sing.h"
 #import "Shared/Haptics/Haptics.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/LockScreenLyrics/LockScreenLyrics.h"
+#import "Shared/LyricsPiP/LyricsPiP.h"
+#import "Shared/Lossless/SGLossless.h"
+#import "Shared/ArtistBlock/ArtistBlock.h"
+#import "Core/SGOptionalWork.h"
 #if SG_WIREGUARD
 #import "Shared/WireGuard/SGWGSettingsController.h"
+#import "Shared/WireGuard/SGWGCore.h"
 #endif
 #import "App/About/About.h"
 #import "App/Onboarding/Onboarding.h"
 #import "Redesigned/Album/Album.h"
 #import "Redesigned/Artist/Artist.h"
 #import "Redesigned/Playlist/Playlist.h"
-#import "Redesigned/Search/Search.h"
-#import "Redesigned/Library/Library.h"
 #import "Pages.h"
 
 static const CGFloat kRowHeight = 56;
@@ -73,11 +73,35 @@ static NSString *namedForLook(NSString *name) {
     return [NSString stringWithFormat:@"page.%@.%@", name, SGRedesignedUIStored() ? @"redesigned" : @"native"];
 }
 
+static NSString *onOff(BOOL on) {
+    return on ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off");
+}
+
 // A look-named row of the main page, remembered in `looked` as (row, name) so the page can name it again when the
 // stored look changes under the open page (modSettingsPage's end).
 static SGModRow *foundByLook(NSMutableArray<NSArray *> *looked, SGModRow *row, NSString *name, NSString *keywords) {
     [looked addObject:@[row, name]];
     return foundBy(row, namedForLook(name), keywords);
+}
+
+// Recents store trails, not just leaf IDs. Replace only the moved prefix; deeper rows keep their IDs.
+static NSArray *canonicalPlace(NSArray *place) {
+    NSString *root = place.firstObject;
+    NSString *child = place.count > 1 ? place[1] : nil;
+    NSArray *prefix = nil;
+    if ([root isEqual:@"page.library.redesigned"]) prefix = @[@"page.search.redesigned"];
+    else if ([root isEqual:@"page.spatialvoice"]) prefix = @[@"page.sing", @"page.spatialvoice"];
+    else if ([root isEqual:@"page.ads"] && [child isEqual:SGKeyHideSearchVideos]) prefix = @[@"page.search.native"];
+    else if ([root isEqual:namedForLook(@"player")] && child &&
+             [@[@"page.player.blockedartists", @"page.player.blockedsongs", @"page.player.localfiles", SGKeyLoadAhead, SGKeyLossless] containsObject:child])
+        prefix = @[@"page.playback"];
+    else if ([root isEqual:@"page.workshop"]) {
+        if ([child isEqual:@"page.visualizers"]) prefix = @[@"page.player.redesigned"];
+        else if ([child isEqual:@"page.lyricsstyles"]) prefix = @[@"page.lyrics.redesigned"];
+        else if ([child isEqual:@"page.freefonts"]) prefix = @[namedForLook(@"appearance"), @"page.font"];
+        else if ([child isEqual:@"page.audiopresets"] || [child isEqual:@"page.headphones"]) prefix = @[@"page.audioeffects"];
+    }
+    return prefix ? [prefix arrayByAddingObjectsFromArray:[place subarrayWithRange:NSMakeRange(1, place.count - 1)]] : place;
 }
 
 static UIViewController *modSettingsPage(void) {
@@ -94,12 +118,8 @@ static UIViewController *modSettingsPage(void) {
     if (SGSigningWeekLong()) [warnings addObject:SGWithSymbol(SGSigningExpiryRow(), @"clock.badge.exclamationmark")];
     if (warnings.count) [sections addObject:SGSection(nil, warnings)];
 
-    // The rows of one look are asked again as Redesigned UI is flipped, so the page shows what the restart brings.
-    BOOL (^redesigned)(void) = ^BOOL { return SGRedesignedUIStored(); };
-    BOOL (^native)(void) = ^BOOL { return !SGRedesignedUIStored(); };
-
     // The tile colors are the system palette's, in dark mode except where SGColorRGB gives a lighter or deeper shade.
-    [sections addObject:SGNotedSection(nil, @[
+    [sections addObject:SGNotedSection(SGL(@"settings.main.look.header", @"Look & navigation"), @[
         SGRedesignedUIRow(),
         foundByLook(looked, pageRow(SGL(@"settings.main.appearance.title", @"Appearance"), @"paintpalette.fill", UIColor.systemPurpleColor, ^UIViewController *{ return SGAppearancePage(); }),
                 @"appearance",
@@ -109,129 +129,141 @@ static UIViewController *modSettingsPage(void) {
                 SGL(@"settings.search.tabbar.keywords", @"navigation bar tabs bottom")),
     ], SGRestartNote)];
 
-    // Each look keeps its own screen builders; only the redesign has a Search page.
+    // Each row opens the screen settings of the look currently selected.
     SGModRow *playlists = foundByLook(looked, pageRow(SGL(@"settings.home.playlists.row.title", @"Playlists"), @"music.note.list", UIColor.systemBlueColor, ^UIViewController *{ return SGRedesignedUIStored() ? SGRPlaylistSettingsPage() : SGPlaylistSettingsPage(); }),
                                   @"playlists",
                                   SGL(@"settings.search.playlists.keywords", @"playlist page album cover"));
-    SGModRow *search = foundByLook(looked, pageRow(SGL(@"settings.main.search.title", @"Search"), @"magnifyingglass", UIColor.systemYellowColor, ^UIViewController *{ return SGRSearchSettingsPage(); }),
+    SGModRow *search = foundByLook(looked, pageRow(SGL(@"settings.main.search_library.title", @"Search & Library"), @"magnifyingglass", UIColor.systemYellowColor, ^UIViewController *{ return SGSearchLibrarySettingsPage(); }),
                                @"search",
-                               SGL(@"settings.search.search.keywords", @"browse categories chips"));
-    search.visible = redesigned;
+                               SGL(@"settings.search.search_library.keywords", @"browse categories chips sort grid compact carousel"));
     SGWithNew(search, @"searchPage");
-    // Only the redesign has a Library page of its own: its compact header, with Spotify's controls in a menu.
-    SGModRow *library = foundByLook(looked, pageRow(SGL(@"settings.main.library.title", @"Library"), @"books.vertical.fill", UIColor.systemPurpleColor, ^UIViewController *{ return SGRLibrarySettingsPage(); }),
-                                @"library",
-                                SGL(@"settings.search.library.keywords", @"your library filter chips sort grid list compact"));
-    library.visible = redesigned;
-    SGWithNew(library, @"libraryPage");
     SGModRow *albums = foundByLook(looked, pageRow(SGL(@"settings.main.albums.title", @"Albums"), @"square.stack.fill", SGColorRGB(0x34C759), ^UIViewController *{ return SGRedesignedUIStored() ? SGRAlbumSettingsPage() : SGAlbumSettingsPage(); }),
                                @"albums",
                                SGL(@"settings.search.albums.keywords", @"album cover notes credits"));
     SGModRow *artists = foundByLook(looked, pageRow(SGL(@"settings.main.artists.title", @"Artists"), @"music.mic", SGColorRGB(0x30B0C7), ^UIViewController *{ return SGRedesignedUIStored() ? SGRArtistSettingsPage() : SGArtistSettingsPage(); }),
                                 @"artists",
                                 SGL(@"settings.search.artists.keywords", @"artist header photo bio"));
-    SGModRow *home = foundByLook(looked, pageRow(SGL(@"settings.main.home_library.title", @"Home & Library"), @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGHomeSettingsPage(); }),
-                             @"home",
-                             SGL(@"settings.search.home.keywords", @"library your library home page gradient"));
-    home.visible = native;
-    SGModRow *redesignedHome = foundByLook(looked, pageRow(SGL(@"settings.main.home.title", @"Home"), @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRHomeSettingsPage(); }),
+    SGModRow *home = foundByLook(looked, pageRow(SGL(@"settings.main.home.title", @"Home"), @"house.fill", UIColor.systemBrownColor, ^UIViewController *{ return SGRedesignedUIStored() ? SGRHomeSettingsPage() : SGHomeSettingsPage(); }),
                                        @"home",
-                                       SGL(@"settings.search.home.keywords", @"library your library home page gradient"));
-    redesignedHome.visible = redesigned;
-    [sections addObject:SGSection(nil, @[
-        redesignedHome,
-        home,
+                                       SGL(@"settings.search.home.keywords", @"home page gradient"));
+    [sections addObject:SGSection(SGL(@"settings.main.screens.header", @"Screens"), @[
+        home, search,
         foundByLook(looked, pageRow(SGL(@"settings.main.player.title", @"Player"), @"play.fill", UIColor.systemPinkColor, ^UIViewController *{ return SGPlayerSettingsPage(); }),
                 @"player",
-                SGL(@"settings.search.player.keywords", @"now playing shuffle repeat gestures sleep timer queue")),
+                SGL(@"settings.search.player.keywords", @"now playing shuffle repeat gestures queue")),
         foundByLook(looked, pageRow(SGL(@"settings.main.lyrics.title", @"Lyrics"), @"quote.bubble.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGLyricsSettingsPage(); }),
                 @"lyrics",
                 SGL(@"settings.search.lyrics.keywords", @"karaoke translation romanization furigana sync delay")),
         albums,
         artists,
         playlists,
-        search,
-        library,
     ])];
 
     // Sing and the audio effects work on the sound, so both looks have them; Audio effects says how many are on.
     SGModRow *sing = foundBy(pageRow(SGL(@"settings.main.sing.title", @"Karaoke"), @"mic.fill", SGColorRGB(0x8C42B3), ^UIViewController *{ return SGSingSettingsPage(); }),
                              namedFor(@"sing"),
-                             SGL(@"settings.search.sing.keywords", @"sing karaoke vocals voice remove"));
+                             SGL(@"settings.search.sing.keywords", @"sing karaoke vocals voice remove spatial headphones"));
     sing.value = ^NSString *{ return SGSingSummary(); };
     SGModRow *audioEffects = foundBy(pageRow(SGL(@"settings.main.audio_effects.title", @"Audio effects"), @"slider.vertical.3", UIColor.systemRedColor, ^UIViewController *{ return SGDSPSettingsPage(); }),
                                      namedFor(@"audioeffects"),
                                      SGL(@"settings.search.audio_effects.keywords", @"equalizer eq bass treble crossfeed reverb compressor limiter"));
     audioEffects.value = ^NSString *{ return SGDSPSummary(); };
-    // Spatial voice is Sing's too, and shows where the iPhone reads headphone motion, as on Sing's page.
-    SGModRow *spatial = foundBy(pageRow(SGL(@"settings.main.spatial_voice.title", @"Spatial voice"), @"person.wave.2.fill", SGColorRGB(0x5856D6), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); }),
-                                namedFor(@"spatialvoice"),
-                                SGL(@"settings.search.spatial_voice.keywords", @"spatial audio surround head tracking headphone motion"));
-    spatial.visible = ^BOOL { return SGSingSpatialAvailable(); };
-    spatial.value = ^NSString *{ return SGSingSpatial() ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off"); };
     // AutoMix sets Spotify's own Automix and Crossfade, which its player does under either look.
     SGModRow *autoMix = foundBy(pageRow(SGL(@"settings.main.automix.title", @"AutoMix"), @"arrow.triangle.merge", SGColorRGB(0xF05D6C), ^UIViewController *{ return SGAutoMixSettingsPage(); }),
                                 namedFor(@"automix"),
                                 SGL(@"settings.search.automix.keywords", @"automix crossfade gapless transition mix"));
     autoMix.value = ^NSString *{ return SGAutoMixSummary(); };
-    SGModRow *workshop = foundBy(pageRow(SGL(@"settings.main.workshop.title", @"Libraries & presets"), @"square.grid.2x2.fill", UIColor.systemIndigoColor,
-                                          ^UIViewController *{ return SGWorkshopPage(); }),
-                                 namedFor(@"workshop"),
-                                 SGL(@"settings.search.workshop.keywords", @"presets headphones autoeq fonts visualizers download"));
-    NSMutableArray<SGModRow *> *features = [NSMutableArray arrayWithObjects:sing, spatial, audioEffects, autoMix, nil];
+    SGModRow *playback = foundBy(pageRow(SGL(@"settings.playback.title", @"Playback & local files"), @"play.square.stack.fill", UIColor.systemIndigoColor,
+        ^UIViewController *{ return SGPlaybackSettingsPage(); }), namedFor(@"playback"),
+        SGL(@"settings.search.playback.keywords", @"sleep timer blocked artists songs lossless import load ahead prefetch"));
+    playback.value = ^NSString *{
+        if (SGFlag(SGKeyLossless, NO)) return SGL(@"settings.lossless.files.title", @"Lossless files");
+        if (SGFlag(SGKeyArtistBlock, NO)) return SGL(@"settings.player.blocked_artists.title", @"Blocked artists");
+        if (SGEnabled(SGKeyLoadAhead)) return SGL(@"settings.load_ahead.title", @"Load ahead");
+        return nil; // No master switch: a timer or blocked song can still be in effect.
+    };
+    SGModRow *stats = foundBy(pageRow(SGL(@"settings.main.listening_stats.title", @"Listening stats"), @"chart.bar.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGListeningStatsPage(); }),
+        namedFor(@"listeningstats"), SGL(@"settings.search.listening_stats.keywords", @"statistics history top songs streaks charts"));
+    stats.value = ^NSString *{ return SGListeningStatsSummary(); };
+    [sections addObject:SGSection(SGL(@"settings.main.audio.header", @"Audio & playback"), @[audioEffects, sing, autoMix, playback, stats])];
+
+    SGModRow *lock = foundBy(pageRow(SGL(@"settings.main.lock_screen.title", @"Lock screen"), @"lock.iphone", SGColorRGB(0x32ADE6), ^UIViewController *{ return SGLockScreenWidgetPage(); }),
+        namedFor(@"lockscreen"), SGL(@"settings.search.lock_screen.keywords", @"lock screen wallpaper moving artwork lyrics widget"));
+    lock.value = ^NSString *{
+        switch (SGLockScreenArtwork()) {
+            case SGLockArtworkMotion: return SGL(@"settings.lockscreen.artwork.choice.moving", @"Moving artwork");
+            case SGLockArtworkEverySong: return SGL(@"settings.lockscreen.artwork.choice.every_song", @"Every song");
+            case SGLockArtworkMotionLyrics: return SGL(@"settings.lockscreen.artwork.choice.moving_with_lyrics", @"Moving artwork with lyrics");
+            case SGLockArtworkLyrics: return SGL(@"settings.main.lyrics.title", @"Lyrics");
+            default: return SGFlag(SGKeyLockScreenLyrics, NO) ? SGL(@"settings.main.lyrics.title", @"Lyrics") : onOff(NO);
+        }
+    };
+    NSMutableArray *outside = [NSMutableArray arrayWithObject:lock];
     // The Live Activity works under both looks, where ActivityKit's card does.
     if (@available(iOS 17.0, *)) {
         SGModRow *liveActivity = foundBy(pageRow(SGL(@"settings.main.live_activity.title", @"Live Activity"), @"iphone", UIColor.systemOrangeColor, ^UIViewController *{ return SGLiveActivitySettingsPage(); }),
                                          namedFor(@"liveactivity"),
                                          SGL(@"settings.search.live_activity.keywords", @"dynamic island lock screen apple watch carplay card activity"));
-        [features addObject:liveActivity];
+        liveActivity.value = ^NSString *{ return SGLiveActivitySummary(); };
+        [outside addObject:liveActivity];
     }
-    [features addObjectsFromArray:@[
-        foundBy(pageRow(SGL(@"settings.main.airpods_gestures.title", @"AirPods gestures"), @"airpods", UIColor.systemCyanColor, ^UIViewController *{ return SGHeadGesturesSettingsPage(); }),
+    SGModRow *pip = SGWithTile(SGLyricsPiPRow(), @"pip", UIColor.systemIndigoColor);
+    pip.title = SGL(@"settings.main.pip.title", @"Picture in Picture");
+    foundBy(pip, namedFor(@"lyricspip"), SGL(@"settings.search.pip.keywords", @"PiP floating lyrics video"));
+    pip.value = ^NSString *{ return onOff(SGFlag(SGKeyLyricsPiP, NO)); };
+    SGModRow *airpods = foundBy(pageRow(SGL(@"settings.main.airpods_gestures.title", @"AirPods gestures"), @"airpods", UIColor.systemCyanColor, ^UIViewController *{ return SGHeadGesturesSettingsPage(); }),
                 namedFor(@"airpods"),
-                SGL(@"settings.search.airpods.keywords", @"head gestures nod shake headphones airpods")),
-        foundBy(pageRow(SGL(@"settings.main.listening_stats.title", @"Listening stats"), @"chart.bar.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGListeningStatsPage(); }),
-                namedFor(@"listeningstats"),
-                SGL(@"settings.search.listening_stats.keywords", @"statistics history top songs streaks charts")),
-    ]];
+                SGL(@"settings.search.airpods.keywords", @"head gestures nod shake headphones airpods"));
+    airpods.value = ^NSString *{ return onOff(SGFlag(SGKeyHeadGestures, NO)); };
+    SGModRow *vibrations = foundBy(pageRow(SGL(@"settings.main.vibrations.title", @"Vibrations"), @"waveform", UIColor.systemGreenColor, ^UIViewController *{ return SGVibrationsSettingsPage(); }),
+        namedFor(@"vibrations"), SGL(@"settings.search.vibrations.keywords", @"haptics vibration haptic feedback buzz"));
+    vibrations.value = ^NSString *{
+        BOOL controls = SGEnabled(SGKeyControlHaptics);
+        if (SGMusicHapticsOn() || SGMusicHapticsInBackground())
+            return controls ? SGL(@"settings.vibrations.both", @"Controls & music") : SGL(@"settings.vibrations.music.title", @"Music Haptics");
+        return controls ? SGL(@"settings.vibrations.controls.title", @"Controls") : onOff(NO);
+    };
+    [outside addObjectsFromArray:@[pip, airpods, vibrations]];
+    [sections addObject:SGSection(SGL(@"settings.main.outside.header", @"Outside Spotify & devices"), outside)];
+    NSMutableArray *privacy = [NSMutableArray arrayWithObject:
+        foundBy(pageRow(SGL(@"settings.main.premium_ads_privacy.title", @"Premium, ads & privacy"), @"hand.raised.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGAdsSettingsPage(); }),
+                namedFor(@"ads"), SGL(@"settings.search.premium_ads_privacy.keywords", @"ads adverts block telemetry tracking privacy sponsors"))];
 #if SG_WIREGUARD
-    [features addObject:foundBy(pageRow(SGL(@"settings.wireguard.title", @"In-app WireGuard / Proxy"), @"network", UIColor.systemTealColor,
+    SGModRow *wireguard = foundBy(pageRow(SGL(@"settings.main.wireguard.title", @"WireGuard & proxy"), @"network", UIColor.systemTealColor,
                                ^UIViewController *{ return [SGWGSettingsController new]; }), @"wireguard",
-                               SGL(@"settings.search.wireguard.keywords", @"lyrics requests Genius direct blocked sources tunnel proxy VPN"))];
+                               SGL(@"settings.search.wireguard.keywords", @"lyrics requests Genius direct blocked sources tunnel proxy VPN"));
+    wireguard.value = ^NSString *{
+        switch (SGWGCurrentState()) {
+            case SGWGStateOff: return onOff(NO);
+            case SGWGStateRunning: return SGL(@"settings.wireguard.state_running", @"Engine started");
+            case SGWGStateExternalProxy: return SGL(@"settings.main.proxy.applied", @"Proxy applied");
+            case SGWGStateStarting: return SGL(@"settings.wireguard.state_starting", @"Starting");
+            case SGWGStateWaitingProfile: return SGL(@"settings.main.proxy.waiting", @"Waiting for unlock");
+            case SGWGStateUnsupported: return SGL(@"settings.karaoke.status.unavailable", @"Unavailable");
+            default: return SGL(@"settings.main.proxy.blocked", @"Blocked");
+        }
+    };
+    [privacy addObject:wireguard];
 #endif
-    [sections addObject:SGSection(nil, features)];
+    [sections addObject:SGSection(SGL(@"settings.main.privacy.header", @"Privacy, network & downloads"), privacy)];
 
     SGModRow *mod = foundBy(pageRow(SGL(@"settings.main.mod.title", @"Mod"), @"info.circle", SGColorRGB(0x7D7D81), ^UIViewController *{ return SGAboutPage(); }),
                             namedFor(@"mod"),
                             SGL(@"settings.search.mod.keywords", @"about version update export import backup diagnostics"));
     mod.value = ^NSString *{ return @(SG_VERSION); };
-    [sections addObjectsFromArray:@[
-        SGSection(nil, @[
-            foundBy(pageRow(SGL(@"settings.main.lock_screen.title", @"Lock screen"), @"lock.iphone", SGColorRGB(0x32ADE6), ^UIViewController *{ return SGLockScreenWidgetPage(); }),
-                     namedFor(@"lockscreen"),
-                     SGL(@"settings.search.lock_screen.keywords", @"lock screen wallpaper moving artwork lyrics widget")),
-            // Vibrations hook Spotify's own controls and its audio, so they answer under either look.
-            foundBy(pageRow(SGL(@"settings.main.vibrations.title", @"Vibrations"), @"waveform", UIColor.systemGreenColor, ^UIViewController *{ return SGVibrationsSettingsPage(); }),
-                    namedFor(@"vibrations"),
-                    SGL(@"settings.search.vibrations.keywords", @"haptics vibration haptic feedback buzz")),
-            foundBy(pageRow(SGL(@"settings.main.premium_ads_privacy.title", @"Premium, ads & privacy"), @"hand.raised.fill", UIColor.systemBlueColor, ^UIViewController *{ return SGAdsSettingsPage(); }),
-                    namedFor(@"ads"),
-                    SGL(@"settings.search.premium_ads_privacy.keywords", @"ads adverts block telemetry tracking privacy sponsors")),
-        ]),
-        SGSection(nil, @[
-            workshop,
+    [sections addObject:SGSection(SGL(@"settings.main.advanced.header", @"Advanced & about"), @[
             foundBy(pageRow(SGL(@"settings.main.labs.title", @"Labs"), @"testtube.2", UIColor.systemGreenColor, ^UIViewController *{ return SGLabsPage(); }),
                     namedFor(@"labs"),
                     SGL(@"settings.search.labs.keywords", @"experimental experiments flags")),
             foundBy(pageRow(SGL(@"settings.main.all_flags.title", @"All flags"), @"flag.fill", UIColor.systemOrangeColor, ^UIViewController *{ return SGAllFlagsPage(); }),
                     namedFor(@"allflags"),
                     SGL(@"settings.search.all_flags.keywords", @"remote config feature flags overrides")),
-        ]),
-        SGSection(nil, @[mod]),
-    ]];
+            mod,
+    ])];
     SGModPage *page = [[SGModPage alloc] initWithTitle:@"Retrine" intro:nil sections:sections footer:nil];
     page.tiles = YES;
     page.searchable = YES;
+    SGSettingsIndexMovesWith(page, ^NSArray *(NSArray *place) { return canonicalPlace(place); });
     // The page can stay open as Redesigned UI is flipped and the root is not rebuilt (the restart can be put off), so
     // the search names these rows again whenever it reads the page, with the page each of them opens.
     SGSettingsIndexRenamesWith(page, ^{

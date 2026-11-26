@@ -42,13 +42,12 @@ static SGModPage *pageOf(NSString *title, NSArray<SGModRow *> *rows) {
     return [[SGModPage alloc] initWithTitle:title intro:nil sections:@[SGSection(nil, rows)] footer:nil];
 }
 
-// The page the search is typed on: a switch that hides a row, rows of its own, pages under it, and a page three
-// levels down, which is out of reach.
-static UIViewController *tooFarPage(void);
+// A row at the depth limit, and a page one step beyond it.
+static UIViewController *thirdPage(void);
 
 static UIViewController *deeperPage(void) {
     built++;
-    return pageOf(@"Deeper", @[row(@"Deeper row", nil), pageRow(@"Too far", ^UIViewController *{ return tooFarPage(); })]);
+    return pageOf(@"Deeper", @[row(@"Deeper row", nil), pageRow(@"Third", ^UIViewController *{ return thirdPage(); })]);
 }
 
 static UIViewController *deepPage(void) {
@@ -56,9 +55,11 @@ static UIViewController *deepPage(void) {
     return pageOf(@"Deep", @[row(@"Deep row", nil), pageRow(@"Deeper", ^UIViewController *{ return deeperPage(); })]);
 }
 
-static UIViewController *tooFarPage(void) {
+static UIViewController *thirdPage(void) {
     built++;
-    return pageOf(@"Too far", @[row(@"Out of reach", nil)]);
+    return pageOf(@"Third", @[row(@"Third-level setting", nil), pageRow(@"Fourth", ^UIViewController *{
+        return pageOf(@"Fourth", @[row(@"Out of reach", nil)]);
+    })]);
 }
 
 static UIViewController *carPlayPage(void) {
@@ -144,10 +145,11 @@ static void runChecks(void) {
     check([titles([index hitsForQuery:@"live activity"]) isEqual:(@[@"Live Activity", @"Artwork"])], @"the page above a row is found by its name, and the page itself too");
     check(built == before, @"a new query builds nothing again");
 
-    // Within reach: the pages the page's rows open, then the pages theirs open. The third level is not read.
+    // Deep destinations are searchable, but a fourth-level page is not traversed.
     while (index.running) pass(index);
     check([titles([index hitsForQuery:@"deeper row"]) isEqual:@[@"Deeper row"]], @"the second level's rows are found");
-    check([index hitsForQuery:@"out of reach"].count == 0, @"a page three levels down is out of reach");
+    check([titles([index hitsForQuery:@"third-level setting"]) isEqual:@[@"Third-level setting"]], @"the third level's rows are found");
+    check([index hitsForQuery:@"out of reach"].count == 0, @"a page four levels down is out of reach");
 
     // A title the query starts lands over a row only its keywords hold.
     SGSettingsIndex *ranked = started();
@@ -241,18 +243,18 @@ static void runChecks(void) {
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     }
     check(!walked.running, @"the run loop reads every page and the build ends by itself");
-    check(built == 4, [NSString stringWithFormat:@"the run loop built all four pages (%lu)", (unsigned long)built]);
+    check(built == 5, [NSString stringWithFormat:@"the run loop built all five reachable pages (%lu)", (unsigned long)built]);
     check([titles([walked hitsForQuery:@"deeper row"]) isEqual:@[@"Deeper row"]], @"a row of the second level down is found after the run loop's passes");
     check([titles([walked hitsForQuery:@"typeface"]) isEqual:@[@"Font"]], @"and so is a row of the first page under the page");
 
     // The index tells the results when its rows changed, so they show without waiting for the next keystroke: once per
     // pass that read a page, and once more when the last pass finds nothing left, so "No Results" can be put up. The
-    // root's rows open three pages, and one of theirs opens a fourth.
+    // root's rows open three pages, with two more levels on the Deep branch.
     __block NSUInteger grew = 0;
     SGSettingsIndex *watched = started();
     watched.grew = ^{ grew++; };
     while (watched.running) pass(watched);
-    check(grew == 5, [NSString stringWithFormat:@"the results are told once per pass that read a page, and once when the pages end (%lu)", (unsigned long)grew]);
+    check(grew == 6, [NSString stringWithFormat:@"the results are told once per pass that read a page, and once when the pages end (%lu)", (unsigned long)grew]);
 
     // A build that is stopped is not continued by a pass already asked for.
     built = 0;

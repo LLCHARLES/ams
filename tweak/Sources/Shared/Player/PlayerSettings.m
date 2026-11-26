@@ -9,13 +9,14 @@
 
 // The sleep timer's fade, under either look and on every iOS: the Live Activity's Timer tab, the Sleep Timer
 // shortcut and its control fade by it, and so does Spotify's own timer (Shared/Player/SpotifySleepTimer.m).
-SGModSection *SGSleepTimerSettingsSection(void) {
+SGModSection *SGPlaybackRulesSection(SGModRow *blockedArtists, SGModRow *blockedSongs) {
     NSArray<NSString *> *fades = SGSleepTimerFadeNames();
-    SGModRow *fade = SGMenuRow(SGL(@"settings.liveactivity.fadeout.title", @"Fade-out duration"), fades,
+    SGModRow *fade = SGMenuRow(SGL(@"settings.playback.timer_fade", @"Sleep timer fade-out"), fades,
                               ^NSString *{ return fades[(NSUInteger)SGSleepTimerFadeChoice()]; },
                               ^(NSInteger index) { SGSetInt(SGKeySleepTimerFade, index); });
     fade.subtitle = SGL(@"settings.player.sleep_fade.subtitle", @"While Labs' Fade out is forced on, Spotify's own timer fades its own way.");
-    return SGNotedSection(SGL(@"settings.liveactivity.sleeptimer.header", @"Sleep timer"), @[fade],
+    SGSearchIdentified(fade, SGKeySleepTimerFade);
+    return SGNotedSection(SGL(@"settings.playback.rules", @"Playback"), @[fade, blockedArtists, blockedSongs],
                           SGL(@"settings.liveactivity.sleeptimer.footer", @"How long the sound fades before a sleep timer pauses Spotify: the one set from the Timer tab, the Sleep Timer shortcut or Control Center, and Spotify's own from the player's ⋯ menu."));
 }
 

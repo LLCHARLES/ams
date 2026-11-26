@@ -933,7 +933,6 @@
 "settings.home.hide.previews.title" = "미리보기 카드";
 "settings.home.hide.promo.title" = "프로모션 카드";
 "settings.home.hide.shortcuts.title" = "바로가기 격자";
-"settings.home.home_and_library.title" = "홈 및 라이브러리";
 "settings.home.keep_title.subtitle" = "홈을 스크롤해도 제목, 프로필 사진, 캡슐을 상단에 유지합니다";
 "settings.home.keep_title.title" = "스크롤할 때 제목 고정";
 "settings.home.library.denser_rows.title" = "더 조밀한 행";
@@ -942,10 +941,8 @@
 "settings.home.library.library_settings.title" = "라이브러리 설정";
 "settings.home.library.recents.title" = "최근 항목";
 "settings.home.library.recents_sort_order.title" = "최근 항목 정렬 순서";
-"settings.home.library.row.title" = "라이브러리";
 "settings.home.library.sort_artists_recent.title" = "최근 업데이트순으로 아티스트 정렬";
 "settings.home.library.sort_playlists_recent.title" = "최근 업데이트순으로 플레이리스트 정렬";
-"settings.home.library.title" = "라이브러리";
 "settings.home.look.subtitle" = "추천 항목과 그 색상, 제목의 글래스 버튼. 끄면 재설계 초기 홈으로 표시됩니다";
 "settings.home.look.title" = "홈 화면 모양";
 "settings.home.on_home.header" = "홈 화면 표시 항목";
@@ -1196,7 +1193,6 @@
 "settings.liveactivity.colors.choice.plain" = "단색";
 "settings.liveactivity.colors.choice.spotify" = "Spotify";
 "settings.liveactivity.colors.title" = "색상";
-"settings.liveactivity.fadeout.title" = "페이드 아웃 시간";
 "settings.liveactivity.missing.alert.message" = "iOS는 실시간 현황이 있다고 선언된 앱에 대해서만 이를 표시하며, Retrine의 IPA 빌드만이 해당 내용을 Spotify에 기록합니다. 이 Spotify는 Retrine의 .deb를 수동 주입하는 등 다른 방식으로 구성되었기 때문에 iOS에서 카드가 거부됩니다. 실시간 현황을 사용하려면 Retrine으로 IPA를 빌드하세요.";
 "settings.liveactivity.missing.alert.title" = "실시간 현황 누락됨";
 "settings.liveactivity.missing.subtitle" = "이유를 보려면 탭하세요";
@@ -1231,7 +1227,6 @@
 "settings.liveactivity.shows.choice.queue" = "대기열";
 "settings.liveactivity.shows.title" = "표시 항목";
 "settings.liveactivity.sleeptimer.footer" = "수면 타이머가 Spotify를 일시 정지하기 전에 소리가 서서히 줄어드는 시간입니다. 타이머 탭, 수면 타이머 단축어 또는 제어 센터에서 설정한 타이머와 플레이어 ⋯ 메뉴의 Spotify 자체 타이머에 적용됩니다.";
-"settings.liveactivity.sleeptimer.header" = "수면 타이머";
 "settings.liveactivity.textsize.choice.large" = "크게";
 "settings.liveactivity.textsize.choice.medium" = "중간";
 "settings.liveactivity.textsize.choice.small" = "작게";
@@ -1350,7 +1345,6 @@
 "settings.lossless.files.subtitle" = "Spotify 스트림 대신 소장 중인 FLAC 재생";
 "settings.lossless.files.title" = "무손실 파일";
 "settings.lossless.footer" = "FLAC 또는 ALAC 파일을 파일 앱 › Spotify › Lossless에 넣으세요. 노래 제목과 길이가 일치하고 사운드가 Spotify에서 재생되는 내용과 일치하면 노래가 시작되거나 탐색한 지 약 4초 후부터 해당 파일이 재생됩니다. 다음 곡에 파일이 있는 동안에도 Spotify는 자체 음원을 최저 음질로 계속 스트리밍합니다. 노래방 및 1x 이외의 속도에서는 Spotify의 사운드가 유지됩니다. Spotify를 다시 시작한 후에 적용됩니다.";
-"settings.lossless.header" = "무손실";
 
 "settings.lyrics.ai.footer" = "가사 메뉴의 발음 쓰기와 맥락 설명은 본인의 키로 Gemini, Claude 또는 설정한 AI 서비스를 씁니다. 쓴 내용은 곡에 저장됩니다.";
 "settings.lyrics.all_tracks.subtitle" = "Spotify에서 제공하지 않는 트랙 포함";
@@ -1465,7 +1459,7 @@
 "settings.lyrics.pip.center" = "가운데";
 "settings.lyrics.pip.close" = "화면 속 화면 닫기";
 "settings.lyrics.pip.credit_links" = "가사 제공자 정보 보기";
-"settings.lyrics.pip.disabled" = "Retrine 설정 → 가사에서 화면 속 화면 가사를 켠 후 Spotify를 다시 시작하세요.";
+"settings.lyrics.pip.disabled" = "모드 설정 → 화면 속 화면에서 가사를 켠 후 Spotify를 다시 시작하세요.";
 "settings.lyrics.pip.extras.note" = "가사 표시 설정과 언어별 규칙에 따라 사용 가능한 발음과 번역을 표시합니다. 화면 속 화면을 열어도 번역이나 AI 작업을 시작하지 않습니다.";
 "settings.lyrics.pip.failed" = "화면 속 화면을 시작할 수 없습니다. 이 기기 또는 Spotify의 현재 재생 세션에서 지원하지 않을 수 있습니다. Spotify를 화면에 둔 상태에서 다시 시도하세요.";
 "settings.lyrics.pip.fit.note" = "크기는 렌더링된 화면에서의 최대값입니다. 긴 텍스트는 줄바꿈하고 크기를 줄여 맞추며, 그래도 들어가지 않는 부분은 말줄임표로 표시합니다.";
@@ -1744,9 +1738,10 @@
 "settings.main.automix.title" = "AutoMix";
 "settings.main.entry.title" = "모드 설정";
 "settings.main.home.title" = "홈";
-"settings.main.home_library.title" = "홈 및 라이브러리";
+"settings.main.advanced.header" = "고급 및 정보";
+"settings.main.audio.header" = "오디오 및 재생";
 "settings.main.labs.title" = "실험실";
-"settings.main.library.title" = "라이브러리";
+"settings.main.look.header" = "모양 및 탐색";
 "settings.main.listening_stats.title" = "감상 통계";
 "settings.main.live_activity.title" = "실시간 현황";
 "settings.main.lock_screen.title" = "잠금 화면";
@@ -1754,12 +1749,18 @@
 "settings.main.mod.title" = "모드";
 "settings.main.player.title" = "플레이어";
 "settings.main.premium_ads_privacy.title" = "Premium, 광고 및 개인정보 보호";
-"settings.main.search.title" = "검색";
+"settings.main.screens.header" = "화면";
+"settings.main.search_library.title" = "검색 및 라이브러리";
 "settings.main.sing.title" = "노래방";
-"settings.main.spatial_voice.title" = "공간 음성";
+"settings.main.outside.header" = "Spotify 외부 및 기기";
+"settings.main.pip.title" = "화면 속 화면";
+"settings.main.privacy.header" = "개인정보 보호, 네트워크 및 다운로드";
+"settings.main.proxy.applied" = "프록시 적용됨";
+"settings.main.proxy.blocked" = "차단됨";
+"settings.main.proxy.waiting" = "잠금 해제 대기 중";
 "settings.main.tabbar.title" = "탭 막대";
 "settings.main.vibrations.title" = "진동";
-"settings.main.workshop.title" = "라이브러리 및 프리셋";
+"settings.main.wireguard.title" = "WireGuard 및 프록시";
 
 "settings.mod.backup.action.import_and_restart" = "가져오기 및 다시 시작";
 "settings.mod.backup.import_confirm.alert.message" = "현재 설정이 버전 %@에서 내보낸 파일의 설정으로 대체됩니다. 파일에 없는 설정은 기본값으로 복원되며, Spotify가 다시 시작됩니다.";
@@ -2580,7 +2581,8 @@
 "settings.pixie.transport.command_unsupported" = "지원되지 않는 명시적 오프라인 명령입니다";
 "settings.pixie.transport.not_verified" = "검증된 Spotify 트랜스포트가 없습니다. 먼저 기기 상태를 새로고침하세요.";
 "settings.pixie.transport.request_unanswered" = "Spotify가 요청에 응답하지 않았습니다";
-"settings.pixie.vitrine.send_log.subtitle" = "보고서, 동작, 다운로드 기록 및 Retrine 진단 정보";
+"settings.pixie.downloads.keywords" = "다운로드 오프라인 파일 진단 로그 보내기";
+"settings.pixie.downloads.title" = "Pixie 다운로드";
 
 "settings.player.artwork.header" = "아트워크";
 "settings.player.artwork_background.title" = "아트워크 배경";
@@ -2886,9 +2888,8 @@
 "settings.search.artists.keywords" = "아티스트 헤더 사진 바이오 정보 프로필";
 "settings.search.audio_effects.keywords" = "이퀄라이저 eq 이큐 베이스 고음 크로스피드 리버브 컴프레서 리미터 음향 효과";
 "settings.search.automix.keywords" = "오토믹스 크로스페이드 갭리스 트랜지션 믹스 automix";
-"settings.search.home.keywords" = "라이브러리 내 라이브러리 홈 페이지 그라데이션 그라디언트";
+"settings.search.home.keywords" = "홈 페이지 그라데이션 그라디언트";
 "settings.search.labs.keywords" = "실험실 실험 플래그 labs flags";
-"settings.search.library.keywords" = "내 라이브러리 필터 칩 정렬 그리드 격자 목록 컴팩트 보관함";
 "settings.search.listening_stats.keywords" = "통계 감상 기록 최다 재생 순위 연속 재생 차트";
 "settings.search.live_activity.keywords" = "다이내믹 아일랜드 잠금 화면 애플워치 카플레이 카드 액티비티 dynamic island lock screen apple watch carplay";
 "settings.search.lock_screen.keywords" = "잠금 화면 배경화면 움직이는 아트워크 가사 위젯 wallpaper widget";
@@ -2896,17 +2897,18 @@
 "settings.search.mod.keywords" = "정보 버전 업데이트 내보내기 가져오기 백업 진단";
 "settings.search.none" = "결과 없음";
 "settings.search.placeholder" = "검색";
-"settings.search.player.keywords" = "지금 재생 중 셔플 순서 섞기 반복 제스처 취침 타이머 재생 대기열 큐";
+"settings.search.pip.keywords" = "PiP 플로팅 가사 동영상";
+"settings.search.playback.keywords" = "취침 타이머 차단 아티스트 곡 무손실 가져오기 미리 불러오기";
+"settings.search.player.keywords" = "지금 재생 중 셔플 순서 섞기 반복 제스처 재생 대기열 큐";
 "settings.search.playlists.keywords" = "플레이리스트 재생목록 페이지 앨범 커버";
 "settings.search.premium_ads_privacy.keywords" = "광고 배너 차단 텔레메트리 추적 프라이버시 개인정보 스폰서";
 "settings.search.recent.clear" = "지우기";
 "settings.search.recent.header" = "최근 검색한 페이지";
-"settings.search.search.keywords" = "검색 둘러보기 카테고리 칩 탐색";
-"settings.search.sing.keywords" = "싱 가라오케 노래방 보컬 음성 제거 반주 보컬 컷";
+"settings.search.search_library.keywords" = "둘러보기 카테고리 필터 칩 정렬 격자 보관함 간결한 목록 캐러셀";
+"settings.search.sing.keywords" = "싱 가라오케 노래방 보컬 음성 제거 반주 공간 음향 헤드폰";
 "settings.search.spatial_voice.keywords" = "공간 음향 공간 오디오 서라운드 헤드 트래킹 헤드폰 모션";
 "settings.search.tabbar.keywords" = "내비게이션 바 탐색 탭 막대 하단 바 하단 탭";
 "settings.search.vibrations.keywords" = "햅틱 진동 햅틱 피드백 진동 세기";
-"settings.search.workshop.keywords" = "프리셋 헤드폰 autoeq 오토이큐 서체 폰트 비주얼라이저 다운로드 워크숍";
 
 "settings.search_tab.cards.header" = "카테고리 카드";
 "settings.search_tab.glass_cards.subtitle" = "각 카드를 고유 색상의 Liquid Glass로 표시합니다. 끄면 Spotify 기본 카드로 표시됩니다.";
@@ -3539,16 +3541,13 @@
 "settings.wireguard.version_unsupported" = "이 Spotify 버전은 WireGuard 전송 검증을 통과하지 않았습니다. 검증된 IPA로 변경한 후 연결을 활성화하세요.";
 "settings.wireguard.yes" = "예";
 
-"settings.workshop.audio_presets.title" = "오디오 프리셋";
-"settings.workshop.free_fonts.title" = "무료 서체";
-"settings.workshop.headphones.title" = "헤드폰";
-"settings.workshop.intro.native.v2" = "계정 없이도 Retrine에서 사용할 수 있는 내장 및 오픈 라이브러리입니다. 비주얼라이저는 재설계 UI를 선택하면 여기에 나타납니다. 헤드폰 보정은 AutoEq에서 가져오며, 무료 서체는 Google Fonts에서 가져옵니다. 프리셋은 파일로 공유할 수 있습니다.";
-"settings.workshop.intro.redesigned.v2" = "계정 없이도 Retrine에서 사용할 수 있는 내장 및 오픈 라이브러리입니다. 헤드폰 보정은 AutoEq에서 가져오며, 무료 서체는 Google Fonts에서 가져옵니다. 프리셋은 파일로 공유할 수 있습니다.";
-"settings.workshop.look.header" = "모양";
-"settings.workshop.sound.header" = "사운드";
-"settings.workshop.title" = "라이브러리 및 프리셋";
-"settings.workshop.type.header" = "서체";
-"settings.workshop.visualizers.title" = "비주얼라이저";
+"settings.playback.data" = "데이터 및 미리 불러오기";
+"settings.playback.local" = "로컬 오디오 및 무손실";
+"settings.playback.rules" = "재생";
+"settings.playback.timer_fade" = "취침 타이머 페이드 아웃";
+"settings.playback.title" = "재생 및 로컬 파일";
+"settings.karaoke.status.spatial" = "켬 · 공간 음성";
+"settings.vibrations.both" = "컨트롤 및 음악";
 "settings.translation.key.remove_failed.title" = "키를 삭제하지 못했습니다";
 "settings.translation.key.remove_failed.message" = "키체인에서 이 키를 삭제하지 못해 키가 아직 이 iPhone에 저장되어 있습니다. 다시 시도해 주세요.";
 "settings.mod.keychain.failed.title" = "키체인을 비우지 못했습니다";
