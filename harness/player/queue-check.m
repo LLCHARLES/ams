@@ -167,6 +167,22 @@ static void report(NSString *revision) {
     state.queueRevision = revision;
     for (id<SGPlayerStateObserver> observer in observers.allObjects) [observer playerStateDidReport:state];
 }
+
+@interface SGRPlayerQueueController : UITableViewController
+- (instancetype)initMusicStyle;
+@end
+@interface MusicQueueCheck : SGRPlayerQueueController
+@end
+@implementation MusicQueueCheck {
+    NSUInteger _passes;
+}
+- (void)viewDidLayoutSubviews {
+    // Bound a non-converging UIKit layout (nested or successive passes) without crashing the harness.
+    if (++_passes > 32) HARNESS_FAIL(@"offscreen empty queue layout did not settle");
+    [super viewDidLayoutSubviews];
+}
+@end
+
 static void run(void) {
     fetchedCover = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(8, 8)] imageWithActions:^(UIGraphicsImageRendererContext *context) {}];
     player = [QueuePlayer new];
@@ -296,6 +312,19 @@ static void run(void) {
         [table.delegate tableView:table willDisplayCell:prepared forRowAtIndexPath:path];
     spin(0.3);
     check(shown(path) == fetchedCover, @"redisplay of the prepared row retries and shows its failed cover");
+    // The closed Music page still receives Spotify's queue snapshots (the DJ may have no next track).
+    MusicQueueCheck *music = [[MusicQueueCheck alloc] initMusicStyle];
+    player.withoutQueueAPI = NO;
+    player.currentQueue.nextTracks = @[];
+    UITableView *closedTable = music.tableView;
+    closedTable.frame = CGRectMake(0, 0, 402, 446);
+    do {
+        [closedTable layoutIfNeeded];
+    } while (closedTable.layer.needsLayout);
+    UIView *footer = closedTable.tableFooterView;
+    check(!closedTable.window && CGRectGetMinY(footer.frame) > 0 &&
+          labelIn(footer, @"No songs are in the queue."),
+          @"the offscreen empty Music queue lays out its message below the sections and settles");
     printf("queue checks: %d of %d right -- PASS\n", checked, checked);
     fflush(stdout);
     exit(0);
