@@ -2689,6 +2689,7 @@
 "settings.player.music_icons.title" = "음악 앱 아이콘";
 "settings.player.new_slider.title" = "새로운 진행 슬라이더";
 "settings.player.no_clip.cover" = "커버 아트";
+"settings.player.no_clip.hold" = "배경 움직임 멈추기";
 "settings.player.no_clip.footer" = "전체 화면 커버는 클립처럼 커버가 화면을 가득 채웁니다. 저전력 모드와 동작 줄이기에서는 커버 아트를 유지합니다.";
 "settings.player.no_clip.full_screen" = "전체 화면 커버";
 "settings.player.no_clip.title" = "클립이 없는 노래";

@@ -233,6 +233,7 @@ void SGRHarnessRunShare(UIWindow *window, BOOL systemOnly);
     // The motion scenario's clip, at once, or HARNESS_CANVAS_DELAY seconds late.
     if ([self.request.URL.host isEqualToString:@"canvas.harness"]) {
         const char *file = getenv("HARNESS_CANVAS_FILE"), *delay = getenv("HARNESS_CANVAS_DELAY");
+        if ([self.request.URL.path hasPrefix:@"/square-"]) file = getenv("HARNESS_SQUARE_FILE");
         NSData *data = file ? [NSData dataWithContentsOfFile:@(file)] : nil;
         // HARNESS_CANVAS_FAILS=n: the first n requests for it fail on the way, as a download iOS canceled.
         static int failing = -1;
@@ -3272,7 +3273,18 @@ static void installSettingsWorkProbes(void) {
         choose(0);
         [self expect:fullScreen && !stored(SGRKeyPlayerAnimatedStill) && !stored(SGRKeyPlayerAnimatedVisualiser) && demo() && !hillsOn() && !stillShown() && !motionOn()
                 step:@"Visualizer to Full-screen cover to Cover art: one switch on at most, then none" detail:[NSString stringWithFormat:@"%@; %@", switches(), cardState()]];
+        SGModRow *hold = rowTitled(@"Keep background still");
+        SGRArtworkField *field = (SGRArtworkField *)firstOfClass(card(), @"SGRArtworkField");
+        BOOL offered = pathOf(hold) && !hold.defaultOn && !field.motionHeld;
+        SGSetEnabled(SGRKeyPlayerHoldNoClip, YES);
+        if (hold.changed) hold.changed(YES);
+        BOOL held = field.motionHeld;
+        SGSetEnabled(SGRKeyPlayerHoldNoClip, NO);
+        if (hold.changed) hold.changed(NO);
+        BOOL resumed = !field.motionHeld;
         choose(2);
+        [self expect:offered && held && resumed && !pathOf(hold)
+                step:@"Cover art can hold and release Fluid live; Visualizer has no still switch" detail:cardState()];
         [self expect:sg_bothOn == 0 step:@"the two switches never stored on together" detail:[NSString stringWithFormat:@"%lu writes left both on", (unsigned long)sg_bothOn]];
     });
     // A tap on the card shows the song as it is again; its button shows it without a clip.
@@ -3307,6 +3319,7 @@ static void installSettingsWorkProbes(void) {
     });
     step(0.8, ^{
         BOOL back = demo() && hillsOn();
+        choose(0);   // The upcoming track transitions exercise the Cover art fallback.
         pick(SGRPlayerBackgroundFluid);
         BOOL ended = !demo() && !hillsOn() && !motionOn();
         pick(SGRPlayerBackgroundAnimated);
@@ -3410,6 +3423,7 @@ static void installSettingsWorkProbes(void) {
     });
     // Deliver B only after C owns the card, then deliver C. No scheduler race decides their order.
     step(1, ^{
+        SGSetEnabled(SGRKeyPlayerHoldNoClip, YES);
         SGRHarnessHoldLookups(@"spotify:track:harnessB");
         setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/b-%d.mp4", getpid()].UTF8String, 1);
         lateImageB = serve(imageURI(@"bbbb"), solid(UIColor.blueColor), 0, NO);
@@ -3424,8 +3438,10 @@ static void installSettingsWorkProbes(void) {
         });
     });
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:harnessB") && pictureReady(lateImageB); }, ^{
+        SGRArtworkField *previewField = [card() valueForKey:@"_field"];
+        [self expect:previewField && !previewField.motionHeld step:@"pending preview lookup leaves Fluid moving" detail:cardState()];
         SGRHarnessHoldLookups(@"spotify:track:harnessC");
-        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/c-%d.mp4", getpid()].UTF8String, 1);
+        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/square-%d.mp4", getpid()].UTF8String, 1);
         serve(imageURI(@"cccc"), solid(UIColor.greenColor), 0.2, NO);
         [self playTrack:@"spotify:track:harnessC" image:imageURI(@"cccc")];
     });
@@ -3445,6 +3461,30 @@ static void installSettingsWorkProbes(void) {
               detail:[NSString stringWithFormat:@"card plays %@, the track's is %@", playing.lastPathComponent, fileC.lastPathComponent]];
         NSString *color = colorName([(UIImageView *)[card() valueForKey:@"_cover"] image]);
         [self expect:[color isEqualToString:@"green"] step:@"the current song's cover, not the preceding song's late blue image" detail:color];
+    });
+    when(^BOOL {
+        UIView *clip = firstOfClass(SGRPlayerShowingCover(), @"SGRPlayerMotionView");
+        return [(AVPlayer *)[clip valueForKey:@"player"] rate] > 0;
+    }, ^{
+        [self expect:SGRPlayerField() && !SGRPlayerField().motionHeld step:@"square clip in the cover leaves Fluid moving" detail:cardState()];
+        unsetenv("HARNESS_CANVAS");
+        SGRHarnessHoldLookups(@"spotify:track:noClip");
+        [self playTrack:@"spotify:track:noClip" image:imageURI(@"cccc")];
+    });
+    when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:noClip"); }, ^{
+        SGRHarnessDeliverLookups(@"spotify:track:noClip");
+    });
+    when(^BOOL { return SGRPlayerField().motionHeld && [(SGRArtworkField *)[card() valueForKey:@"_field"] motionHeld]; }, ^{
+        [self expect:!SGRPlayerMotionShowing() && !SGRPlayerVisualiserShowing() && !SGPlayerState().isPaused
+                step:@"confirmed miss holds the playing field and preview" detail:cardState()];
+        SGRHarnessHoldLookups(@"spotify:track:pending");
+        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/pending-%d.mp4", getpid()].UTF8String, 1);
+        [self playTrack:@"spotify:track:pending" image:imageURI(@"cccc")];
+    });
+    when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:pending"); }, ^{
+        [self expect:!SGRPlayerField().motionHeld step:@"next track releases the hold before its clip answer" detail:cardState()];
+        SGRHarnessDeliverLookups(@"spotify:track:pending");
+        SGSetEnabled(SGRKeyPlayerHoldNoClip, NO);
     });
     step(0.5, ^{
         checkScrollWork();
@@ -3575,7 +3615,7 @@ static void installSettingsWorkProbes(void) {
                                                forKey:SGKeyLastTrack];
         SGRHarnessClearTrack();
         pick(SGRPlayerBackgroundAnimated);
-        SGRPlayerMotionPreview(^{ latePreviewCallbacks++; });
+        SGRPlayerMotionPreview(^(BOOL found){ latePreviewCallbacks++; });
     });
     // Closed: the card does nothing more, whatever the player does.
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:lastG"); }, ^{
@@ -6660,7 +6700,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
     if ([scenario() isEqualToString:@"settings"]) {
         NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
         [store setInteger:SGRPlayerBackgroundAnimated forKey:SGRKeyPlayerArtworkBackground];
-        for (NSString *key in @[SGRKeyPlayerAnimatedStill, SGRKeyPlayerAnimatedVisualiser, SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat,
+        for (NSString *key in @[SGRKeyPlayerAnimatedStill, SGRKeyPlayerAnimatedVisualiser, SGRKeyPlayerHoldNoClip, SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat,
                                 SGKeyHideVideoSwitch, SGRKeyPlayerHeaderGlass, SGRKeyPlayerStarAdd]) [store removeObjectForKey:key];
     }
     [NSUserDefaults.standardUserDefaults setBool:([scenario() hasPrefix:@"lyric-line"] || [scenario() isEqual:@"preview-tap"] || [scenario() isEqual:@"preview-pending"]) forKey:SGRKeyPlayerLyricLine];

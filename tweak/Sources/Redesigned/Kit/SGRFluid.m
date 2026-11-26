@@ -9,7 +9,7 @@
 // height on a phone), measured from its middle with y up. Each copy is a square of the cover `side` units across,
 // centered `x`, `y` units from the middle, turning clockwise about its own center once in `turn` seconds; a copy with
 // an `orbit` is also carried clockwise about the middle once in that many seconds (the third rides the first's turn).
-// Each is opaque and drawn over the one before.
+// Each soft copy is composited over the one before.
 static const struct { CGFloat side, x, y; CFTimeInterval turn, orbit; } kCopy[] = {
     {1.4, 0, 0, 120, 0},
     {0.7, -0.25, 0.15, 70, 0},
@@ -159,13 +159,22 @@ NSArray<NSString *> *SGRFluidRendererNames(void) {
 }
 
 // `saturation` is the Saturation setting as a factor (1.1 its standard), `gain` the Brightness setting's on linear light.
-static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat radius, CGFloat saturation, CGFloat gain, CGFloat *lowerLight) {
+static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat relativeSigma, CGFloat saturation, CGFloat gain,
+                        CGFloat *lowerLight, CGFloat *expansion) {
     CGImageRef source = image.CGImage;
     if (!source) return nil;
     CIImage *input = [CIImage imageWithCGImage:source];
-    CGFloat scale = kBlurSide / MAX(input.extent.size.width, input.extent.size.height);
+    // Leave three standard deviations of transparent halo on each side. Reduce the
+    // cover resolution rather than clipping the halo for a small copy or a strong blur.
+    CGFloat side = MAX(1, MIN(kBlurSide, floor(510 / (1 + 6 * relativeSigma))));
+    CGFloat radius = side * relativeSigma, pad = ceil(3 * radius);
+    CGFloat scale = side / MIN(input.extent.size.width, input.extent.size.height);
     input = [input imageByApplyingTransform:CGAffineTransformMakeScale(scale, scale)];
-    CGRect extent = input.extent;
+    input = [input imageByApplyingTransform:CGAffineTransformMakeTranslation(side/2 - CGRectGetMidX(input.extent),
+                                                                             side/2 - CGRectGetMidY(input.extent))];
+    CGRect coverRect = CGRectMake(0, 0, side, side);
+    CGRect extent = CGRectInset(coverRect, -pad, -pad);
+    *expansion = extent.size.width / side;
     // The Music app's copy treatment before its blur: toward black, contrast about middle gray, then saturation about
     // the luma, clamped as its 8-bit texture holds it. One matrix and a bias: each output channel is
     // spread * keep * (s * own + (1 - s) * luma) + (1 - spread) / 2, spread the contrast (the saturation leaves a gray
@@ -183,7 +192,7 @@ static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat radius, CGFloat s
     CIImage *output = [[[[input imageByApplyingFilter:@"CIColorMatrix" withInputParameters:@{
             @"inputRVector": rows[0], @"inputGVector": rows[1], @"inputBVector": rows[2],
             @"inputBiasVector": [CIVector vectorWithX:bias Y:bias Z:bias W:0]}]
-        imageByApplyingFilter:@"CIColorClamp" withInputParameters:@{}] imageByClampingToExtent]
+        imageByApplyingFilter:@"CIColorClamp" withInputParameters:@{}] imageByCroppingToRect:coverRect]
         imageByApplyingFilter:@"CIGaussianBlur" withInputParameters:@{kCIInputRadiusKey: @(radius)}];
     static CIContext *context;
     static dispatch_once_t once;
@@ -206,12 +215,13 @@ static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat radius, CGFloat s
     CGImageRelease(cg);
     unsigned char *pixels = CGBitmapContextGetData(bitmap);
     CGFloat lowerSum = 0;
-    size_t lowerCount = 0, lowerRow = (size_t)floor(height * kLowerFrom);
+    size_t lowerCount = 0, lowerRow = pad + floor(side * kLowerFrom);
     for (size_t i = 0; i < width * height; i++) {
         unsigned char *p = pixels + i * 4;
+        if (!p[3]) continue;
         // After the blur: toward white, then the grade.
         CGFloat e[3];
-        for (int c = 0; c < 3; c++) e[c] = p[c] / 255.0 * (1 - kBackdropWhite) + kBackdropWhite;
+        for (int c = 0; c < 3; c++) e[c] = (CGFloat)p[c] / p[3] * (1 - kBackdropWhite) + kBackdropWhite;
         backdropGrade(e);
         // The lowest channel taken further down by kBackdropDepth of the spread (an orange's blue, a teal's red).
         CGFloat lo = MIN(e[0], MIN(e[1], e[2])), hi = MAX(e[0], MAX(e[1], e[2]));
@@ -224,12 +234,12 @@ static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat radius, CGFloat s
         }
         CGFloat light = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
         CGFloat cap = contrast && light > kCeilingContrast ? kCeilingContrast / light : 1;
-        if (i / width >= lowerRow) { lowerSum += light * cap; lowerCount++; }
+        if (lowerLight && i / width >= lowerRow && i / width < pad + side &&
+            i % width >= pad && i % width < pad + side) { lowerSum += light * cap; lowerCount++; }
         for (int c = 0; c < 3; c++) {
             CGFloat v = MIN(1, rgb[c] * cap);
-            p[c] = floor(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055));
+            p[c] = lround(p[3] * (v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1 / 2.4) - 0.055));
         }
-        p[3] = 255;
     }
     // 0 for a black lower part, 1 for one at kCeiling or lighter.
     if (lowerLight) *lowerLight = lowerCount ? MIN(1, lowerSum / lowerCount / kCeiling) : 0;
@@ -286,6 +296,7 @@ NSData *SGRFluidGradeTable(int side) {
     CALayer *_canvas;   // the copies, shown a quarter larger while held still (kHeldZoom)
     CALayer *_orbits[kCopies];   // each copy's journey about the middle, for those with an orbit
     CALayer *_copies[kCopies];
+    CGFloat _expansion[2];   // padded bitmap / original square, large and small
     CAGradientLayer *_shade;
     CGFloat _lowerLight;   // how light the shown cover's lower part is, 0 to 1 (blurred())
     UIImage *_source;
@@ -486,15 +497,22 @@ NSData *SGRFluidGradeTable(int side) {
         if (_turning) [self stop];
         CGFloat half = MAX(visible.size.width, visible.size.height) / 2;
         for (int i = 0; i < kCopies; i++) {
-            CGFloat side = round(2 * half * kCopy[i].side);
             _orbits[i].bounds = CGRectMake(0, 0, 2 * half, 2 * half);
             _orbits[i].position = CGPointMake(CGRectGetMidX(visible), CGRectGetMidY(visible));
-            _copies[i].bounds = CGRectMake(0, 0, side, side);
             _copies[i].position = CGPointMake(half * (1 + kCopy[i].x * _warp), half * (1 - kCopy[i].y * _warp));
         }
         [self updateCopies];
     }
+    [self sizeCopies];
     [CATransaction commit];
+}
+
+- (void)sizeCopies {
+    CGFloat longer = MAX(_laidOutFor.size.width, _laidOutFor.size.height);
+    for (int i = 0; i < kCopies; i++) {
+        CGFloat side = round(longer * kCopy[i].side) * _expansion[i != 0];
+        _copies[i].bounds = CGRectMake(0, 0, side, side);
+    }
 }
 
 - (void)setArtwork:(UIImage *)image animated:(BOOL)animated {
@@ -511,15 +529,15 @@ NSData *SGRFluidGradeTable(int side) {
     CGFloat longer = MAX(visible.size.width, visible.size.height);
     if (longer < 1) longer = MAX(UIScreen.mainScreen.bounds.size.width, UIScreen.mainScreen.bounds.size.height);
     CGFloat points = kBackdropSigma * SGRFluidValue(SGRFluidBlur) / SGRFluidLimitsOf(SGRFluidBlur).standard;
-    CGFloat radius = points * kBlurSide / (kCopy[0].side * longer), saturation = SGRFluidValue(SGRFluidSaturation) / 100.0;
+    CGFloat saturation = SGRFluidValue(SGRFluidSaturation) / 100.0;
     CGFloat gain = SGRFluidValue(SGRFluidBrightness) / 100.0;
     __weak SGRFluidLayer *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        CGFloat lowerLight = 0, ignored = 0;
-        UIImage *blur = blurred(image, contrast, radius, saturation, gain, &lowerLight);
+        CGFloat lowerLight = 0, largeScale = 0, smallScale = 0;
+        UIImage *blur = blurred(image, contrast, points / (kCopy[0].side * longer), saturation, gain, &lowerLight, &largeScale);
         // The smaller copies are half the large one's size, so their cover is blurred twice as far for the same blur
         // on screen, as the Music app blurs the whole square at once.
-        UIImage *small = blurred(image, contrast, radius * kCopy[0].side / kCopy[1].side, saturation, gain, &ignored);
+        UIImage *small = blurred(image, contrast, points / (kCopy[1].side * longer), saturation, gain, NULL, &smallScale);
         UIImage *cover = needsCover ? upright(image) : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             SGRFluidLayer *layer = weakSelf;
@@ -533,7 +551,11 @@ NSData *SGRFluidGradeTable(int side) {
             layer->_cover = cover;
             [layer->_gpu setCover:cover.CGImage animated:fade];
             // A picture the blur cannot read (no CGImage) keeps the copies showing the last cover, not black.
-            if (blur) [layer show:blur small:small ?: blur lowerLight:lowerLight animated:fade];
+            if (blur) {
+                layer->_expansion[0] = largeScale;
+                layer->_expansion[1] = small ? smallScale : largeScale;
+                [layer show:blur small:small ?: blur lowerLight:lowerLight animated:fade];
+            }
             layer->_awaitingCoveredBlur = NO;
             [layer setHidden:layer->_requestedHidden];
         });
@@ -553,6 +575,7 @@ NSData *SGRFluidGradeTable(int side) {
     [CATransaction commit];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
+    [self sizeCopies];
     for (int i = 0; i < kCopies; i++) {
         if (animated) {
             CATransition *fade = [CATransition animation];

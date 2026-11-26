@@ -345,6 +345,9 @@ void SGRPlayerStillChanged(void);
 // it on switches the full-screen cover off (the last one switched on wins); the open player follows at once.
 #define SGRKeyPlayerAnimatedVisualiser @"spotifyglass.redesign.player.animatedVisualizer"
 BOOL SGRPlayerAnimatedVisualiserOn(void);
+#define SGRKeyPlayerHoldNoClip @"spotifyglass.redesign.player.holdNoClip"
+BOOL SGRPlayerNoClipHoldEnabled(void);
+BOOL SGRPlayerTrackHasNoClip(void);
 void SGRPlayerAnimatedVisualiserChanged(void);
 // With both switches saved on, the full-screen cover stays and the Visualizer switch goes off. Called at start and on
 // every pass of SGRPlayerVisualiserUpdate; the fallback is never wanted while the cover is on.
@@ -386,9 +389,9 @@ BOOL SGRPlayerCoverHidden(void);
 // for the Player page's showcase. It plays only in a window, like the player's. While the player has no clip
 // it is the playing track's, which the page looks up itself, by the player's sources and Low Data Mode, into
 // the store the player reads too: nil until it is in, and with `arrived` given the lookup starts, and
-// `arrived` runs once on the main queue when a call would return it (never when nothing is found, or the
-// track changed). Without `arrived` it only answers with a clip already in.
-UIView *SGRPlayerMotionPreview(void (^arrived)(void));
+// `arrived` reports a ready clip or a confirmed miss on main, never for a superseded request.
+// Without it the preview only answers with a clip already in.
+UIView *SGRPlayerMotionPreview(void (^arrived)(BOOL found));
 // End the page's preview only: cancel its lookup, invalidate late posters, and release its decoder.
 // Shared transfers still needed by the real player are not cancelled.
 void SGRPlayerMotionPreviewStop(void);

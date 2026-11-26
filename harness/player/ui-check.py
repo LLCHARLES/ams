@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix="player-ui-") as work:
                         "-framework", "AVFoundation", "-framework", "CoreMedia",
                         "-framework", "CoreVideo", "-o", str(work / "settings-clip")], check=True)
         subprocess.run([str(work / "settings-clip"), str(work / "clip.mp4")], check=True)
+        subprocess.run([str(work / "settings-clip"), str(work / "square.mp4"), "square"], check=True)
     udid = args.udid
     if not udid:
         runtimes = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "runtimes", "-j"]))
@@ -47,7 +48,8 @@ with tempfile.TemporaryDirectory(prefix="player-ui-") as work:
                 subprocess.run(["xcrun", "simctl", "ui", udid, option, os.environ[name]], check=True)
         for scenario in args.scenarios:
             env = dict(os.environ, SIMCTL_CHILD_HARNESS_SCENARIO=scenario,
-                       SIMCTL_CHILD_HARNESS_CANVAS_FILE=str(work / "clip.mp4"))
+                       SIMCTL_CHILD_HARNESS_CANVAS_FILE=str(work / "clip.mp4"),
+                       SIMCTL_CHILD_HARNESS_SQUARE_FILE=str(work / "square.mp4"))
             launch = subprocess.Popen(["xcrun", "simctl", "launch", "--console-pty", udid,
                                        "com.vojta.playerharness"], stdout=subprocess.PIPE,
                                       stderr=subprocess.STDOUT, text=True, env=env)

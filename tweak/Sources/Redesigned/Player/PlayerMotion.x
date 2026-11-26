@@ -1326,6 +1326,10 @@ static NSString *sg_track;   // the track playing
 static NSString *sg_shown;   // the track sg_motion is the clip of
 static NSUInteger sg_begun;   // counts the walks begun, so a poster read for an earlier one is dropped
 static NSString *sg_noClip;   // the track whose walk found no clip, until another walk begins
+
+BOOL SGRPlayerTrackHasNoClip(void) {
+    return [sg_noClip isEqualToString:SGURIString(SGPlayerState().track.URI)];
+}
 static NSString *sg_stillOf;   // the identity of the cover sg_motion shows as a still; nil while it is a clip or none
 // The clip sg_motion plays and its poster, for the Player page's showcase (SGRPlayerMotionPreview).
 static NSURL *sg_motionFile;
@@ -1497,7 +1501,7 @@ static UIView *previewOf(NSURL *file, UIImage *poster) {
 static NSString *sg_previewTrack;
 static NSURL *sg_previewFile;
 static UIImage *sg_previewPoster;
-static void (^sg_previewArrived)(void);
+static void (^sg_previewArrived)(BOOL);
 static SGMotionTicket *sg_previewTicket;
 static BOOL sg_previewLooking;
 static NSUInteger sg_previewGeneration;
@@ -1517,7 +1521,7 @@ void SGRPlayerMotionPreviewStop(void) {
     sg_previewViewFile = nil;
 }
 
-UIView *SGRPlayerMotionPreview(void (^arrived)(void)) {
+UIView *SGRPlayerMotionPreview(void (^arrived)(BOOL)) {
     SGShownTrack *shown = SGShownTrackNow();
     NSString *track = shown.uri;
     if (![track isEqualToString:sg_previewTrack]) {
@@ -1541,14 +1545,16 @@ UIView *SGRPlayerMotionPreview(void (^arrived)(void)) {
         // Nothing found is not kept: the page asks again the next time it shows Animated.
         if (!file) {
             sg_previewLooking = NO;
+            void (^done)(BOOL) = sg_previewArrived;
             sg_previewArrived = nil;
+            if (done) done(NO);
             return;
         }
         SGMotionPoster(file, ^(UIImage *poster) {
             if (generation != sg_previewGeneration) return;
             sg_previewLooking = NO;
             sg_previewTicket = nil;
-            void (^done)(void) = sg_previewArrived;
+            void (^done)(BOOL) = sg_previewArrived;
             sg_previewArrived = nil;
             if (!poster || poster.size.width <= 0) {
                 return;
@@ -1556,7 +1562,7 @@ UIView *SGRPlayerMotionPreview(void (^arrived)(void)) {
             sg_previewFile = file;
             sg_previewPoster = poster;
             SGLog(@"redesign player: the Player page's clip from %@, %@", source, file.lastPathComponent);
-            if (done) done();
+            if (done) done(YES);
         });
     });
     return nil;
@@ -1769,7 +1775,10 @@ static BOOL beginTrack(NSString *track) {
     sg_begun++;
     BOOL wanted = consumerVisible() && clipWanted();
     // Restarting while hidden or hot does not start a lookup or invalidate this track's answer.
-    if (wanted || ![sg_noClip isEqualToString:track]) sg_noClip = nil;
+    if (sg_noClip && (wanted || ![sg_noClip isEqualToString:track])) {
+        sg_noClip = nil;
+        SGRPlayerHoldField();
+    }
     // The Visualizer standing in for the last track's missing clip goes with the lookup this walk starts.
     SGRPlayerVisualiserUpdate();
     if (wanted && [track isEqualToString:sg_shown]) return YES;
@@ -1883,11 +1892,12 @@ void SGPlayerMenuSetAnimatedArtwork(BOOL on) {
         return beginTrack(uri);
     } found:^(NSString *uri, NSURL *file) {
         if (!consumerVisible()) return;
+        sg_noClip = file ? nil : uri;
+        SGRPlayerHoldField();
         if (file) {
             show(uri, file);
             return;
         }
-        sg_noClip = uri;
         if (!showStill()) clear(YES);
         SGRPlayerVisualiserUpdate();
     }];

@@ -13,7 +13,7 @@
 typedef NS_ENUM(NSInteger, SGRFluidSetting) {
     SGRFluidSpeed,        // percent of the turns' speed
     SGRFluidWarp,         // percent of how far apart the copies turn and how much the upper three show
-    SGRFluidBlur,         // the blur's strength, 1.25 px of radius each on the 128 px cover
+    SGRFluidBlur,         // the on-screen Gaussian radius, relative to the standard setting
     SGRFluidSaturation,   // percent
     SGRFluidBrightness,   // percent, on linear light
     SGRFluidGrain,        // percent of the Smooth renderer's grain (SGRFluidGPU.h); 100 is its standard dither

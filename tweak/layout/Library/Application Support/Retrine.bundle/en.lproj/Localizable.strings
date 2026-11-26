@@ -2679,6 +2679,7 @@
 "settings.player.no_clip.cover" = "Cover art";
 "settings.player.no_clip.footer" = "Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.";
 "settings.player.no_clip.full_screen" = "Full-screen cover";
+"settings.player.no_clip.hold" = "Keep background still";
 "settings.player.no_clip.title" = "Song without a clip";
 "settings.player.not_playing" = "Not Playing";
 "settings.player.now_playing_bar.title" = "Now playing bar";

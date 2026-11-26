@@ -125,12 +125,18 @@ NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
              SGL(@"settings.player.background.visualizer", @"Visualizer")];
 }
 
+BOOL SGRPlayerNoClipHoldEnabled(void) {
+    return SGHidden(SGRKeyPlayerHoldNoClip) && SGRPlayerBackground() == SGRPlayerBackgroundAnimated &&
+        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn();
+}
+
 // A paused song holds the colors still, the way it rests the cover (PlayerArtwork.x), and so does what lies over
 // the field: an animated artwork's clip, which covers it (PlayerMotion.x), or the Visualizer's hills, which are
 // the one thing moving.
 static BOOL fieldHeld(void) {
     return !SGRPlayerIsVisible() || SGRPlayerLandscapeCovers(sg_field.window) || SGPlayerState().isPaused ||
-        SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing();
+        SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing() ||
+        (SGRPlayerNoClipHoldEnabled() && SGRPlayerTrackHasNoClip());
 }
 
 void SGRPlayerHoldField(void) {

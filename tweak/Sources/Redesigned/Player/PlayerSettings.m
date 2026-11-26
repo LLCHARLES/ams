@@ -218,7 +218,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     NSString *_demoText;
     CGFloat _chipWidth, _chipHeight, _titleHeight, _artistHeight, _timeHeight;
     CGFloat _position;
-    BOOL _paused, _active, _demo;
+    BOOL _paused, _active, _demo, _previewMiss;
     BOOL _hideShuffle, _hideRepeat, _hideVideo;
     NSString *_track;      // the shown track
     NSString *_artworkOf;  // the last track whose cover the card asked for
@@ -493,7 +493,8 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
 - (void)holdField {
     // The visualizer still shows the field through its hills; a backdrop or full-screen still does not.
     _field.covered = !_active || _backdrop != nil || !_still.hidden || _motion != nil;
-    _field.motionHeld = !_active || _paused || _motion != nil || _visualiser != nil || _backdrop != nil || !_still.hidden || (_demo && !noClipMotionAllowed());
+    _field.motionHeld = !_active || _paused || _motion != nil || _visualiser != nil || _backdrop != nil || !_still.hidden ||
+        (_demo && !noClipMotionAllowed()) || ((_demo || _previewMiss) && SGRPlayerNoClipHoldEnabled());
 }
 
 - (BOOL)demoAvailable {
@@ -554,10 +555,16 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     NSString *track = _track;
     NSUInteger generation = _generation;
     __weak SGRPlayerPreview *weakSelf = self;
-    void (^arrived)(void) = !self.window || _demo ? nil : ^{
+    _previewMiss = NO;
+    void (^arrived)(BOOL) = !self.window || _demo ? nil : ^(BOOL found){
         SGRPlayerPreview *preview = weakSelf;
         if (!preview || !preview->_active || preview->_generation != generation || ![SGShownTrackNow().uri isEqualToString:track]) return;
-        if (!preview->_motion && !preview->_demo && SGRPlayerBackground() == SGRPlayerBackgroundAnimated) [preview reloadBackgroundAnimated:YES];
+        if (preview->_motion || preview->_demo || SGRPlayerBackground() != SGRPlayerBackgroundAnimated) return;
+        if (found) [preview reloadBackgroundAnimated:YES];
+        else {
+            preview->_previewMiss = YES;
+            [preview holdField];
+        }
     };
     // Black or the photo lies over a field made as the artwork's last choice, as in the player.
     SGRPlayerBackgroundKind look = SGRPlayerArtworkBackground();
@@ -989,6 +996,8 @@ SGModSection *SGRPlayerButtonsSection(void) {
 // A choice of Song without a clip is shown on the card at once.
 - (void)noClipPicked {
     [self.preview setDemo:YES];
+    [self refreshVisibility];
+    [self.tableView reloadData];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
@@ -1148,10 +1157,17 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     }, ^(NSInteger index) {
         if (index < SGRNoClipCover || index > SGRNoClipVisualiser) return;
         pickNoClip(index);
+        SGRPlayerHoldField();
         [weakPlayerPage noClipPicked];
     });
     noClip.visible = lowData.visible;
     noClip.searchIdentifier = @"spotifyglass.redesign.player.noClip";
+    SGModRow *holdNoClip = SGOptionRow(SGL(@"settings.player.no_clip.hold", @"Keep background still"), nil, SGRKeyPlayerHoldNoClip);
+    holdNoClip.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated && noClipStored() == SGRNoClipCover; };
+    holdNoClip.changed = ^(BOOL on) {
+        SGRPlayerHoldField();
+        [weakPlayerPage.preview holdField];
+    };
     SGModRow *visualiserStyle = SGRVisualiserStyleRow();
     visualiserStyle.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundVisualiser; };
 
@@ -1252,7 +1268,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
 
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:
         SGSection(nil, @[behind, choosePhoto]),
-        SGNotedSection(nil, @[sources, noClip, lowData],
+        SGNotedSection(nil, @[sources, noClip, holdNoClip, lowData],
                        SGL(@"settings.player.no_clip.footer", @"Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.")),
         SGSection(nil, @[visualiserStyle]),
         SGNotedSection(nil, fluid, SGL(@"settings.player.fluid.footer", @"Smooth lets the cover flow and carries the next song's cover in through it, "

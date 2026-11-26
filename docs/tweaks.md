@@ -2683,7 +2683,8 @@ kept under `spotifyglass.visualizer.shuffle.home` and comes back when shuffle is
 while hidden, backgrounded, in Low Power Mode, under serious heat (unless Ignore heat warnings,
 `spotifyglass.visualizer.ignoreHeat`, off) or during player transitions,
 and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`). Artwork sources, Song without a clip (one
-choice: Cover art, Full-screen cover or Visualizer, written through the two keys below) and Download in Low Data Mode
+choice: Cover art, Full-screen cover or Visualizer, written through the two keys below; Cover art also offers
+Keep background still, off by default) and Download in Low Data Mode
 appear while Animated is chosen (Visualizer when there's no clip, `spotifyglass.redesign.player.animatedVisualizer`, off: once the track's clip lookup has answered
 none, the Visualizer stands where the clip would be, taken down by a later clip or a new track, the ordinary cover
 under Low Power Mode, Reduce Motion or the heat stand-down; it and the full-screen cover turn each other off, the

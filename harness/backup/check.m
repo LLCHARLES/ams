@@ -80,7 +80,7 @@ static void runChecks(void) {
             @"spotifyglass.lyrics.pip.pronunciation.size":@16, @"spotifyglass.lyrics.pip.pronunciation.weight":@0,
             @"spotifyglass.lyrics.pip.translation.size":@48, @"spotifyglass.lyrics.pip.translation.weight":@3,
             @"spotifyglass.redesign.fluid.renderer":@1, @"spotifyglass.redesign.haptics.controls.strength":@2,
-            @"spotifyglass.redesign.liveActivity":@YES, @"spotifyglass.flag.bad":@NO};
+            SGRKeyPlayerHoldNoClip:@YES, @"spotifyglass.redesign.liveActivity":@YES, @"spotifyglass.flag.bad":@NO};
         NSMutableDictionary *snapshot = [choices mutableCopy];
         [snapshot addEntriesFromDictionary:install];
         snapshot[@"spotifyglass.unknown.unschematized"] = @[];
