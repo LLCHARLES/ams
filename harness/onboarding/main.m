@@ -108,6 +108,7 @@ static int checkInstallWarnings(void) {
 
 @interface Scene : UIResponder <UIWindowSceneDelegate>
 @property (nonatomic, strong) UIWindow *window;
+@property BOOL checkStarted;
 @end
 
 @implementation Scene
@@ -128,14 +129,7 @@ static int checkInstallWarnings(void) {
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.rootViewController = home;
     [self.window makeKeyAndVisible];
-    if ([arguments containsObject:@"kept-cleanup"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ CheckKeptCleanup(self.window); });
-        return;
-    }
-    if ([arguments containsObject:@"sponsorblock-check"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ CheckSponsorBlockScreens(self.window); });
-        return;
-    }
+    if ([arguments containsObject:@"kept-cleanup"] || [arguments containsObject:@"sponsorblock-check"]) return;
 
     if ([arguments containsObject:@"environment"]) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"spotifyglass.environment.told"];
@@ -170,6 +164,17 @@ static int checkInstallWarnings(void) {
                 }
             }
         });
+    }
+}
+
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    if (self.checkStarted) return;
+    self.checkStarted = YES;
+    NSArray *arguments = NSProcessInfo.processInfo.arguments;
+    if ([arguments containsObject:@"kept-cleanup"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CheckKeptCleanup(self.window); });
+    } else if ([arguments containsObject:@"sponsorblock-check"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CheckSponsorBlockScreens(self.window); });
     }
 }
 

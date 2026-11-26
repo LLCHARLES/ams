@@ -24,6 +24,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleExecutable</key><string>Check</string>
+<key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIdentifier</key><string>com.retrine.settings-bars-check</string>
 <key>CFBundleVersion</key><string>1</string>
 <key>UIApplicationSceneManifest</key><dict>
@@ -36,4 +37,16 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 codesign -f -s - "$APP" >/dev/null 2>&1
-"$APP/Contents/MacOS/Check" -AppleLanguages '(en)'
+# Launch the bundle through Launch Services so Catalyst gets a scene request,
+# not a bare executable with an AppKit launch pending. open -W waits for exit
+# but does not return the app's exit status: require this launch's verdict.
+log=$(mktemp "$TMPDIR/launch.XXXXXX")
+trap 'rm -f "$log"' EXIT
+status=0
+open -n -W -F --env "CFFIXED_USER_HOME=$CFFIXED_USER_HOME" --env "TMPDIR=$TMPDIR" \
+    --stderr "$log" "$APP" --args -AppleLanguages '(en)' || status=$?
+cat "$log"
+if [ "$status" -ne 0 ] || ! grep -Fxq '[settings-bars] ok' "$log"; then
+    echo "[harness] FAIL settings-bars: open status $status, no successful run" >&2
+    exit 1
+fi

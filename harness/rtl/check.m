@@ -133,8 +133,8 @@ static void checkMicSlider(UIView *host, void (^then)(void)) {
     SGRSingButton *mic = [[SGRSingButton alloc] initWithFrame:CGRectMake(300, 400, 44, 44)];
     [host addSubview:mic];
     [mic layoutIfNeeded];
-    [mic performSelector:@selector(showPanel)];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{
         NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
         findViews(mic, UISlider.class, sliders);
         HARNESS_CHECK(sliders.count == 1);
@@ -168,7 +168,9 @@ static void checkMicSlider(UIView *host, void (^then)(void)) {
         CGFloat middle = CGRectGetMidY(box) * scale;
         if (greenY / greenCount <= middle) HARNESS_FAIL(@"mic slider: the fill sits above the middle (%.0f over %.0f)", greenY / greenCount, middle);
         then();
-    });
+    }];
+    [mic performSelector:@selector(showPanel)];
+    [CATransaction commit];
 }
 
 static void checkRecapBar(UIView *host) {
@@ -253,19 +255,29 @@ static void checkMarquee(UIView *host) {
 }
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow *window;
+@end
+@implementation AppDelegate
 @end
 
-@implementation AppDelegate
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
-    // The launch arguments are what make the direction; a run that did not get it checks nothing.
-    BOOL running = application.userInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-    if (running != rtl) HARNESS_FAIL(@"asked for %@, running %@", rtl ? @"rtl" : @"ltr", running ? @"rtl" : @"ltr");
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+@interface RTLScene : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@property BOOL started;
+@end
+
+@implementation RTLScene
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.rootViewController = [UIViewController new];
     self.window.rootViewController.view.backgroundColor = UIColor.blackColor;
     [self.window makeKeyAndVisible];
+}
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    if (self.started) return;
+    self.started = YES;
+    rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
+    // The launch arguments are what make the direction; a run that did not get it checks nothing.
+    BOOL running = UIApplication.sharedApplication.userInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    if (running != rtl) HARNESS_FAIL(@"asked for %@, running %@", rtl ? @"rtl" : @"ltr", running ? @"rtl" : @"ltr");
     UIView *host = self.window.rootViewController.view;
     dispatch_async(dispatch_get_main_queue(), ^{
         checkGlowSwitch(host);
@@ -277,16 +289,19 @@ static void checkMarquee(UIView *host) {
         checkRecapTaps(host);
         checkMarquee(host);
         checkMicSlider(host, ^{
-            NSLog(@"[harness] PASS %@", rtl ? @"rtl" : @"ltr");
+            fprintf(stderr, "[harness] PASS %s\n", rtl ? "rtl" : "ltr");
             exit(0);
         });
     });
-    return YES;
 }
 @end
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+        fputs("[harness] RTLCheck entered main\n", stderr);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 180 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            HARNESS_FAIL(@"did not complete scene activation and direction checks");
+        });
         return UIApplicationMain(argc, argv, nil, NSStringFromClass(AppDelegate.class));
     }
 }

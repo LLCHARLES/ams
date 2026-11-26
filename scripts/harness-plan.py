@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parent.parent
 TWEAK = "tweak/Sources"
 
 # CI names, commands and Theos requirements; ``dir`` is the harness directory.
+# simulator marks entries that launch simulator apps (or names their opt-in flag).
 # Explicit weights estimate CI minutes. Mutation checks prove a check catches its
 # bug while it is written; they run by hand, not on every push.
 HARNESSES = [
@@ -40,7 +41,7 @@ HARNESSES = [
      "run": "bash harness/data-migration/build.sh"},
     {"name": "Unavailable clip storage", "dir": "data-migration", "theos": True,
      "run": "bash harness/data-migration/clip-unavailable.sh"},
-    {"name": "Page zoom", "dir": "page-zoom", "theos": True, "weight": 8,
+    {"name": "Page zoom", "dir": "page-zoom", "theos": True, "weight": 8, "simulator": True,
      "run": "python3 harness/page-zoom/check.py"},
     {"name": "AutoMix facts", "dir": "automix",
      "run": "sh harness/automix/check.sh"},
@@ -50,10 +51,10 @@ HARNESSES = [
      "run": "bash harness/album-counts/check.sh"},
     {"name": "Album cover", "dir": "album", "theos": True, "weight": 5,
      "run": "sh harness/album/cover-check.sh"},
-    {"name": "Header decoder suspension", "dir": "album", "theos": True, "weight": 19,
+    {"name": "Header decoder suspension", "dir": "album", "theos": True, "weight": 19, "simulator": True,
      "builders": ["harness/album/build.sh", "harness/artist/build.sh"],
      "run": "bash harness/album/motion-visibility.sh"},
-    {"name": "Album faces and row more", "dir": "album", "theos": True, "weight": 32,
+    {"name": "Album faces and row more", "dir": "album", "theos": True, "weight": 32, "simulator": True,
      "run": "sh harness/album/build.sh && sh harness/album/faces-more-check.sh"},
     {"name": "Appearance accent", "dir": "appearance-accent", "theos": True,
      "run": "bash harness/appearance-accent/check.sh"},
@@ -115,7 +116,7 @@ HARNESSES = [
      "run": "python3 harness/liveprog-guard/run.py"},
     {"name": "Gesture hold speed", "dir": "gesture-hold",
      "run": "sh harness/gesture-hold/check.sh"},
-    {"name": "Head gestures", "dir": "head-gestures",
+    {"name": "Head gestures", "dir": "head-gestures", "simulator": "HEAD_GESTURES_SIM",
      "run": "sh harness/head-gestures/build.sh && harness/head-gestures/build/head-gestures"},
     {"name": "Keyboard commands", "dir": "keyboard-commands",
      "run": "sh harness/keyboard-commands/build.sh"},
@@ -163,7 +164,7 @@ HARNESSES = [
      "run": "sh harness/player/title-notification-check.sh"},
     {"name": "Player repeat transitions", "dir": "player",
      "run": "sh harness/player/repeat-check.sh"},
-    {"name": "Player lyrics layout", "dir": "player", "theos": True, "weight": 24,
+    {"name": "Player lyrics layout", "dir": "player", "theos": True, "weight": 24, "simulator": True,
      "run": "sh harness/player/lyrics-layout-check.sh"},
     {"name": "Player Connect volume", "dir": "player", "theos": True,
      "run": "sh harness/player/volume-check.sh"},
@@ -189,17 +190,17 @@ HARNESSES = [
      "run": "sh harness/player-refinements/check.sh"},
     {"name": "Player upcoming tracks", "dir": "player",
      "run": "sh harness/player/upcoming-tracks-check.sh"},
-    {"name": "Player settings", "dir": "player", "theos": True, "weight": 15,
+    {"name": "Player settings", "dir": "player", "theos": True, "weight": 15, "simulator": True,
      "run": "sh harness/player/settings-check.sh"},
-    {"name": "Player visualizer shuffle and heat", "dir": "player", "theos": True, "weight": 9,
+    {"name": "Player visualizer shuffle and heat", "dir": "player", "theos": True, "weight": 9, "simulator": True,
      "run": "python3 harness/player/ui-check.py shuffle heat"},
-    {"name": "Player AutoMix UI", "dir": "player", "theos": True, "weight": 11,
+    {"name": "Player AutoMix UI", "dir": "player", "theos": True, "weight": 11, "simulator": True,
      "run": "sh harness/player/automix-check.sh"},
     {"name": "Preferences and counters", "dir": "prefs",
      "run": "sh harness/prefs/check.sh"},
     {"name": "Radio modes", "dir": "radio-modes",
      "run": "sh harness/radio-modes/build.sh"},
-    {"name": "Right-to-left layout", "dir": "rtl", "theos": True, "weight": 8,
+    {"name": "Right-to-left layout", "dir": "rtl", "theos": True, "weight": 8, "simulator": True,
      "run": "sh harness/rtl/check.sh"},
     {"name": "Song audio retention", "dir": "song-audio",
      "run": "sh harness/song-audio/build.sh"},
@@ -215,7 +216,7 @@ HARNESSES = [
      "run": "sh harness/spicy-lyrics/build.sh"},
     {"name": "SponsorBlock", "dir": "sponsorblock",
      "run": "sh harness/sponsorblock/build.sh"},
-    {"name": "SponsorBlock screens", "dir": "onboarding", "weight": 12,
+    {"name": "SponsorBlock screens", "dir": "onboarding", "weight": 12, "simulator": True,
      "run": "sh harness/onboarding/sponsorblock-check.sh"},
     {"name": "UI refinements album menu", "dir": "ui-refinements", "theos": True,
      "run": "sh harness/ui-refinements/menu-check.sh"},
@@ -1104,6 +1105,91 @@ def run_harness(command):
                 signal.signal(sig, handler)
 
 
+def crash_summary(report):
+    def text(*fields):
+        # Only scalar diagnostic fields, on one line; never serialize report objects.
+        parts = [str(f) for f in fields if isinstance(f, (str, int)) and str(f)]
+        return " ".join(" ".join(parts).split())[:512] or "(not recorded)"
+
+    exc = report.get("exception", {})
+    reason = report.get("exceptionReason", {})
+    objc_reason = reason.get("composed_message") if isinstance(reason, dict) else reason
+    term = report.get("termination", {})
+    lines = ["  Process: " + text(report.get("procName")),
+             "  Exception: " + text(exc.get("type"), exc.get("signal")),
+             "  Reason: " + text(objc_reason, exc.get("message"), exc.get("subtype"), exc.get("codes")),
+             "  Termination: " + text(term.get("namespace"), term.get("code"), term.get("indicator"),
+                                      *term.get("reasons", []))]
+    threads = report.get("threads", [])
+    index = report.get("faultingThread")
+    if not isinstance(index, int) or not 0 <= index < len(threads):
+        index = next((i for i, t in enumerate(threads) if t.get("triggered")), None)
+    if index is None:
+        return lines + ["  Crashed thread: (not recorded)"]
+    lines.append(f"  Crashed thread {index}:")
+    images = report.get("usedImages", [])
+    for i, frame in enumerate(threads[index].get("frames", [])[:15]):
+        j = frame.get("imageIndex")
+        image = images[j] if isinstance(j, int) and 0 <= j < len(images) else {}
+        symbol = frame.get("symbol")
+        if not symbol and isinstance(frame.get("imageOffset"), int):
+            symbol = "image offset %#x" % frame["imageOffset"]
+        lines.append("    %2d  %s  %s" % (i, text(image.get("name") or Path(image.get("path", "")).name),
+                                          text(symbol)))
+    return lines
+
+
+def scan_crashes(directory, existing, started, printed):
+    errors = {}
+    for path in sorted(directory.rglob("*.ips")):
+        if path in printed:
+            continue
+        try:
+            info = path.lstat()
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            # macOS has creation time. On filesystems without it, never take an
+            # updated pre-existing report for a new one.
+            created = getattr(info, "st_birthtime", None)
+            if created is None and path in existing:
+                continue
+            if (info.st_mtime if created is None else created) < started:
+                continue
+            with path.open(encoding="utf-8") as f:
+                f.readline()  # IPS metadata; the crash payload is the second JSON document.
+                summary = crash_summary(json.load(f))
+            print("Crash report %r:\n%s" % (path.name, "\n".join(summary)), flush=True)
+            printed.add(path)
+        except (OSError, ValueError, TypeError, AttributeError, RecursionError) as error:
+            # Report generation/rotation is asynchronous. Keep the harness verdict
+            # and continue to the other reports if one is incomplete.
+            errors[path] = type(error).__name__
+    return errors
+
+
+CRASH_REPORT_WAIT_SECONDS = 10
+CRASH_REPORT_QUIET_SECONDS = 2
+CRASH_REPORT_POLL_SECONDS = 0.5
+
+
+def print_new_crashes(directory, existing, started, watch):
+    deadline = time.monotonic() + (CRASH_REPORT_WAIT_SECONDS if watch else 0)
+    quiet_until = deadline  # An initially empty directory is not a settled batch.
+    printed = set()
+    while True:
+        count = len(printed)
+        errors = scan_crashes(directory, existing, started, printed)
+        now = time.monotonic()
+        if len(printed) != count:
+            quiet_until = min(deadline, now + CRASH_REPORT_QUIET_SECONDS)
+        remaining = (deadline if errors else quiet_until) - now
+        if remaining <= 0:
+            for path, error in errors.items():
+                print("Cannot summarize crash report %r (%s)" % (path.name, error), flush=True)
+            return
+        time.sleep(min(CRASH_REPORT_POLL_SECONDS, remaining))
+
+
 def cmd_run(args):
     index = build_index()
     tokens = []
@@ -1131,13 +1217,21 @@ def cmd_run(args):
         return 2
 
     label = args.shard or "local"
+    reports = Path.home() / "Library/Logs/DiagnosticReports"
     results = []
     for harness in chosen:
         start = time.monotonic()
         try:
             with harness_locks(harness):
                 print("=== %s: %s" % (harness["name"], harness["run"]), flush=True)
+                existing = set(reports.rglob("*.ips"))
+                started = time.time()
                 returncode = run_harness(harness["run"])
+                if returncode:
+                    simulator = harness.get("simulator")
+                    watch = (returncode < 0 or returncode > 128 or simulator is True
+                             or (isinstance(simulator, str) and os.environ.get(simulator) == "1"))
+                    print_new_crashes(reports, existing, started, watch)
         except HarnessInterrupted as error:
             print("error: interrupted by %s" % signal.Signals(error.signum).name, file=sys.stderr)
             return 128 + error.signum

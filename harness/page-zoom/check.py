@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,13 +24,9 @@ with tempfile.TemporaryDirectory(prefix="retrine-page-zoom-") as work:
         for value, verdict in [("YES", "on"), ("NO", "off")]:
             # bootstatus does not warm the first UIKit process. Allow the cold Intel
             # launch and the real navigation completions to finish; never retry a launch.
-            try:
-                result = subprocess.run(["xcrun", "simctl", "launch", "--console-pty", device,
-                                         "com.retrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
-                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=240)
-            except subprocess.TimeoutExpired as error:
-                print((error.stdout or b"").decode(errors="replace"), flush=True)
-                raise
+            result = subprocess.run([sys.executable, ROOT / "harness/sim-launch.py", "--timeout", "240", device,
+                                     "com.retrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
+                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             print(result.stdout, end="", flush=True)
             if result.returncode or f"PASS page zoom {verdict}:" not in result.stdout:
                 raise SystemExit(f"Page zoom {verdict} failed")

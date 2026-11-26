@@ -34,6 +34,14 @@ packed into at most five shards by greedy weight and run as
 the setup-Theos action; its caches contain build tools/output, never
 credentials or test data.
 
+When a harness exits nonzero, the runner summarizes new `.ips` files in the
+user's `Library/Logs/DiagnosticReports`: process, exception, termination, and the
+first 15 frames of the crashed thread. A signal exit (including shell status
+above 128) or failed simulator harness waits up to 10 seconds for ReportCrash,
+stopping after two quiet seconds once a report is printed. Other failures scan
+once without waiting. Reports are selected by creation time, not proof of
+causation. No reports are uploaded or removed.
+
 On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
 Host, Catalyst and simulator harnesses build for the runner's architecture;
 iPhone device libraries still target arm64. On same-repo PRs the Ubuntu watchdog
