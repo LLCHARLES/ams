@@ -146,6 +146,31 @@ class Retry(unittest.TestCase):
         self.jobs = [job("Harnesses 1/1", 1, "failure")]
         self.annotations = {1: [{"message": "Job was not acquired by Runner"}]}
 
+    def test_acquisition_failure_with_cancelled_running_sibling(self):
+        self.run["conclusion"] = "failure"
+        self.jobs = [job("Harnesses 1/5", 1, "success", steps=[{}]),
+                     job("Harnesses 2/5", 2, "success", steps=[{}]),
+                     job("Harnesses 3/5", 3, "cancelled", runner_id=31, steps=[{}]),
+                     job("Harnesses 4/5", 4, "failure"), job("Harnesses 5/5", 5, "failure"),
+                     job("Runner watchdog / Watch queue", 6, "success", steps=[{}])]
+        missed = {"message": "The job was not acquired by Runner of type hosted even after multiple attempts"}
+        self.annotations = {3: [{"message": "The operation was canceled."}], 4: [missed], 5: [missed]}
+        self.assertEqual(self.reruns(), [["gh", "run", "rerun", "42"]])
+
+    def test_unacquired_job_cannot_excuse_failure_or_timeout(self):
+        self.natural()
+        self.run["conclusion"] = "failure"
+        for conclusion, steps in (("failure", [{}]), ("timed_out", [])):
+            with self.subTest(conclusion=conclusion):
+                self.jobs[1:] = [job("engine", 2, conclusion, steps=steps)]
+                self.annotations[2] = self.annotations[1]
+                self.assertEqual(self.reruns(), [])
+
+    def test_cancelled_jobs_alone_are_not_starvation(self):
+        self.jobs = [job("Harnesses 1/2", 1, "cancelled"), job("Harnesses 2/2", 2, "cancelled")]
+        self.annotations = {}
+        self.assertEqual(self.reruns(), [])
+
     def test_head_moved_before_new_workflow_started(self):
         self.natural()
         self.pr["head"]["sha"] = "new"

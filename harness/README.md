@@ -44,10 +44,11 @@ Dependabot PRs wait for GitHub's natural starvation failure.
 `.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
 at most once: if `macos-latest` starves, the second and final attempt uses
 `macos-26-intel` without a watchdog. A retry requires either GitHub's
-`was not acquired by Runner` annotation on every unsuccessful workload with no
-steps, or a successful or cancelled watchdog's warning naming the exact cancelled
+`was not acquired by Runner` annotation on at least one workload with no
+steps (other unsuccessful jobs must also be unacquired or have been cancelled),
+or a successful or cancelled watchdog's warning naming the exact cancelled
 Mac jobs, all without runners or steps and with other workloads successful. It
-does not retry mixed failures, superseded runs or a SHA no longer at the PR head. The
+does not retry a job failure with steps, a timeout, a superseded run or a SHA no longer at the PR head. The
 last attempt waits in the queue normally. The privileged retry workflow runs
 default-branch inline code only; it doesn't check out PR code or read artifacts.
 

@@ -46,9 +46,15 @@ jobs:
               unsuccessful = [j for j in jobs if j["conclusion"] != "success"
                               and not (j["conclusion"] == "skipped" and j["name"] in
                                        ("Runner watchdog", WATCH))]
-              if unsuccessful and all(not j["steps"] and any(
-                      "was not acquired by Runner" in a["message"] for a in annotations[j["id"]])
-                      for j in unsuccessful):
+              unacquired = {j["id"] for j in unsuccessful
+                            if j["conclusion"] in ("failure", "cancelled") and not j["steps"]
+                            and any("was not acquired by Runner" in a["message"]
+                                    for a in annotations[j["id"]])}
+              # GitHub can cancel running siblings when another shard never acquires a runner.
+              if (any(j["id"] in unacquired and j["name"] not in ("Runner watchdog", WATCH)
+                      for j in unsuccessful)
+                      and all(j["id"] in unacquired or j["conclusion"] == "cancelled"
+                              for j in unsuccessful)):
                   return True
               if (run["conclusion"] != "cancelled" or
                       (run["head_repository"] or {}).get("full_name") != os.environ["GH_REPO"]):
