@@ -69,7 +69,8 @@ for direction in ltr rtl; do
     [ "$direction" = rtl ] && set -- rtl -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
     xcrun simctl launch --console --terminate-running-process "$UDID" com.retrine.rtlcheck "$@" > "$OUT/$direction.log" 2>&1 || true
     if grep -q "\[harness\] PASS $direction" "$OUT/$direction.log"; then echo "PASS $direction"
-    else echo "FAIL $direction"; grep "\[harness\]" "$OUT/$direction.log" | tail -3; status=1; fi
+    # A launch that never reached the check leaves no [harness] line; its own output says why.
+    else echo "FAIL $direction"; grep -q "\[harness\]" "$OUT/$direction.log" && grep "\[harness\]" "$OUT/$direction.log" | tail -3 || tail -20 "$OUT/$direction.log"; status=1; fi
 done
 xcrun simctl uninstall "$UDID" com.retrine.rtlcheck
 exit $status
