@@ -47,15 +47,16 @@ These are projections, not a measured three-shard run.
 On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
 Host, Catalyst and simulator harnesses build for the runner's architecture;
 iPhone device libraries still target arm64. On same-repo PRs the Ubuntu watchdog
-cancels only if **all** Mac jobs have been queued for at least 90 seconds and no
-workload has started (including WireGuard's Linux `engine`, excluding the harness
-planner). Forks and Dependabot PRs wait for GitHub's natural starvation failure.
+watches for up to 20 minutes and cancels only if **all planned Mac jobs** have
+been queued for at least 90 seconds. Linux jobs aren't watched. Forks and
+Dependabot PRs wait for GitHub's natural starvation failure.
 
 `.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
 including its watchdog, up to four attempts total. It requires either GitHub's
 `was not acquired by Runner` annotation on every unsuccessful workload with no
-steps, or a successful watchdog's warning naming the exact cancelled jobs,
-all without runners or steps. It does not retry mixed or real failures. The
+steps, or a successful or cancelled watchdog's warning naming the exact cancelled
+Mac jobs, all without runners or steps and with other workloads successful. It
+does not retry mixed failures, superseded runs or a SHA no longer at the PR head. The
 last attempt waits in the queue normally. The privileged retry workflow runs
 default-branch inline code only; it doesn't check out PR code or read artifacts.
 

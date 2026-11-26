@@ -62,6 +62,6 @@ mkdir -p "$(dirname "$OUT")"
 xcrun clang -fobjc-arc -O2 -g -Wall -Werror -target $(uname -m)-apple-macos13.0 ${SANITIZE:+-fsanitize=$SANITIZE -O1 -fno-omit-frame-pointer} \
     -I ../../tweak/Sources -isystem "$VENDOR/libbs2b" -isystem "$VENDOR/eel2-parser" -isystem "$VENDOR/wdl/eel2" \
     "$MAIN" "$ENGINE"/SGDSPEngine.m "$ENGINE"/SGDSPFilters.m "$ENGINE"/SGDSPConvolver.m "$ENGINE"/SGDSPTone.m "$ENGINE"/SGDSPDynamics.m \
-    "$ENGINE"/SGDSPCrossfeed.m "$ENGINE"/SGDSPReverb.m "$ENGINE"/SGDSPLiveprog.m "$VENDOR/build/mac${SANITIZE:+-$SANITIZE}/libsgaudio.a" \
+    "$ENGINE"/SGDSPCrossfeed.m "$ENGINE"/SGDSPReverb.m "$ENGINE"/SGDSPLiveprog.m "$VENDOR/build/mac-$(uname -m)${SANITIZE:+-$SANITIZE}/libsgaudio.a" \
     -framework Foundation -framework AudioToolbox -framework Accelerate -o "$OUT"
 echo "built $OUT"

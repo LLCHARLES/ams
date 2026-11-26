@@ -13,10 +13,10 @@ permissions:
 jobs:
   watch:
     name: Watch queue
-    # Finish recording the receipt even when our own cancellation is being processed.
+    # Only the owner and trusted bots can push same-repo branches and receive actions: write here.
     if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 22
     steps:
       - name: Cancel only an entirely queued workload
         if: always()
@@ -32,15 +32,15 @@ jobs:
           import time
           from datetime import datetime, timezone
 
-          def state(jobs, mac, protected, now):
-              batch = [j for j in jobs if j["name"] in protected]
+          def state(jobs, mac, now):
+              batch = [j for j in jobs if j["name"] in mac]
               if any(j["status"] != "queued" or j.get("runner_id") or j.get("steps") for j in batch):
                   return "started", []
-              if {j["name"] for j in batch} != protected or len(batch) != len(protected):
+              if {j["name"] for j in batch} != mac or len(batch) != len(mac):
                   return "wait", []
               # 90 s from the youngest mac job's creation allows ordinary matrix scheduling jitter.
               if any((now - datetime.fromisoformat(j["created_at"].replace("Z", "+00:00"))
-                      ).total_seconds() < 90 for j in batch if j["name"] in mac):
+                      ).total_seconds() < 90 for j in batch):
                   return "wait", []
               return "starved", sorted(j["id"] for j in batch)
 
@@ -49,25 +49,26 @@ jobs:
               attempt = os.environ["GITHUB_RUN_ATTEMPT"]
               shards = os.environ["SHARDS"]
               mac = {"Harnesses " + s for s in shards.split(",")} if shards else {"apple"}
-              protected = mac if shards else mac | {"engine"}
 
               def inspect():
                   pages = json.loads(subprocess.check_output([
                       "gh", "api", "--paginate", "--slurp", endpoint + f"/attempts/{attempt}/jobs?per_page=100"]))
-                  return state([j for p in pages for j in p["jobs"]], mac, protected, datetime.now(timezone.utc))
+                  return state([j for p in pages for j in p["jobs"]], mac, datetime.now(timezone.utc))
 
-              until = time.monotonic() + 180
+              # Allow late matrix expansion without occupying Ubuntu indefinitely if a shard never appears.
+              until = time.monotonic() + 20 * 60
               while time.monotonic() < until:
                   status, ids = inspect()
                   if status == "started":
                       return
                   if status == "starved":
                       if inspect() == (status, ids):
-                          subprocess.run(["gh", "api", "--silent", "-X", "POST", endpoint + "/cancel"], check=True)
+                          # Flush the Actions annotation before cancellation can interrupt this step.
                           print("::warning::Retrine runner starvation: cancelled queued jobs " +
                                 ",".join(map(str, ids)), flush=True)
+                          subprocess.run(["gh", "api", "--silent", "-X", "POST", endpoint + "/cancel"], check=True)
                       return
-                  time.sleep(5)
+                  time.sleep(10)
 
           if __name__ == "__main__":
               main()

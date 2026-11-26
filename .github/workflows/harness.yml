@@ -11,7 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: harness-${{ github.workflow }}-${{ github.ref }}
+  # The freshness check and rerun POST aren't atomic. A retry must never evict a newer
+  # pending or running first attempt, even if a push lands between those two requests.
+  group: harness-${{ github.workflow }}-${{ github.ref }}-${{ github.run_attempt == '1' && 'latest' || github.run_id }}
   cancel-in-progress: true
 
 jobs:

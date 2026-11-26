@@ -8,6 +8,7 @@ on:
 permissions:
   actions: write
   checks: read
+  pull-requests: read
 
 concurrency:
   group: runner-starvation-${{ github.event.workflow_run.id }}
@@ -33,6 +34,7 @@ jobs:
           import json
           import os
           import subprocess
+          from urllib.parse import urlencode
 
           WATCH = "Runner watchdog / Watch queue"
 
@@ -44,10 +46,9 @@ jobs:
               unsuccessful = [j for j in jobs if j["conclusion"] != "success"
                               and not (j["conclusion"] == "skipped" and j["name"] in
                                        ("Runner watchdog", WATCH))]
-              if not unsuccessful or any(j["steps"] for j in unsuccessful):
-                  return False
-              if all(any("was not acquired by Runner" in a["message"]
-                         for a in annotations[j["id"]]) for j in unsuccessful):
+              if unsuccessful and all(not j["steps"] and any(
+                      "was not acquired by Runner" in a["message"] for a in annotations[j["id"]])
+                      for j in unsuccessful):
                   return True
               if (run["conclusion"] != "cancelled" or
                       (run["head_repository"] or {}).get("full_name") != os.environ["GH_REPO"]):
@@ -55,13 +56,14 @@ jobs:
               # Only accept the same-repo watchdog's receipt for these exact, untouched jobs.
               # A marker on a workload, a previous attempt, or beside a real failure is not evidence.
               protected = [j for j in jobs if j["name"].startswith("Harnesses ")
-                           or j["name"] in ("apple", "engine")]
-              if (not protected or {j["id"] for j in protected} != {j["id"] for j in unsuccessful}
-                      or any(j["conclusion"] != "cancelled" or j["runner_id"] for j in protected)):
+                           or j["name"] == "apple"]
+              workloads = [j for j in unsuccessful if j["name"] != WATCH]
+              if (not protected or {j["id"] for j in protected} != {j["id"] for j in workloads}
+                      or any(j["conclusion"] != "cancelled" or j["runner_id"] or j["steps"] for j in protected)):
                   return False
               receipt = "Retrine runner starvation: cancelled queued jobs " + ",".join(
                   str(i) for i in sorted(j["id"] for j in protected))
-              return any(j["name"] == WATCH and j["conclusion"] == "success"
+              return any(j["name"] == WATCH and j["conclusion"] in ("success", "cancelled")
                          and any(a["annotation_level"] == "warning" and a["message"] == receipt
                                  for a in annotations[j["id"]]) for j in jobs)
 
@@ -72,6 +74,35 @@ jobs:
           def pages(endpoint):
               return json.loads(subprocess.check_output(
                   ["gh", "api", "--paginate", "--slurp", endpoint], text=True))
+
+          def still_latest(base, run):
+              repo = run["head_repository"]
+              if not repo:
+                  return False
+              branch = run["head_branch"]
+              query = urlencode({"event": "pull_request", "branch": branch, "per_page": 100,
+                                 "created": ">=" + run["created_at"]})
+              listing = api(f"{base}/actions/workflows/{run['workflow_id']}/runs?{query}")
+              runs = listing["workflow_runs"]
+              # An incomplete listing cannot prove that this is the latest run.
+              if listing["total_count"] != len(runs) or not any(r["id"] == run["id"] for r in runs):
+                  return False
+              if any(r["run_number"] > run["run_number"] and
+                     (not r["head_repository"] or r["head_repository"]["id"] == repo["id"]) for r in runs):
+                  return False
+
+              linked = run["pull_requests"]
+              if not linked:
+                  # Fork workflow runs can omit the PR link. Require one unambiguous open PR.
+                  query = urlencode({"state": "open", "head": repo["owner"]["login"] + ":" + branch})
+                  linked = api(f"{base}/pulls?{query}")
+              if len(linked) != 1:
+                  return False
+              pr = api(f"{base}/pulls/{linked[0]['number']}")
+              head = pr["head"]
+              return (pr["state"] == "open" and pr["created_at"] <= run["created_at"]
+                      and head["repo"] and head["repo"]["id"] == repo["id"]
+                      and head["ref"] == branch and head["sha"] == run["head_sha"])
 
           def main():
               with open(os.environ["GITHUB_EVENT_PATH"]) as event_file:
@@ -100,6 +131,9 @@ jobs:
               current = api(endpoint)
               if current["run_attempt"] != attempt or current["status"] != "completed":
                   print("No retry: run advanced during inspection")
+                  return
+              if not still_latest(base, current):
+                  print("No retry: cannot confirm the latest run and current open PR head")
                   return
               subprocess.run(["gh", "run", "rerun", str(run["id"])], check=True)
 
