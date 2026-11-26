@@ -4,13 +4,13 @@
 The harness list lives here (one place).  For each harness the tweak files it
 builds are derived from its build scripts and the quoted imports of its own
 sources, then closed over quoted imports.  ``plan`` prints a GitHub Actions
-matrix (at most three shards) and ``run`` executes one shard sequentially.
+matrix (at most five shards) and ``run`` executes one shard sequentially.
 Python 3 standard library only: the plan job runs on ubuntu with no Apple SDK.
 
     harness-plan.py explain <path>...
     harness-plan.py plan --changed-from <file|-> [--all] [--github-output PATH]
     harness-plan.py run --names "Pitch" "Palette"
-    harness-plan.py run --shard 1/3 --names pitch,palette
+    harness-plan.py run --shard 1/5 --names pitch,palette
 """
 
 import argparse
@@ -792,11 +792,11 @@ def is_global_change(path):
 
 
 def shard_matrix(selected):
-    """At most three greedy shards by weight; a shard with any Theos harness sets Theos up."""
+    """At most five greedy shards by weight; a shard with any Theos harness sets Theos up."""
     if not selected:
         return []
     units = [{"theos": bool(h.get("theos")), "harnesses": [h], "weight": h["weight"]} for h in selected]
-    count = min(3, len(units))
+    count = min(5, len(units))
     bins = [[] for _ in range(count)]
     loads = [0] * count
     for unit in sorted(units, key=lambda u: u["weight"], reverse=True):
@@ -1187,7 +1187,7 @@ def main(argv=None):
     plan_parser.set_defaults(func=cmd_plan)
 
     run_parser = sub.add_parser("run", help="run harnesses sequentially")
-    run_parser.add_argument("--shard", metavar="SPEC", help="shard label such as 1/3")
+    run_parser.add_argument("--shard", metavar="SPEC", help="shard label such as 1/5")
     run_parser.add_argument("--names", nargs="+", metavar="NAME", help="harness names or directory ids")
     run_parser.set_defaults(func=cmd_run)
 

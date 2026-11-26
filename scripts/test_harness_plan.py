@@ -52,6 +52,18 @@ class BuildInputSelection(unittest.TestCase):
                 )
 
 
+class ShardMatrix(unittest.TestCase):
+    def test_full_matrix_balances_across_five_shards(self):
+        entries = [dict(name=name, weight=weight, theos=name == "F")
+                   for name, weight in zip("ABCDEF", (5, 4, 3, 2, 1, 1))]
+        with patch.object(planner, "HARNESSES", entries):
+            matrix = planner.shard_matrix(entries)
+        self.assertEqual([(s["shard"], s["harnesses"], s["theos"]) for s in matrix], [
+            ("1/5", "A", False), ("2/5", "B", False), ("3/5", "C", False),
+            ("4/5", "D", False), ("5/5", "E,F", True),
+        ])
+
+
 class GlobalSelection(unittest.TestCase):
     def setUp(self):
         tmp = TemporaryDirectory()

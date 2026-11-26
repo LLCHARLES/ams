@@ -29,20 +29,10 @@ first matching name or directory. The shortcut requires the running registry to 
 the head literal, so entries derived or modified after it cannot be missed.
 A harness with no tweak
 dependency is always selected, with a warning. The selected harnesses are
-packed into at most three shards by greedy weight and run as
+packed into at most five shards by greedy weight and run as
 `Harnesses <shard>` jobs with a 45-minute timeout. Each shard containing a Theos harness uses
 the setup-Theos action; its caches contain build tools/output, never
 credentials or test data.
-
-The cap reduces macOS runner demand without changing the weighting. The successful
-full scheduled run [43850580004](https://github.com/oneulddu/retrine/actions/runs/43850580004)
-(2026-11-16, `297145c6`) reported 78 harness durations totaling 3,601.7 seconds.
-Repacking those measurements with the current three-shard plan gives 820.7,
-1,209.4 and 1,571.6 seconds. Per-job setup/cleanup overhead was 42–71 seconds,
-including 35–61 seconds for Theos. The largest projection plus the worst overhead
-is 27m23s, leaving 17m37s within the unchanged 45-minute timeout for variability
-and newer checks (SponsorBlock was not present in that measured run).
-These are projections, not a measured three-shard run.
 
 On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
 Host, Catalyst and simulator harnesses build for the runner's architecture;
@@ -52,7 +42,8 @@ been queued for at least 90 seconds. Linux jobs aren't watched. Forks and
 Dependabot PRs wait for GitHub's natural starvation failure.
 
 `.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
-including its watchdog, up to four attempts total. It requires either GitHub's
+at most once: if `macos-latest` starves, the second and final attempt uses
+`macos-26-intel` without a watchdog. A retry requires either GitHub's
 `was not acquired by Runner` annotation on every unsuccessful workload with no
 steps, or a successful or cancelled watchdog's warning naming the exact cancelled
 Mac jobs, all without runners or steps and with other workloads successful. It

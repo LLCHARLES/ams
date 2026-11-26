@@ -162,7 +162,7 @@ class Retry(unittest.TestCase):
                         pull_requests=[])
         self.pr["head"]["repo"]["id"] = 12
         self.assertEqual(self.reruns(), [["gh", "run", "rerun", "42"]])
-        self.run["run_attempt"] = 4
+        self.run["run_attempt"] = 2
         self.assertEqual(self.reruns(), [])
 
 

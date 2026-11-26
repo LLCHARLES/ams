@@ -55,7 +55,7 @@ jobs:
     if: >-
       always() && needs.plan.result == 'success' &&
       github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
-      github.actor != 'dependabot[bot]' && fromJSON(github.run_attempt) < 4 && needs.plan.outputs.any == 'true'
+      github.actor != 'dependabot[bot]' && fromJSON(github.run_attempt) < 2 && needs.plan.outputs.any == 'true'
     permissions:
       actions: write
     uses: ./.github/workflows/runner-queue-watchdog.yml
