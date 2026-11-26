@@ -4,6 +4,7 @@
 // statics are reachable; the player state, the view tree of Spotify's page and the stubs it links against are
 // doubles. A failed check exits 1 with its name.
 #import <UIKit/UIKit.h>
+#import <dlfcn.h>
 #import "../harness-fail.h"
 #import "Shared/Player/PlayerState.h"
 #include "repeat.inc"
@@ -210,9 +211,18 @@ static void checkTextSize(void) {
     HARNESS_CHECK([textLook(kept) isEqualToString:small]);
 }
 
+// Set the accessibility input only for this fixture, never the Mac's preference.
+static _Thread_local enum { useHostMotion, motionOn, motionReduced } marqueeMotion;
+BOOL UIAccessibilityIsReduceMotionEnabled(void) {
+    if (marqueeMotion != useHostMotion) return marqueeMotion == motionReduced;
+    return ((BOOL (*)(void))dlsym(RTLD_NEXT, "UIAccessibilityIsReduceMotionEnabled"))();
+}
+
 // The pager lays out its neighbour before scrolling it into view. No placeText or
 // title layout occurs between that scroll and the first visible frame.
-static void checkPagedMarquee(void) {
+static void checkPagedMarquee(BOOL reduced) {
+    BOOL hostReduced = UIAccessibilityIsReduceMotionEnabled();
+    marqueeMotion = reduced ? motionReduced : motionOn;
     UIView *host = [(id)UIApplication.sharedApplication.delegate window].rootViewController.view;
     UIScrollView *pager = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 300, 60)];
     [host addSubview:pager];
@@ -226,9 +236,19 @@ static void checkPagedMarquee(void) {
     [text.title layoutIfNeeded];
     pager.contentOffset = CGPointMake(300, 0);
     CALayer *label = text.title.subviews.firstObject.layer;
-    HARNESS_CHECK([label animationForKey:@"sg.marquee"] && label.speed == 1);
+    NSLog(@"[harness] marquee: attached=%d key=%d scene=%ld app=%ld hostReduceMotion=%d fixtureReduceMotion=%d bounds=%@ fitted=%.1f paused=%d speed=%.1f animation=%d",
+          text.window != nil, text.window.isKeyWindow, (long)text.window.windowScene.activationState,
+          (long)UIApplication.sharedApplication.applicationState, hostReduced, reduced,
+          NSStringFromCGRect(text.title.bounds), [text.title.subviews.firstObject sizeThatFits:CGSizeMake(CGFLOAT_MAX, text.title.bounds.size.height)].width,
+          text.title.scrollingPaused, label.speed, [label animationForKey:@"sg.marquee"] != nil);
+    if (reduced) {
+        HARNESS_CHECK(![label animationForKey:@"sg.marquee"]);
+    } else {
+        HARNESS_CHECK([label animationForKey:@"sg.marquee"] && label.speed == 1);
+    }
     sg_checks++;
     [pager removeFromSuperview];
+    marqueeMotion = useHostMotion;
 }
 
 #pragma mark - the artist under the title in the minimized row
@@ -863,7 +883,8 @@ static void runDisabled(void) {
 
     checkInlineArtist();
     checkTextSize();
-    checkPagedMarquee();
+    checkPagedMarquee(NO);
+    checkPagedMarquee(YES);
     checkNextButton();
     checkConnectButton();
     checkArtworkShape();
