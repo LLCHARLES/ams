@@ -113,6 +113,13 @@ void SGRHarnessClearTrack(void) {
     for (id<SGPlayerStateObserver> observer in sg_observers.allObjects) [observer playerStateDidChange:nil];
 }
 
+static id<SGPlayerStateObserver> firstTrackObserver;
+static dispatch_block_t afterFirstRefresh;
+void SGRHarnessObserveHandover(id preview, dispatch_block_t check) {
+    firstTrackObserver = preview;
+    afterFirstRefresh = check;
+}
+
 // `imageURI` is the xlarge picture as Spotify's metadata has it, spotify:image:<40 hex digits>, or nil for
 // a track whose metadata names none.
 void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused) {
@@ -149,7 +156,18 @@ void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused) {
         [state setValue:@240 forKey:@"duration"];
     }
     sg_state = state;
-    for (id<SGPlayerStateObserver> observer in sg_observers.allObjects) [observer playerStateDidChange:state];
+    NSArray *observers = sg_observers.allObjects;
+    id<SGPlayerStateObserver> first = firstTrackObserver;
+    if (first && [observers containsObject:first]) {
+        // Put the card's real queued refresh, then its observation, on main
+        // before the player arms the handover deadline. Notify each observer once.
+        [first playerStateDidChange:state];
+        dispatch_async(dispatch_get_main_queue(), afterFirstRefresh);
+    }
+    firstTrackObserver = nil;
+    afterFirstRefresh = nil;
+    for (id<SGPlayerStateObserver> observer in observers)
+        if (observer != first) [observer playerStateDidChange:state];
 }
 
 #pragma mark - Shared/Haptics

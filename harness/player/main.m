@@ -118,6 +118,7 @@
 
 void SGRHarnessPlayFrom(NSInteger ms);
 void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused);
+void SGRHarnessObserveHandover(id preview, dispatch_block_t check);
 // stubs.m: every clip lookup answers this many seconds late (0, the default, at once).
 void SGRHarnessSetLookupDelay(NSTimeInterval seconds);
 void SGRHarnessSetReduceMotion(BOOL reduced) {
@@ -3451,22 +3452,21 @@ static void installSettingsWorkProbes(void) {
         [table() layoutIfNeeded];
     });
     // Deliver B only after C owns the card, then deliver C. No scheduler race decides their order.
-    step(1, ^{
+    __block BOOL observedHandover = NO;
+    when(^BOOL { return motionOn() && SGRPlayerMotionShowing(); }, ^{
         SGSetEnabled(SGRKeyPlayerHoldNoClip, YES);
         SGRHarnessHoldLookups(@"spotify:track:harnessB");
         setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/b-%d.mp4", getpid()].UTF8String, 1);
         lateImageB = serve(imageURI(@"bbbb"), solid(UIColor.blueColor), 0, NO);
         lateImageB.held = YES;
-        [self playTrack:@"spotify:track:harnessB" image:imageURI(@"bbbb")];
-        // The player keeps A's clip only for its handover (kHandOver, PlayerMotion.x), timed from this track change, so
-        // the card is looked at in the main queue turn after its own re-read (queued by the change, PlayerSettings.m),
-        // ahead of the handover's end; B's held lookup is a download and may come after the handover is over.
-        dispatch_async(dispatch_get_main_queue(), ^{
+        SGRHarnessObserveHandover(card(), ^{
             [self expect:!motionOn() && SGRPlayerMotionShowing() && [[card() valueForKey:@"_track"] isEqualToString:@"spotify:track:harnessB"]
                     step:@"handover: no old preview clip while the real player keeps its clip" detail:cardState()];
+            observedHandover = YES;
         });
+        [self playTrack:@"spotify:track:harnessB" image:imageURI(@"bbbb")];
     });
-    when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:harnessB") && pictureReady(lateImageB); }, ^{
+    when(^BOOL { return observedHandover && SGRHarnessLookupReady(@"spotify:track:harnessB") && pictureReady(lateImageB); }, ^{
         SGRArtworkField *previewField = [card() valueForKey:@"_field"];
         [self expect:previewField && !previewField.motionHeld step:@"pending preview lookup leaves Fluid moving" detail:cardState()];
         SGRHarnessHoldLookups(@"spotify:track:harnessC");
@@ -4195,19 +4195,19 @@ static NSString *finishChecks(NSUInteger checks, NSUInteger failures, NSString *
         }],
         @[@0.3, ^{
             [self expect:visualiserView() && SGRPlayerVisualiserShowing() && SGRHarnessReading() step:@"hot, ignoring: the Visualizer stays" detail:@""];
+            UIView *content = [visualiserView() valueForKey:@"_content"];
             sg_lowPower = YES;
             [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
-            // Sample the fade after the notification's main-queue callbacks, before a later layout can repair it.
-            dispatch_async(dispatch_get_main_queue(), ^{
-                UIView *content = [visualiserView() valueForKey:@"_content"];
-                standInLeaving = content.alpha == 0;
-            });
+            // Sample the actual outgoing view after the power observers, before a
+            // later layout can repair it. Animation completion is a separate event.
+            dispatch_async(dispatch_get_main_queue(), ^{ standInLeaving = content && content.alpha == 0; });
         }],
-        @[@0.6, ^{
-            [self expect:standInLeaving && !visualiserView() && !SGRHarnessReading() step:@"hot, ignoring: Low Power removes the stand-in without layout" detail:@""];
+        @[^BOOL { return !visualiserView() && !SGRHarnessReading(); }, ^{
+            [self expect:standInLeaving step:@"hot, ignoring: Low Power removes the stand-in without layout" detail:@"detached, reader off"];
             sg_lowPower = NO;
             [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
-        }],
+        }, ^{ return [NSString stringWithFormat:@"stand-in leaving %d, view %@, reading %d",
+                      standInLeaving, visualiserView(), SGRHarnessReading()]; }],
         @[^BOOL { return visualiserView() && SGRHarnessReading(); }, ^{
             [self->_background viewWillDisappear:NO];
             [self->_background viewDidDisappear:NO];

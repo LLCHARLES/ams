@@ -21,9 +21,15 @@ with tempfile.TemporaryDirectory(prefix="retrine-page-zoom-") as work:
         subprocess.run(["xcrun", "simctl", "bootstatus", device, "-b"], check=True)
         subprocess.run(["xcrun", "simctl", "install", device, str(Path(work) / "PageZoomHarness.app")], check=True)
         for value, verdict in [("YES", "on"), ("NO", "off")]:
-            result = subprocess.run(["xcrun", "simctl", "launch", "--console-pty", device,
-                                     "com.retrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=60)
+            # bootstatus does not warm the first UIKit process. Allow the cold Intel
+            # launch and the real navigation completions to finish; never retry a launch.
+            try:
+                result = subprocess.run(["xcrun", "simctl", "launch", "--console-pty", device,
+                                         "com.retrine.pagezoomharness", "-spotifyglass.redesign.pageZoom", value],
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=240)
+            except subprocess.TimeoutExpired as error:
+                print((error.stdout or b"").decode(errors="replace"), flush=True)
+                raise
             print(result.stdout, end="", flush=True)
             if result.returncode or f"PASS page zoom {verdict}:" not in result.stdout:
                 raise SystemExit(f"Page zoom {verdict} failed")

@@ -290,12 +290,26 @@ static void exerciseMotion(UINavigationController *nav, BOOL artist) {
     art.fluid = YES;
     SGRFluidLayer *fluid = [art valueForKey:@"fluidLayer"];
     for (NSNumber *state in @[@1,@2,@0,@3,@1,@4,@1]) {
+        BOOL wasLowPower = lowPower;
         lowPower = state.intValue == 4;
         heat = lowPower ? NSProcessInfoThermalStateFair : (NSProcessInfoThermalState)state.intValue;
-        NSNotificationName name = lowPower ? NSProcessInfoPowerStateDidChangeNotification : NSProcessInfoThermalStateDidChangeNotification;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{ postMotion(name); });
+        NSNotificationName name = lowPower != wasLowPower ? NSProcessInfoPowerStateDidChangeNotification : NSProcessInfoThermalStateDidChangeNotification;
+        __block BOOL delivered = NO;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            postMotion(name);
+            // Both observers enqueue their updates on main. Don't advance the
+            // input just because playback already matched before they read it.
+            dispatch_async(dispatch_get_main_queue(), ^{ delivered = YES; });
+        });
         BOOL moving = !lowPower && heat < NSProcessInfoThermalStateSerious;
-        untilMotion(@"thermal/power event", ^BOOL{ return (visible.rate > 0) == moving && fluid.moving == moving; });
+        double deadline = CACurrentMediaTime() + 30;
+        while (!delivered || (visible.rate > 0) != moving || fluid.moving != moving) {
+            if (CACurrentMediaTime() >= deadline)
+                HARNESS_FAIL(@"%@ heat %ld low power %d delivered %d: expected moving %d; rate %g same graph %d fluid %d app state %ld",
+                             name, (long)heat, lowPower, delivered, moving, visible.rate, visible == graph(h), fluid.moving,
+                             (long)UIApplication.sharedApplication.applicationState);
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        }
     }
     untilMotion(@"numbered frame 3", ^BOOL{ double t = CMTimeGetSeconds(visible.currentTime); return t > 3.15 && t < 3.8; });
     postMotion(UIApplicationWillResignActiveNotification);

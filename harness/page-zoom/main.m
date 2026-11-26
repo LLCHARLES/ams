@@ -120,6 +120,7 @@ void SGRequireClasses(NSArray *names) {
     [self.navigationController pushViewController:self.destination animated:YES];
 }
 - (void)checkPush:(NSUInteger)stage {
+    NSLog(@"[harness] page zoom push %lu", (unsigned long)stage);
     if (stage == 3) { [self checkPop:0]; return; }
     for (UIView *view in self.destination.view.subviews.copy) [view removeFromSuperview];
     UIButton *action = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -179,6 +180,7 @@ void SGRequireClasses(NSArray *names) {
     }
 }
 - (void)checkPop:(NSUInteger)stage {
+    NSLog(@"[harness] page zoom pop %lu", (unsigned long)stage);
     if (stage == 3) {
         fprintf(stderr, "PASS page zoom on: uncapped readiness, destination chrome reveal/restoration/cancel, artwork push, content/cap reveal, interactive fallback, delegate forwarding, source frame, removal and reuse\n");
         fflush(stderr);
@@ -214,6 +216,7 @@ void SGRequireClasses(NSArray *names) {
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     if (self.started) return;
+    NSLog(@"[harness] page zoom source appeared");
     self.started = YES;
     self.testedNavigation = self.navigationController;
     self.testedNavigation.delegate = (id)self.testedNavigation;
@@ -282,6 +285,7 @@ void SGRequireClasses(NSArray *names) {
 @implementation App
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     harnessMotion = allowMotion;
+    NSLog(@"[harness] page zoom launched");
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     self.window.rootViewController = [[SPNavigationController alloc] initWithRootViewController:[SourcePage new]];
     return YES;
