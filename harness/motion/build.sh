@@ -38,12 +38,16 @@ trap 'rm -rf "$relaunch"' EXIT
 "$OUT/state-check" seed "$relaunch/album.plist"
 "$OUT/state-check" relaunch "$relaunch/album.plist"
 xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi \
+    -isysroot "$(xcrun --sdk macosx --show-sdk-path)" -fobjc-arc \
+    -DSGBoundedRequestTask=fixtureHTTPTask -c ../../tweak/Sources/Shared/LyricsSources/SGBoundedRequest.m \
+    -o "$OUT/transport.o"
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi \
     -isysroot "$(xcrun --sdk macosx --show-sdk-path)" \
     -iframework "$(xcrun --sdk macosx --show-sdk-path)/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -I ../../tweak/Sources \
     -framework UIKit -framework Foundation -framework CoreGraphics -framework AVFoundation -framework CoreMedia -framework CoreVideo \
     sources-check.m ../../tweak/Sources/Shared/AnimatedArtwork/MotionSources.m ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionTicket.m \
-    ../../tweak/Sources/Shared/LyricsSources/SGBoundedRequest.m \
+    "$OUT/transport.o" \
     ../../tweak/Sources/Shared/AnimatedArtwork/SGMotionClip.m ../../tweak/Sources/Shared/AdBlock/Protobuf.m \
     -o "$OUT/sources-check"
 "$OUT/sources-check"

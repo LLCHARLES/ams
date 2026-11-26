@@ -80,6 +80,12 @@ jobs:
       - name: Set up Theos for Logos hooks only
         if: matrix.theos
         uses: ./.github/actions/setup-theos
+      - name: Install Pillow for the header pixel check
+        if: contains(matrix.harnesses, 'Header decoder suspension')
+        run: |
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/header-pixels"
+          "$RUNNER_TEMP/header-pixels/bin/python" -m pip install --only-binary=:all: Pillow==11.3.0
+          echo "MOTION_PIXELS_PYTHON=$RUNNER_TEMP/header-pixels/bin/python" >> "$GITHUB_ENV"
       - name: Build and assert
         shell: bash
         env:

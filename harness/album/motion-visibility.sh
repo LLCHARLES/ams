@@ -24,7 +24,8 @@ if [ -z "$sim" ]; then
     sim=$own
     xcrun simctl bootstatus "$sim" -b
 fi
-python3 "$here/album/motion-pixels.py" fixture "$out"
+python=${MOTION_PIXELS_PYTHON:-python3}
+"$python" "$here/album/motion-pixels.py" fixture "$out"
 HARNESS_BUILD_DIR="$out/Album" /usr/bin/lockf -k /tmp/vitrine-build.lock sh "$here/album/build.sh"
 HARNESS_BUILD_DIR="$out/Artist" /usr/bin/lockf -k /tmp/vitrine-build.lock sh "$here/artist/build.sh"
 status=0
@@ -37,7 +38,7 @@ for page in Album Artist; do
     mv "$out/Info.plist" "$app/Info.plist"
     xcrun simctl install "$sim" "$app"
     bundle=$id
-    python3 "$here/album/motion-pixels.py" "$sim" "$bundle" "$out" || status=1
+    "$python" "$here/album/motion-pixels.py" "$sim" "$bundle" "$out" || status=1
     xcrun simctl uninstall "$sim" "$bundle"
     bundle=
 done
