@@ -127,18 +127,15 @@ static void checkSingCard(UIView *host) {
     if (rtl ? column >= play : column <= play) HARNESS_FAIL(@"Sing card: column at %.0f, play at %.0f", column, play);
 }
 
-// The mic's slider at a fifth of its range: its accent fill is the run of track below the thumb.
-static void checkMicSlider(UIView *host, void (^then)(void)) {
-    SGSetSingLevel(0.4f);
-    SGRSingButton *mic = [[SGRSingButton alloc] initWithFrame:CGRectMake(300, 400, 44, 44)];
-    [host addSubview:mic];
-    [mic layoutIfNeeded];
-    [CATransaction begin];
-    [CATransaction setCompletionBlock:^{
-        NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
-        findViews(mic, UISlider.class, sliders);
-        HARNESS_CHECK(sliders.count == 1);
-        UISlider *slider = sliders[0];
+// The panel's slider drawn on screen: its green fill measured from a render of the host. The panel is shown with an
+// animation that the host may not have drawn yet (a slow simulator draws nothing in the first frames), so the render
+// is taken again until the fill is there, for up to 10 seconds; only its place is the check.
+static void measureMicSlider(UIView *host, SGRSingButton *mic, CFTimeInterval deadline, void (^then)(void)) {
+    NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
+    findViews(mic, UISlider.class, sliders);
+    HARNESS_CHECK(sliders.count == 1);
+    UISlider *slider = sliders[0];
+    {
         slider.minimumTrackTintColor = UIColor.greenColor;
         slider.maximumTrackTintColor = UIColor.redColor;
         [slider layoutIfNeeded];
@@ -164,13 +161,28 @@ static void checkMicSlider(UIView *host, void (^then)(void)) {
                 if (px[1] > 150 && px[0] < 90 && px[2] < 90) { greenY += y; greenCount++; }
             }
         }
-        HARNESS_CHECK(greenCount > 0);
+        if (greenCount == 0) {
+            if (CACurrentMediaTime() >= deadline) HARNESS_FAIL(@"mic slider: no fill drawn in %@ within 10 s", NSStringFromCGRect(box));
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{
+                measureMicSlider(host, mic, deadline, then);
+            });
+            return;
+        }
         CGFloat middle = CGRectGetMidY(box) * scale;
         if (greenY / greenCount <= middle) HARNESS_FAIL(@"mic slider: the fill sits above the middle (%.0f over %.0f)", greenY / greenCount, middle);
         then();
-    }];
+    }
+}
+
+// The mic's slider at a fifth of its range: its accent fill is the run of track below the thumb.
+static void checkMicSlider(UIView *host, void (^then)(void)) {
+    SGSetSingLevel(0.4f);
+    SGRSingButton *mic = [[SGRSingButton alloc] initWithFrame:CGRectMake(300, 400, 44, 44)];
+    [host addSubview:mic];
+    [mic layoutIfNeeded];
     [mic performSelector:@selector(showPanel)];
-    [CATransaction commit];
+    CFTimeInterval deadline = CACurrentMediaTime() + 10;
+    dispatch_async(dispatch_get_main_queue(), ^{ measureMicSlider(host, mic, deadline, then); });
 }
 
 static void checkRecapBar(UIView *host) {
