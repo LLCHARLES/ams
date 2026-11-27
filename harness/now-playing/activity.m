@@ -113,7 +113,7 @@ BOOL SGLikePlayingTrack(void) { return NO; }
 static void refresh(void) {
     // The card's normal action notification asks its timer owner to publish now.
     [NSNotificationCenter.defaultCenter postNotificationName:@"SGLiveActivityAction" object:@"tab:0"];
-    runFor(.05);
+    drainMain();
 }
 
 static void lockedLyrics(void) {
@@ -143,8 +143,7 @@ static void lockedLyrics(void) {
         });
     };
     SGSetLiveActivityEnabled(YES);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
-    while (![sentLine isEqual:@"Locked lyric"] && deadline.timeIntervalSinceNow > 0) runFor(.01);
+    HARNESS_AWAIT([sentLine isEqual:@"Locked lyric"]);
     check([sentLine isEqual:@"Locked lyric"], @"Live Activity requests and publishes lyrics while locked without now-playing or UI events");
     SGSetLiveActivityEnabled(NO);
     harnessLyricsRequested = nil;
@@ -170,7 +169,7 @@ static void lyricDeadlines(void) {
     bridgeCost = .12;
     harnessLines(@[lineOf(@"Landing", 0, 9000), lineOf(@"Second", 10000, 19000)]);
     harnessReport(@"activity-deadlines", @"Deadline song");
-    runFor(.01);
+    HARNESS_AWAIT([sentLine isEqual:@"Landing"]);
     bridgeCost = 0;
     check([sentLine isEqual:@"Landing"] && harnessActivityDelay == 80 * NSEC_PER_MSEC
           && harnessActivityRepeat == DISPATCH_TIME_FOREVER,
@@ -182,7 +181,7 @@ static void lyricDeadlines(void) {
     harnessLines(@[prefetched, lineOf(@"Next lead", 10000, 19000)]);
     harnessReport(@"prefetched", @"Prefetched song");
     harnessTrackOffset = 500; // Karaoke's DidChange follows the activity's DidReport.
-    runFor(.01);
+    HARNESS_AWAIT([sentLine isEqual:@"Prefetched lead"]);
     check([sentLine isEqual:@"Prefetched lead"] && harnessActivityDelay == 500 * NSEC_PER_MSEC,
           @"skip uses the prefetched track's own offset for the line and next wake");
     harnessPlaying = NO;
@@ -190,10 +189,10 @@ static void lyricDeadlines(void) {
     harnessTrackOffset = 0;
     harnessReading(SGRLyricsReadingSource, YES);
     harnessReport(@"prefetched", @"Prefetched song");
-    runFor(.01);
+    drainMain();
     [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsAIResultDidChangeNotification object:@"prefetched"];
     prefetched.pronunciation = lineOf(@"New reading", 0, 9000); // applied later in the same notification turn
-    runFor(.01);
+    HARNESS_AWAIT([sentLine isEqual:@"New reading"]);
     check([sentLine isEqual:@"New reading"], @"paused card rereads the saved pronunciation after in-place application");
     harnessReading(SGRLyricsReadingNone, NO);
     SGSetLiveActivityEnabled(NO);
@@ -229,7 +228,7 @@ static void cardDeadlines(void) {
     check(!fires, @"empty player leaves the activity clock disarmed");
     harnessDuration = 180;
     harnessReport(@"panel", @"Panel");
-    runFor(.01);
+    drainMain();
     NSUInteger at = fires, sent = sends;
     advance(19);
     check(fires == at && sends == sent, @"stable playing panel has no idle fires or sends");
@@ -237,13 +236,13 @@ static void cardDeadlines(void) {
     check(fires == at + 1 && sends == sent + 1, @"visible unchanged panel refreshes at 20 seconds");
     upcoming = @[harnessState(@"next", @"Queued").track];
     harnessReport(@"panel", @"Panel");
-    runFor(.01);
+    HARNESS_AWAIT([sentTitles isEqual:@[@"Queued"]]);
     check([sentTitles isEqual:@[@"Queued"]], @"queue-only report updates the panel");
-    [center postNotificationName:@"SGLiveActivityAction" object:@"tab:1"]; runFor(.01);
+    [center postNotificationName:@"SGLiveActivityAction" object:@"tab:1"]; HARNESS_AWAIT(sentTab == 1);
     check(sentTab == 1, @"card intent changes tab without a timer");
     singLead = 5;
     harnessReport(@"sing-hold", @"Following track");
-    runFor(.01);
+    drainMain();
     advance(1.5);
     check(sentStart.timeIntervalSince1970 == now, @"running progress reanchors while Sing holds the new track at zero");
     singLead = 0;
@@ -255,7 +254,7 @@ static void cardDeadlines(void) {
     harnessPlaying = NO;
     sleepEnd = [NSDate.activityDate dateByAddingTimeInterval:3];
     harnessReport(@"panel", @"Panel");
-    runFor(.01);
+    HARNESS_AWAIT([sentSleepEnd isEqual:sleepEnd]);
     check([sentSleepEnd isEqual:sleepEnd], @"paused panel offers its active sleep timer");
     advance(3);
     check(!sentSleepEnd, @"sleep expiry removes Add/Cancel even before the owner's main-queue callback");
@@ -289,14 +288,14 @@ static void cardDeadlines(void) {
     started = nil;
     app.applicationState = UIApplicationStateActive;
     pip = YES;
-    [center postNotificationName:SGLyricsPiPDidChangeNotification object:nil]; runFor(.01);
+    [center postNotificationName:SGLyricsPiPDidChangeNotification object:nil]; drainMain();
     pip = NO;
-    [center postNotificationName:SGLyricsPiPDidChangeNotification object:nil]; runFor(.01);
+    [center postNotificationName:SGLyricsPiPDidChangeNotification object:nil]; drainMain();
     sent = sends;
     advance(5);
     check(!showing && sends == sent, @"return from PiP waits while paused");
     harnessPlaying = YES; harnessReport(@"panel", @"Panel");
-    runFor(.01);
+    HARNESS_AWAIT(showing);
     check(showing && sends == sent + 1, @"playback report restores the card after PiP");
     SGSetLiveActivityEnabled(NO);
     virtualClock = harnessPlaying = harnessActivityOn = NO;
@@ -320,16 +319,17 @@ void activityChecks(void) {
 
     harnessLanguage = @"ko";
     refresh();
+    HARNESS_AWAIT([sentTranslation isEqual:@"안녕"]);
     check([sentTranslation isEqual:@"안녕"], @"Live Activity reloads saved translation after language change");
     harnessTranslations = nil;
     [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsTranslationsDidChangeNotification object:nil];
-    runFor(.05);
+    HARNESS_AWAIT(!sentTranslation.length);
     check(!sentTranslation.length, @"paused Live Activity clears deleted translation without a view");
 
     harnessTranslations = @{@"ko": @{@"Hola": @"다시"}};
     [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsTranslationSavedNotification
         object:@"activity-restore" userInfo:@{@"language": @"ko"}];
-    runFor(.05);
+    HARNESS_AWAIT([sentTranslation isEqual:@"다시"]);
     check([sentTranslation isEqual:@"다시"], @"paused Live Activity refreshes a saved translation");
 
     harnessHoldTranslation = YES;
@@ -340,11 +340,12 @@ void activityChecks(void) {
     refresh();
     harnessHoldTranslation = NO;
     harnessDeliverTranslations();
-    runFor(.05);
+    HARNESS_AWAIT([sentTranslation isEqual:@"새 소스"]);
     check([sentTranslation isEqual:@"새 소스"], @"late retired-language load cannot overwrite the current activity");
     harnessTranslations = @{@"ko": @{@"Hola": @"다른 소스"}};
     harnessLines(@[lineOf(@"Hola", 0, 10000)]);
     refresh();
+    HARNESS_AWAIT([sentTranslation isEqual:@"다른 소스"]);
     check([sentTranslation isEqual:@"다른 소스"], @"Live Activity restores translations onto replacement source lines");
     check(harnessAutomaticTranslations == automaticBefore, @"Live Activity never starts automatic translation");
     SGSetLiveActivityEnabled(NO);

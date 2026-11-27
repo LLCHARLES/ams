@@ -7,6 +7,7 @@
 #import "Shared/LocalFiles/LocalFiles.h"
 #import "Shared/LocalFiles/LocalInfoLookup.h"
 #import <objc/runtime.h>
+#import "../../harness-wait.h"
 
 static NSString *const kURI = @"spotify:local:Daft+Punk:Discovery:One+More+Time:320";
 static int sg_failures;
@@ -66,12 +67,19 @@ BOOL SGPlayerMenuIsPlayers(UIViewController *menu) {
 }
 @end
 
-static void after(double seconds, dispatch_block_t block) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
+static BOOL visible(UIViewController *vc) {
+    return vc.viewIfLoaded.window && !vc.transitionCoordinator && !vc.navigationController.transitionCoordinator;
 }
+#define STEP(condition, ...) do { HARNESS_AWAIT(condition); (__VA_ARGS__)(); } while (0)
 
 static void shot(NSString *name) {
     NSLog(@"[harness] SHOT %@", name);
+    if (![NSProcessInfo.processInfo.arguments containsObject:@"capture-shots"]) return;
+    NSString *ack = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    [CATransaction flush];
+    NSLog(@"[harness] CAPTURE %@ %@", name, ack);
+    HARNESS_AWAIT([NSFileManager.defaultManager fileExistsAtPath:ack]);
+    HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:ack error:nil]);
 }
 
 static UIImage *redSquare(void) {
@@ -91,11 +99,13 @@ static SGInfoFixtureProtocol *sg_pendingSearch;
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return YES; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
+    dispatch_async(dispatch_get_main_queue(), ^{
     if ([self.request.URL.host isEqual:@"itunes.apple.com"]) {
         ++sg_searches;
         if (sg_holdSearch) { sg_pendingSearch = self; return; }
     } else ++sg_covers;
     [self finishLoading];
+    });
 }
 - (void)finishLoading {
     if (self.stopped) return;
@@ -174,7 +184,9 @@ static void installInfoFixture(void) {
     player.view.backgroundColor = UIColor.blackColor;
     self.window.rootViewController = player;
     [self.window makeKeyAndVisible];
-    [self runOn:player];
+    HarnessWhen(@"player attached to active scene", ^BOOL {
+        return player.view.window.windowScene.activationState == UISceneActivationStateForegroundActive && player.view.window.windowScene;
+    }, ^{ [self runOn:player]; });
     return YES;
 }
 
@@ -193,14 +205,14 @@ static void installInfoFixture(void) {
     }
     BOOL large = [NSProcessInfo.processInfo.arguments containsObject:@"large"];
     __block UIViewController *menu;
-    after(1, ^{
+    STEP(visible(player), ^{
         menu = [_TtC24ContextMenu_InternalImpl25ContextMenuViewController new];
         UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:menu];
         navigation.navigationBarHidden = YES;
         navigation.sheetPresentationController.detents = @[UISheetPresentationControllerDetent.mediumDetent];
         [player presentViewController:navigation animated:YES completion:nil];
     });
-    after(2.5, ^{
+    STEP(visible(menu) && ((_TtC24ContextMenu_InternalImpl25ContextMenuViewController *)menu).table.tableFooterView != nil, ^{
         UIView *footer = ((_TtC24ContextMenu_InternalImpl25ContextMenuViewController *)menu).table.tableFooterView;
         CHECK(@"the menu has the Edit info row", [NSStringFromClass(footer.class) isEqualToString:@"SGEditInfoRow"]);
         UILabel *title = nil;
@@ -216,7 +228,7 @@ static void installInfoFixture(void) {
         shot(@"menu");
         [(UIControl *)footer sendActionsForControlEvents:UIControlEventTouchUpInside];
     });
-    after(4.5, ^{
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         CHECK(@"the menu closed and the editor came up over the player", editor != nil);
         CHECK(@"the editor is dark", editor.navigationController.overrideUserInterfaceStyle == UIUserInterfaceStyleDark);
@@ -224,10 +236,10 @@ static void installInfoFixture(void) {
         CHECK(@"the fields show the file's names", [fields[0].text isEqualToString:@"One More Time"] && [fields[1].text isEqualToString:@"Daft Punk"]);
         CHECK(@"Save is off with nothing changed", !editor.navigationItem.rightBarButtonItem.enabled && !editor.modalInPresentation);
         shot(large ? @"editor-large" : @"editor");
-        if (large) after(2, ^{ exit(sg_failures ? 1 : 0); });
+        if (large) exit(sg_failures ? 1 : 0);
     });
     if (large) return;
-    after(6, ^{
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         NSArray<UITextField *> *fields = [editor valueForKey:@"fields"];
         fields[0].text = @"One More Time (Edit)";
@@ -236,8 +248,8 @@ static void installInfoFixture(void) {
         [editor performSelector:@selector(useCover:) withObject:redSquare()];
         CHECK(@"a picked cover is not stored before Save", !SGLocalFileEditFor(kURI));
     });
-    after(7, ^{ shot(@"edited"); });
-    after(8, ^{
+    shot(@"edited");
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         UIBarButtonItem *save = editor.navigationItem.rightBarButtonItem;
         [[UIApplication sharedApplication] sendAction:save.action to:save.target from:save forEvent:nil];
@@ -245,15 +257,15 @@ static void installInfoFixture(void) {
         CHECK(@"Save stores the name and the cover", [edit[@"title"] isEqualToString:@"One More Time (Edit)"] && SGLocalFileCoverPath(edit));
         CHECK(@"the rename gives a new lyrics key", [SGLocalFileLyricsKey(kURI) containsString:@"#"]);
     });
-    after(9.5, ^{ SGLocalFilePresentEditor(player, kURI); });
-    after(11, ^{
+    STEP(!player.presentedViewController && visible(player), ^{ SGLocalFilePresentEditor(player, kURI); });
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         NSArray<UITextField *> *fields = [editor valueForKey:@"fields"];
         UITableViewCell *restore = [editor valueForKey:@"restoreCell"];
         CHECK(@"opened again, it shows the edit and offers the restore", [fields[0].text isEqualToString:@"One More Time (Edit)"] && restore.userInteractionEnabled);
         shot(@"reopened");
     });
-    after(12.5, ^{
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         NSArray<UITextField *> *fields = [editor valueForKey:@"fields"];
         UITableViewCell *restore = [editor valueForKey:@"restoreCell"];
@@ -264,8 +276,8 @@ static void installInfoFixture(void) {
         [[UIApplication sharedApplication] sendAction:save.action to:save.target from:save forEvent:nil];
         CHECK(@"saved, the edit and its cover are gone", !SGLocalFileEditFor(kURI) && [SGLocalFileLyricsKey(kURI) isEqualToString:kURI]);
     });
-    after(14, ^{ SGLocalFilePresentEditor(player, kURI); });
-    after(15.5, ^{
+    STEP(!player.presentedViewController && visible(player), ^{ SGLocalFilePresentEditor(player, kURI); });
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         NSArray<UITextField *> *fields = [editor valueForKey:@"fields"];
         UITableViewCell *restore = [editor valueForKey:@"restoreCell"];
@@ -274,17 +286,15 @@ static void installInfoFixture(void) {
         [fields[2] sendActionsForControlEvents:UIControlEventEditingChanged];
         [(id<UIAdaptivePresentationControllerDelegate>)editor presentationControllerDidAttemptToDismiss:editor.navigationController.presentationController];
     });
-    after(17, ^{
+    STEP(visible([self editorOver:player].presentedViewController), ^{
         UIViewController *editor = [self editorOver:player];
         UIAlertController *confirm = (UIAlertController *)editor.presentedViewController;
         CHECK(@"a swipe away with changes asks first", [confirm isKindOfClass:UIAlertController.class] && confirm.preferredStyle == UIAlertControllerStyleActionSheet
               && [confirm.actions.firstObject.title isEqualToString:@"Discard changes"]);
         shot(@"discard");
     });
-    after(19, ^{
-        NSLog(@"[harness] %@: %d failed", sg_failures ? @"FAIL" : @"PASS", sg_failures);
-        exit(sg_failures ? 1 : 0);
-    });
+    NSLog(@"[harness] %@: %d failed", sg_failures ? @"FAIL" : @"PASS", sg_failures);
+    exit(sg_failures ? 1 : 0);
 }
 
 - (UITableViewController *)reviewOver:(UIViewController *)editor {
@@ -295,20 +305,18 @@ static void installInfoFixture(void) {
 
 - (void)runSuggestOn:(UIViewController *)player {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyLocalFileSuggest];
-    after(1, ^{ SGLocalFilePresentEditor(player, kURI); });
-    after(1.8, ^{
+    SGLocalFilePresentEditor(player, kURI);
+    STEP(visible([self editorOver:player]), ^{
         [self editorOver:player].navigationController.sheetPresentationController.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
     });
-    after(2.5, ^{
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         CHECK(@"Find Info is default on and makes no automatic request", editor.toolbarItems.count == 3 && sg_searches == 0);
         shot(@"find-info");
-        after(0.5, ^{
-            [editor performSelector:@selector(findInfo)];
-            [editor performSelector:@selector(findInfo)];
-        });
+        [editor performSelector:@selector(findInfo)];
+        [editor performSelector:@selector(findInfo)];
     });
-    after(4, ^{
+    STEP(visible([self reviewOver:[self editorOver:player]]), ^{
         UIViewController *editor = [self editorOver:player];
         UITableViewController *review = [self reviewOver:editor];
         CHECK(@"one search and review, no eager cover download", review && sg_searches == 1 && sg_covers == 0);
@@ -318,104 +326,106 @@ static void installInfoFixture(void) {
         CHECK(@"only differing fields checked", [review tableView:review.tableView cellForRowAtIndexPath:album].accessoryType == UITableViewCellAccessoryCheckmark &&
             [review tableView:review.tableView cellForRowAtIndexPath:title].accessoryType == UITableViewCellAccessoryNone);
         shot(@"review-best");
-        after(0.8, ^{
+        STEP(visible(review), ^{
             [review tableView:review.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:3 inSection:0]];
             [review tableView:review.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
             CHECK(@"Other Matches preserves unchecked Cover", [review tableView:review.tableView cellForRowAtIndexPath:
                 [NSIndexPath indexPathForRow:3 inSection:0]].accessoryType == UITableViewCellAccessoryNone);
         });
     });
-    after(5.5, ^{
+    STEP(visible([self reviewOver:[self editorOver:player]]), ^{
         UIViewController *editor = [self editorOver:player];
         UITableViewController *review = [self reviewOver:editor];
         shot(@"review-other");
-        after(0.5, ^{ [review performSelector:@selector(reject)]; });
+        [review performSelector:@selector(reject)];
         CHECK(@"Not This Song never saves", !SGLocalFileEditFor(kURI));
     });
-    after(7, ^{
+    STEP(![self editorOver:player].presentedViewController && visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         CHECK(@"reject leaves editor unchanged", !editor.navigationItem.rightBarButtonItem.enabled);
         [editor performSelector:@selector(findInfo)];
     });
-    after(8.5, ^{
+    STEP(visible([self reviewOver:[self editorOver:player]]), ^{
         UIViewController *editor = [self editorOver:player];
         UITableViewController *review = [self reviewOver:editor];
         [review tableView:review.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:3 inSection:0]];
         [review performSelector:@selector(use)];
     });
-    after(10, ^{
+    STEP(![self editorOver:player].presentedViewController && visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         NSArray<UITextField *> *fields = [editor valueForKey:@"fields"];
         CHECK(@"Use only fills selected fields; no overlay write", [fields[0].text isEqual:@"One More Time"] &&
             [fields[2].text isEqual:@"Discovery (Remastered)"] && !SGLocalFileEditFor(kURI) && sg_covers == 0);
         CHECK(@"accepted values retain dirty/discard guard", editor.modalInPresentation && editor.navigationItem.rightBarButtonItem.enabled);
         shot(@"accepted-unsaved");
-        after(0.5, ^{
+        STEP(editor.navigationItem.rightBarButtonItem.enabled, ^{
             [editor performSelector:@selector(save)];
             CHECK(@"existing Save publishes the URI-keyed overlay", [SGLocalFileEditFor(kURI)[@"album"] isEqual:@"Discovery (Remastered)"]);
         });
     });
-    after(11.5, ^{ SGLocalFilePresentEditor(player, kURI); });
-    after(13, ^{
+    STEP(!player.presentedViewController && visible(player), ^{ SGLocalFilePresentEditor(player, kURI); });
+    STEP(visible([self editorOver:player]), ^{
         [self editorOver:player].navigationController.sheetPresentationController.selectedDetentIdentifier = UISheetPresentationControllerDetentIdentifierLarge;
         [[self editorOver:player] performSelector:@selector(findInfo)];
     });
-    after(14.5, ^{ [[self reviewOver:[self editorOver:player]] performSelector:@selector(use)]; });
-    after(16, ^{
+    STEP(visible([self reviewOver:[self editorOver:player]]), ^{ [[self reviewOver:[self editorOver:player]] performSelector:@selector(use)]; });
+    STEP(![self editorOver:player].presentedViewController && [[self editorOver:player] valueForKey:@"cover"] != nil, ^{
         UIViewController *editor = [self editorOver:player];
         UIImage *cover = [editor valueForKey:@"cover"];
         CHECK(@"Use downloads cover only on demand, fills picked cover without saving", sg_covers == 1 && cover &&
             MAX(cover.size.width, cover.size.height) == 1200 && !SGLocalFileEditFor(kURI)[@"cover"]);
         shot(@"accepted-cover");
-        after(0.5, ^{
+        STEP(visible(editor) && editor.navigationItem.rightBarButtonItem.enabled, ^{
             [editor performSelector:@selector(save)];
             CHECK(@"Save sends picked cover through existing cover store", SGLocalFileEditFor(kURI)[@"cover"] != nil);
         });
     });
-    after(17.5, ^{
+    STEP(!player.presentedViewController && visible(player), ^{
         [NSUserDefaults.standardUserDefaults setBool:NO forKey:SGKeyLocalFileSuggest];
         SGLocalFilePresentEditor(player, kURI);
     });
-    after(19, ^{
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         CHECK(@"off hides Find Info", editor.toolbarItems.count == 0);
         [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyLocalFileSuggest];
         SGLocalFileSaveEdit(kURI, @{}, nil, NO);
         [editor dismissViewControllerAnimated:YES completion:nil];
     });
-    after(20, ^{ SGLocalFilePresentEditor(player, kURI); });
-    after(21, ^{
+    STEP(!player.presentedViewController && visible(player), ^{ SGLocalFilePresentEditor(player, kURI); });
+    STEP(visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
         ((UITextField *)[editor valueForKey:@"fields"][0]).text = @"Pending Files";
         sg_holdSearch = YES;
         [editor performSelector:@selector(findInfo)];
     });
-    after(21.6, ^{ [[self editorOver:player] pickCoverFromFiles:YES]; });
-    after(22.5, ^{
+    STEP(sg_pendingSearch != nil, ^{ [[self editorOver:player] pickCoverFromFiles:YES]; });
+    STEP(visible([self editorOver:player].presentedViewController), ^{
         UIViewController *editor = [self editorOver:player];
         [editor dismissViewControllerAnimated:YES completion:nil];
     });
-    after(23.5, ^{
+    STEP(![self editorOver:player].presentedViewController && visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
+        sg_pendingSearch = nil;
         ((UITextField *)[editor valueForKey:@"fields"][0]).text = @"Pending Photos";
         [editor performSelector:@selector(findInfo)];
     });
-    after(24.1, ^{ [[self editorOver:player] pickCoverFromFiles:NO]; });
-    after(25, ^{
+    STEP(sg_pendingSearch != nil, ^{ [[self editorOver:player] pickCoverFromFiles:NO]; });
+    STEP(visible([self editorOver:player].presentedViewController), ^{
         UIViewController *editor = [self editorOver:player];
         [editor dismissViewControllerAnimated:YES completion:nil];
     });
-    after(26, ^{
+    STEP(![self editorOver:player].presentedViewController && visible([self editorOver:player]), ^{
         UIViewController *editor = [self editorOver:player];
+        sg_pendingSearch = nil;
         ((UITextField *)[editor valueForKey:@"fields"][0]).text = @"Blocked Review";
         [editor performSelector:@selector(findInfo)];
         [editor performSelector:@selector(cancel)]; // dirty editor presents its real discard/keep-editing guard
     });
-    after(27, ^{
+    STEP(sg_pendingSearch && visible([self editorOver:player].presentedViewController), ^{
         CHECK(@"pending lookup reaches discard confirmation race", sg_pendingSearch && !sg_pendingSearch.stopped);
         [sg_pendingSearch finishLoading];
     });
-    after(28, ^{
+    STEP(((UIBarButtonItem *)[self editorOver:player].toolbarItems[1]).enabled, ^{
         UIViewController *editor = [self editorOver:player];
         CHECK(@"both picker presentation boundaries were exercised", sg_filesBoundaryChecked && sg_photosBoundaryChecked);
         CHECK(@"answer behind another controller is dropped and button reset", !sg_conflictingPresentation &&

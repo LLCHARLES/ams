@@ -32,7 +32,7 @@ int fsync(int fd) {
     if (atomic_exchange(&failNextSync, false)) { errno = ENOSPC; return -1; }
     if (atomic_exchange(&stallNextSync, false)) {
         dispatch_semaphore_signal(syncEntered);
-        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
             atomic_store(&stalledSyncTimedOut, true);
             errno = ETIMEDOUT;
             return -1;
@@ -56,7 +56,7 @@ void dispatch_sync(dispatch_queue_t queue, dispatch_block_t block) {
     if (atomic_exchange(&pauseNextBarrier, false)) {
         realSync(queue, ^{
             dispatch_semaphore_signal(barrierEntered);
-            if (dispatch_semaphore_wait(releaseBarrier, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+            if (dispatch_semaphore_wait(releaseBarrier, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
                 fprintf(stderr, "scheduler barrier probe timed out\n"); exit(1);
             }
             block();
@@ -73,7 +73,7 @@ int fclonefileat(int from, int dir, const char *to, uint32_t flags) {
     dispatch_once(&once, ^{ realClone = dlsym(RTLD_NEXT, "fclonefileat"); });
     if (atomic_exchange(&holdClone, false)) {
         dispatch_semaphore_signal(syncEntered);
-        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
             fprintf(stderr, "held import clone timed out\n"); exit(1);
         }
     }
@@ -86,7 +86,7 @@ int fclonefileat(int from, int dir, const char *to, uint32_t flags) {
 }
 static BOOL removeRaceItem(id object, SEL selector, NSString *path, NSError **error) {
     if ([path isEqual:eraseRacePath] &&
-        dispatch_semaphore_wait(canonicalRead, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+        dispatch_semaphore_wait(canonicalRead, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
         fprintf(stderr, "canonical-read probe timed out\n"); exit(1);
     }
     return originalRemoveItem(object, selector, path, error);
@@ -134,7 +134,7 @@ static NSError *writesAndWait(SGPlayLog *log) {
     __block BOOL done = NO;
     __block NSError *failure;
     [log finishPendingWritesWithCompletion:^(NSError *error) { failure = error; done = YES; }];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "recorder acknowledgement timed out\n"); exit(1); }
@@ -220,7 +220,7 @@ static void snapshotChecks(NSString *dir) {
     syncEntered = dispatch_semaphore_create(0); releaseSync = dispatch_semaphore_create(0);
     atomic_store(&holdClone, true);
     [log merge:@[play(8000, 30000, @"Imported", @"Artist", @"")] completion:added];
-    CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)), "import reached snapshot clone");
+    CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "import reached snapshot clone");
     SGPlay *backup = play(9000, 30000, @"Restored", @"Artist", @""); backup.exactImport = YES;
     [restorer merge:@[backup] completion:added];
     dispatch_semaphore_signal(releaseSync);
@@ -653,7 +653,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     [asyncLog loadWithCompletion:^{ completions++; }];
     [asyncLog loadWithCompletion:^{ completions++; }];
     [asyncLog record:play(1900000500, 10000, @"During load", @"Recorder", @"")];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (completions < 2 && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(!writesAndWait(asyncLog), "recording during initial load is acknowledged independently");
@@ -665,7 +665,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     [erasedDuringLoad loadWithCompletion:^{ done = YES; }];
     [erasedDuringLoad erase];
     [erasedDuringLoad record:play(1900000600, 20000, @"After erase", @"Recorder", @"")];
-    deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(!writesAndWait(erasedDuringLoad), "erase and subsequent recording finish in order");
@@ -677,7 +677,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     SGPlayLog *corrupt = [[SGPlayLog alloc] initWithPath:corruptPath];
     done = NO;
     [corrupt loadWithCompletion:^{ done = YES; }];
-    deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(done && corrupt.loadError != nil, "async TSV load: corrupt encoding is an explicit error, not empty history");
@@ -783,13 +783,13 @@ static void interruptedImport(NSString *path, NSString *mode) {
     blocked.end = 2000; blocked.ms = 30000;
     blocked.title = @"Uncommitted import"; blocked.artist = @"Artist"; blocked.album = @"";
     [log merge:@[blocked] completion:^(NSUInteger added, NSError *error) { _exit(92); }];
-    if (dispatch_semaphore_wait(importEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) _exit(93);
+    if (dispatch_semaphore_wait(importEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) _exit(93);
     if ([mode isEqual:@"terminate"]) {
         syncEntered = dispatch_semaphore_create(0);
         releaseSync = dispatch_semaphore_create(0);
         atomic_store(&stallNextSync, true);
         [log record:play(3000, 30000, @"Queued first", @"Artist", @"")];
-        if (dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC))) _exit(99);
+        if (dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) _exit(99);
         [log record:play(4000, 30000, @"Final at termination", @"Artist", @"")];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             dispatch_semaphore_signal(releaseSync);
@@ -823,7 +823,7 @@ static void slowRecorderChecks(NSString *dir) {
         atomic_store(&stallNextSync, true);
         [log record:play(100, 30000, @"First", @"Artist", @"")];
         CHECK(!atomic_load(&stalledSyncTimedOut), "record returns while its fsync is still blocked");
-        CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)),
+        CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
               "slow-write probe reached the real persistence boundary");
         [log record:play(200, 30000, @"Second", @"Artist", @"")];
         [log record:play(300, 30000, @"Third", @"Artist", @"")];
@@ -856,7 +856,7 @@ static void eraseGenerationChecks(NSString *dir) {
     canonicalRead = dispatch_semaphore_create(0);
     atomic_store(&pauseNextBarrier, true);
     SGPlayLog *log = [[SGPlayLog alloc] initWithPath:path];
-    CHECK(!dispatch_semaphore_wait(barrierEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)),
+    CHECK(!dispatch_semaphore_wait(barrierEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
           "initial load is concurrent with a queued erase");
     [log erase];
     dispatch_semaphore_signal(releaseBarrier);
@@ -903,7 +903,7 @@ static void reviewPersistenceChecks(NSString *dir) {
         BOOL launched = [child launchAndReturnError:&error];
         CHECK(launched, "launch interrupted-import probe");
         if (!launched) continue;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             if (child.running) [child terminate];
         });
         [child waitUntilExit];

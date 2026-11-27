@@ -176,7 +176,6 @@ static void setTextSize(UIWindow *window, UIContentSizeCategory category) {
     // Hand the new traits down now rather than whenever the window next lays out: a slow machine may not in 0.1 s.
     [window updateTraitsIfNeeded];
     [window layoutIfNeeded];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 }
 
 static SGRBarText *barIn(UIView *host) {
@@ -707,10 +706,10 @@ static void switchTitles(NSString *key, BOOL on, dispatch_block_t next) {
     BOOL translate = [key isEqualToString:SGKeyLyricsTranslateTitles];
     void (^post)(void) = ^{
         [NSNotificationCenter.defaultCenter postNotificationName:translate ? SGTitleTranslationSettingsDidChangeNotification : SGSimplifyTitlesDidChangeNotification object:nil];
+        dispatch_async(dispatch_get_main_queue(), next);
     };
     if (translate) dispatch_async(dispatch_get_main_queue(), post);
     else post();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), next);
 }
 static void toggleTitles(BOOL enabled, dispatch_block_t next) {
     TitleRefreshProbe *root = [TitleRefreshProbe new];

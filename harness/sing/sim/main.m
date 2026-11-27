@@ -20,6 +20,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <stdatomic.h>
+#import "../../harness-wait.h"
 #import "Shared/Sing/Sing.h"
 #import "Shared/Sing/SGSingLoader.h"
 
@@ -372,14 +373,6 @@ static void check(OSStatus status, const char *what) {
     _lastAt = now;
 }
 
-- (void)waitFor:(BOOL (^)(void))condition every:(double)seconds then:(void (^)(void))then {
-    if (condition()) {
-        then();
-        return;
-    }
-    [self after:seconds do:^{ [self waitFor:condition every:seconds then:then]; }];
-}
-
 // The position Spotify shows against where in the mix what is heard is.
 // The state the lyrics read: the player's.
 - (SPTPlayerState *)lyricsState {
@@ -452,19 +445,19 @@ static void check(OSStatus status, const char *what) {
         [self checkPosition:@"held at Serious,"];
         setThermal(NSProcessInfoThermalStateFair);
         CFTimeInterval fair = CACurrentMediaTime();
-        [self waitFor:^BOOL { return SGSingLoaderSeparator() || CACurrentMediaTime() - fair > 40; } every:0.25 then:^{
+        HarnessWhen(@"separator reloaded after thermal recovery", ^BOOL { return SGSingLoaderSeparator() != nil; }, ^{
             CHECK(SGSingCurrentState() != SGSingStateHot && SGSingLoaderSeparator() && SGSingHeldLead() > 2,
                   @"at Fair it loads the model again in %.1f s (%@), the lead kept (%.2f s)", CACurrentMediaTime() - fair, SGSingStatusText(), SGSingHeldLead());
             [self checkPosition:@"running again,"];
             // A memory warning stops Sing with the mic still on.
             [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidReceiveMemoryWarningNotification object:UIApplication.sharedApplication];
-            [self after:1 do:^{
+            HarnessWhen(@"Sing stopped after memory warning", ^BOOL { return [SGSingStatusText() isEqual:@"Stopped"]; }, ^{
                 CHECK(SGSingOn() && [SGSingStatusText() isEqualToString:@"Stopped"] && SGSingHeldLead() > 2,
                       @"stopped by a memory warning, Sing reads %@ and plays on the %.2f s it holds", SGSingStatusText(), SGSingHeldLead());
                 [self checkPosition:@"stopped,"];
                 [self pauseThenResume];
-            }];
-        }];
+            });
+        });
     }];
 }
 
@@ -492,13 +485,13 @@ static void check(OSStatus status, const char *what) {
               SGSingHeldLead());
         [self checkPosition:@"resumed,"];
         SGSetSingOn(NO);
-        [self after:1 do:^{
+        HarnessWhen(@"Sing switched off", ^BOOL { return SGSingCurrentState() == SGSingStateOff; }, ^{
             CHECK(SGSingHeldLead() < 0.001 && SGSingCurrentState() == SGSingStateOff, @"switched off, nothing is held (%.3f s) and Sing is %@",
                   SGSingHeldLead(), SGSingStatusText());
             [self score];
             NSLog(@"[harness] %@", sg_failures ? @"FAILED" : @"all passed");
             exit(sg_failures ? 1 : 0);
-        }];
+        });
     }];
 }
 
@@ -549,26 +542,26 @@ static void check(OSStatus status, const char *what) {
     CFTimeInterval began = CACurrentMediaTime();
     if (SGSingModelCurrentState() != SGSingModelReady) SGSingDownloadModel();
     __block CFTimeInterval logged = 0;
-    [self waitFor:^BOOL {
+    HarnessWhen(@"voice model download completed", ^BOOL {
         if (CACurrentMediaTime() - logged > 5) {
             logged = CACurrentMediaTime();
             NSLog(@"[harness] %@", SGSingStatusText());
         }
         return SGSingModelCurrentState() != SGSingModelDownloading;
-    } every:0.5 then:^{
+    }, ^{
         CHECK(SGSingModelCurrentState() == SGSingModelReady, @"the voice model is on the phone, checked (%@, %.0f s)", SGSingModelError() ?: @"no error",
               CACurrentMediaTime() - began);
         if (SGSingModelCurrentState() != SGSingModelReady) exit(1);
         SGSetSingLevel(0);
         CFTimeInterval loading = CACurrentMediaTime();
         SGSetSingOn(YES);
-        [self waitFor:^BOOL { return SGSingCurrentState() != SGSingStatePreparing; } every:0.25 then:^{
+        HarnessWhen(@"Sing finished preparing the model", ^BOOL { return SGSingCurrentState() != SGSingStatePreparing; }, ^{
             CHECK(SGSingCurrentState() == SGSingStateWaiting, @"the model loads in %.1f s, and Sing waits for Spotify (%@)", CACurrentMediaTime() - loading,
                   SGSingStatusText());
             [self startChain];
             [self play];
-        }];
-    }];
+        });
+    });
     return YES;
 }
 

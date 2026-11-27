@@ -41,11 +41,11 @@ static SGRPhotoReading *readOf(UIImage *image) {
     __block SGRPhotoReading *result = nil;
     HARNESS_CHECK(SGRPhotoRead(image, ^(SGRPhotoReading *reading) {
         calls++;
+        if (calls != 1) HARNESS_FAIL(@"duplicate photo reading");
         result = reading;
     }));
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:20];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!calls && [limit timeIntervalSinceNow] > 0) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
     if (calls != 1) HARNESS_FAIL(@"%lu deliveries of one read, not 1", (unsigned long)calls);
     return result;
 }

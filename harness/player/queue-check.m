@@ -153,8 +153,12 @@ static UILabel *labelIn(UIView *view, NSString *text) {
     }
     return nil;
 }
-static void spin(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+static void until(NSString *what, BOOL (^ready)(void)) {
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 45;
+    while (!ready()) {
+        if (NSProcessInfo.processInfo.systemUptime >= deadline) HARNESS_FAIL(@"queue: waiting for %@", what);
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    }
 }
 static NSUInteger visibleHeadings(UIView *view, NSString *text) {
     if (view.hidden || view.alpha <= 0 || !view.window) return 0;
@@ -200,7 +204,7 @@ static void run(void) {
           [titles(2) isEqual:@[@"First occurrence", @"Second occurrence"]], @"Spotify History appears chronologically above current and Up Next");
     UITableView *table = screen.tableView;
     [table layoutIfNeeded];
-    spin(0.3);
+    until(@"Up Next section mounted", ^BOOL { return [table headerViewForSection:2].window != nil; });
     check(visibleHeadings([table headerViewForSection:2], @"Up Next") == 1,
           @"Up Next has exactly one visible heading");
     UILabel *now = labelIn([table headerViewForSection:1], @"Now Playing"), *next = labelIn([table headerViewForSection:2], @"Up Next");
@@ -218,6 +222,7 @@ static void run(void) {
     UIImage *(^shown)(NSIndexPath *) = ^UIImage *(NSIndexPath *path) {
         return ((UIListContentConfiguration *)[table cellForRowAtIndexPath:path].contentConfiguration).image;
     };
+    until(@"first row's fetched cover", ^BOOL { return shown(row(2, 0)) == fetchedCover; });
     check(shown(row(2, 0)) == fetchedCover && shown(row(1, 0)) && shown(row(1, 0)) != fetchedCover,
           @"a row takes the cover its song's metadata names as it lands; a song without one keeps the placeholder");
     UITableViewCell *history = [screen tableView:screen.tableView cellForRowAtIndexPath:row(0, 1)];
@@ -269,22 +274,24 @@ static void run(void) {
     check(keptCover && droppedCover && droppedCover.cancelled && !keptCover.cancelled,
           @"a cover still coming for a song gone from the list is cancelled; a listed song's keeps coming");
     [screen.navigationController pushViewController:[UIViewController new] animated:NO];
-    spin(0.3);
+    until(@"pending cover cancelled on departure", ^BOOL { return keptCover.cancelled; });
     check(keptCover.cancelled, @"Playing Next leaving the screen cancels the covers still coming");
     // Back with the same cells: first the cancelled request is retried offline, then the failed request online.
     coversHeld = NO;
     offline = YES;
     NSUInteger cancelledAsks = [coverAsks countForObject:@"Kept"];
     [screen.navigationController popViewControllerAnimated:NO];
-    spin(0.3);
+    until(@"offline row displayed and cover requested", ^BOOL {
+        return shown(row(2, 0)) && [coverAsks countForObject:@"Kept"] > cancelledAsks;
+    });
     check(shown(row(2, 0)) && shown(row(2, 0)) != fetchedCover && [coverAsks countForObject:@"Kept"] == cancelledAsks + 1,
           @"back on screen offline, the cancelled cover is requested again but stays a placeholder");
     [screen.navigationController pushViewController:[UIViewController new] animated:NO];
-    spin(0.3);
+    until(@"queue left the window", ^BOOL { return !screen.view.window; });
     offline = NO;
     NSUInteger keptAsks = [coverAsks countForObject:@"Kept"];
     [screen.navigationController popViewControllerAnimated:NO];
-    spin(0.3);
+    until(@"retried cover displayed", ^BOOL { return shown(row(2, 0)) == fetchedCover; });
     check(shown(row(2, 0)) == fetchedCover && [coverAsks countForObject:@"Kept"] == keptAsks + 1,
           [NSString stringWithFormat:@"Playing Next shown again retries the failed cover once and shows it (%lu asks)",
                                      (unsigned long)([coverAsks countForObject:@"Kept"] - keptAsks)]);
@@ -292,7 +299,7 @@ static void run(void) {
     for (NSString *title in coverAsks) totalAsks += [coverAsks countForObject:title];
     [screen.navigationController pushViewController:[UIViewController new] animated:NO];
     [screen.navigationController popViewControllerAnimated:NO];
-    spin(0.3);
+    until(@"queue redisplayed with cached cover", ^BOOL { return screen.view.window && shown(row(2, 0)) == fetchedCover; });
     NSUInteger totalAfter = 0;
     for (NSString *title in coverAsks) totalAfter += [coverAsks countForObject:title];
     check(coverAsks.count == asksShown && totalAfter == totalAsks, @"shown again with every cover in, no cover is asked for again");
@@ -301,7 +308,11 @@ static void run(void) {
     offline = YES;
     player.currentQueue.nextTracks = @[late];
     report(@"107");
-    spin(0.3);
+    until(@"new row requested its cover", ^BOOL { return [coverAsks countForObject:@"Late"] > 0 && [table cellForRowAtIndexPath:row(2, 0)]; });
+    // Deliver the fixture's offline completion before switching it online.
+    __block BOOL drained = NO;
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{ drained = YES; });
+    until(@"offline reply delivered", ^BOOL { return drained; });
     NSIndexPath *path = row(2, 0);
     UITableViewCell *prepared = [table cellForRowAtIndexPath:path];
     check(prepared && shown(path) != fetchedCover && [coverAsks countForObject:@"Late"] > 0,
@@ -310,7 +321,7 @@ static void run(void) {
     // UIKit can redisplay this cell without asking the data source to configure it again.
     if ([table.delegate respondsToSelector:@selector(tableView:willDisplayCell:forRowAtIndexPath:)])
         [table.delegate tableView:table willDisplayCell:prepared forRowAtIndexPath:path];
-    spin(0.3);
+    until(@"prepared row shows fetched cover", ^BOOL { return shown(path) == fetchedCover; });
     check(shown(path) == fetchedCover, @"redisplay of the prepared row retries and shows its failed cover");
     // The closed Music page still receives Spotify's queue snapshots (the DJ may have no next track).
     MusicQueueCheck *music = [[MusicQueueCheck alloc] initMusicStyle];
@@ -336,8 +347,8 @@ static void run(void) {
     window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     window.rootViewController = [UIViewController new];
     [window makeKeyAndVisible];
-    dispatch_async(dispatch_get_main_queue(), ^{ run(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) { run(); }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_FAIL(@"queue checks did not finish");
     });
     return YES;

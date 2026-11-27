@@ -31,7 +31,7 @@ BOOL UIAccessibilityIsReduceMotionEnabled(void) {
 }
 
 static void untilMotion(NSString *event, BOOL (^condition)(void)) {
-    double end = CACurrentMediaTime() + 8;
+    double end = CACurrentMediaTime() + 45;
     while (!condition() && CACurrentMediaTime() < end)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     if (!condition()) HARNESS_FAIL(@"waiting for %@", event);
@@ -311,9 +311,17 @@ static void exerciseMotion(UINavigationController *nav, BOOL artist) {
             [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
         }
     }
-    untilMotion(@"numbered frame 3", ^BOOL{ double t = CMTimeGetSeconds(visible.currentTime); return t > 3.15 && t < 3.8; });
+    // Park the real decoder on frame 3; the host may not deliver a run-loop turn
+    // during the fraction of a second in which this frame would normally play.
     postMotion(UIApplicationWillResignActiveNotification);
     HARNESS_CHECK(visible == graph(h) && !visible.rate);
+    __block BOOL sought = NO;
+    [visible seekToTime:CMTimeMake(7, 2) toleranceBefore:kCMTimeZero toleranceAfter:kCMTimeZero
+      completionHandler:^(BOOL finished) { dispatch_async(dispatch_get_main_queue(), ^{ HARNESS_CHECK(finished); sought = YES; }); }];
+    untilMotion(@"numbered frame 3 decoded", ^BOOL {
+        AVPlayerItem *item = visible.currentItem;
+        return sought && [((AVPlayerItemVideoOutput *)[h valueForKeyPath:@"clip.output"]) hasNewPixelBufferForItemTime:item.currentTime];
+    });
     shot(@"last", h);
     holdClock = YES;
     postMotion(UIApplicationDidBecomeActiveNotification);
@@ -411,7 +419,7 @@ static void exerciseMotion(UINavigationController *nav, BOOL artist) {
     }
     [nav pushViewController:top animated:NO];
     [CATransaction flush];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1]];
+    drainMotionCallbacks();
     double base = footprint();
     [nav setViewControllers:@[owner] animated:NO];
     [nav pushViewController:owners.firstObject animated:NO];
@@ -434,7 +442,7 @@ static void exerciseMotion(UINavigationController *nav, BOOL artist) {
         HARNESS_CHECK(surface(hero).contents);
     }
     [CATransaction flush];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1]];
+    drainMotionCallbacks();
     NSUInteger bytes = 0;
     untilMotion(@"retired player/looper/output objects deallocated", ^BOOL{ return !retired.allObjects.count; });
     for (UIView *hero in pages) {

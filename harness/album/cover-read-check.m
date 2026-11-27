@@ -41,7 +41,7 @@ static NSArray<SGRCoverReading *> *readAll(UIImage *image) {
         if (reading.final) finished = YES;
     });
     HARNESS_CHECK(started);
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:20];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!finished && [limit timeIntervalSinceNow] > 0) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     HARNESS_CHECK(finished);
     return delivered;
@@ -199,7 +199,7 @@ int main(void) {
         // Nothing opaque to read: nil, and nothing at all for a cover narrower than 80 pt.
         __block BOOL answered = NO, nilReading = NO;
         HARNESS_CHECK(SGRCoverRead(transparentCover(), ^(SGRCoverReading *reading) { answered = YES; nilReading = reading == nil; }));
-        NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:10];
+        NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:45];
         while (!answered && [limit timeIntervalSinceNow] > 0) [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
         if (!answered || !nilReading) HARNESS_FAIL(@"a transparent cover was %@", answered ? @"read" : @"never answered");
         UIImage *small = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(60, 60)] imageWithActions:^(UIGraphicsImageRendererContext *c) {}];

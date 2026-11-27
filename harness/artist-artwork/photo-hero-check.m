@@ -55,9 +55,12 @@ static const CGFloat kDissolveShare = 0.46;
 // them go while it holds them.
 static NSUInteger visionPasses;
 static dispatch_semaphore_t visionHolds[2];
+static BOOL secondPassEntered;
 #ifdef PHOTO_READ
 BOOL SGRCoverReadTestSubjects(CGImageRef bitmap, SGRCoverVision vision, NSArray<NSValue *> **faces, NSArray<NSValue *> **objects) {
     NSUInteger pass = visionPasses++;
+    if (pass == 1 && visionHolds[1])
+        dispatch_async(dispatch_get_main_queue(), ^{ secondPassEntered = YES; });
     if (pass < 2 && visionHolds[pass]) dispatch_semaphore_wait(visionHolds[pass], DISPATCH_TIME_FOREVER);
     return vision(bitmap, faces, objects);
 }
@@ -77,15 +80,7 @@ void SGMotionArtistArtwork(NSString *name, NSArray *titles, CGFloat pixels, BOOL
     appleDone = done;
 }
 
-static void spin(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
-}
-
-static BOOL waitUntil(NSTimeInterval seconds, BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    while (!done() && [limit timeIntervalSinceNow] > 0) spin(0.02);
-    return done();
-}
+#import "../harness-wait.h"
 
 #pragma mark - the page
 
@@ -178,14 +173,14 @@ static UIImage *fixtureNamed(NSString *name) {
 static UIColor *paletteColour(UIImage *photo) {
     __block UIColor *colour = nil;
     [SGRPalette paletteForImage:photo request:(SGRPaletteRequest){.mainColor = YES} completion:^(SGRPalette *palette) { colour = palette.fieldColor; }];
-    HARNESS_CHECK(waitUntil(10, ^BOOL { return colour != nil; }));
+    HARNESS_AWAIT(colour != nil);
     return colour;
 }
 
 static SGRPhotoReading *readingOf(UIImage *photo) {
     __block SGRPhotoReading *reading = nil;
     HARNESS_CHECK(SGRPhotoRead(photo, ^(SGRPhotoReading *read) { reading = read; }));
-    HARNESS_CHECK(waitUntil(10, ^BOOL { return reading != nil; }));
+    HARNESS_AWAIT(reading != nil);
     return reading;
 }
 
@@ -224,8 +219,7 @@ int main(int argc, char *argv[]) {
             HARNESS_CHECK(argc > 3);
             Page p = makePage(fixtureNamed(@(argv[2])));
             // The field's own colour from the photo, then time for anything else to land.
-            HARNESS_CHECK(waitUntil(10, ^BOOL { return ![fieldOf(p).fieldColor isEqual:SGRNeutralField()]; }));
-            spin(1);
+            HARNESS_AWAIT(![fieldOf(p).fieldColor isEqual:SGRNeutralField()]);
             HARNESS_CHECK(visionPasses == 0);
 #ifdef PHOTO_READ
             HARNESS_CHECK(fieldOf(p).overrideColor == nil);
@@ -240,8 +234,7 @@ int main(int argc, char *argv[]) {
             NSString *name = @(argv[2]);
             UIImage *photo = fixtureNamed(name);
             Page p = makePage(photo);
-            if (!waitUntil(10, ^BOOL { return settled(p); })) HARNESS_FAIL(@"%@: the colour never came", name);
-            spin(0.3);
+            HARNESS_AWAIT(settled(p));
             if (visionPasses != 1) HARNESS_FAIL(@"%@: %lu Vision passes, not 1", name, (unsigned long)visionPasses);
             if (!CGRectEqualToRect(pictureOf(p).frame, p.hero.bounds)) HARNESS_FAIL(@"%@: the photo does not fill the hero", name);
             checkColour(p, photo, name);
@@ -263,12 +256,13 @@ int main(int argc, char *argv[]) {
             observed(p.source);
             HARNESS_CHECK(pictureOf(p).image == second);
             dispatch_semaphore_signal(visionHolds[0]);
-            spin(1);
+            // Both reads use the same serial queue: its first completion was
+            // enqueued on main before the second pass announced entry there.
+            HARNESS_AWAIT(secondPassEntered);
             if ([p.hero valueForKey:@"_photoReading"] || fieldOf(p).overrideColor)
                 HARNESS_FAIL(@"stale completion: the replaced photo's read landed on the hero");
             dispatch_semaphore_signal(visionHolds[1]);
-            if (!waitUntil(10, ^BOOL { return settled(p); })) HARNESS_FAIL(@"swap: the colour never came");
-            spin(0.5);
+            HARNESS_AWAIT(settled(p));
             HARNESS_CHECK(pictureOf(p).image == second && visionPasses == 2);
             UIColor *firstColour = SGRPhotoPageColor(readingOf(first), paletteColour(first));
             for (UIColor *colour in shown) {
@@ -310,8 +304,7 @@ int main(int argc, char *argv[]) {
             more.accessibilityIdentifier = @"Components.UI.ContextMenuButton-second";
             [p.hero updateAppleArtwork:header name:@"Another Artist"];
             HARNESS_CHECK(pictureOf(p).image == spotify);
-            if (!waitUntil(10, ^BOOL { return settled(p); })) HARNESS_FAIL(@"source: the colour never came");
-            spin(0.5);
+            HARNESS_AWAIT(settled(p));
             for (UIColor *colour in shown) {
                 if (sameColour(colour, appleColour)) HARNESS_FAIL(@"source change: Apple Music's photo's colour reached the page");
             }

@@ -1,7 +1,17 @@
 #import "tests.h"
 #import <objc/message.h>
+#import "../dispatch-clock.h"
+static CFTimeInterval menuTime(void) {
+    return harnessTimers ? 100 + harnessNow / (double)NSEC_PER_SEC : CACurrentMediaTime();
+}
 // Logos transforms the real production hooks, including their existing player-sheet gate.
+#define CACurrentMediaTime menuTime
+#define dispatch_time HarnessTime
+#define dispatch_after HarnessAfter
 #import "SpeedPitchMenu.m"
+#undef dispatch_after
+#undef dispatch_time
+#undef CACurrentMediaTime
 
 void SGRequireClasses(NSArray *classes) {}
 void SGPlayFeedback(SGFeedback feedback) {}
@@ -90,12 +100,14 @@ static void songControlTests(void) {
     SGSpeedPitchView *block = [SGSpeedPitchView new];
     UISlider *slider = speedSlider(block);
     SGTestAssert(slider != nil, @"speed slider is accessible to gesture tests");
+    HarnessStartClock();
     sliderEvent(slider, block, UIControlEventTouchDown);
     slider.value = 1.5;
     sliderEvent(slider, block, UIControlEventValueChanged);
     SGTestAssert(SGPlayerSpeed() == 1.5, @"speed drag changes the current song");
     slider.value = 1.8;
     sliderEvent(slider, block, UIControlEventValueChanged); // coalesced slider send is still pending
+    SGTestAssert(harnessTimers.count == 1, @"second drag queued a coalesced send");
 
     dispatch_async(dispatch_get_main_queue(), ^{ playSong(@"spotify:track:gesture-b"); });
     SGDSPSetNumber(SGKeyDSPReverbAmount, 65); // Settings edits A before the already-queued B report.
@@ -104,9 +116,9 @@ static void songControlTests(void) {
     sliderEvent(slider, block, UIControlEventValueChanged);
     sliderEvent(slider, block, UIControlEventTouchUpInside);
     SGTestAssert(SGPlayerSpeed() == 0.75, @"old drag and release cannot overwrite the new song");
-    __block BOOL settled = NO;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{ settled = YES; });
-    SGTestAssert(SGTestPump(^BOOL{ return settled; }) && SGPlayerSpeed() == 0.75,
+    HarnessAdvanceClock(100 * NSEC_PER_MSEC);
+    HarnessStopClock();
+    SGTestAssert(SGPlayerSpeed() == 0.75,
         @"old coalesced slider send cannot change the new song");
     [menuSongOwner flush];
     NSDictionary *records = [defaults dictionaryForKey:@"spotifyglass.speedPitch.songs"];

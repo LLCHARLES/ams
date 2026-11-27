@@ -12,7 +12,7 @@ SDK=$(xcrun --sdk macosx --show-sdk-path)
 xcrun clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -g -O0 -Wall -Wextra -Werror -Wno-unused-parameter -I "$SRC" \
-    "$HERE/retrine-keyboard-commands-check.m" "$SRC/Shared/Keyboard/KeyboardCommands.m" \
+    "$HERE/retrine-keyboard-commands-check.m" \
     "$SRC/Core/SGLocalize.m" \
     -framework UIKit -framework Foundation -framework CoreGraphics -o "$OUT/retrine-keyboard-commands-check"
 "$OUT/retrine-keyboard-commands-check"

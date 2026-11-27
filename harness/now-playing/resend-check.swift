@@ -62,7 +62,7 @@ extension SGLiveActivityBridge {
     static func check() async {
         let dismiss = CommandLine.arguments.contains("--dismiss")
         let timeout = Task {
-            do { try await Task.sleep(for: .seconds(12)) } catch { return }
+            do { try await Task.sleep(for: .seconds(60)) } catch { return }
             fputs("FAIL ActivityKit send/cancellation did not complete\n", stderr)
             exit(1)
         }

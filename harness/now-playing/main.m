@@ -244,22 +244,22 @@ static void songBlockOccurrence(void) {
     [center postNotificationName:SGBlockedSongsDidChangeNotification object:@"other"];
     harnessState(@"newly-blocked", @"Song");
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
-    runFor(.03);
+    drainMain();
     // The queued now-playing check sees the new block before its list-change handler.
     blockedSongs[@"newly-blocked"] = @YES;
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
     [center postNotificationName:SGBlockedSongsDidChangeNotification object:@"newly-blocked"];
-    runFor(.03);
+    drainMain();
     check(skipRequests == 1, @"a newly blocked examined occurrence requests one skip");
     harnessState(@"already-blocked", @"Song");
     blockedSongs[@"already-blocked"] = @YES;
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
     [center postNotificationName:SGBlockedSongsDidChangeNotification object:@"already-blocked"];
-    runFor(.03);
+    drainMain();
     check(skipRequests == 2, @"a queued skip and its block notification cannot skip twice for one occurrence");
     harnessState(@"allowed", @"Song");
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
-    runFor(.03);
+    drainMain();
     check(skipRequests == 2, @"the next allowed song is left playing");
     [blockedSongs removeAllObjects];
     [center postNotificationName:SGBlockedSongsDidChangeNotification object:nil];
@@ -268,24 +268,36 @@ static void songBlockOccurrence(void) {
 
 // Lock screen lyrics: once the line is let go, the artist comes back with the clock moved on, and the
 // extras' clock, which records what passes, is not pulled back by it either.
+extern BOOL harnessManualRow;
+extern CFAbsoluteTime harnessExtrasNow;
+extern int64_t harnessRowDelay;
+BOOL HarnessFireRow(void);
+BOOL HarnessRowArmed(void);
 static void progressBar(void) {
     MPNowPlayingInfoCenter *center = MPNowPlayingInfoCenter.defaultCenter;
     // Rate 4, so the 4 s break after the line's end comes in about a second of wall time.
     const double rate = 4;
-    CFAbsoluteTime setAt = CFAbsoluteTimeGetCurrent();
+    harnessManualRow = YES;
+    CFAbsoluteTime setAt = harnessExtrasNow = 1000;
     center.nowPlayingInfo = spotifyInfo(@"Song", 0, rate);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"Hello"], @"the line sung shows in place of the artist");
-    runFor(1.6);
-    double expected = rate * (CFAbsoluteTimeGetCurrent() - setAt);
+    check(harnessRowDelay > 0 && harnessRowDelay < 1.6 * NSEC_PER_SEC, @"row armed for the line break");
+    harnessExtrasNow += 1.6;
+    check(HarnessFireRow(), @"armed row timer delivers the break");
+    double expected = rate * (harnessExtrasNow - setAt);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"Artist"], @"the artist comes back in the break");
     // The line is let go 4 s past its end at 0.1 s, so the info that lets it go is from 4.1 s on.
     check(systemElapsed() > 4.1 && systemElapsed() <= expected,
           [NSString stringWithFormat:@"the break's info is at %.2f s, not Spotify's 0", systemElapsed()]);
+    harnessExtrasNow += 0.25;
     SGNowPlayingSetExtras(@"haptics", @{MPNowPlayingInfoPropertyInternationalStandardRecordingCode: @"ISRC"}, @"Song");
-    expected = rate * (CFAbsoluteTimeGetCurrent() - setAt);
+    expected = rate * (harnessExtrasNow - setAt);
     check(fabs(systemElapsed() - expected) < 1.5,
           [NSString stringWithFormat:@"an extra's resend is at %.2f s (expected about %.2f)", systemElapsed(), expected]);
     SGNowPlayingSetExtras(@"haptics", nil, nil);
+    center.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
+    harnessManualRow = NO;
+    harnessExtrasNow = 0;
 }
 
 // Lock screen translation: a translation longer than the row is cut by its own
@@ -355,7 +367,7 @@ static void pronunciation(void) {
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"안녕"], @"the words lead the artist row by the default order");
     sg_readingLeads = YES;
     [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
-    runFor(.05);
+    HARNESS_AWAIT([sg_system[MPMediaItemPropertyArtist] isEqual:@"annyeong"]);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"annyeong"], @"paused, the pronunciation takes the row once the order leads with it");
     sg_showTranslation = YES;
     line.translation = @"Hello";
@@ -366,8 +378,7 @@ static void pronunciation(void) {
     sg_reading = SGRLyricsReadingRomanised;
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"안녕"], @"uncached reading leaves the original visible until its worker completes");
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
-    while (![sg_system[MPMediaItemPropertyArtist] isEqual:@"annyeong"] && deadline.timeIntervalSinceNow > 0) runFor(.01);
+    HARNESS_AWAIT([sg_system[MPMediaItemPropertyArtist] isEqual:@"annyeong"]);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"annyeong"], @"completed offline reading refreshes the paused artist row");
     sg_reading = SGRLyricsReadingNone;
     sg_readingLeads = NO;
@@ -388,18 +399,18 @@ static void pausedTrackDuringTick(void) {
             center.nowPlayingInfo = spotifyInfo(@"Paused B", 7, 0);
             dispatch_semaphore_signal(published);
         });
-        check(dispatch_semaphore_wait(published, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0,
+        check(dispatch_semaphore_wait(published, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
               @"paused B publishes off-main while A's tick is held after its snapshot");
     };
     [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:nil];
     check(gated, @"the production lyric tick reaches the snapshot gate");
-    runFor(.05);
+    HARNESS_AWAIT([sg_system[MPMediaItemPropertyTitle] isEqual:@"Paused B"]);
     check([sg_system[MPMediaItemPropertyTitle] isEqual:@"Paused B"] && systemElapsed() == 7
           && [sg_system[MPNowPlayingInfoPropertyPlaybackRate] doubleValue] == 0,
           @"draining main restores paused B after A's stale resend");
     NSUInteger reads = sg_lyricReads;
-    runFor(.35);
-    check(sg_lyricReads == reads, @"paused B leaves no timer polling the lyric player");
+    drainMain();
+    check(!HarnessRowArmed() && sg_lyricReads == reads, @"paused B leaves no timer polling the lyric player");
     sg_lines = saved;
 }
 
@@ -408,11 +419,11 @@ static void deletedTranslation(void) {
     harnessTranslations = @{@"en": @{@"Hola": @"Hello saved"}};
     sg_lines = @[lineOf(@"Hola", 0, 10000)];
     MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = spotifyInfo(@"Song", 0, 0);
-    runFor(.05);
+    HARNESS_AWAIT([sg_system[MPMediaItemPropertyArtist] isEqual:@"Hello saved"]);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"Hello saved"], @"paused artist row restores saved translation without a view");
     harnessTranslations = nil;
     [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsTranslationsDidChangeNotification object:nil];
-    runFor(.05);
+    HARNESS_AWAIT([sg_system[MPMediaItemPropertyArtist] isEqual:@"Hola"]);
     check([sg_system[MPMediaItemPropertyArtist] isEqual:@"Hola"], @"paused artist row removes deleted translation without a view");
     sg_showTranslation = NO;
 }

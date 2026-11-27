@@ -5,7 +5,7 @@
 # settings page instead of the lyrics page.
 #
 #     ./build.sh [<udid> [settings]]
-set -e
+set -eo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../../tweak/Sources" && pwd)
 OUT=${OUT:-"$HERE/../build/lyrics"}   # harness/*/build/ is ignored
@@ -48,8 +48,16 @@ echo "built $OUT/LocalLyricsHarness.app"
 [ -n "$1" ] || exit 0
 UDID=$1
 xcrun simctl install "$UDID" "$OUT/LocalLyricsHarness.app"
-xcrun simctl launch --console-pty "$UDID" com.retrine.locallyricsharness ${2:-page} 2>&1 | tr -ud '\r' | while IFS= read -r line; do
+python3 "$HERE/../../sim-launch.py" --live --terminate-running-process "$UDID" com.retrine.locallyricsharness "${2:-page}" capture-shots 2>&1 |
+while IFS= read -r line; do
     echo "$line"
-    case "$line" in *"[harness] SHOT "*) xcrun simctl io "$UDID" screenshot "$OUT/shots/${line##*SHOT }.png" >/dev/null 2>&1 & ;; esac
+    case "$line" in
+        *"[harness] CAPTURE "*)
+            capture=${line##*CAPTURE }
+            shot=${capture%% *}
+            ack=${capture#* }
+            xcrun simctl io "$UDID" screenshot "$OUT/shots/$shot.png" >/dev/null
+            touch "$ack"
+            ;;
+    esac
 done
-exit 0

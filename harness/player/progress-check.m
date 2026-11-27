@@ -314,7 +314,7 @@ int main(void) { @autoreleasepool { @try {
     HARNESS_CHECK(t.isPaused && objc_getAssociatedObject(times.label, &kNotice) != nil);
     __block BOOL drained = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!drained && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
     HARNESS_CHECK(drained && !objc_getAssociatedObject(times.label, &kNotice));

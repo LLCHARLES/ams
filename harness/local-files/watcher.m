@@ -12,6 +12,7 @@
 #import "Shared/Player/NowPlayingExtras.h"
 #import "Shared/Player/PlayerState.h"
 #import "../harness-fail.h"
+#import "../dispatch-clock.h"
 
 NSNotificationName const SGNowPlayingInfoDidChangeNotification = @"spotifyglass.nowPlayingInfoDidChange";
 
@@ -70,16 +71,13 @@ static void play(HarnessTrack *track) {
     state.track = track;
     for (id<SGPlayerStateObserver> observer in [observers copy]) [observer playerStateDidChange:SGPlayerState()];
 }
-static void pump(NSTimeInterval seconds) {
-    sg_listInWindow = YES;
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
-    sg_listInWindow = NO;
-}
-static void pumpUntil(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
-    while (!done() && deadline.timeIntervalSinceNow > 0) pump(0.005);
-    HARNESS_CHECK(done());
-}
+// Drive the watcher's two scheduled retries before announcing the real artwork.
+#define dispatch_after HarnessAfter
+#define dispatch_time HarnessTime
+#import "LocalCover.m"
+#undef dispatch_time
+#undef dispatch_after
+#import "../harness-wait.h"
 static UIImage *solid(UIColor *color) {
     return [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(4, 4)] imageWithActions:^(UIGraphicsImageRendererContext *context) {
         [color setFill]; UIRectFill(CGRectMake(0, 0, 4, 4));
@@ -115,13 +113,16 @@ int main(void) { @autoreleasepool {
     [cell addSubview:cover];
     [list addSubview:cell];
 
+    HarnessStartClock();
     play(one);
     [list layoutSubviews];   // the hooked layout the player does on its own
     HARNESS_CHECK(cover.image == first);
 
     // The second track agrees by title and artist, so it shows the first's artwork until its own arrives.
     play(two);
-    pump(1.7);   // past the watcher's retries at 0 and 1.5 s
+    sg_listInWindow = YES;
+    HarnessAdvanceClock(1700 * NSEC_PER_MSEC);
+    HarnessStopClock();
     HARNESS_CHECK(cover.image == first);
 
     // Its own artwork reaches the now playing info afterwards, as the system's post (NowPlayingExtras.x) says.
@@ -130,7 +131,8 @@ int main(void) { @autoreleasepool {
     dispatch_async(dispatch_get_main_queue(), ^{
         [NSNotificationCenter.defaultCenter postNotificationName:SGNowPlayingInfoDidChangeNotification object:nil];
     });
-    pumpUntil(^BOOL { return cover.image == second; });
+    HARNESS_AWAIT(cover.image == second);
+    sg_listInWindow = NO;
 
     method_setImplementation(getter, original);
     imp_removeBlock(replacement);

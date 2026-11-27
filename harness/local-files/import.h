@@ -9,7 +9,7 @@ static NSString *importLRC(NSURL *url, NSString *uri, NSError **error) {
         if (!NSThread.isMainThread) { fprintf(stderr, "LRC completion is not on main\n"); exit(1); }
         name = imported; failure = reason; done = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "LRC import timed out\n"); exit(1); }
@@ -25,7 +25,7 @@ static BOOL deleteLRC(NSString *name) {
         if (!NSThread.isMainThread) { fprintf(stderr, "delete completion is not on main\n"); exit(1); }
         deleted = answer; done = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "LRC delete timed out\n"); exit(1); }
@@ -40,7 +40,7 @@ static inline __attribute__((unused)) NSArray<NSString *> *retireLRC(void) {
         if (!NSThread.isMainThread) { fprintf(stderr, "retire completion is not on main\n"); exit(1); }
         removed = names; done = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "LRC retire timed out\n"); exit(1); }

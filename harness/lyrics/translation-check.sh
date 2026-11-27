@@ -15,11 +15,11 @@ xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$OUT" -I"$SRC" -I"$SRC/Redesigned/Lyrics" -Wall -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../scene.m" "$HERE/stubs.m" "$HERE/translation-check.m" "$HERE/../sing/button/sing-stubs.m" \
     "$SRC"/Redesigned/Lyrics/AutoTranslatorName.m \
-    "$SRC"/Redesigned/Lyrics/AutoTranslation.m $( [ -f "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ] && echo "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ) "$SRC"/Redesigned/Lyrics/SGRKaraokeView.m "$SRC"/Redesigned/Lyrics/LyricsText.m "$SRC"/Redesigned/Lyrics/LyricsLook.m "$SRC"/Redesigned/Lyrics/LyricsStyle.m \
+    "$HERE"/auto-source.m $( [ -f "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ] && echo "$SRC"/Redesigned/Lyrics/TranslationStatusView.m ) "$HERE"/karaoke-source.m "$SRC"/Redesigned/Lyrics/LyricsText.m "$SRC"/Redesigned/Lyrics/LyricsLook.m "$SRC"/Redesigned/Lyrics/LyricsStyle.m \
     "$SRC"/Redesigned/Lyrics/SongLanguage.m "$SRC"/Redesigned/Lyrics/MeaningSheet.m "$SRC"/Redesigned/Lyrics/SGRSingButton.m \
     "$SRC"/Shared/Lyrics/KaraokeTiming.m "$SRC"/Shared/Lyrics/Romanise.m "$SRC"/Shared/Lyrics/LyricsLanguage.m \
     "$SRC"/Shared/LyricsMeanings/Meanings.m "$SRC"/Shared/LyricsSources/SongMatch.m "$SRC"/Shared/AdBlock/Protobuf.m "$SRC"/Shared/LyricsSources/SGTTML.m \
-    "$SRC"/Redesigned/Kit/SGRTokens.m "$SRC"/Redesigned/Kit/SGRGlass.m "$SRC"/Redesigned/Kit/SGRDownload.m "$SRC"/Redesigned/Kit/SGRRestyle.m "$SRC"/Redesigned/Kit/SGRRollingDigits.m "$SRC"/Redesigned/Kit/SGRRefinements.m "$HERE/../page-style-with-presenter-stubs.m" "$SRC"/Core/SGViewTree.m \
+    "$SRC"/Redesigned/Kit/SGRTokens.m "$SRC"/Redesigned/Kit/SGRGlass.m "$HERE"/download-source.m "$SRC"/Redesigned/Kit/SGRRestyle.m "$SRC"/Redesigned/Kit/SGRRollingDigits.m "$SRC"/Redesigned/Kit/SGRRefinements.m "$HERE/../page-style-with-presenter-stubs.m" "$SRC"/Core/SGViewTree.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLocalize.m "$SRC"/Core/SGGlass.m \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreText -framework Foundation \
     -framework Symbols -framework NaturalLanguage -o "$APP/Contents/MacOS/Check"

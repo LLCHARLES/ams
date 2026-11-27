@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "Shared/Player/SGTimePitch.h"
 #include "Shared/Player/SGRenderGate.h"
+#import "../reader-handoff.h"
 
 // Observe ownership at the AudioComponent service boundary, not private fields.
 static atomic_int liveUnits;
@@ -33,7 +34,8 @@ static OSStatus source(void *context, UInt32 frames, AudioBufferList *data) {
 typedef struct {
     SGRenderGate gate;
     _Atomic(SGTimePitch *) current;
-    atomic_bool loaded, closed, release, retired, rendered;
+    atomic_bool loaded, retired, rendered;
+    dispatch_semaphore_t release;
 } Lifetime;
 
 static void *heldRender(void *context) {
@@ -42,7 +44,7 @@ static void *heldRender(void *context) {
     SGTimePitch *unit = atomic_load(&test->current);
     atomic_store(&test->loaded, true);
     // Test double pauses after loading, before touching the retained unit.
-    while (!atomic_load(&test->release)) {}
+    HARNESS_CHECK(!dispatch_semaphore_wait(test->release, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)));
     float left[1024] = {0}, right[1024] = {0};
     float *lanes[] = {left, right};
     atomic_store(&test->rendered, SGTimePitchProcess(unit, lanes, 1024));
@@ -53,8 +55,8 @@ static void *heldRender(void *context) {
 static void *retire(void *context) {
     Lifetime *test = context;
     SGRenderGateClose(&test->gate);
-    atomic_store(&test->closed, true);
-    while (!SGRenderGateIdle(&test->gate)) usleep(100);
+    harnessRetiring = YES;
+    while (!SGRenderGateIdle(&test->gate)) HarnessWriterSleep(100);
     SGTimePitchFree(atomic_exchange(&test->current, NULL));
     atomic_store(&test->retired, true);
     return NULL;
@@ -65,14 +67,17 @@ static bool concurrentLifetime(void) {
     atomic_store(&test.current, SGTimePitchCreate(48000, 2, NULL, NULL));
     if (!atomic_load(&test.current)) return false;
     pthread_t render, writer;
+    HarnessStartHandoff();
+    test.release = dispatch_semaphore_create(0);
     pthread_create(&render, NULL, heldRender, &test);
-    while (!atomic_load(&test.loaded)) usleep(100);
+    Lifetime *testPtr = &test;
+    HARNESS_AWAIT(atomic_load(&testPtr->loaded));
     pthread_create(&writer, NULL, retire, &test);
-    while (!atomic_load(&test.closed)) usleep(100);
-    usleep(150000); // exceeds the obsolete bounded waitFor
+    HarnessWaitForHeldReader();
     bool retained = !atomic_load(&test.retired) && atomic_load(&liveUnits) > 0;
-    atomic_store(&test.release, true);
+    dispatch_semaphore_signal(test.release);
     pthread_join(render, NULL);
+    dispatch_semaphore_signal(harnessResumeWriter);
     pthread_join(writer, NULL);
     bool ok = retained && atomic_load(&test.rendered) && atomic_load(&test.retired) && atomic_load(&liveUnits) == 0;
     printf("%s concurrent retirement preserves a loaded unit until render exits\n", ok ? "ok" : "FAIL");

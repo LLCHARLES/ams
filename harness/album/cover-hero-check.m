@@ -22,6 +22,7 @@
 #import "cover-seams.h"
 #import "Redesigned/Kit/SGRField.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
+#import "Redesigned/Kit/SGRTokens.h"
 #import "../harness-fail.h"
 #import "cover-fixtures.h"
 
@@ -49,15 +50,7 @@ static const CGFloat kWidth = 402, kHeroHeight = 430;
 - (void)playMotionForArtist:(NSString *)artist album:(NSString *)album;
 @end
 
-static void spin(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
-}
-
-static BOOL waitUntil(NSTimeInterval seconds, BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    while (!done() && [limit timeIntervalSinceNow] > 0) spin(0.02);
-    return done();
-}
+#import "../harness-wait.h"
 
 typedef struct {
     UIView *page, *hero;
@@ -207,7 +200,7 @@ static SGRCoverReading *readingOf(UIImage *cover) {
     SGRCoverRead(cover, ^(SGRCoverReading *reading) {
         if (reading.final) final = reading;
     });
-    HARNESS_CHECK(waitUntil(30, ^BOOL { return final != nil; }));
+    HARNESS_AWAIT(final != nil);
     return final;
 }
 
@@ -379,10 +372,10 @@ static void checkVerifiedEdition(void) {
     owner.restorationIdentifier = fixtureURI;
     owner.view = p.page;
     [p.hero playMotionForArtist:@"Artist" album:@"Fixture Album"];
-    HARNESS_CHECK(waitUntil(3, ^BOOL { return [[p.hero valueForKeyPath:@"clip.file"] isEqual:local]; }));
+    HARNESS_AWAIT([[p.hero valueForKeyPath:@"clip.file"] isEqual:local]);
     // Even a delayed miss from the first page cannot replace the now-known URI with a title.
     identifierResult(nil, SGMotionIdentifierMiss);
-    HARNESS_CHECK(waitUntil(3, ^BOOL { return [[waiting.hero valueForKeyPath:@"clip.file"] isEqual:local]; }));
+    HARNESS_AWAIT([[waiting.hero valueForKeyPath:@"clip.file"] isEqual:local]);
     puts("album motion: both the direct lookup and the delayed title fallback open verified edition B");
 }
 
@@ -457,7 +450,7 @@ static void checkMotionRow(void) {
         [cell layoutSubviews];
         HARNESS_CHECK(rowRequests.count == 1);
     } completion:^(BOOL finished) { committed = YES; }];
-    HARNESS_CHECK(waitUntil(2, ^BOOL { return committed; }));
+    HARNESS_AWAIT(committed);
     [cell layoutSubviews]; [cell layoutIfNeeded];
     HARNESS_CHECK([rowRequests.lastObject[0] isEqual:@"현지화된 이름"]);
     creditLabel.text = @"Ed Sheeran";
@@ -543,7 +536,8 @@ BOOL SGRAlbumTestStillRead(UIImage *image, void (^done)(SGRCoverReading *)) {
 }
 @end
 
-NSCache *SGRAlbumTestRenderCache(void) { return [CoverReusedAddressCache new]; }
+static NSCache *installedCache;
+NSCache *SGRAlbumTestRenderCache(void) { return installedCache = [CoverReusedAddressCache new]; }
 
 static BOOL fieldIsBlue(Page p) {
     CGFloat r, g, b, a;
@@ -559,7 +553,7 @@ static BOOL fieldIsRed(Page p) {
 
 static void startAlbumA(Page p) {
     [p.hero playMotionForArtist:@"Fixture" album:@"A"];
-    HARNESS_CHECK(waitUntil(5, ^BOOL {
+    HARNESS_CHECK(HarnessRunUntil(^BOOL {
         return ((CALayer *)[p.hero valueForKeyPath:@"clip.layer"]).opacity == 1;
     }));
 }
@@ -567,7 +561,7 @@ static void startAlbumA(Page p) {
 static void startAlbumB(Page p) {
     p.source.image = flatSleeve(0.10, 0.20, 0.85, 0.6);
     [p.hero playMotionForArtist:@"Fixture" album:@"B"];
-    if (!waitUntil(5, ^BOOL { return fieldIsBlue(p); }))
+    if (!HarnessRunUntil(^BOOL { return fieldIsBlue(p); }))
         HARNESS_FAIL(@"still ownership: B without a clip did not receive its blue cover colour");
 }
 
@@ -589,7 +583,7 @@ static void checkStillOwnership(void) {
     startAlbumA(p);
     void (^poster)(UIImage *) = takeReply(posters);
     poster(redPoster);
-    HARNESS_CHECK(waitUntil(5, ^BOOL { return fieldIsRed(p); }));
+    HARNESS_AWAIT(fieldIsRed(p));
     startAlbumB(p);
 
     // Each async boundary, first A -> B (no clip), then A -> B -> A with the very same URL object.
@@ -620,7 +614,7 @@ static void checkStillOwnership(void) {
                 holdStillReading = NO;
                 void (^current)(UIImage *) = takeReply(posters);
                 current(redPoster);
-                HARNESS_CHECK(waitUntil(5, ^BOOL { return fieldIsRed(p); }));
+                HARNESS_AWAIT(fieldIsRed(p));
             }
         }
     }
@@ -640,13 +634,13 @@ static void checkRenderCacheReuse(void) {
         expired = first;
         p = makePage(first);
         (void)readingOf(first);
-        HARNESS_CHECK(waitUntil(10, ^BOOL { return renderOf(p.hero).contents != nil; }));
+        HARNESS_AWAIT(renderOf(p.hero).contents != nil);
         // Same dimensions, page colour and geometry, different pixels at the sharp boundary.
         HARNESS_CHECK([readingOf(first).pageColor isEqual:readingOf(second).pageColor]);
         p.source.image = second;
     }
     (void)readingOf(second);
-    HARNESS_CHECK(waitUntil(10, ^BOOL { return !expired && renderOf(p.hero).contents != nil; }));
+    HARNESS_AWAIT(!expired && renderOf(p.hero).contents != nil);
     NSData *drawn = pixelsOfImage((__bridge CGImageRef)renderOf(p.hero).contents);
     const uint8_t *corner = drawn.bytes;
     // The mirrored fixture starts blue (0.15, 0.20, 0.85), not the expired fixture's magenta.
@@ -661,11 +655,13 @@ static void checkCover(NSString *name, UIImage *cover, CGFloat sharpFrom, CGFloa
     SGRCoverReading *reading = readingOf(cover);
     // The field asked for the read colour; what it paints for it is measured off the page below.
     UIColor *page = reading.pageColor;
-    if (!waitUntil(30, ^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:page]; }))
+    if (!HarnessRunUntil(^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:page]; }))
         HARNESS_FAIL(@"%@: no picture drawn (%@) or the field not given the read colour (%@, read %@)", name,
                      renderOf(p.hero).contents ? @"drawn" : @"none", fieldOf(p).overrideColor, page);
     // The last of the pixel reading's and the final reading's pictures.
-    spin(1);
+    HARNESS_AWAIT([(SGRCoverReading *)[p.hero valueForKey:@"coverReading"] final] &&
+        [[installedCache objectForKey:[p.hero valueForKey:@"renderKey"]] valueForKey:@"image"] != nil &&
+        renderOf(p.hero).contents == (__bridge id)[(UIImage *)[[installedCache objectForKey:[p.hero valueForKey:@"renderKey"]] valueForKey:@"image"] CGImage]);
     CALayer *render = renderOf(p.hero);
     CGImageRef drawn = (__bridge CGImageRef)render.contents;
     size_t wide = CGImageGetWidth(drawn);
@@ -849,7 +845,7 @@ int main(int argc, char *argv[]) {
             HARNESS_CHECK(argc > 2);
             Page p = makePage(colourfulCover());
             // The field's palette, and nothing else, landing.
-            spin(1.5);
+            HARNESS_AWAIT(![fieldColorOf(p) isEqual:SGRNeutralField()]);
             HARNESS_CHECK(!renderOf(p.hero));
             size_t wide = (size_t)(kWidth * 2), high = (size_t)(kHeroHeight * 2);
             NSMutableData *hero = pixels(wide, high, 2, ^(CGContextRef c) { [p.hero.layer renderInContext:c]; });
@@ -909,10 +905,9 @@ int main(int argc, char *argv[]) {
             // Replaced before its read is back: the album changed.
             p.source.image = second;
             UIColor *secondColor = readingOf(second).pageColor;
-            HARNESS_CHECK(waitUntil(30, ^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:secondColor]; }));
+            HARNESS_AWAIT(renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:secondColor]);
             // Every read of the first cover back by now, pixel and final.
             UIColor *firstColor = readingOf(first).pageColor;
-            spin(1);
             for (UIColor *color in shown) {
                 if ([color isEqual:firstColor]) HARNESS_FAIL(@"the replaced cover's colour %@ reached the page", firstColor);
             }

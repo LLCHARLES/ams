@@ -76,14 +76,9 @@ static void after(NSTimeInterval seconds, dispatch_block_t block) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
 }
 
-// Runs `then` once `condition` holds, or after `limit` seconds whether or not it does; looks every 10 ms.
-static void waitFor(BOOL (^condition)(void), NSTimeInterval limit, dispatch_block_t then) {
-    if (condition() || limit <= 0) {
-        then();
-        return;
-    }
-    after(0.01, ^{ waitFor(condition, limit - 0.01, then); });
-}
+#import "../harness-wait.h"
+// Stringify the missing condition at the scenario site, not the wait helper.
+#define waitFor(condition, limit, ...) HarnessWhen(@#condition, condition, __VA_ARGS__)
 
 #pragma mark - what the menu's code calls
 
@@ -710,7 +705,8 @@ static void pick(NSString *title) {
     static BOOL started;
     if (started) return;
     started = YES;
-    after(1, ^{ [self run:scenario()]; });
+    HarnessWhen(@"player attached and laid out", ^BOOL { return self.view.window && !self.transitionCoordinator; },
+                ^{ [self run:scenario()]; });
 }
 
 static NSArray<NSString *> *quickTitles(void) {
@@ -827,7 +823,7 @@ static NSArray<NSString *> *quickTitles(void) {
     sg_rowsHeld = is(@"loading") || is(@"quick") || is(@"quicklate") || is(@"podcast") || is(@"stored") || is(@"playlist") || is(@"stalecache")
                || is(@"slowsheet") || is(@"star");
     sg_rowsNever = is(@"quicklate");
-    sg_rowsAfter = is(@"quick") ? 1.2 : is(@"loading") || is(@"podcast") ? 1.5 : is(@"slowsheet") ? 3.4 : 0;
+    sg_rowsAfter = is(@"slowsheet") ? 3.4 : 0;
 
     if ([run hasPrefix:@"delayed-"] || [run hasPrefix:@"request-timeout-"] || is(@"request-superseded")) {
         sg_sheetHeld = YES;
@@ -846,7 +842,7 @@ static NSArray<NSString *> *quickTitles(void) {
                 waitFor(^BOOL { return [self.front valueForKey:@"session"] == nil; }, 1, ^{
                     check([self.front valueForKey:@"session"] == nil, @"the ended menu released its session");
                     // Let menuEnded's queued block finish: neither the harness nor an anchor owns the request.
-                    after(0.15, ^{
+                    dispatch_async(dispatch_get_main_queue(), ^{
                         if (!modPanel) check(session != nil, @"an outstanding request survives the menu ending");
                         check(sg_selectionCount == 0, @"no action runs before the sheet arrives");
                         if (modPanel) {
@@ -887,7 +883,7 @@ static NSArray<NSString *> *quickTitles(void) {
                                 [replacement menuEnded];
                                 newer = replacement;
                             }
-                            after(0.15, ^{
+                            waitFor(^BOOL { return sg_spotifyTaps == 2; }, 60, ^{
                                 check(sg_spotifyTaps == 2, @"the newer session requested Spotify's sheet");
                                 check(session == nil, @"superseding releases the old request immediately");
                                 check(newer != nil, @"the newer request survives its menu ending");
@@ -927,7 +923,7 @@ static NSArray<NSString *> *quickTitles(void) {
             waitFor(^BOOL { return menuShows(@"Lyrics") && self.mockSheet != nil; }, 2, ^{
                 check(menuShows(@"Lyrics"), @"the previously enabled Lyrics action is offered");
                 pick(@"Lyrics");
-                after(0.5, ^{
+                waitFor(^BOOL { return self.mockSheet != nil && !self.mockSheet.isBeingPresented; }, 60, ^{
                     [self.mockSheet giveRows];
                     waitFor(^BOOL { return self.sheetShown; }, 2, ^{
                         check(!sg_selected && self.sheetShown, @"disabled live Lyrics is not fired; its sheet is shown");
@@ -955,7 +951,7 @@ static NSArray<NSString *> *quickTitles(void) {
         check([glyph.description containsString:@"ellipsis"], @"it draws the ⋯");
         CGPoint slot = [self.titleRow convertPoint:CGPointMake(CGRectGetMidX(self.addElement.frame), CGRectGetMidY(self.addElement.frame)) toView:nil];
         check([self.view.window hitTest:slot withEvent:nil] == front, @"a touch in the slot reaches the ⋯");
-        after(0.3, ^{
+        waitFor(^BOOL { return front.window && !self.transitionCoordinator; }, 60, ^{
             check(self.frontDowns == 0 && !openMenu() && sg_spotifyTaps == 0, @"nothing opened before the finger");
             [self tap:^(CFTimeInterval took) {
                 check(took >= 0, @"a finger on the ⋯ opens the menu");
@@ -990,7 +986,7 @@ static NSArray<NSString *> *quickTitles(void) {
         check(CGRectGetMaxX(self.addElement.frame) <= CGRectGetMinX(front.frame) + 0.5,
               [NSString stringWithFormat:@"the add button ends where the ⋯ starts (%@, ⋯ %@)", NSStringFromCGRect(self.addElement.frame), NSStringFromCGRect(front.frame)]);
         [self touch:self.addElement];
-        after(0.3, ^{
+        waitFor(^BOOL { return self.addTaps > 0; }, 60, ^{
             check(self.addTaps == 1 && !openMenu() && self.frontDowns == 0, @"a finger on the add button runs Spotify's add action, not the menu");
             [self tap:^(CFTimeInterval took) {
                 check(took >= 0 && menuShowsAll(quickTitles()), @"a finger on the ⋯ opens the menu");
@@ -1087,7 +1083,7 @@ static NSArray<NSString *> *quickTitles(void) {
 - (void)nextStaleMenu:(dispatch_block_t)then {
     waitFor(^BOOL { return self.sheetGone && !openMenu(); }, 3, ^{
         check(self.sheetGone && !openMenu(), @"the last menu and its sheet went");
-        after(1, ^{
+        waitFor(^BOOL { return !self.transitionCoordinator && !self.presentedViewController; }, 60, ^{
             storePlaylistRows();
             [self tap:^(CFTimeInterval took) {
                 check(took >= 0, @"the next menu opened");
@@ -1134,30 +1130,25 @@ static NSArray<NSString *> *quickTitles(void) {
         return;
     }
     if ([run isEqualToString:@"rows"] || [run isEqualToString:@"sort"] || [run isEqualToString:@"wrapped"] || [run isEqualToString:@"popover"]) {
-        after(0.3, ^{
-            waitFor(^BOOL { return menuShows(@"Go to album"); }, 3, ^{
+        waitFor(^BOOL { return menuShows(@"Go to album"); }, 3, ^{
                 check(menuShowsAll(@[@"Go to album", @"Lyrics", @"Sleep timer"]), @"the menu lays out the rest of Spotify's rows, Sleep timer below the sheet's fold too");
                 check(!menuShowsAny(@[@"Add to playlist", @"Add to queue"]), @"it leaves out the rows the quick row has");
                 if ([run isEqualToString:@"sort"]) check(menuShows(@"Sort"), @"the mod's row in the sheet's header is among them");
-                after(0.3, ^{
-                    NSString *title = [run isEqualToString:@"sort"] ? @"Sort" : @"Go to album";
-                    pick(title);
-                    [self gone:[@"picked " stringByAppendingString:title] selected:title from:CACurrentMediaTime() finish:finish];
-                });
-            });
+                NSString *title = [run isEqualToString:@"sort"] ? @"Sort" : @"Go to album";
+                pick(title);
+                [self gone:[@"picked " stringByAppendingString:title] selected:title from:CACurrentMediaTime() finish:finish];
         });
         return;
     }
     if ([run isEqualToString:@"loading"]) {
         // The first menu ever: the system's loading row in place of Spotify's rows until they come, 1.5 s after the sheet.
-        after(0.3, ^{
+        waitFor(^BOOL { return self.mockSheet.viewIfLoaded.window != nil; }, 60, ^{
             check(openMenu() && !menuShows(@"Go to album"), @"no rows before the sheet has them");
+            [self.mockSheet giveRows];
             waitFor(^BOOL { return menuShows(@"Go to album"); }, 4, ^{
                 check(menuShows(@"Go to album"), @"Spotify's rows came into the open menu");
-                after(0.3, ^{
-                    pick(@"Go to album");
-                    [self gone:@"picked Go to album" selected:@"Go to album" from:CACurrentMediaTime() finish:finish];
-                });
+                pick(@"Go to album");
+                [self gone:@"picked Go to album" selected:@"Go to album" from:CACurrentMediaTime() finish:finish];
             });
         });
         return;
@@ -1165,21 +1156,21 @@ static NSArray<NSString *> *quickTitles(void) {
     if ([run isEqualToString:@"stored"]) {
         // A second menu, its sheet's rows held back: it shows the first one's rows at once, and a pick on them
         // waits for the live ones.
-        after(0.6, ^{
+        waitFor(^BOOL { return self.mockSheet.viewIfLoaded.window != nil; }, 60, ^{
             check(!menuShows(@"Go to album"), @"the first menu has no stored rows: it waits for the live ones");
             [self.mockSheet giveRows];
             waitFor(^BOOL { return menuShows(@"Go to album"); }, 3, ^{
                 [self.front.contextMenuInteraction dismissMenu];
                 waitFor(^BOOL { return self.sheetGone && !openMenu(); }, 3, ^{
                     check(self.sheetGone, @"the first menu closed with no pick took its sheet with it");
-                    after(1, ^{
+                    waitFor(^BOOL { return !self.transitionCoordinator; }, 60, ^{
                         [self tap:^(CFTimeInterval took) {
                             check(took >= 0 && took < 0.5, [NSString stringWithFormat:@"the second menu is on screen %.0f ms after the tap", took * 1000]);
-                            after(0.15, ^{
+                            waitFor(^BOOL { return menuShowsAll(@[@"Go to album", @"Sleep timer"]) && self.mockSheet; }, 60, ^{
                                 check(menuShowsAll(@[@"Go to album", @"Sleep timer"]), @"the menu shows the stored rows at once, the live ones not in yet");
                                 check(!self.mockSheet.loaded, @"(the live rows are not in)");
                                 pick(@"Go to album");
-                                after(0.8, ^{
+                                waitFor(^BOOL { return !openMenu() && self.sheetWindow; }, 60, ^{
                                     check(!self.sheetGone && ![sg_selected isEqualToString:@"Go to album"], @"the pick waits for the live rows");
                                     [self.mockSheet giveRows];
                                     [self gone:@"picked Go to album from the stored rows" selected:@"Go to album" from:CACurrentMediaTime() finish:finish];
@@ -1202,7 +1193,7 @@ static NSArray<NSString *> *quickTitles(void) {
                   [NSString stringWithFormat:@"the pick fired Spotify's Add to queue once its row came (%@), the sheet not shown (%d)", sg_selected, self.sheetShown]);
             check(sg_rowsGivenAt - sg_sheetAskedAt > 3, [NSString stringWithFormat:@"(the rows came %.1f s after the sheet was asked for, past the request window)",
                                                          sg_rowsGivenAt - sg_sheetAskedAt]);
-            after(2, ^{
+            waitFor(^BOOL { return sg_sheetCompletedAt > sg_sheetAskedAt && self.sheetGone && !openMenu(); }, 60, ^{
                 check(sg_sheetCompletedAt - sg_sheetAskedAt > 3, @"(the sheet's presentation completed after the request window)");
                 check(sg_selectionCount == 1 && !self.sheetShown, [NSString stringWithFormat:@"it fired once (%lu), nothing shown after the late completion",
                                                                    (unsigned long)sg_selectionCount]);
@@ -1216,28 +1207,34 @@ static NSArray<NSString *> *quickTitles(void) {
         BOOL late = [run isEqualToString:@"quicklate"];
         pick(late ? @"Add to Playlist" : @"Add to Queue");
         CFTimeInterval picked = CACurrentMediaTime();
-        after(0.5, ^{ check(!self.sheetShown && !self.sheetGone, @"the sheet stays hidden while the pick waits for its row"); });
-        if (!late) {
-            [self gone:@"Add to Queue picked before the rows (they came 1.2 s after the sheet)" selected:@"Add to queue" from:picked finish:finish];
-            return;
-        }
-        waitFor(^BOOL { return self.sheetShown; }, 6, ^{
-            check(self.sheetShown, [NSString stringWithFormat:@"with no rows in 4 s Spotify's sheet is shown (%.1f s after the pick)", CACurrentMediaTime() - picked]);
-            check(!sg_selected, @"nothing was selected");
-            finish();
+        waitFor(^BOOL { return self.sheetWindow && self.mockSheet && !openMenu(); }, 60, ^{
+            check(!self.sheetShown && !self.sheetGone, @"the sheet stays hidden while the pick waits for its row");
+            if (!late) {
+                [self.mockSheet giveRows];
+                [self gone:@"Add to Queue picked before the rows" selected:@"Add to queue" from:picked finish:finish];
+                return;
+            }
+            HarnessWhen(@"sheet shown or 6 s elapsed since the pick", ^BOOL {
+                return self.sheetShown || CACurrentMediaTime() - picked >= 6;
+            }, ^{
+                CFTimeInterval elapsed = CACurrentMediaTime() - picked;
+                check(self.sheetShown && elapsed >= 3.5 && elapsed <= 6,
+                      [NSString stringWithFormat:@"with no rows in 4 s Spotify's sheet is shown (%.2f s after the pick, shown %d)", elapsed, self.sheetShown]);
+                check(!sg_selected, @"nothing was selected");
+                finish();
+            });
         });
         return;
     }
     if ([run isEqualToString:@"podcast"]) {
+        [self.mockSheet giveRows];
         waitFor(^BOOL { return !menuShows(@"Add to Playlist"); }, 4, ^{
             check(!menuShows(@"Add to Playlist"), @"once the rows are in, the quick item this sheet has no row for is gone");
             check(menuShowsAll(@[@"Share", @"Add to Queue"]), @"the other quick items are still there");
             waitFor(^BOOL { return menuShows(@"Go to show"); }, 3, ^{
                 check(menuShows(@"Go to show"), @"the menu lays out the podcast's other rows");
-                after(0.3, ^{
-                    pick(@"Go to show");
-                    [self gone:@"picked Go to show" selected:@"Go to show" from:CACurrentMediaTime() finish:finish];
-                });
+                pick(@"Go to show");
+                [self gone:@"picked Go to show" selected:@"Go to show" from:CACurrentMediaTime() finish:finish];
             });
         });
         return;
@@ -1272,7 +1269,7 @@ static NSArray<NSString *> *quickTitles(void) {
                         check(!openMenu(), @"the menu is gone");
                         // Closed, the mod's window goes back under the app's.
                         [self.sheet.presentingViewController dismissViewControllerAnimated:NO completion:nil];
-                        after(0.6, ^{
+                        waitFor(^BOOL { return !self.sheetWindow && !self.transitionCoordinator; }, 60, ^{
                             check(self.view.window.windowLevel > [self.front.window windowLevel] - 1 && !self.sheetWindow, @"the sheet closed, nothing of the mod's stays over the player");
                             UIWindow *host = nil;
                             for (UIWindow *window in self.view.window.windowScene.windows) if ([NSStringFromClass(window.class) isEqualToString:@"SGRSheetWindow"]) host = window;
@@ -1298,7 +1295,7 @@ static NSArray<NSString *> *quickTitles(void) {
                     waitFor(^BOOL { return !openMenu(); }, 3, ^{
                         check(!openMenu(), @"no menu came up for it (the picked one faded out)");
                         check(sg_spotifyTaps == 1, @"Spotify's ⋯ action ran only once");
-                        after(1, ^{
+                        waitFor(^BOOL { return self.sheetGone; }, 60, ^{
                             check(self.sheetGone, @"the card it came from is gone, unseen");
                             check(sleepSheet.viewIfLoaded.window != nil, @"the sleep timer sheet is still up");
                             finish();
@@ -1341,10 +1338,10 @@ static NSArray<NSString *> *quickTitles(void) {
             [self.front.contextMenuInteraction dismissMenu];
             waitFor(^BOOL { return self.sheetGone && !openMenu(); }, 3, ^{
                 check(self.sheetGone, @"the first menu closed with no pick took its sheet with it");
-                after(1, ^{
+                waitFor(^BOOL { return !self.transitionCoordinator; }, 60, ^{
                     [self tap:^(CFTimeInterval took) {
                         check(took >= 0, @"the second menu opened");
-                        after(0.15, ^{
+                        waitFor(^BOOL { return self.mockSheet && menuShowsAll(@[@"Add to Liked Songs", @"Hide in this playlist"]); }, 60, ^{
                             check(!self.mockSheet.loaded && menuShowsAll(@[@"Add to Liked Songs", @"Hide in this playlist"])
                                   && !menuShowsAny(@[@"Save to Your Library", @"Don't play this"]),
                                   @"before its live rows, the stored rows' Like and Hide stand for the add button and the X");
@@ -1378,7 +1375,7 @@ static NSArray<NSString *> *quickTitles(void) {
         check(menuShowsAll(@[@"Add to Liked Songs", @"Hide in this playlist"]) && !menuShowsAny(@[@"Save to Your Library", @"Don't play this"]),
               @"before the live rows, the stored Like and Hide rows stand for the add button and the X");
         pick(@"Hide in this playlist");
-        after(0.3, ^{
+        waitFor(^BOOL { return self.mockSheet.viewIfLoaded.window && !openMenu(); }, 60, ^{
             check(self.banTaps == 0 && sg_selectionCount == 0, @"the stored Hide waits for the live rows");
             [self.mockSheet giveRows];
             waitFor(^BOOL { return self.sheetShown; }, 3, ^{

@@ -34,6 +34,8 @@
 #import <UIKit/UIKit.h>
 #import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
+#import "../harness-wait.h"
+#import "display-witness.h"
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <mach/mach_time.h>
@@ -51,6 +53,8 @@
 
 NSArray<SGKaraokeLine *> *SGTTMLLines(NSString *xml);
 void SGHarnessStartClock(double at, double rate, double pauseAt, double holdFor);
+void SGHarnessHoldSeek(void);
+NSInteger SGHarnessReleaseSeek(void);
 void SGHarnessRunTranslationCheck(UIWindow *window);
 
 static const NSInteger kWordMs = 500;
@@ -357,6 +361,7 @@ static void checkGlide(SGRKaraokeView *karaoke, dispatch_block_t then) {
         return;
     }
     // HEAD's sources (build.sh old) seek and follow the song, as their tap did.
+    SGHarnessHoldSeek();
     if ([karaoke respondsToSelector:NSSelectorFromString(@"glideTo:")]) {
         ((void (*)(id, SEL, NSInteger))objc_msgSend)(karaoke, NSSelectorFromString(@"glideTo:"), lines[(NSUInteger)target].start);
     } else {
@@ -366,13 +371,14 @@ static void checkGlide(SGRKaraokeView *karaoke, dispatch_block_t then) {
     NSInteger goal = [[karaoke valueForKey:@"focus"] integerValue];
     expect(goal > focus && goal <= target && view.layer.animationKeys.count > 0,
            [NSString stringWithFormat:@"a tapped line is arranged around at once, and glides there (line %ld to %ld for %ld)", (long)focus, (long)goal, (long)target]);
-    __block BOOL held = YES;
-    for (int i = 1; i <= 5; i++) {
-        after(i * 0.06, ^{ held = held && [[karaoke valueForKey:@"focus"] integerValue] == goal; });
-    }
-    after(0.8, ^{
-        expect(held && [[karaoke valueForKey:@"focus"] integerValue] == goal,
-               @"it stays arranged around it while the player is slow to report the seek, and after");
+    SEL tick = NSSelectorFromString(@"tick");
+    __block NSUInteger observed = 0;
+    for (int i = 1; i <= 5; i++) after(i * 0.06, ^{
+        expect([[karaoke valueForKey:@"focus"] integerValue] == goal, @"focus held while seek report is outstanding");
+        if (++observed != 5) return;
+        expect(SGHarnessReleaseSeek() >= 0, @"tap requested a seek");
+        ((void (*)(id, SEL))objc_msgSend)(karaoke, tick);
+        expect([[karaoke valueForKey:@"focus"] integerValue] == goal, @"focus held after seek report");
         then();
     });
 }
@@ -413,19 +419,20 @@ static void checkDelay(SGRKaraokeView *karaoke, dispatch_block_t then) {
         return;
     }
     SGHarnessTap *tap = [SGHarnessTap new];
+    SGHarnessHoldSeek();
     tap.point = [view convertPoint:CGPointMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds)) toView:nil];
     ((void (*)(id, SEL, id))objc_msgSend)(karaoke, NSSelectorFromString(@"tapped:"), tap);
     NSInteger start = lines[(NSUInteger)target].start;
-    after(0.8, ^{
-        // The player reports the seek -seekLag (0.4 s) after it, so it has run on about 0.4 s since.
-        NSInteger song = SGKaraokePositionMs();
-        expect(song >= start + delay && song <= start + delay + 600,
-               [NSString stringWithFormat:@"a tap on the line at %ld ms seeks the song to %ld ms (now at %ld ms)", (long)start, (long)(start + delay), (long)song]);
+    NSInteger requested = SGHarnessReleaseSeek();
+    expect(requested == start + delay,
+           [NSString stringWithFormat:@"tap on line at %ld ms requested %ld ms including delay", (long)start, (long)requested]);
+    {
+        ((void (*)(id, SEL))objc_msgSend)(karaoke, NSSelectorFromString(@"tick"));
         NSInteger sung = [[karaoke valueForKey:@"focus"] integerValue];
         expect(sung > focus && sung <= target, [NSString stringWithFormat:@"and the line tapped (or one sung over it) is the one sung (line %ld for %ld)", (long)sung, (long)target]);
         [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyLyricsDelay];
         then();
-    });
+    }
 }
 
 // Scrolled by hand, the page's room grows (the controls go) and the scroll goes on up: the lines made for
@@ -438,7 +445,11 @@ static void checkBrowse(SGRKaraokeView *karaoke, UIView *host, dispatch_block_t 
     host.frame = CGRectMake(frame.origin.x, frame.origin.y - 150, frame.size.width, frame.size.height + 300);
     [karaoke layoutIfNeeded];
     scroll.contentOffset = CGPointMake(0, -700);
-    after(0.5, ^{
+    HarnessWhen(@"neighboring browsed lyrics laid out", ^BOOL {
+        CGFloat least, most;
+        gapsBetween(karaoke, &least, &most);
+        return least < CGFLOAT_MAX;
+    }, ^{
         CGFloat least, most;
         gapsBetween(karaoke, &least, &most);
         expect(least >= gap - 1 && least < CGFLOAT_MAX, [NSString stringWithFormat:@"scrolled by hand while the room grows, no two lines run into each other (least room %.1f, most %.1f, %lu views)",
@@ -447,7 +458,10 @@ static void checkBrowse(SGRKaraokeView *karaoke, UIView *host, dispatch_block_t 
         scroll.contentOffset = CGPointZero;
         host.frame = frame;
         [karaoke layoutIfNeeded];
-        after(0.6, then);   // the lines around the sung one are made again, a few a frame
+        HarnessWhen(@"tap target three lines ahead restored", ^BOOL {
+            NSInteger focus = [[karaoke valueForKey:@"focus"] integerValue];
+            return [karaoke valueForKey:@"shown"][@(focus + 3)] != nil;
+        }, then);
     });
 }
 
@@ -493,12 +507,14 @@ static void runChecks(SGRKaraokeView *karaoke, UIView *host) {
     glow = lit.layer.shadowOpacity;
     [lineView setValue:@NO forKey:@"active"];
     expect(lit.layer.shadowOpacity == glow, @"the glow stays on as its line goes out, for the fade to carry it");
-    after(0.8, ^{
+    __block BOOL glowChecked = NO;
+    HarnessWhen(@"completed line fade", ^BOOL { return lit.hidden && lit.layer.shadowOpacity == 0; }, ^{
         expect(lit.layer.shadowOpacity == 0 && lit.hidden, @"the glow is off once the line is dim");
         BOOL landed = YES;
         for (UIView *letter in letters) landed = landed && CGAffineTransformIsIdentity(letter.transform);
         expect(landed, @"and its letters are back down");
         [lineView removeFromSuperview];
+        glowChecked = YES;
     });
 
     // The sung line stays on the anchor through a change of height, and is placed for the new one at once.
@@ -539,10 +555,9 @@ static void runChecks(SGRKaraokeView *karaoke, UIView *host) {
     ((UIActionHandler)[gemini valueForKey:@"handler"])(gemini);
     BOOL offered = findAction(extras.menu, @"Translate with Gemini") != nil;
     expect(extras.configuration.showsActivityIndicator && !offered, @"while Gemini works the button spins and the item is gone");
-    after([NSUserDefaults.standardUserDefaults doubleForKey:@"geminiDelay"] + 0.5, ^{
+    HarnessWhen(@"Gemini finished and glow verdict delivered", ^BOOL { return glowChecked && !extras.configuration.showsActivityIndicator; }, ^{
         expect(!extras.configuration.showsActivityIndicator, @"once it answers the spinner is gone");
-        after(0.5, ^{
-            checkBrowse(karaoke, host, ^{
+        checkBrowse(karaoke, host, ^{
                 checkGlide(karaoke, ^{
                     checkDelay(karaoke, ^{
                         printf("%d failed\n", sg_failures);
@@ -551,7 +566,6 @@ static void runChecks(SGRKaraokeView *karaoke, UIView *host) {
                         exit(0);
                     });
                 });
-            });
         });
     });
 }
@@ -578,7 +592,7 @@ static void checkFailureUI(SGRKaraokeView *view) {
         SGHarnessLoadFailed = NO;
         SGKaraokeKeepLines(track, failureCheckLines(@"Recovered"));
     };
-    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5;
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 60;
     [NSTimer scheduledTimerWithTimeInterval:.05 repeats:YES block:^(NSTimer *timer) {
         NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:view];
         UIButton *retry = nil;
@@ -685,7 +699,11 @@ static void checkFailureUI(SGRKaraokeView *view) {
     }];
     self.window.rootViewController = root;
     [self.window makeKeyAndVisible];
-    if ([args boolForKey:@"detachCheck"]) after(1, ^{
+    if ([args boolForKey:@"detachCheck"]) HarnessWhen(@"blurred lyric rows appeared", ^BOOL {
+        for (UIView *row in [[karaoke valueForKey:@"shown"] allValues])
+            if ([[row.layer valueForKeyPath:@"filters.gaussianBlur.inputRadius"] doubleValue] > 0) return YES;
+        return NO;
+    }, ^{
         UIScrollView *scroll = [karaoke valueForKey:@"scroll"];
         [karaoke removeFromSuperview];
         [host addSubview:karaoke];
@@ -701,7 +719,10 @@ static void checkFailureUI(SGRKaraokeView *view) {
         UIView *target = [karaoke valueForKey:@"shown"][targetKey];
         HARNESS_CHECK(target);
         scroll.contentOffset = CGPointMake(0, CGRectGetMinY(target.frame) - 5);
-        after(.3, ^{
+        HarnessWhen(@"browsed row at scroll anchor", ^BOOL {
+            CGFloat y = CGRectGetMinY(target.frame) - scroll.contentOffset.y;
+            return y >= 0 && y <= 6;
+        }, ^{
             NSArray *before = shownLines(karaoke);
             CGPoint offset = scroll.contentOffset;
             NSNumber *focus = [karaoke valueForKey:@"focus"];
@@ -713,7 +734,7 @@ static void checkFailureUI(SGRKaraokeView *view) {
             [karaoke setValue:@74 forKey:@"fontSize"];
             ((void (*)(id, SEL))objc_msgSend)(karaoke, NSSelectorFromString(@"restyle"));
             [karaoke removeFromSuperview];
-            after(.4, ^{
+            HarnessWhen(@"detached view received remeasurement", ^BOOL { return oldTops != [karaoke valueForKey:@"tops"]; }, ^{
                 HARNESS_CHECK(!shownLines(karaoke).count && oldTops != [karaoke valueForKey:@"tops"]);
                 [host addSubview:karaoke];
                 UIView *restored = [karaoke valueForKey:@"shown"][targetKey];
@@ -728,7 +749,9 @@ static void checkFailureUI(SGRKaraokeView *view) {
         });
     });
 #ifdef SGRKeyLyricsFullRate
-    if ([args boolForKey:@"frameRateCheck"]) after(1, ^{
+    if ([args boolForKey:@"frameRateCheck"]) HarnessWhen(@"instrumental dots are displayed", ^BOOL {
+        return ((UIView *)[karaoke valueForKey:@"dots"]).window != nil;
+    }, ^{
         HARNESS_CHECK(![args objectForKey:SGRKeyLyricsFullRate]);
         SGModRow *row = SGRLyricsFullRateRow();
         void (^checkRate)(float) = ^(float maximum) {
@@ -759,56 +782,80 @@ static void checkFailureUI(SGRKaraokeView *view) {
         extern BOOL SGHarnessAwake;
         extern void SGHarnessPause(BOOL);
         extern void SGHarnessStall(BOOL);
-        after(1, ^{
+        HarnessWhen(@"visible plain lyrics, awake with display link parked", ^BOOL {
+            return shownLines(karaoke).count && SGHarnessAwake && ((CADisplayLink *)[karaoke valueForKey:@"link"]).paused;
+        }, ^{
             CADisplayLink *link = [karaoke valueForKey:@"link"];
             HARNESS_CHECK(shownLines(karaoke).count && SGHarnessAwake && link.paused);
             HARNESS_CHECK(![[karaoke valueForKey:@"poll"] isValid]);
             NSUInteger idle = sg_idleTicks;
-            after(.3, ^{
+            LyricsAfterDisplayFrames(^{
                 HARNESS_CHECK(sg_idleTicks == idle);
                 UIScrollView *scroll = [karaoke valueForKey:@"scroll"];
                 NSDictionary *before = [[karaoke valueForKey:@"shown"] copy];
                 [scroll.delegate scrollViewWillBeginDragging:scroll];
                 scroll.contentOffset = CGPointMake(0, 1100);
                 [scroll.delegate scrollViewDidEndDragging:scroll willDecelerate:NO];
-                after(.3, ^{
+                HarnessWhen(@"scrolled plain rows repopulated and parked", ^BOOL {
+                    return link.paused && ![before isEqualToDictionary:[karaoke valueForKey:@"shown"]];
+                }, ^{
                     HARNESS_CHECK(link.paused && scroll.contentOffset.y == 1100 &&
                         ![before isEqualToDictionary:[karaoke valueForKey:@"shown"]]);
+                    NSDate *pauseStart = NSDate.date;
                     SGHarnessPause(YES);
-                });
-            });
-            after(1, ^{ HARNESS_CHECK(SGHarnessAwake && link.paused); });
-            after(6.1, ^{
-                HARNESS_CHECK(!SGHarnessAwake && link.paused && ![[karaoke valueForKey:@"poll"] isValid]);
-                SGHarnessPause(NO);
-                after(.1, ^{
-                    HARNESS_CHECK(SGHarnessAwake && link.paused);
-                    SGHarnessStall(YES);   // rate-only reports: playing, not paused
-                    after(2, ^{
-                        HARNESS_CHECK(SGHarnessAwake && link.paused);
-                        SGHarnessStall(YES);   // the unmoved report must not extend the deadline
-                    });
-                    after(5.3, ^{
-                        HARNESS_CHECK(!SGHarnessAwake && link.paused);
-                        SGHarnessStall(NO);
-                        after(.1, ^{
-                            HARNESS_CHECK(SGHarnessAwake && link.paused);
-                            SGKaraokeKeepLines(@"harness", songNamed(@"duet", nil));
-                            [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:@"harness"];
-                            after(.3, ^{
-                                HARNESS_CHECK(!link.paused && link.preferredFrameRateRange.maximum == 120 &&
-                                              ![[karaoke valueForKey:@"plain"] boolValue]);
-                                extern NSUInteger SGHarnessAwakeWrites;
-                                NSUInteger writes = SGHarnessAwakeWrites;
-                                after(.2, ^{
-                                    HARNESS_CHECK(SGHarnessAwake && writes == SGHarnessAwakeWrites);
-                                    SGModRow *row = SGRLyricsKeepAwakeRow();
-                                    row.changed(NO);
-                                    HARNESS_CHECK(!UIApplication.sharedApplication.idleTimerDisabled);
-                                    row.changed(YES);
-                                    HARNESS_CHECK(UIApplication.sharedApplication.idleTimerDisabled);
-                                    NSLog(@"[harness] PASS plain idle, pause and zero-speed holds, timed replacement without redundant holds");
-                                    exit(0);
+                    // The pause report wakes the display link. Its next frame arms the release.
+                    HarnessWhen(@"paused page rendered and armed its awake release", ^BOOL {
+                        return link.paused && [[karaoke valueForKey:@"plainRelease"] isValid];
+                    }, ^{
+                        HARNESS_CHECK(SGHarnessAwake && link.paused && [[karaoke valueForKey:@"plainRelease"] isValid]);
+                        NSTimer *pauseRelease = [karaoke valueForKey:@"plainRelease"];
+                        HARNESS_CHECK([pauseRelease.fireDate timeIntervalSinceDate:pauseStart] >= 1 &&
+                                      pauseRelease.fireDate.timeIntervalSinceNow <= 6.1);
+                        HarnessWhen(@"paused page released its awake hold", ^BOOL { return !SGHarnessAwake; }, ^{
+                            HARNESS_CHECK(!SGHarnessAwake && link.paused && ![[karaoke valueForKey:@"poll"] isValid]);
+                            SGHarnessPause(NO);
+                            HarnessWhen(@"resume restored awake hold", ^BOOL { return SGHarnessAwake && link.paused; }, ^{
+                                HARNESS_CHECK(SGHarnessAwake && link.paused);
+                                NSDate *stallStart = NSDate.date;
+                                SGHarnessStall(YES);   // rate-only reports: playing, not paused
+                                NSTimer *release = [karaoke valueForKey:@"plainRelease"];
+                                HARNESS_CHECK(release.valid);
+                                HARNESS_CHECK([release.fireDate timeIntervalSinceDate:stallStart] >= 2 &&
+                                              release.fireDate.timeIntervalSinceNow <= 5.3);
+                                NSDate *originalFireDate = release.fireDate;
+                                after(0.05, ^{
+                                    HARNESS_CHECK(SGHarnessAwake && link.paused);
+                                    SGHarnessStall(YES);   // the unmoved report must not extend the deadline
+                                    HARNESS_CHECK(release == [karaoke valueForKey:@"plainRelease"] && release.valid &&
+                                                  fabs([release.fireDate timeIntervalSinceDate:originalFireDate]) < 0.001);
+                                    HarnessWhen(@"stalled page released its original awake hold", ^BOOL { return !SGHarnessAwake; }, ^{
+                                        HARNESS_CHECK(!SGHarnessAwake && link.paused);
+                                        SGHarnessStall(NO);
+                                        HarnessWhen(@"moving page reacquired awake hold", ^BOOL { return SGHarnessAwake && link.paused; }, ^{
+                                            HARNESS_CHECK(SGHarnessAwake && link.paused);
+                                            SGKaraokeKeepLines(@"harness", songNamed(@"duet", nil));
+                                            [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:@"harness"];
+                                            HarnessWhen(@"timed replacement rendered its visible lines and reacquired awake hold", ^BOOL {
+                                                return !link.paused && ![[karaoke valueForKey:@"plain"] boolValue] &&
+                                                       shownLines(karaoke).count > 0 && SGHarnessAwake;
+                                            }, ^{
+                                                HARNESS_CHECK(!link.paused && link.preferredFrameRateRange.maximum == 120 &&
+                                                              ![[karaoke valueForKey:@"plain"] boolValue]);
+                                                extern NSUInteger SGHarnessAwakeWrites;
+                                                NSUInteger writes = SGHarnessAwakeWrites;
+                                                LyricsAfterDisplayFrames(^{
+                                                    HARNESS_CHECK(SGHarnessAwake && writes == SGHarnessAwakeWrites);
+                                                    SGModRow *row = SGRLyricsKeepAwakeRow();
+                                                    row.changed(NO);
+                                                    HARNESS_CHECK(!UIApplication.sharedApplication.idleTimerDisabled);
+                                                    row.changed(YES);
+                                                    HARNESS_CHECK(UIApplication.sharedApplication.idleTimerDisabled);
+                                                    NSLog(@"[harness] PASS plain idle, pause and zero-speed holds, timed replacement without redundant holds");
+                                                    exit(0);
+                                                });
+                                            });
+                                        });
+                                    });
                                 });
                             });
                         });
@@ -818,7 +865,9 @@ static void checkFailureUI(SGRKaraokeView *view) {
         });
     }
     if ([args boolForKey:@"failureCheck"]) { checkFailureUI(karaoke); return YES; }
-    if ([args boolForKey:@"check"]) after(2, ^{ runChecks(karaoke, host); });
+    if ([args boolForKey:@"check"]) HarnessWhen(@"sung line at its anchor", ^BOOL {
+        return anchorMiss(karaoke) < 2;
+    }, ^{ runChecks(karaoke, host); });
     if ([args objectForKey:@"translateIn"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)([args doubleForKey:@"translateIn"] * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             NSMutableArray<SGKaraokeLine *> *translated = [SGKaraokeLinesForTrack(@"harness") mutableCopy];
@@ -830,7 +879,7 @@ static void checkFailureUI(SGRKaraokeView *view) {
             }
             SGKaraokeKeepLines(@"harness", translated);
             if ([args boolForKey:@"checkTranslateIn"]) {
-                NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 5;
+                NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 60;
                 [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
                     NSMutableArray<UIView *> *pending = [NSMutableArray arrayWithObject:karaoke];
                     while (pending.count) {

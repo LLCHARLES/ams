@@ -6,9 +6,16 @@
 @end
 @interface SGTimedIdleView : SGRKaraokeView
 @property (nonatomic) NSUInteger ticks;
+@property (nonatomic) double collapseClock;
 @end
 @implementation SGTimedIdleView
-- (void)tick { self.ticks++; [super tick]; }
+- (void)tick {
+    self.ticks++;
+    BOOL open = [[self valueForKey:@"openBreak"] integerValue] == 1;
+    [super tick];
+    if (open && [[self valueForKey:@"openBreak"] integerValue] < 0)
+        self.collapseClock = [[self valueForKey:@"clock"] doubleValue];
+}
 @end
 
 static void timedIdleChecks(UIWindow *window) {
@@ -38,7 +45,10 @@ static void timedIdleChecks(UIWindow *window) {
     NSUInteger ticks = view.ticks;
     for (int i = 0; i < 4; i++) {
         [view playerStateDidReport:SGPlayerState()];
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.05]];
+        extern void LyricsAfterDisplayFrames(dispatch_block_t);
+        __block BOOL frames = NO;
+        LyricsAfterDisplayFrames(^{ frames = YES; });
+        check(extrasWait(^BOOL { return frames; }), @"display opportunities arrived while the lyrics were parked");
     }
     check(view.ticks == ticks, @"zero display callbacks across four advancing reports inside the same static line");
 
@@ -70,9 +80,10 @@ static void timedIdleChecks(UIWindow *window) {
     [view playerStateDidReport:SGPlayerState()];
     check(extrasWait(^BOOL { return [[view valueForKey:@"openBreak"] integerValue] == 1 && link.paused; }),
           @"seek into the break installs the dots and parks the link");
-    check(extrasWait(^BOOL { return [[view valueForKey:@"openBreak"] integerValue] < 0; }),
+    view.collapseClock = -1;
+    check(extrasWait(^BOOL { return view.collapseClock >= 0; }),
           @"break collapses before the next line without another player report");
-    double clock = [[view valueForKey:@"clock"] doubleValue];
+    double clock = view.collapseClock;
     check(clock >= 29500 && clock < 30000, @"break collapse is on its own displayed timestamp");
     UIView *(^row)(void) = ^UIView *{ return [view valueForKey:@"shown"][@1]; };
     check(extrasWait(^BOOL { return (row().accessibilityTraits & UIAccessibilityTraitSelected) != 0; }),

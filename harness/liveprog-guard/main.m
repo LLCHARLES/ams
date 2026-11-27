@@ -28,8 +28,8 @@ static double nanosPerTick;
 static float left[kSGDSPEngineBlock], right[kSGDSPEngineBlock];
 static const char *gain = "@sample\nspl0 *= 0.5; spl1 *= 0.5;\n";
 static const char *startError = "This script took too long to start.";
-static atomic_bool renderRunning;
-static atomic_uint rendered;
+static dispatch_semaphore_t loadEntered, renderedDuringLoad;
+static unsigned deadlineRequests;
 static _Atomic(pthread_t) renderThread;
 static atomic_bool inRender;
 static atomic_uint renderAllocations;
@@ -71,6 +71,8 @@ SGDSPLiveprog *guard_create(const char *script, double rate, bool *slow, char *e
     SGDSPLiveprog *vm = SGDSPLiveprogCreate(script, rate, slow, error, errorSize);
     if (script && !strncmp(script, "desc: held\n", 11)) {
         atomic_store(&heldVM, vm);
+        dispatch_semaphore_signal(loadEntered);
+        if (renderedDuringLoad) dispatch_semaphore_signal(loadEntered);
         dispatch_semaphore_wait(releaseLoad, DISPATCH_TIME_FOREVER);
     }
     return vm;
@@ -93,8 +95,25 @@ long guard_signal(dispatch_semaphore_t semaphore) {
     return result;
 }
 
-static double seconds(void) {
-    return mach_absolute_time() * nanosPerTick / 1e9;
+dispatch_time_t guard_deadline(dispatch_time_t base, int64_t offset) {
+    require(base == DISPATCH_TIME_NOW && offset == 2 * NSEC_PER_SEC, "startup requests a two-second deadline");
+    deadlineRequests++;
+    return (dispatch_time_t)offset;
+}
+
+long guard_wait(dispatch_semaphore_t finished, dispatch_time_t deadline) {
+    require(deadline == 2 * NSEC_PER_SEC, "startup waits on its requested deadline");
+    if (!loadEntered) {
+        require(!dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
+                "startup worker did not finish");
+        return 0;
+    }
+    require(!dispatch_semaphore_wait(loadEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
+            "worker did not enter held startup");
+    if (renderedDuringLoad)
+        require(!dispatch_semaphore_wait(renderedDuringLoad, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
+                "previous script did not render during startup");
+    return 1; // Expire the deadline while the worker is positively held.
 }
 
 static void block(SGDSPEngine *engine) {
@@ -232,14 +251,14 @@ static void heavy(void) {
 }
 
 static void *renderDuringLoad(void *engine) {
-    uint64_t pace = audioRenderPace();
-    uint64_t next = mach_absolute_time();
-    while (atomic_load_explicit(&renderRunning, memory_order_relaxed)) {
+    // Wait for the VM to enter the held loader, not merely for the thread to start.
+    require(!dispatch_semaphore_wait(loadEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
+            "render did not observe held load");
+    for (unsigned i = 0; i < 101; ++i) {
         block(engine);
         level(0.125f, -0.0625f);
-        atomic_fetch_add_explicit(&rendered, 1, memory_order_relaxed);
-        waitForAudioBlock(&next, pace);
     }
+    dispatch_semaphore_signal(renderedDuringLoad);
     return NULL;
 }
 
@@ -250,25 +269,23 @@ static void deadline(void) {
     load(engine, gain);
     for (int i = 0; i < 3; i++) block(engine);
     pthread_t thread;
-    atomic_store(&renderRunning, true);
+    synthetic = true;
+    cost(0.1, 48000);
+    loadEntered = dispatch_semaphore_create(0);
+    renderedDuringLoad = dispatch_semaphore_create(0);
     require(pthread_create(&thread, NULL, renderDuringLoad, engine) == 0, "render thread starts");
     // Hold startup independently of the VM's deterministic work budget.
     char error[300] = "";
-    double before = seconds();
     bool ok = SGDSPEngineSetLiveprog(engine, true,
         "desc: held\n@sample\nspl0 = 0; spl1 = 0;\n", error, sizeof error);
-    double elapsed = seconds() - before;
     require(!ok && !strcmp(error, startError), "held startup returns the start error");
-    require(elapsed >= 1.8 && elapsed < 2.6, "start deadline returns in about two seconds");
-    require(atomic_load(&rendered) > 100, "the previous script keeps rendering during compile/init");
-    before = seconds();
+    unsigned before = deadlineRequests;
     ok = SGDSPEngineSetLiveprog(engine, true, gain, error, sizeof error);
-    require(!ok && !strcmp(error, startError) && seconds() - before < 0.2,
+    require(!ok && !strcmp(error, startError) && deadlineRequests == before,
             "a second load is immediately refused while the worker is abandoned");
     dispatch_semaphore_signal(releaseLoad);
-    require(dispatch_semaphore_wait(freedLoad, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0,
+    require(dispatch_semaphore_wait(freedLoad, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0,
             "abandoned startup releases the VM");
-    atomic_store(&renderRunning, false);
     require(pthread_join(thread, NULL) == 0, "render thread joins");
     for (int i = 0; i < 3; i++) block(engine);
     level(0.125f, -0.0625f);
@@ -276,6 +293,7 @@ static void deadline(void) {
 }
 
 static void abandonment(void) {
+    loadEntered = dispatch_semaphore_create(0);
     releaseLoad = dispatch_semaphore_create(0);
     freedLoad = dispatch_semaphore_create(0);
     SGDSPEngine *engine = SGDSPEngineCreate(48000);
@@ -287,7 +305,7 @@ static void abandonment(void) {
             "an abandoned VM is not freed while its worker owns it");
     SGDSPEngineFree(engine);
     dispatch_semaphore_signal(releaseLoad);
-    require(dispatch_semaphore_wait(freedLoad, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0,
+    require(dispatch_semaphore_wait(freedLoad, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0,
             "the worker frees its abandoned VM after returning, even after engine destruction");
 }
 
@@ -402,7 +420,7 @@ static void messages(void) {
     cost(0.1, 48000);
     require(applyScript(engine, gain) && SGDSPError(SGKeyDSPLiveprog) == nil,
             "re-enabling clears the displayed runaway message");
-    synthetic = false;
+    loadEntered = dispatch_semaphore_create(0);
     releaseLoad = dispatch_semaphore_create(0);
     freedLoad = dispatch_semaphore_create(0);
     workerReturned = dispatch_semaphore_create(0);
@@ -412,8 +430,9 @@ static void messages(void) {
     require([SGDSPError(SGKeyDSPLiveprog) isEqualToString:@"This script took too long to start."],
             "SGDSPError exposes the startup timeout message");
     dispatch_semaphore_signal(releaseLoad);
-    require(dispatch_semaphore_wait(workerReturned, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0,
+    require(dispatch_semaphore_wait(workerReturned, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0,
             "abandoned worker has returned");
+    loadEntered = nil;
     require(applyScript(engine, gain) && SGDSPError(SGKeyDSPLiveprog) == nil,
             "re-enabling clears the displayed startup timeout message");
     atomic_store(&sg_engine, NULL);

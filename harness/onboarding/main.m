@@ -4,7 +4,7 @@
 //   tour        the tour, as on a first launch (the default)
 //   old         the tour as below iOS 26: the redesign card untested, Legacy picked
 //   whatsnew    the What's new sheet
-//   pick        taps the other look's card three seconds in, to see the note change
+//   pick        taps the other look's card once it appears, to see the note change
 //   environment loads a stand-in EeveeSpotify.dylib and runs the install check (the harness's own
 //               version, 1.0, is not Spotify's either), whose alert follows about 5 s in
 #import <UIKit/UIKit.h>
@@ -17,6 +17,7 @@
 #import "Settings/SGModPage.h"
 #import "Shared/SponsorBlock/SponsorBlock.h"
 #import <objc/runtime.h>
+#import "../harness-wait.h"
 
 static BOOL sg_old;
 static NSDictionary *sg_installInfo;
@@ -141,29 +142,28 @@ static int checkInstallWarnings(void) {
         return;
     }
     BOOL whatsNew = [arguments containsObject:@"whatsnew"];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    HarnessWhen(@"active tour host", ^BOOL { return scene.activationState == UISceneActivationStateForegroundActive; }, ^{
         NSLog(@"harness: %lu changes in the notes", (unsigned long)SGWhatsNewChanges().count);
         if (whatsNew) SGShowWhatsNew();
         else SGShowOnboarding();
     });
     if ([arguments containsObject:@"pick"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIViewController *tour = home.presentedViewController;
-            NSMutableArray<UIControl *> *cards = [NSMutableArray array];
-            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:tour.view];
+        __block UIControl *other;
+        HarnessWhen(@"unselected look card in the presented tour", ^BOOL {
+            UIView *tour = home.presentedViewController.viewIfLoaded;
+            if (!tour.window) return NO;
+            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:tour];
             while (queue.count) {
                 UIView *view = queue.firstObject;
                 [queue removeObjectAtIndex:0];
-                if ([NSStringFromClass(view.class) isEqualToString:@"SGLookCard"]) [cards addObject:(UIControl *)view];
+                if ([NSStringFromClass(view.class) isEqualToString:@"SGLookCard"] && !((UIControl *)view).selected) {
+                    other = (UIControl *)view;
+                    return YES;
+                }
                 [queue addObjectsFromArray:view.subviews];
             }
-            for (UIControl *card in cards) {
-                if (!card.selected) {
-                    [card sendActionsForControlEvents:UIControlEventTouchUpInside];
-                    break;
-                }
-            }
-        });
+            return NO;
+        }, ^{ [other sendActionsForControlEvents:UIControlEventTouchUpInside]; });
     }
 }
 

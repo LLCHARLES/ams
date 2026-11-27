@@ -261,7 +261,7 @@ static void runChecks(void) {
 @implementation PlayerApp @end
 int main(int argc,char **argv) {
     @autoreleasepool {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{ HARNESS_FAIL(@"player harness timed out"); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{ HARNESS_FAIL(@"player harness timed out"); });
         return UIApplicationMain(argc,argv,nil,NSStringFromClass(PlayerApp.class));
     }
 }

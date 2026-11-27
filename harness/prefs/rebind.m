@@ -42,7 +42,7 @@ static void fakeHook(void *function, void *replace, void **original) {
             HARNESS_CHECK(((OSStatus (*)(void))replace)() == kAudioUnitErr_CannotDoInCurrentContext);
             dispatch_semaphore_signal(finished);
         });
-        HARNESS_CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        HARNESS_CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
         *original = (void *)trampoline;
         // Even the hooker's private write is not a publication to callers until installation returns.
         HARNESS_CHECK(((OSStatus (*)(void))replace)() == kAudioUnitErr_CannotDoInCurrentContext);

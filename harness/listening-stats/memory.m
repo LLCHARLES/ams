@@ -1,6 +1,7 @@
 // Build against the production SGPlayLog and SGLocalize as in build.sh.
 // Usage: memory <private empty directory> <row count>. Run each size in a fresh process.
 #import "Shared/ListeningStats/SGPlayLog.h"
+#import "../harness-wait.h"
 #import <mach/mach.h>
 #import <malloc/malloc.h>
 #import <sys/resource.h>
@@ -29,9 +30,7 @@ int main(int argc, char **argv) {
         __attribute__((objc_precise_lifetime)) SGPlayLog *log = [[SGPlayLog alloc] initWithPath:path];
         __block BOOL loaded = NO;
         [log loadWithCompletion:^{ loaded = YES; }];
-        while (!loaded) @autoreleasepool {
-            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-        }
+        HARNESS_AWAIT(loaded);
         @autoreleasepool {
             if (log.loadError || log.plays.count != rows) return 1;
         }

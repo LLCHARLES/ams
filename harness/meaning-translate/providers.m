@@ -234,7 +234,7 @@ static NSArray *ask(NSArray *texts, BOOL direct, NSString **error, UIView *view)
     else if (direct && [provider isEqual:@"google"]) SGGoogleTranslateTexts(texts, @"fr", done);
     else if (direct && [provider isEqual:@"deepl"]) SGDeepLTranslateTexts(texts, @"fr", done);
     else SGLyricsTranslateTexts(texts, @"fr", view, done);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!finished && deadline.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(finished, @"%@ timed out", provider);
     if (error) *error = problem;

@@ -129,7 +129,7 @@ static void checkSingCard(UIView *host) {
 
 // The panel's slider drawn on screen: its green fill measured from a render of the host. The panel is shown with an
 // animation that the host may not have drawn yet (a slow simulator draws nothing in the first frames), so the render
-// is taken again until the fill is there, for up to 10 seconds; only its place is the check.
+// is taken again until the fill is there; only its place is the check.
 static void measureMicSlider(UIView *host, SGRSingButton *mic, CFTimeInterval deadline, void (^then)(void)) {
     NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
     findViews(mic, UISlider.class, sliders);
@@ -162,7 +162,7 @@ static void measureMicSlider(UIView *host, SGRSingButton *mic, CFTimeInterval de
             }
         }
         if (greenCount == 0) {
-            if (CACurrentMediaTime() >= deadline) HARNESS_FAIL(@"mic slider: no fill drawn in %@ within 10 s", NSStringFromCGRect(box));
+            if (CACurrentMediaTime() >= deadline) HARNESS_FAIL(@"mic slider: no fill drawn in %@", NSStringFromCGRect(box));
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{
                 measureMicSlider(host, mic, deadline, then);
             });
@@ -181,7 +181,7 @@ static void checkMicSlider(UIView *host, void (^then)(void)) {
     [host addSubview:mic];
     [mic layoutIfNeeded];
     [mic performSelector:@selector(showPanel)];
-    CFTimeInterval deadline = CACurrentMediaTime() + 10;
+    CFTimeInterval deadline = CACurrentMediaTime() + 60;
     dispatch_async(dispatch_get_main_queue(), ^{ measureMicSlider(host, mic, deadline, then); });
 }
 

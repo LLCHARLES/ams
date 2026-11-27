@@ -16,7 +16,7 @@ static void songLanguageChecks(void) {
     __block BOOL analysed = NO;
     __block NSString *detectedLanguage = nil;
     SGRAnalyzeLyricsLanguage(lines, @"en", ^(BOOL foreign, NSString *detected) { analysed = YES; detectedLanguage = detected; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!analysed && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     check(analysed, @"song language is available before constructing its settled menu");

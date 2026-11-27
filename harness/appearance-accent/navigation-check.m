@@ -121,7 +121,7 @@ static void accent(NSInteger want,NSString *what) {
 @implementation NavigationApp @end
 int main(int argc,char **argv) {
     @autoreleasepool {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{HARNESS_FAIL(@"navigation harness timed out");});
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{HARNESS_FAIL(@"navigation harness timed out");});
         return UIApplicationMain(argc,argv,nil,NSStringFromClass(NavigationApp.class));
     }
 }

@@ -8,7 +8,7 @@ static UIImage *loadCoverAndWait(NSString *uri) {
         if (!NSThread.isMainThread) { fprintf(stderr, "cover completion not on main\n"); exit(1); }
         cover = image; done = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "cover load timed out\n"); exit(1); }

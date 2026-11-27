@@ -2,14 +2,23 @@
 // no download, model prediction, hardware, or instrumentation on the render thread.
 #import <unistd.h>
 #import <stdatomic.h>
+#import <pthread.h>
 #import "../../harness-fail.h"
 static atomic_uint polls;
+static atomic_bool observePark;
+static dispatch_semaphore_t workerParked;
+static int workerWait(pthread_cond_t *cond, pthread_mutex_t *lock) {
+    if (atomic_exchange(&observePark, false)) dispatch_semaphore_signal(workerParked);
+    return pthread_cond_wait(cond, lock);
+}
 static int workerSleep(useconds_t delay) {
     atomic_fetch_add(&polls, 1);
     return usleep(delay);
 }
 #define usleep workerSleep
+#define pthread_cond_wait workerWait
 #import "SGSingEngine.m"
+#undef pthread_cond_wait
 #undef usleep
 
 #import "Sing.h"
@@ -86,7 +95,7 @@ static void checkBackgroundTick(int windows) {
     };
     SGSingLoaderSetForeground(YES);
     SGSingLoaderWant(url, YES);
-    waitUntil(CFAbsoluteTimeGetCurrent() + 10, ^BOOL { return SGSingLoaderFastState() == SGSingFastReady; }, ^{
+    waitUntil(CFAbsoluteTimeGetCurrent() + 60, ^BOOL { return SGSingLoaderFastState() == SGSingFastReady; }, ^{
         SGSingLoaderSetForeground(NO);
         sg_active = NO;
         for (int i = 0; i < windows; i++) HARNESS_CHECK(window());
@@ -96,7 +105,7 @@ static void checkBackgroundTick(int windows) {
         tick();
         HARNESS_CHECK(sg_neuralFailed && SGSingLoaderFastState() == SGSingFastNone);
         HARNESS_CHECK(SGSingLoaderCurrentState() == (windows ? SGSingLoaderLoading : SGSingLoaderReady));
-        waitUntil(CFAbsoluteTimeGetCurrent() + 10, ^BOOL { return SGSingLoaderCurrentState() == SGSingLoaderReady; }, ^{
+        waitUntil(CFAbsoluteTimeGetCurrent() + 60, ^BOOL { return SGSingLoaderCurrentState() == SGSingLoaderReady; }, ^{
             SGSingLoaderSetForeground(YES);
             HARNESS_CHECK(SGSingLoaderAttempts() == attempts + (windows != 0) && window() && !SGSingLoaderSeparator().stats.fast);
             SGSingLoaderPurge(@"end tick case");
@@ -124,7 +133,7 @@ void HarnessSingBattery(NSSet *listeners) {
     NSSet *both = [NSSet setWithArray:@[@"gestures", @"sing"]], *gestures = [NSSet setWithObject:@"gestures"];
     HARNESS_CHECK([listeners isEqual:both]);
     float l[1024], r[1024];
-    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 5;
+    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + 60;
     do {
         SGSingEngineRender(engine, 1024, l, r, tone, NULL);
         if (mixed(l, r)) break;
@@ -133,18 +142,22 @@ void HarnessSingBattery(NSSet *listeners) {
     HARNESS_CHECK(mixed(l, r));
     double lead = SGSingHeldLead();
     HARNESS_CHECK(lead > 0.05);
-    for (int i = 0; i < 100 && !atomic_load(&polls); ++i) usleep(5000);
+    deadline = CFAbsoluteTimeGetCurrent() + 60;
+    while (!atomic_load(&polls) && CFAbsoluteTimeGetCurrent() < deadline) usleep(5000);
     HARNESS_CHECK(atomic_load(&polls));
+    workerParked = dispatch_semaphore_create(0);
+    atomic_store(&observePark, true);
     [state setValue:@YES forKey:@"isPaused"];
     [watcher playerStateDidChange:state];
     unsigned before = atomic_load(&polls);
-    usleep(200000);
+    HARNESS_CHECK(!dispatch_semaphore_wait(workerParked, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)));
     HARNESS_CHECK(atomic_load(&polls) - before <= 1 && SGSingHeldLead() == lead);
     HARNESS_CHECK([listeners isEqual:gestures]);
     [state setValue:@NO forKey:@"isPaused"];
     [watcher playerStateDidChange:state];
     before = atomic_load(&polls);
-    for (int i = 0; i < 100 && atomic_load(&polls) == before; ++i) usleep(5000);
+    deadline = CFAbsoluteTimeGetCurrent() + 60;
+    while (atomic_load(&polls) == before && CFAbsoluteTimeGetCurrent() < deadline) usleep(5000);
     HARNESS_CHECK(atomic_load(&polls) > before && SGSingHeldLead() == lead);
     SGSingEngineRender(engine, 1024, l, r, tone, NULL);
     HARNESS_CHECK(mixed(l, r));

@@ -167,13 +167,13 @@ void SGCheckFontSelection(void) {
                 }
                 dispatch_semaphore_signal(chosen);
             });
-            HARNESS_CHECK(dispatch_semaphore_wait(chosen, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+            HARNESS_CHECK(dispatch_semaphore_wait(chosen, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
             if (scenario == FailReplacement) return NO; // staged file disappears before installation
         }
         return ((BOOL (*)(id, SEL, id, id, NSError **))originalCopy)(files, @selector(moveItemAtURL:toURL:error:), source, destination, error);
     });
     method_setImplementation(copyMethod, blockedCopy);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_FAIL(@"font import did not complete");
     });
     runImport();

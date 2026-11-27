@@ -35,7 +35,7 @@
 #import "Shared/Player/SpeedPitch.h"
 #import "Settings/SGModPage.h"
 #import "Player.h"
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 
 #pragma mark - the stubs
 
@@ -238,11 +238,6 @@ static id printOf(UIView *view) {
     return [[stageOf(view) valueForKey:@"_print"] contents];
 }
 
-// The main queue run until `done` holds, for two seconds at the most.
-static BOOL waitFor(BOOL (^done)(void)) {
-    for (int i = 0; i < 200 && !done(); i++) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    return done();
-}
 
 static UIImage *coverArt(UIColor *top, UIColor *bottom, UIColor *disc) {
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat new];
@@ -506,7 +501,7 @@ int main(void) {
                   [UIColor colorWithRed:0.40 green:0.18 blue:0.48 alpha:1]];
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
         HARNESS_CHECK(printOf(v) == nil);
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
         id print = printOf(v);
         HARNESS_CHECK(print != (id)gArtwork.CGImage);
         gWindow = window;
@@ -534,7 +529,7 @@ int main(void) {
         gArtwork = coverArt(UIColor.darkGrayColor, UIColor.blackColor, UIColor.whiteColor);
         gArtworkID = @"art-b";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil && printOf(v) != print);
         HARNESS_CHECK(printOf(v) != print);
 
         // A print that cannot be made (a cover with no bitmap: the nil answer a failed allocation gives) is final for
@@ -543,7 +538,7 @@ int main(void) {
         gArtwork = [UIImage new];
         gArtworkID = @"art-empty";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+        HARNESS_AWAIT(printOf(v) == (id)gArtwork.CGImage);
         HARNESS_CHECK(printOf(v) == (id)gArtwork.CGImage);
         UIView *failed = visualiser();
         HARNESS_CHECK(printOf(failed) == (id)gArtwork.CGImage);
@@ -559,11 +554,11 @@ int main(void) {
         gArtwork = coverArt(UIColor.greenColor, UIColor.blueColor, UIColor.yellowColor);
         gArtworkID = @"art-fast";
         UIView *newer = visualiser();
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(newer) != nil; }));
+        HARNESS_AWAIT(printOf(newer) != nil);
         id fastPrint = printOf(newer);
         HARNESS_CHECK(printOf(v) == nil);
         dispatch_semaphore_signal(gGate);
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
         HARNESS_CHECK(printOf(v) != fastPrint);
         UIView *later = visualiser();
         HARNESS_CHECK(printOf(later) == fastPrint);
@@ -573,7 +568,7 @@ int main(void) {
         gArtwork = artA;
         gArtworkID = @"art-a";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
 
         // Poster under Reduce Motion: the new line only fades in; otherwise it rises into place.
         __block BOOL moved = NO;

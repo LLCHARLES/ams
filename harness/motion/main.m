@@ -8,9 +8,9 @@
 
 static int failures;
 
-// First demand withholds readiness for 150 ms. Only the production translation unit
+// First demand withholds readiness until the producer registers its callback. Only the production translation unit
 // uses these selectors; the underlying AVFoundation writer is unmodified.
-static NSDate *releaseAt;
+static BOOL registeredDemand;
 static BOOL stall, refuseAppend;
 // Only the terminal fault is synthetic. Forward setup to the real writer so
 // the failure occurs with its session open and its partial on disk.
@@ -32,14 +32,12 @@ static StalledWriter *stalledWriter;
 }
 @end
 static NSUInteger stalledReads;
-static NSTimeInterval stallRemaining(void) {
-    if (!stall) return 0;
-    if (!releaseAt) releaseAt = [NSDate dateWithTimeIntervalSinceNow:.15];
-    return MAX(0, releaseAt.timeIntervalSinceNow);
-}
 @implementation AVAssetWriterInput (ShapeFixture)
 - (BOOL)isFixtureReady {
-    if (stallRemaining() > 0) { stalledReads++; return NO; }
+    if (stall && !registeredDemand) {
+        fputs("FAIL: producer polled the blocked writer before the readiness callback\n", stderr);
+        exit(1);
+    }
     return self.readyForMoreMediaData;
 }
 - (void)fixtureRequestOnQueue:(dispatch_queue_t)queue usingBlock:(dispatch_block_t)feed {
@@ -50,7 +48,8 @@ static NSTimeInterval stallRemaining(void) {
         });
         return; // no readiness callback, even after failure
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(stallRemaining() * NSEC_PER_SEC)), queue, ^{
+    dispatch_async(queue, ^{
+        if (stall) registeredDemand = YES;
         [self requestMediaDataWhenReadyOnQueue:queue usingBlock:feed];
     });
 }
@@ -188,7 +187,7 @@ int main(int argc, const char **argv) {
         stall = YES;
         BOOL shaped = SGMotionClipShape(tall, 0.75, cut);
         stall = NO;
-        check(releaseAt && !stalledReads, @"no producer wakes during sustained writer backpressure");
+        check(registeredDemand && !stalledReads, @"no producer wakes during sustained writer backpressure");
         printf("  (cut in %.0f ms)\n", (CFAbsoluteTimeGetCurrent() - start) * 1000);
         check(shaped, @"cut and written");
         NSData *original = [NSData dataWithContentsOfURL:cut];
@@ -205,7 +204,7 @@ int main(int argc, const char **argv) {
             published = SGMotionClipShape(tall, 1, failed);
             dispatch_semaphore_signal(returned);
         });
-        if (dispatch_semaphore_wait(returned, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(returned, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC))) {
             check(NO, @"writer failure without readiness hung");
             return 1;
         }

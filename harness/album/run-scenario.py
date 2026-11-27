@@ -23,6 +23,8 @@ argv = sys.argv[1:]
 split = argv.index("--") if "--" in argv else len(argv)
 args = parser.parse_args(argv[:split])
 launch_args = argv[split + 1:]
+if args.shots:
+    launch_args.append("capture-shots")
 
 launch = subprocess.Popen([sys.executable, Path(__file__).resolve().parents[1] / "sim-launch.py",
                            "--live", "--timeout", "120", "--terminate-running-process", args.udid,
@@ -34,12 +36,13 @@ for line in launch.stdout:
     if "[harness]" not in line:
         continue
     print(line.rstrip(), flush=True)
-    shot = re.search(r"\[harness\] SHOT (\S+)", line)
+    shot = re.search(r"\[harness\] CAPTURE (\S+) (.+)$", line.rstrip())
     if shot and args.shots:
         os.makedirs(args.shots, exist_ok=True)
         subprocess.run(["xcrun", "simctl", "io", args.udid, "screenshot",
                         os.path.join(args.shots, shot.group(1) + args.suffix + ".png")],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        Path(shot.group(2)).touch()
     if "[harness] FAIL" in line:
         failures.append(line.strip())
         break

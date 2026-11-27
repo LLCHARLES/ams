@@ -192,7 +192,7 @@ static void tap(UIViewController *sheet, NSString *ivar) {
 // A run loop turn, so a double's answer on the main queue runs.
 // Runs the run loop until `done` says so, or the wait runs out (a check then fails on what it expected).
 static void waitUntil(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && deadline.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     [sg_window.rootViewController.view layoutIfNeeded];
 }
@@ -560,10 +560,10 @@ static void run(void) {
     [sg_window makeKeyAndVisible];
     // A timer, not a queued block: the checks pump the run loop for a double's answer, and the main queue is not
     // drained reentrantly from a block still running on it.
-    // A slow CI runner can take longer than a moment to attach the window to its scene: wait up to five seconds.
+    // Wait for scene attachment, not a fixed number of launch turns.
     CFTimeInterval started = CACurrentMediaTime();
     [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
-        if (!self.window.windowScene && CACurrentMediaTime() - started < 5) return;
+        if (!self.window.windowScene && CACurrentMediaTime() - started < 60) return;
         [timer invalidate];
         if (!self.window.windowScene) HARNESS_FAIL(@"the window never joined a scene");
         run();

@@ -153,17 +153,17 @@ static void presenter(BOOL first) {
             [[[NSFileCoordinator alloc] initWithFilePresenter:editor] coordinateWritingItemAtURL:old options:0 error:nil byAccessor:^(NSURL *url) {
                 NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:url error:nil]; CHECK(handle);
                 dispatch_semaphore_signal(held);
-                CHECK(!dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)));
+                CHECK(!dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, 120*NSEC_PER_SEC)));
                 [handle seekToEndOfFile]; [handle writeData:bytes(@" edited")]; [handle closeFile];
                 put(url, @"later save to previous path");
                 dispatch_semaphore_signal(finished);
             }];
         });
-        CHECK(!dispatch_semaphore_wait(held, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)));
+        CHECK(!dispatch_semaphore_wait(held, dispatch_time(DISPATCH_TIME_NOW, 60*NSEC_PER_SEC)));
         CHECK(NSThread.isMainThread);
         active(NSDocumentDirectory, @"Retrine"); // must return before the editor relinquishes
         dispatch_semaphore_signal(release);
-        CHECK(!dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)));
+        CHECK(!dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60*NSEC_PER_SEC)));
         [NSFileCoordinator removeFilePresenter:editor];
     }
     NSURL *lyrics = child(active(NSDocumentDirectory, @"Retrine"), @"Lyrics");

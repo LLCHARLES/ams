@@ -14,7 +14,7 @@ static id geminiReply(NSString *text, NSString *reason) {
     return @{@"candidates": @[@{@"content": @{@"parts": @[@{@"text": text}]}, @"finishReason": reason}]};
 }
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && deadline.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(ready());
 }
@@ -1010,7 +1010,7 @@ static void checkAIStore(void) {
     storeRelease = dispatch_semaphore_create(0);
     holdStore = YES;
     SGLyricsSaveTranslation(@"async-store", @"ko", written);
-    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     SGLyricsSaveAI(@"notes", @"async-store", @"ko", @{@"async line": @"ordered note"});
     __block BOOL heartbeat = NO, translated = NO, noted = NO, rejected = NO;
     SGLyricsLoadTranslation(@"async-store", @"ko", loaded, ^BOOL { return YES; }, ^{

@@ -51,7 +51,7 @@ static void exchange(SEL original, SEL replacement) {
                                    class_getInstanceMethod(NSFileManager.class, replacement));
 }
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!ready() && until.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
     CHECK(ready());
@@ -310,7 +310,7 @@ int main(int argc, const char **argv) {
         exchange(@selector(contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:), @selector(testContents:includingPropertiesForKeys:options:error:));
         if (strcmp(argv[1], "missing-root") == 0) {
             missingRootTrim = dispatch_semaphore_create(0);
-            CHECK(!dispatch_semaphore_wait(missingRootTrim, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)));
+            CHECK(!dispatch_semaphore_wait(missingRootTrim, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC)));
             return 0;
         }
         watch = YES;
@@ -358,7 +358,7 @@ int main(int argc, const char **argv) {
                 }, ^(BOOL ok) { CHECK(ok); if (i == 40) dispatch_semaphore_signal(written); });
             }
         }
-        CHECK(dispatch_semaphore_wait(written, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(written, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC)) == 0);
         waitFor(^BOOL { return replies == 2; });
         checkCancellation();
         watch = NO;

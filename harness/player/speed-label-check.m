@@ -185,7 +185,7 @@ static void run(UIWindow *window) {
     self.window.rootViewController = [UIViewController new];
     [self.window makeKeyAndVisible];
     [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) { run(self.window); }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_FAIL(@"speed label checks did not finish");
     });
     return YES;

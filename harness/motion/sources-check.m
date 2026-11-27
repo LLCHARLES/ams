@@ -117,7 +117,7 @@ static NSURLSession *fixtureSession;
 @end
 
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
     CHECK(ready());

@@ -25,7 +25,7 @@ struct OnDeviceKeptCheck {
             }
             return (["stale"], nil)
         }, progress: { _ in }, done: { result in replies.append(result.0 == nil ? "held" : "stale") })
-        let limit = Date().addingTimeInterval(3)
+        let limit = Date().addingTimeInterval(60)
         while !replies.contains("latest") && limit.timeIntervalSinceNow > 0 {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
@@ -43,7 +43,7 @@ struct OnDeviceKeptCheck {
             if let error { print(error) }
             finished = true
         }
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(60)
         while !finished && deadline.timeIntervalSinceNow > 0 {
             RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }

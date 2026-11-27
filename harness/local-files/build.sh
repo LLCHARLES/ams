@@ -13,7 +13,7 @@ xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK
 CFFIXED_USER_HOME="$OUT/home" "$OUT/check"
 # The imported lyrics files, with the lyrics engine's line timing and the TTML reader as the tweak has them.
 xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
-    -fobjc-arc -g -Wall -Werror -I"$SRC" "$HERE/lrc.m" "$SRC/Shared/LocalFiles/LocalLyrics.m" "$SRC/Shared/LocalFiles/EmbeddedLyrics.m" "$SRC/Shared/LocalFiles/LyricRetirement.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \
+    -fobjc-arc -g -Wall -Werror -I"$SRC" -I"$SRC/Shared/LocalFiles" "$HERE/lrc.m" "$HERE/ordered-import-source.m" "$SRC/Shared/LocalFiles/EmbeddedLyrics.m" "$SRC/Shared/LocalFiles/LyricRetirement.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \
     "$SRC/Shared/Lyrics/KaraokeTiming.m" "$SRC/Shared/LyricsSources/SGTTML.m" "$SRC/Shared/AdBlock/Protobuf.m" \
     -framework UIKit -framework CoreGraphics -framework Foundation -framework ImageIO "$SRC/Core/SGDataRoot.m" -o "$OUT/lrc"
 python3 "$HERE/embedded-fixtures.py" "$OUT/tags"
@@ -34,8 +34,8 @@ CFFIXED_USER_HOME="$OUT/home" "$OUT/bridge"
 # The native cover consumer's Logos watcher over the production resolver and a late system artwork.
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Native/LocalFiles/LocalCover.x" > "$OUT/LocalCover.m"
 xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
-    -fobjc-arc -g -Wall -Werror -I"$SRC" -I"$SRC/Native/LocalFiles" \
-    "$HERE/watcher.m" "$OUT/LocalCover.m" "$SRC/Shared/LocalFiles/LocalCover.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \
+    -fobjc-arc -g -Wall -Werror -I"$SRC" -I"$OUT" -I"$SRC/Native/LocalFiles" \
+    "$HERE/watcher.m" "$SRC/Shared/LocalFiles/LocalCover.m" "$SRC/Shared/LocalFiles/LocalFiles.m" \
     -framework UIKit -framework MediaPlayer -framework CoreGraphics -framework Foundation -framework ImageIO "$SRC/Core/SGDataRoot.m" -o "$OUT/watcher"
 CFFIXED_USER_HOME="$OUT/home" "$OUT/watcher"
 # The actual Logos observer over a fake player and now-playing extras sink.

@@ -30,17 +30,19 @@ static UIButton *lyricsMenuIn(UIView *stage) {
 
 - (void)checkOpeningSettles {
     __block unsigned lastPasses = atomic_load(&openingLayoutPasses);
-    __block CFTimeInterval quietSince = CACurrentMediaTime();
-    [NSTimer scheduledTimerWithTimeInterval:0.01 repeats:YES block:^(NSTimer *timer) {
+    // Compare completed layout frames, not elapsed time while the VM may be descheduled.
+    __block NSUInteger idleFrames = 0;
+    SGRHarnessFrameCheck *frame = [SGRHarnessFrameCheck new];
+    frame.check = ^BOOL {
+        [self->_host layoutIfNeeded];
         unsigned passes = atomic_load(&openingLayoutPasses);
         if (passes != lastPasses) {
             lastPasses = passes;
-            quietSince = CACurrentMediaTime();
-            return;
+            idleFrames = 0;
+            return NO;
         }
-        // Observe an idle window, not merely the synchronous return from the last layout callback.
-        if (CACurrentMediaTime() - quietSince < 0.2) return;
-        [timer invalidate];
+        if (++idleFrames < 2) return NO;
+        if (!getenv("HARNESS_SHORT") && !getenv("HARNESS_NO_ARTWORK") && !SGRPlayerTwoColumns()) return NO;
         NSLog(@"[harness] opening settled: %u host layout passes", passes);
         if (getenv("HARNESS_NO_ARTWORK")) HARNESS_CHECK(SGRNowPlayingArtwork(NULL, NULL) == nil);
         if (getenv("HARNESS_NO_ARTWORK") || getenv("HARNESS_SHORT")) {
@@ -70,7 +72,10 @@ static UIButton *lyricsMenuIn(UIView *stage) {
         dispatch_semaphore_signal(openingFinished);
         NSLog(@"[harness] adaptive checks: PASS (opening)");
         fflush(stdout);
-    }];
+        return YES;
+    };
+    CADisplayLink *link = [CADisplayLink displayLinkWithTarget:frame selector:@selector(frame:)];
+    [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
 
 - (void)runAdaptiveChecks {

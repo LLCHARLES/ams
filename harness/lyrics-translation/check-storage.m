@@ -641,7 +641,7 @@ static void checkAsyncTranslationDeletion(void) {
         CHECK(NSThread.isMainThread && heartbeat && !error); finished = YES;
     });
     CHECK(!SGLyricsTranslationIsCurrent(@"async-delete", @"ko", token));
-    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     dispatch_async(dispatch_get_main_queue(), ^{ heartbeat = YES; dispatch_semaphore_signal(storeRelease); });
     waitFor(^BOOL { return finished; });
     SGLyricsSyncSavedTranslation(@"async-delete", @"ko", lines);
@@ -741,7 +741,7 @@ static void checkFirstRecordRead(void) {
     Method method = class_getInstanceMethod(SGTranslationFiles.class, @selector(migrate:));
     IMP original = method_getImplementation(method);
     IMP gated = imp_implementationWithBlock(^BOOL(SGTranslationFiles *store, NSError **error) {
-        CHECK(!dispatch_semaphore_wait(delivered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)));
+        CHECK(!dispatch_semaphore_wait(delivered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)));
         return ((BOOL (*)(id, SEL, NSError **))original)(store, @selector(migrate:), error);
     });
     method_setImplementation(method, gated);

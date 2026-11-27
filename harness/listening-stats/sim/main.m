@@ -16,6 +16,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "../../harness-fail.h"
+#import "../../harness-wait.h"
 #import "../../timer-lifecycle.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
@@ -229,9 +230,16 @@ static UIDocumentPickerViewController *SGHarnessPicker;
     if (![heading isKindOfClass:UIButton.class]) HARNESS_FAIL(@"the Top heading of section %ld is %@, not a button", (long)(2 + kind), heading.class);
     NSLog(@"[harness] heading \"%@\", hint \"%@\"", heading.accessibilityLabel, heading.accessibilityHint);
     [(UIButton *)heading sendActionsForControlEvents:UIControlEventTouchUpInside];
-    [self after:2 do:^{
+    NSString *expected = @[@"Top tracks", @"Top artists", @"Top albums"][(NSUInteger)kind];
+    HarnessWhen(@"chart page finished navigation and ranked its entries", ^BOOL {
+        if (![self.nav.topViewController.title isEqual:expected] || self.nav.transitionCoordinator ||
+            self.table.numberOfSections <= 1 || ![self.table numberOfRowsInSection:1]) return NO;
+        UITableViewCell *list = [self.table.dataSource tableView:self.table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+        NSMutableArray *entries = [NSMutableArray array];
+        findViews(list, NSClassFromString(@"SGChartEntryView"), entries);
+        return entries.count != 0;
+    }, ^{
         UIViewController *top = self.nav.topViewController;
-        NSString *expected = @[@"Top tracks", @"Top artists", @"Top albums"][(NSUInteger)kind];
         if (![top.title isEqualToString:expected]) HARNESS_FAIL(@"the heading opened \"%@\", not %@", top.title, expected);
         UITableView *chart = self.table;
         UITableViewCell *list = [chart.dataSource tableView:chart cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
@@ -247,13 +255,15 @@ static UIDocumentPickerViewController *SGHarnessPicker;
         NSLog(@"[harness] chart \"%@\": summary %@; %ld rows: %@", top.title, [[labels valueForKey:@"text"] componentsJoinedByString:@" | "], (long)rows,
               [spoken componentsJoinedByString:@"; "]);
         NSLog(@"[harness] PASS the heading opens its chart");
-    }];
+    });
 }
 
 // Recap opened from the page, then the first year with a recap.
 - (void)openStory:(void (^)(UIViewController *story))then {
     [self.table.delegate tableView:self.table didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:5]];
-    [self after:1.5 do:^{
+    HarnessWhen(@"Recap year list", ^BOOL {
+        return [self.nav.topViewController.title isEqual:@"Recap"] && !self.nav.transitionCoordinator && [self.table numberOfRowsInSection:0] > 0;
+    }, ^{
         UITableView *years = self.table;
         if (![self.nav.topViewController.title isEqualToString:@"Recap"]) HARNESS_FAIL(@"the Recap row opened \"%@\"", self.nav.topViewController.title);
         for (NSInteger row = 0; row < [years numberOfRowsInSection:0]; row++) {
@@ -267,15 +277,17 @@ static UIDocumentPickerViewController *SGHarnessPicker;
             NSLog(@"[harness] recap year row: %@ = %@", [[labels valueForKey:@"text"] componentsJoinedByString:@" | "], value);
             if (![value isEqualToString:@"Play"]) continue;
             [years.delegate tableView:years didSelectRowAtIndexPath:path];
-            [self after:1.5 do:^{
+            HarnessWhen(@"story presented", ^BOOL {
+                return self.nav.presentedViewController.viewIfLoaded.window && !self.nav.presentedViewController.transitionCoordinator;
+            }, ^{
                 UIViewController *story = self.nav.presentedViewController;
                 if (![NSStringFromClass(story.class) isEqualToString:@"SGRecapStoryController"]) HARNESS_FAIL(@"the year opened %@", story.class);
                 then(story);
-            }];
+            });
             return;
         }
         HARNESS_FAIL(@"no year has a recap");
-    }];
+    });
 }
 
 - (void)story {
@@ -294,10 +306,10 @@ static UIDocumentPickerViewController *SGHarnessPicker;
             NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
             findViews(story.view, UIButton.class, buttons);
             for (UIButton *button in buttons) if ([button.accessibilityLabel isEqualToString:@"Close"]) [button sendActionsForControlEvents:UIControlEventTouchUpInside];
-            [self after:1.5 do:^{
+            HarnessWhen(@"story dismissed", ^BOOL { return !self.nav.presentedViewController; }, ^{
                 if (self.nav.presentedViewController) HARNESS_FAIL(@"Close left %@ up", self.nav.presentedViewController.class);
                 NSLog(@"[harness] PASS the story opens, moves on and closes");
-            }];
+            });
         }];
     }];
 }

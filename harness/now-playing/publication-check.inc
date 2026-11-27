@@ -19,7 +19,7 @@ CGImageRef harnessPublicationFrame(NSString *line, CGImageRef backdrop) {
         }
     }
     if (hold) {
-        BOOL timedOut = dispatch_semaphore_wait(publicationRelease, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0;
+        BOOL timedOut = dispatch_semaphore_wait(publicationRelease, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) != 0;
         @synchronized (cacheRoot) { publicationGateTimedOut = timedOut; }
     }
     // Mark the interrupted ahead render; a fresh request for this line produces green instead.
@@ -118,7 +118,7 @@ void publicationChecks(void) {
     check(sameImage([secondStill imageWithSize:CGSizeMake(24, 32)], secondFrame),
           @"memory pressure preserves the immediately available composed fallback");
     // Direct mode switch: no Off step, no new native info and no metadata URL completing later.
-    runFor(.05); // finish the preceding resend's notification and any ready-frame publication first
+    drainMain();
     id outgoing = artwork();
     harnessMotionSourcesOff = YES;
     sourceFile = nil;

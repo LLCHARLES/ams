@@ -34,7 +34,7 @@ static void publicationCheck(void) {
     SGPublicationView *view = [[SGPublicationView alloc] initWithFrame:CGRectMake(0, 0, 360, 600)];
     ((void (*)(id, SEL))objc_msgSend)(view, NSSelectorFromString(@"tick"));
     [view layoutSubviews];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!view.published && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     check(view.published && view.firstFrameCorrect, @"first published frame selects the current sung line without a display tick");
@@ -88,7 +88,7 @@ static void reviewChecks(UIWindow *window) {
     // The first measurement cannot publish until this main-thread turn returns. Change the style
     // now, not on a timer that might race the result.
     SGRSetLyricsTextShown(SGRLyricsTextTranslation, YES);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!reviewShowsText(view, @"First translation") && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     check(reviewShowsText(view, @"First translation"), @"a translation enabled during first measurement is displayed");

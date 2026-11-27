@@ -15,6 +15,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #import <stdatomic.h>
+#import "../../harness-wait.h"
 #import "Shared/AudioEffects/AudioEffects.h"
 
 // No songs are kept here: exercise the real audio chain without the per-song persistence owner.
@@ -58,6 +59,8 @@ typedef struct { float left, right; UInt32 frames; bool silent; } ProbeCall;
 // One ring per output: [0] the chain the script starts with, [1] the second chain run beside it.
 static ProbeCall sg_calls[2][kProbeCalls];
 static atomic_uint sg_callCount[2];
+static atomic_uint_fast64_t sg_outputFrames[2], sg_tailFrame;
+static atomic_int sg_tailResult;
 
 static OSStatus probe(void *refCon, AudioUnitRenderActionFlags *flags, const AudioTimeStamp *timestamp, UInt32 bus,
                       UInt32 frames, AudioBufferList *data) {
@@ -75,6 +78,13 @@ static OSStatus probe(void *refCon, AudioUnitRenderActionFlags *flags, const Aud
     unsigned n = atomic_load(&sg_callCount[which]);
     sg_calls[which][n % kProbeCalls] = (ProbeCall){(float)(left / frames), (float)(right / frames), frames, (*flags & kAudioUnitRenderAction_OutputIsSilence) != 0};
     atomic_store(&sg_callCount[which], n + 1);
+    uint64_t end = atomic_fetch_add(&sg_outputFrames[which], frames) + frames;
+    uint64_t target = atomic_load(&sg_tailFrame);
+    if (!which && target && end >= target && !atomic_load(&sg_tailResult)) {
+        ProbeCall prev = sg_calls[0][(n + kProbeCalls - 1) % kProbeCalls];
+        BOOL ringing = (prev.left + left / frames) / 2 > 1e-8 || (prev.right + right / frames) / 2 > 1e-8;
+        atomic_store(&sg_tailResult, ringing ? 1 : -1);
+    }
     return noErr;
 }
 
@@ -295,7 +305,7 @@ static void check(OSStatus status, const char *what) {
         };
         [self startSpotifyChainAt:44100];
         SGDSPSetSwitch(SGKeyDSP, YES);
-        [self after:10 do:^{ NSLog(@"FAIL maintenance lifecycle did not finish"); exit(1); }];
+        [self after:60 do:^{ NSLog(@"FAIL missing maintenance transition after phase %lu", (unsigned long)phase); exit(1); }];
         return YES;
     }
     double sine = 20 * log10(kAmplitude / M_SQRT2), nothing = -200, any = NAN;
@@ -343,52 +353,33 @@ static void check(OSStatus status, const char *what) {
         }, @(nothing), @(sine)],
         @[@"master off again", ^{ SGDSPSetSwitch(SGKeyDSP, NO); }, @(sine), @(nothing)],
     ];
-    __block NSString *label = nil;
-    __block double wantLeft = 0, wantRight = 0, wantSecondLeft = NAN, wantSecondRight = NAN;
-    double step = 2.5, at = 1;
-    for (NSArray *entry in script) {
-        [self after:at do:^{
-            if (label) report(label, wantLeft, wantRight);
-            if (label && !isnan(wantSecondLeft)) reportOutput(1, [label stringByAppendingString:@" (2nd)"], wantSecondLeft, wantSecondRight);
-            if ([label hasPrefix:@"the source goes silent"]) {
-                // The tail: the level over the renders since the source stopped, loud at first, then less.
-                double left, right;
-                unsigned frames, silent;
-                level(3, &left, &right, &frames, &silent);
-                NSLog(@"[harness]        the tail's last renders: left %.1f dB, right %.1f dB, %u of them flagged silent", left, right, silent);
-            }
-            if ([label hasPrefix:@"a convolver file"]) {
-                NSString *error = SGDSPError(SGKeyDSPConvolver);
-                if (!error) sg_failures++;
-                NSLog(@"[harness] %@ its error: \"%@\"", error ? @"  ok  " : @"FAILED", error);
-            }
-            label = entry[0];
-            wantLeft = [entry[2] doubleValue];
-            wantRight = [entry[3] doubleValue];
-            wantSecondLeft = entry.count > 5 ? [entry[4] doubleValue] : NAN;
-            wantSecondRight = entry.count > 5 ? [entry[5] doubleValue] : NAN;
-            ((void (^)(void))entry[1])();
-        }];
-        if ([entry[0] hasPrefix:@"the source goes silent"]) {
-            // Right after the source stops, the reverb's tail is still coming out.
-            [self after:at + 0.4 do:^{
-                double left, right;
-                unsigned frames, silent;
-                level(2, &left, &right, &frames, &silent);
-                BOOL ringing = left > -80 || right > -80;
-                if (!ringing) sg_failures++;
-                NSLog(@"[harness] %@ 0.4 s after the source stopped: left %.1f dB, right %.1f dB, %u of 2 renders flagged silent after the effects",
-                      ringing ? @"  ok  " : @"FAILED", left, right, silent);
-            }];
-        }
-        at += step;
-    }
-    [self after:at do:^{
-        report(label, wantLeft, wantRight);
+    [self runScript:script at:0];
+    return YES;
+}
+
+- (void)runScript:(NSArray *)script at:(NSUInteger)i {
+    if (i == script.count) {
         NSLog(@"[harness] %@: %d failed", sg_failures ? @"FAILED" : @"all passed", sg_failures);
         exit(sg_failures ? 1 : 0);
-    }];
-    return YES;
+    }
+    NSArray *entry = script[i];
+    NSString *label = entry[0];
+    BOOL tail = [label hasPrefix:@"the source goes silent"];
+    ((void (^)(void))entry[1])();
+    uint64_t first = atomic_load(&sg_outputFrames[0]), second = atomic_load(&sg_outputFrames[1]);
+    double rate = AVAudioSession.sharedInstance.sampleRate;
+    HARNESS_CHECK(rate > 0);
+    if (tail) atomic_store(&sg_tailFrame, first + llround(0.4 * rate));
+    HarnessWhen([@"rendered audio for " stringByAppendingString:label], ^BOOL {
+        return atomic_load(&sg_outputFrames[0]) - first >= 2.5 * rate &&
+            (entry.count <= 5 || atomic_load(&sg_outputFrames[1]) - second >= 2.5 * rate) &&
+            (![label hasPrefix:@"a convolver file"] || SGDSPError(SGKeyDSPConvolver) != nil);
+    }, ^{
+        report(label, [entry[2] doubleValue], [entry[3] doubleValue]);
+        if (entry.count > 5) reportOutput(1, [label stringByAppendingString:@" (2nd)"], [entry[4] doubleValue], [entry[5] doubleValue]);
+        if (tail) HARNESS_CHECK(atomic_load(&sg_tailResult) == 1);
+        [self runScript:script at:i + 1];
+    });
 }
 
 @end

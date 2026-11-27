@@ -212,7 +212,7 @@ static Audio separateOffline(SGSingSeparator *separator, Audio mix, double *slow
 
 // The main run loop turned until `done` holds or `seconds` pass; the loader hands back on the main queue.
 static bool waitFor(double seconds, bool (^done)(void)) {
-    double until = now() + seconds;
+    double until = now() + MAX(60, seconds);
     while (!done() && now() < until) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
     return done();
 }
@@ -231,14 +231,16 @@ static bool waitFor(double seconds, bool (^done)(void)) {
 // The loader through its cases; hands back the separator it leaves Ready, both copies in it. With `neural`, the
 // model's Neural Engine copy loads beside its CPU copy, as Sing.x has it on Automatic.
 static SGSingSeparator *checkLoader(NSString *path, bool neural) {
+    extern void HarnessCaptureLoaderDelay(int64_t), HarnessFireLoaderDelay(void);
     NSURL *url = [NSURL fileURLWithPath:path];
     SGSingLoaderSetForeground(YES);
 
     // A load past its deadline is abandoned and Sing is Failed; the mic off and on starts a fresh one at once,
     // which works while the first is still out, and the first is let go when it comes back.
     SGSingLoaderCPUDeadline = 0.2;
+    HarnessCaptureLoaderDelay(200 * NSEC_PER_MSEC);
     SGSingLoaderWant(url, NO);
-    waitFor(5, ^bool { return SGSingLoaderCurrentState() != SGSingLoaderLoading; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderFailed && [SGSingLoaderError() containsString:@"did not load in"],
           "a load past its deadline is abandoned, and Sing is Failed: %s", SGSingLoaderError().UTF8String ?: "(no reason)");
     SGSingLoaderCPUDeadline = 120;
@@ -265,21 +267,21 @@ static SGSingSeparator *checkLoader(NSString *path, bool neural) {
 
     // Kept over a quick off and on, dropped once the time kept has passed.
     SGSingLoaderKeepSeconds = 1.5;
+    HarnessCaptureLoaderDelay(1500 * NSEC_PER_MSEC);
     SGSingLoaderRelease();
-    waitFor(0.5, ^bool { return false; });
     SGSingLoaderWant(url, neural);
-    waitFor(2, ^bool { return false; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderSeparator() == separator && SGSingLoaderAttempts() == 2 + neural,
           "switched off and on within the time kept, the copies are still there and nothing loads (%u loads)", SGSingLoaderAttempts());
+    HarnessCaptureLoaderDelay(1500 * NSEC_PER_MSEC);
     SGSingLoaderRelease();
-    waitFor(3, ^bool { return SGSingLoaderCurrentState() == SGSingLoaderIdle; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderIdle && !SGSingLoaderSeparator(), "left off past the time kept, the copies are dropped");
 
     // A purge during a load: what the load brings back is let go.
     SGSingLoaderWant(url, NO);
     SGSingLoaderPurge(@"the harness purges during the load");
     waitFor(300, ^bool { return SGSingLoaderOutstanding() == 0; });
-    waitFor(0.5, ^bool { return false; });
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderIdle && !SGSingLoaderSeparator(), "a load purged on its way is let go when it comes back");
 
     // Another model wanted (the update in place of the old one), here the same files through a link: the first model's
@@ -360,8 +362,10 @@ static void checkNeuralFallback(NSString *path) {
     SGSingSeparator *separator = SGSingLoaderSeparator();
     CHECK(separator && SGSingLoaderFastState() == SGSingFastNone, "asked for none, the Neural Engine copy is dropped and CPU is ready");
     SGSingLoaderNeuralDeadline = 0.001;
+    extern void HarnessCaptureLoaderDelay(int64_t), HarnessFireLoaderDelay(void);
+    HarnessCaptureLoaderDelay(NSEC_PER_MSEC);
     SGSingLoaderWant(url, YES);
-    waitFor(60, ^bool { return SGSingLoaderFastState() != SGSingFastLoading; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderFastState() == SGSingFastTimedOut && SGSingLoaderSeparator() == separator && SGSingLoaderCurrentState() == SGSingLoaderReady,
           "the Neural Engine copy past its deadline times out, and Sing stays Ready on the CPU's");
     SGSingLoaderNeuralDeadline = 600;
@@ -1021,7 +1025,7 @@ static void checkPreparePurge(NSURL *url, dispatch_semaphore_t predicted) {
     prepared = NO;
     CHECK(SGSingLoaderPrepareNeural(url, done), "second standalone prepare starts");
     // Main owns this call until after purge: the prediction succeeds but its completion cannot publish yet.
-    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)), "purged prepare produced valid ANE features");
+    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "purged prepare produced valid ANE features");
     SGSingLoaderPurge(@"memory warning");
     CHECK(SGSingLoaderPreparingSeconds() < 0, "purge abandons the standalone prepare");
     CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && !callbacks && !prepared,
@@ -1038,7 +1042,7 @@ static void checkProvenFallback(void) {
     Method reader = class_getClassMethod(MLModel.class, @selector(modelWithContentsOfURL:configuration:error:));
     IMP stub = imp_implementationWithBlock(^MLModel *(id cls, NSURL *url, MLModelConfiguration *config, NSError **error) {
         if ([url isEqual:preparing] && config.computeUnits != MLComputeUnitsCPUOnly &&
-            dispatch_semaphore_wait(finishPrepare, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC))) return nil;
+            dispatch_semaphore_wait(finishPrepare, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) return nil;
         SGMockModel *model = mockCopy(config.computeUnits, 0);
         if ([url isEqual:abandoned]) model.predicted = predicted;
         if (config.computeUnits == MLComputeUnitsCPUOnly) cpu = model; else fast = model;
@@ -1050,7 +1054,7 @@ static void checkProvenFallback(void) {
     checkPreparePurge(abandoned, predicted);
     SGSingLoaderWant(abandoned, NO);
     // Main is still in this call, so a successful prediction cannot have published its completion yet.
-    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)), "abandoned CPU load produced valid features");
+    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "abandoned CPU load produced valid features");
     SGSingLoaderPurge(@"memory warning");
     CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && SGSingLoaderCurrentState() == SGSingLoaderIdle &&
           !SGSingLoaderSeparator(), "successful abandoned CPU load is not installed");

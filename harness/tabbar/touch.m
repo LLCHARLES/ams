@@ -2,7 +2,7 @@
 // IOHIDEvent UIKit's gesture recognizers read since iOS 9. The private calls are the ones KIF has made for
 // years; they let the harness tap the glass bar and fling the list with UIKit's own recognizers and
 // scrolling, not by calling the delegate. Checked on iOS 27.0 in the simulator only.
-#import <UIKit/UIKit.h>
+#import "touch.h"
 #import <mach/mach_time.h>
 
 typedef struct __IOHIDEvent *IOHIDEventRef;
@@ -67,7 +67,7 @@ static void deliver(UITouch *touch) {
     [UIApplication.sharedApplication sendEvent:event];
 }
 
-static UITouch *touchDown(UIWindow *window, CGPoint point) {
+UITouch *SGHarnessTouchDown(UIWindow *window, CGPoint point) {
     UITouch *touch = [UITouch new];
     UIView *view = [window hitTest:point withEvent:nil];
     [touch setWindow:window];
@@ -89,11 +89,14 @@ static void touchTo(UITouch *touch, CGPoint point, UITouchPhase phase) {
     deliver(touch);
 }
 
+void SGHarnessTouchMove(UITouch *touch, CGPoint point) { touchTo(touch, point, UITouchPhaseMoved); }
+void SGHarnessTouchUp(UITouch *touch, CGPoint point) { touchTo(touch, point, UITouchPhaseEnded); }
+
 // A finger held at `point` for `seconds`, then lifted.
 void SGHarnessHold(UIWindow *window, CGPoint point, NSTimeInterval seconds) {
-    UITouch *touch = touchDown(window, point);
+    UITouch *touch = SGHarnessTouchDown(window, point);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        touchTo(touch, point, UITouchPhaseEnded);
+        SGHarnessTouchUp(touch, point);
     });
 }
 
@@ -104,7 +107,7 @@ void SGHarnessTap(UIWindow *window, CGPoint point) {
 
 // A finger from `from` to `to` over `seconds`, a move every 1/60 s, let go while still moving: a fling.
 void SGHarnessDrag(UIWindow *window, CGPoint from, CGPoint to, NSTimeInterval seconds) {
-    UITouch *touch = touchDown(window, from);
+    UITouch *touch = SGHarnessTouchDown(window, from);
     NSUInteger steps = MAX(2, (NSUInteger)(seconds * 60));
     for (NSUInteger i = 1; i <= steps; i++) {
         CGFloat t = (CGFloat)i / steps;

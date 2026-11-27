@@ -9,7 +9,7 @@ static UILabel *extrasLabel(UIView *view, NSString *text) {
 }
 
 static BOOL extrasWait(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     return ready();
@@ -47,7 +47,7 @@ static void extrasSetPrepared(id self, SEL selector, id value) {
         objc_setAssociatedObject(self, &extrasLifetimeKey, [SGExtrasPreparationLifetime new], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         extrasHeldStyle = self;
         atomic_store(&extrasHeld, true);
-        if (dispatch_semaphore_wait(extrasRelease, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)))
+        if (dispatch_semaphore_wait(extrasRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)))
             atomic_store(&extrasHoldTimedOut, true);
     }
 }

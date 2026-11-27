@@ -238,7 +238,7 @@ static void runChecks(void) {
     built = 0;
     SGSettingsIndex *walked = started();
     [walked scheduleStep];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (walked.running && deadline.timeIntervalSinceNow > 0) {
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     }

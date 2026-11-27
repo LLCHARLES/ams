@@ -35,6 +35,8 @@ static BOOL contentRequested;
 #define NSFileCoordinator SGFontTestCoordinator
 #import "Shared/Fonts/FontImport.m"
 
+dispatch_queue_t harnessImportQueue(void) { return registrationQueue(); }
+
 void harnessImportPlaceholder(NSURL *url, NSURL *metadata, NSURL *materialized, void (^done)(BOOL)) {
     placeholder = url; providerMetadata = metadata; providerFile = materialized; contentRequested = NO;
     import(@[url], ^{ placeholder = providerMetadata = providerFile = nil; done(contentRequested); });

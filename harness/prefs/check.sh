@@ -11,7 +11,7 @@ xcrun clang -fobjc-arc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -I ../../
     ../../tweak/Sources/Core/SGLog.m -o "$OUT/optional-work"
 "$OUT/optional-work"
 xcrun clang -fobjc-arc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-deprecated-declarations -I ../../tweak/Sources \
-    -framework Foundation counters.m ../../tweak/Sources/Core/SGCounterStore.m ../../tweak/Sources/Core/SGFileHash.m -o "$OUT/counters"
+    -framework Foundation counters.m ../../tweak/Sources/Core/SGFileHash.m -o "$OUT/counters"
 "$OUT/counters"
 xcrun clang -fobjc-arc -O2 -Wall -Wextra -Werror -Wno-unused-parameter -DSG_DRIVER=1 -I ../../tweak/Sources \
     -framework Foundation logging.m ../../tweak/Sources/Core/SGLog.m -o "$OUT/logging"

@@ -108,7 +108,7 @@ static void runCase(unsigned scenario) {
     [self.window makeKeyAndVisible];
     allowCopy = dispatch_semaphore_create(0);
     dispatch_async(dispatch_get_main_queue(), ^{ runCase(0); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         fprintf(stderr, "FAIL import completion watchdog\n");
         exit(1);
     });

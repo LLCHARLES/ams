@@ -9,6 +9,7 @@
 //
 // Threading: main thread only.
 #import <objc/runtime.h>
+#import "Shared/SGMediaClock.h"
 #import <CoreText/CoreText.h>
 #import <CoreText/SFNTLayoutTypes.h>
 #import "SGRRefinements.h"
@@ -342,7 +343,7 @@ void SGRRollingDigitsTextChanged(UILabel *label, NSAttributedString *before) {
     }
     NSString *after = label.text ?: @"";
     UIWindow *window = label.window;
-    CFTimeInterval now = CACurrentMediaTime();
+    CFTimeInterval now = SG_MEDIA_CLOCK();
     BOOL attached = window && state.window == window;
     NSTimeInterval since = state.changedAt > 0 ? now - state.changedAt : -1;
     SGRDigitsChange change = SGRDigitsChangeFor(before.string ?: @"", after, attached, since, SGRReduceMotion());

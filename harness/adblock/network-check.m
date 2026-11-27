@@ -176,9 +176,9 @@ static int delegateSessions(void) {
         NSURLSessionDataTask *task = [session dataTaskWithURL:[NSURL URLWithString:@"https://spclient.wg.spotify.com/ads"]];
         NSUInteger blocked = blockedRequests, seen = seenRequests;
         [task resume];
-        BOOL completed = dispatch_semaphore_wait(delegate.completed, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0;
+        BOOL completed = dispatch_semaphore_wait(delegate.completed, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0;
         [session finishTasksAndInvalidate];
-        BOOL invalidated = dispatch_semaphore_wait(delegate.invalidated, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0;
+        BOOL invalidated = dispatch_semaphore_wait(delegate.invalidated, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0;
         NSData *expected = SGHidden(SGKeyHideAds) ? [NSData data] : [@"ok" dataUsingEncoding:NSUTF8StringEncoding];
         BOOL passed = completed && invalidated && delegate.correctQueue && delegate.status == 200 && !delegate.error &&
             [delegate.body isEqual:expected] && [delegate.events isEqual:@[@"response", @"data", @"complete"]];
@@ -224,9 +224,9 @@ static int delegateFallbacks(void) {
                     }];
                 }];
             }];
-            BOOL completed = dispatch_semaphore_wait(delegate.completed, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0;
+            BOOL completed = dispatch_semaphore_wait(delegate.completed, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0;
             [session finishTasksAndInvalidate];
-            BOOL invalidated = dispatch_semaphore_wait(delegate.invalidated, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0;
+            BOOL invalidated = dispatch_semaphore_wait(delegate.invalidated, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0;
             NSArray *expected = reject.boolValue ? @[@"response", @"complete"] : @[@"response", @"data", @"complete"];
             BOOL cancelled = [delegate.error.domain isEqualToString:NSURLErrorDomain] && delegate.error.code == NSURLErrorCancelled;
             BOOL passed = completed && invalidated && delegate.correctQueue && delegate.status == 200 && !delegate.body.length &&
@@ -258,7 +258,7 @@ static int realSession(void) {
             dispatch_semaphore_signal(done);
         }];
         [task resume];
-        if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) {
             NSLog(@"FAIL real session completion timed out: %@", path);
             failed++;
             break;

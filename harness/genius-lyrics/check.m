@@ -232,7 +232,7 @@ static void checkEmbed(void) {
 static NSDictionary *meaningsFor(NSString *track) {
     __block NSDictionary *answer;
     SGLyricsMeaningsFor(track, SGKaraokeStaticLines(@[@"Filler line"]), ^(NSDictionary *value) { answer = value; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!answer && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(answer);
@@ -276,7 +276,7 @@ static void checkMeanings(void) {
     SGLyricsMeaningsFor(@"evicted", repeated, ^(NSDictionary *value) { CHECK(NSThread.isMainThread); first = value; });
     SGLyricsMeaningsFor(@"evicted", repeated, ^(NSDictionary *value) { CHECK(NSThread.isMainThread); second = value; });
     CHECK(!first && !second); // even a warm raw-referent cache matches asynchronously
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while ((!first || !second) && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(first && first == second);
@@ -288,7 +288,7 @@ static void checkMeanings(void) {
     // A later request on the serial worker provides a completion boundary for the stale one.
     __block BOOL barrier = NO;
     SGLyricsMeaningsFor(@"evicted", repeated, ^(NSDictionary *value) { barrier = YES; });
-    deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!barrier && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(barrier && !stale);

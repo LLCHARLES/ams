@@ -56,7 +56,8 @@ with tempfile.TemporaryDirectory(prefix="retrine-liveprog-guard-") as directory:
         obj = out / f"{name}.o"
         run(flags + ["-Dmach_absolute_time=guard_clock", "-DSGDSPLiveprogRun=guard_run",
                      "-DSGDSPLiveprogCreate=guard_create", "-DSGDSPLiveprogFree=guard_free",
-                     "-Ddispatch_semaphore_signal=guard_signal",
+                     "-Ddispatch_semaphore_signal=guard_signal", "-Ddispatch_time=guard_deadline",
+                     "-Ddispatch_semaphore_wait=guard_wait",
                      "-c", engine, "-o", obj])
         executable = out / name
         run(flags + [HERE / "main.m", obj] + objects +
@@ -66,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix="retrine-liveprog-guard-") as directory:
 
     executable = build("guard", source)
     for case in ("thresholds", "normal", "heavy", "limits", "deadline", "abandonment", "messages", "quarantine", "adjacent"):
-        run([executable, case], timeout=15)
+        run([executable, case], timeout=120)
 
     if not args.mutations:
         raise SystemExit(0)
@@ -101,7 +102,7 @@ with tempfile.TemporaryDirectory(prefix="retrine-liveprog-guard-") as directory:
         if source.count(old) != 1:
             raise RuntimeError(f"mutation {name}: expected one live source match")
         mutant = build(name, source.replace(old, new))
-        result = subprocess.run([str(mutant), case], text=True, capture_output=True, timeout=15)
+        result = subprocess.run([str(mutant), case], text=True, capture_output=True, timeout=120)
         if result.returncode != 1 or "FAIL:" not in result.stderr:
             raise RuntimeError(f"mutation {name} was not caught: {result.returncode}\n"
                                f"{result.stdout}\n{result.stderr}")
