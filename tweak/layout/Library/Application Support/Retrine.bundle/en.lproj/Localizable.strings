@@ -2728,6 +2728,7 @@
 "settings.player.queue_bottom_sheet.title" = "Queue as a bottom sheet";
 "settings.player.queue_devices.title" = "Queue & devices";
 "settings.player.queue_flip.title" = "Queue flip transition";
+"settings.player.queue_history.title" = "Show recently played songs in queue";
 "settings.player.queue_style.music" = "Apple Music";
 "settings.player.queue_style.music_note" = "The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back. AutoMix controls global transitions; per-playlist Mix stays in the playlist's ⋯ menu.";
 "settings.player.queue_style.spotify" = "Spotify";

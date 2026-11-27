@@ -493,10 +493,8 @@ static void placeGrabber(UIView *header, UIView *close, UIControl *route, UIView
 
 #pragma mark - touches through the put-away row
 
-// The ordinary header put away: its buttons gone for the grabber, which closes by its arrow, and where it plays from
-// hidden, nothing in its row is left to take a touch. The row keeps its touches while it shows where it plays from,
-// which is a button, or the arrow, which stays Spotify's and live with no action to close by; the AI DJ's keeps its
-// buttons. Read from the row and the setting as they are, never kept.
+// With the arrow and context put away the empty parts of the row can pass touches to the cover.
+// onControl still protects a button Spotify shows beside them.
 static BOOL rowPutAway(UIView *row) {
     return SGEnabled(SGRKeyPlayerHideContext) && closeRoute(buttonIn(row, closeIDs(), &kCloseKey)) != nil;
 }
@@ -548,6 +546,17 @@ static BOOL onDrawnCover(UIView *view, CGPoint point) {
 }
 %end
 
+// Spotify's side panel keeps an expand button beside the controls the redesign puts away.
+// Check their holders too: Spotify can restore a button's alpha inside a transparent holder.
+static BOOL hasVisibleControl(UIView *row) {
+    for (UIView *child in row.subviews) {
+        if (child.hidden || child.alpha <= 0.01) continue;
+        if ([child isKindOfClass:UIControl.class] && !CGRectIsEmpty(child.bounds)) return YES;
+        if (hasVisibleControl(child)) return YES;
+    }
+    return NO;
+}
+
 // `ordinary`: the ordinary player's header, its buttons put away; else the AI DJ's, its buttons on glass.
 static void layOutHeader(UIViewController *unit, BOOL ordinary) {
     UIView *header = unit.viewIfLoaded;
@@ -557,10 +566,8 @@ static void layOutHeader(UIViewController *unit, BOOL ordinary) {
     if (ordinary) putButtonsAway(header, close, route);
     else glassInside(unit);
     UIView *player = playerHolding(header);
-    // A touch in the put-away row's band falls through to the lifted cover under it (passesTouches); a live row keeps
-    // its touches, and the cover stays under it.
-    SGRPlayerCoverUnderRow(header, !ordinary || !rowPutAway(header), player);
     contextVisibility(header);
+    SGRPlayerCoverUnderRow(header, !ordinary || !rowPutAway(header) || hasVisibleControl(header), player);
     placeGrabber(header, close, route, player);
     SGRPlayerWatchLook(header);
 }

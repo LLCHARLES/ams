@@ -204,6 +204,7 @@ void SGRPlayerToggleQueueSide(void);
 // How the footer's queue button shows the queue (Player > Controls > Queue): 0, Spotify's own queue screen; 1, the
 // Music app's, in the player itself, the cover a thumbnail over it as for the lyrics (PlayerLyrics.x, PlayerQueue.m).
 // Read at launch. In two columns either choice selects the side column's queue.
+#define SGRKeyPlayerQueueHistory @"spotifyglass.redesign.player.queueHistory"
 #define SGRKeyPlayerQueueStyle @"spotifyglass.redesign.player.queueStyle"
 typedef NS_ENUM(NSInteger, SGRPlayerQueueStyleKind) { SGRPlayerQueueStyleSpotify, SGRPlayerQueueStyleMusic };
 SGRPlayerQueueStyleKind SGRPlayerQueueStyle(void);

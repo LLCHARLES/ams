@@ -389,22 +389,29 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 @end
 #endif
 
+@interface SGRQueueCutMask : CAGradientLayer
+@end
+@implementation SGRQueueCutMask
+@end
+
 @class SGRQueueToggle;
 
 // The Music app's queue table: gripping a song's reorder control starts a drag at once rather than waiting through
 // UIScrollView's 150 ms touch delay (where a quick drag on iPad or inside Spotify's outer player scroll view turned
 // into scrolling instead of moving the row), while drags starting on the toggles or Clear still scroll the list.
 @interface SGRQueueTableView : UITableView
+@property (nonatomic, copy) void (^onDetach)(void);
 @end
 
 @implementation SGRQueueTableView {
     NSHashTable<UIScrollView *> *_outerDelays;
-    NSHashTable<UIScrollView *> *_pausedPans;
+    NSHashTable<UIPanGestureRecognizer *> *_pausedPans;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame style:(UITableViewStyle)style {
     if (!(self = [super initWithFrame:frame style:style])) return nil;
     self.delaysContentTouches = NO;
+    self.dragInteractionEnabled = NO;
     return self;
 }
 
@@ -418,6 +425,19 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     return [super touchesShouldCancelInContentView:view];
 }
 
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gesture {
+    if (gesture == self.panGestureRecognizer) {
+        CGPoint start = [gesture locationInView:self];
+        CGPoint travel = [self.panGestureRecognizer translationInView:self];
+        start.x -= travel.x;
+        start.y -= travel.y;
+        for (UIView *view = [self hitTest:start withEvent:nil]; view && view != self; view = view.superview) {
+            if ([NSStringFromClass(view.class) containsString:@"Reorder"]) return NO;
+        }
+    }
+    return [super gestureRecognizerShouldBegin:gesture];
+}
+
 - (void)restoreOuterDelays {
     for (UIScrollView *scroll in _outerDelays) scroll.delaysContentTouches = YES;
     [_outerDelays removeAllObjects];
@@ -426,24 +446,26 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 - (void)pauseOuterPans {
     if (!_pausedPans) _pausedPans = [NSHashTable weakObjectsHashTable];
     for (UIView *v = self.superview; v; v = v.superview) {
-        if (![v isKindOfClass:UIScrollView.class]) continue;
-        UIScrollView *scroll = (UIScrollView *)v;
-        if (!scroll.panGestureRecognizer.enabled || [_pausedPans containsObject:scroll]) continue;
-        scroll.panGestureRecognizer.enabled = NO;
-        [_pausedPans addObject:scroll];
+        for (UIGestureRecognizer *gesture in v.gestureRecognizers) {
+            if (![gesture isKindOfClass:UIPanGestureRecognizer.class] || !gesture.enabled) continue;
+            [_pausedPans addObject:(UIPanGestureRecognizer *)gesture];
+            gesture.enabled = NO;
+        }
     }
 }
 
 - (void)restoreOuterPans {
-    for (UIScrollView *scroll in _pausedPans) scroll.panGestureRecognizer.enabled = YES;
+    for (UIPanGestureRecognizer *pan in _pausedPans) pan.enabled = YES;
     [_pausedPans removeAllObjects];
 }
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
-    [self restoreOuterPans];
     [self restoreOuterDelays];
-    if (!self.window) return;
+    if (!self.window) {
+        if (self.onDetach) self.onDetach();
+        return;
+    }
     if (!_outerDelays) _outerDelays = [NSHashTable weakObjectsHashTable];
     for (UIView *v = self.superview; v; v = v.superview) {
         if (![v isKindOfClass:UIScrollView.class]) continue;
@@ -481,9 +503,11 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     NSArray<SPTPlayerTrack *> *_tracks;
     NSArray *_signature;
     NSArray<SPTPlayerTrack *> *_history;
+    BOOL _showsHistory;
     SPTPlayerTrack *_current;
     NSArray *_reportedKey;
     BOOL _fetching;
+    NSUInteger _fetchGeneration;
     UILabel *_empty;
     SGRQueueUpNextHeader *_upNext;
     // Each row's cover by the track's URI once it has landed (a failed or missing one is asked for again when its row
@@ -501,6 +525,9 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     // A finger is moving a row: the list is not reloaded under it, and the queue Spotify reported meanwhile is shown once
     // it lets go.
     BOOL _reordering;
+    BOOL _movedRow, _coversChangedDuringReorder, _optimisticMove;
+    // The submitted move's playback ID and queue revision. Track metadata can change within that revision.
+    NSArray *_submittedKey;
     id _dragSnapshot;
     NSUInteger _dragGeneration;
     // The Music app's snapping between rest and History: where a drag started, and its tick.
@@ -565,6 +592,8 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
         SGRQueueTableView *table = [[SGRQueueTableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
         table.delegate = self;
         table.dataSource = self;
+        __weak typeof(self) weakSelf = self;
+        table.onDetach = ^{ [weakSelf finishReordering]; };
         self.tableView = table;
     }
 }
@@ -585,6 +614,8 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
         table.sectionHeaderTopPadding = 0;
         table.sectionFooterHeight = CGFLOAT_MIN;
         table.estimatedSectionFooterHeight = 0;
+        table.estimatedSectionHeaderHeight = 0;
+        table.estimatedRowHeight = 0;
         table.cellLayoutMarginsFollowReadableWidth = NO;
         table.tableHeaderView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 0, CGFLOAT_MIN)];
         table.rowHeight = kMusicCoverSide + 2 * kMusicRowPad;
@@ -665,7 +696,13 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 // nothing for a cover in or on its way), and takes it as it lands.
 - (void)viewIsAppearing:(BOOL)animated {
     [super viewIsAppearing:animated];
+    [self updateHistoryVisibility];
     for (NSIndexPath *path in self.tableView.indexPathsForVisibleRows) [self coverOf:[self trackAt:path]];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    [self finishReordering];
 }
 
 // Closed, or the side column gone: no row waits for a cover, and viewIsAppearing: asks again for the rows shown.
@@ -684,19 +721,33 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 static NSArray *reportKey(SPTPlayerState *state) {
     id revision = queueValue(state, @"queueRevision");
     if (!revision || ![SGPlayerInstance() respondsToSelector:@selector(fetchQueue:on:)]) return nil;
-    return @[queueValue(state, @"playbackId") ?: NSNull.null, revision,
-             trackIdentity(state.track) ?: SGURIString(state.track.URI) ?: @""];
+    NSArray *queueKey = @[queueValue(state, @"playbackId") ?: NSNull.null, revision];
+    return @[queueKey, trackIdentity(state.track) ?: SGURIString(state.track.URI) ?: @""];
+}
+
+- (void)showPlayerState:(SPTPlayerState *)state key:(NSArray *)key {
+    BOOL keepHistory = _musicStyle && key && [historyKey(_current) isEqualToString:historyKey(state.track)];
+    if (!keepHistory) _optimisticMove = NO;
+    NSArray *past = _history;
+    if (!keepHistory) past = [state.reverse isKindOfClass:NSArray.class] ? state.reverse.reverseObjectEnumerator.allObjects : @[];
+    [self showTracks:_optimisticMove ? _tracks : SGPlayerUpcomingTracks(state, kMaxRows) past:past current:state.track];
 }
 
 - (void)takeState:(SPTPlayerState *)state {
     NSArray *key = reportKey(state);
-    if ([_reportedKey isEqual:key]) return;
+    if ([_reportedKey isEqual:key]) {
+        [self updateHistoryVisibility];
+        return;
+    }
     _reportedKey = key;
     _snapshot = nil;
-    [self showTracks:SGPlayerUpcomingTracks(state, kMaxRows)
-               past:[state.reverse isKindOfClass:NSArray.class] ? state.reverse.reverseObjectEnumerator.allObjects : @[]
-            current:state.track];
+    [self showPlayerState:state key:key];
     if (key && !_fetching) [self refreshQueue];
+}
+
+- (void)updateHistoryVisibility {
+    if (!_heldShow && _showsHistory != SGFlag(SGRKeyPlayerQueueHistory, YES))
+        [self showTracks:_tracks past:_history current:_current];
 }
 
 // Before the list changes: whether it rests, and when `current` is a song that was to come (a pick, a skip, the song
@@ -767,10 +818,17 @@ static NSArray *reportKey(SPTPlayerState *state) {
         return;
     }
     BOOL atRest = NO;
+    CGFloat oldRest = 0, oldOffset = 0;
+    BOOL preserveOffset = NO;
     NSString *anchorKey = nil;
     CGFloat anchorY = 0;
     if (_musicStyle && self.isViewLoaded && self.tableView.window) {
         [self noteStandingAtRest:&atRest anchorKey:&anchorKey anchorY:&anchorY current:current];
+        preserveOffset = !atRest && [_placedFor isEqualToString:[self placementKey:current]];
+        if (preserveOffset) {
+            oldRest = [self restOffset];
+            oldOffset = self.tableView.contentOffset.y;
+        }
     }
     _tracks = queueTracks(next, kMaxRows, NO);
     NSArray *history = queueTracks(past, NSUIntegerMax, YES);
@@ -781,6 +839,7 @@ static NSArray *reportKey(SPTPlayerState *state) {
         }]];
     }
     _current = current;
+    _showsHistory = SGFlag(SGRKeyPlayerQueueHistory, YES);
     NSArray *signature = [self signature];
     // Rebuilt every time, so the rows hold the very objects Spotify reported last (a move hands them back).
     _groups = _musicStyle ? [self musicGroups] : [self sheetGroups];
@@ -793,7 +852,7 @@ static NSArray *reportKey(SPTPlayerState *state) {
         }
         [self stopCoversExcept:listed];
         if (_musicStyle) [self placeEmpty];
-        else self.tableView.backgroundView = _tracks.count || _history.count || current ? nil : _empty;
+        else self.tableView.backgroundView = _tracks.count || (_showsHistory && _history.count) || current ? nil : _empty;
         _pinnedSection = NSNotFound;
         if (_musicStyle) {
             // The list was at rest and its content changed: History's length does, so the rest moves, and the list goes
@@ -807,13 +866,19 @@ static NSArray *reportKey(SPTPlayerState *state) {
         }
         [self.tableView reloadData];
         [self placeAtUpcomingForcingLayout:YES];
+        if (preserveOffset) {
+            UITableView *table = self.tableView;
+            CGFloat maxY = table.contentSize.height + table.adjustedContentInset.bottom - table.bounds.size.height;
+            CGFloat y = MAX([self leastOffset], MIN(maxY, oldOffset + [self restOffset] - oldRest));
+            if (fabs(table.contentOffset.y - y) > 0.01) table.contentOffset = CGPointMake(table.contentOffset.x, y);
+        }
     }
     [self showBlend];
 }
 
 - (NSArray *)signature {
-    return @[signatureOf(_history), signatureOf(_current ? @[_current] : @[]), signatureOf(_tracks),
-             _musicStyle ? [self sourcesOf:_tracks] : @[], @(_musicStyle && queueEditable(_snapshot))];
+    return @[@(_showsHistory), _showsHistory ? signatureOf(_history) : @[], signatureOf(_current ? @[_current] : @[]),
+             signatureOf(_tracks), _musicStyle ? [self sourcesOf:_tracks] : @[], @(_musicStyle && (_optimisticMove || queueEditable(_snapshot)))];
 }
 
 // The sheet's three sections: History, Now Playing and Up Next, the last under its own heading.
@@ -822,7 +887,7 @@ static NSArray *reportKey(SPTPlayerState *state) {
     SGRQueueGroup *now = groupOf(_current ? SGL(@"settings.player.queue.now", @"Now Playing") : nil, nil, _current ? @[_current] : @[], NO);
     SGRQueueGroup *next = groupOf(nil, nil, _tracks, YES);
     next.upNext = YES;
-    return @[history, now, next];
+    return _showsHistory ? @[history, now, next] : @[now, next];
 }
 
 - (NSArray<NSNumber *> *)sourcesOf:(NSArray<SPTPlayerTrack *> *)tracks {
@@ -853,7 +918,7 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
 // playing has none, being the player's own title over the list.
 - (NSArray<SGRQueueGroup *> *)musicGroups {
     NSMutableArray<SGRQueueGroup *> *groups = [NSMutableArray array];
-    if (_history.count) {
+    if (_showsHistory && _history.count) {
         SGRQueueGroup *history = groupOf(SGL(@"settings.player.queue.history", @"History"), nil, _history, NO);
         history.history = YES;
         [groups addObject:history];
@@ -910,6 +975,10 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
     return CGRectGetMinY([table rectForSection:(NSInteger)controls]) - table.adjustedContentInset.top;
 }
 
+- (NSString *)placementKey:(SPTPlayerTrack *)track {
+    return [NSString stringWithFormat:@"%@\t%.1f", SGURIString(track.URI) ?: @"", self.headHeight];
+}
+
 // The Music app's list opens at rest, and goes back to it for each new song while nobody is scrolling it. The rows
 // under the toggles always reach the bottom of the list, so the rest can be scrolled to however few songs are left.
 - (void)placeAtUpcomingForcingLayout:(BOOL)forceLayout {
@@ -930,7 +999,7 @@ static NSString *playingFrom(NSArray<SPTPlayerTrack *> *run) {
         inset.bottom = room;
         table.contentInset = inset;
     }
-    NSString *track = [NSString stringWithFormat:@"%@\t%.1f", SGURIString(_current.URI) ?: @"", self.headHeight];
+    NSString *track = [self placementKey:_current];
     if ([_placedFor isEqualToString:track] || table.tracking || table.dragging || table.decelerating) {
         if (_anchorKey) {
             SGLog(@"redesign queue: not placed (%@), the anchor is dropped; offset %.0f, rest %.0f",
@@ -1020,6 +1089,7 @@ static const CFTimeInterval kSlideDuration = 0.45;
 }
 
 - (void)goToRest {
+    if (self.isViewLoaded) [self updateHistoryVisibility];
     SGLog(@"redesign queue: the page asks the list back to rest (the room over the toggles is %.0f); offset %.0f, rest %.0f",
           self.headHeight, self.isViewLoaded ? self.tableView.contentOffset.y : 0, self.isViewLoaded ? [self restOffset] : 0);
     _placedFor = nil;
@@ -1038,19 +1108,24 @@ static const CFTimeInterval kSlideDuration = 0.45;
 // The rows' fade into what is held at the top: they are gone this far over its bottom edge.
 static const CGFloat kPinFade = 8;
 
+static void clearCut(UIView *view) {
+    if ([view.layer.mask isKindOfClass:SGRQueueCutMask.class]) view.layer.mask = nil;
+}
+
 // Hides the part of `view` (a row or a heading of the list) over `cut`, in the list's visible frame, fading over
 // kPinFade; the whole view again for a cut of 0.
 static void cutUnder(UIView *view, UITableView *table, CGFloat cut) {
-    CGFloat top = CGRectGetMinY(view.frame) - table.contentOffset.y;
+    CGFloat top = CGRectGetMinY([table convertRect:view.bounds fromView:view]) - table.contentOffset.y;
     CGFloat hidden = cut - top;
     if (cut <= 0 || hidden <= -kPinFade) {
-        if (view.layer.mask) view.layer.mask = nil;
+        clearCut(view);
         return;
     }
     CGFloat height = MAX(1, view.bounds.size.height);
-    CAGradientLayer *mask = [view.layer.mask isKindOfClass:CAGradientLayer.class] ? (CAGradientLayer *)view.layer.mask : nil;
+    if (view.layer.mask && ![view.layer.mask isKindOfClass:SGRQueueCutMask.class]) return;
+    CAGradientLayer *mask = (CAGradientLayer *)view.layer.mask;
     if (!mask) {
-        mask = [CAGradientLayer layer];
+        mask = [SGRQueueCutMask layer];
         mask.colors = @[(id)UIColor.clearColor.CGColor, (id)UIColor.blackColor.CGColor];
         view.layer.mask = mask;
     }
@@ -1140,7 +1215,9 @@ static const CGFloat kPinZ = 100;
     _cut = cut;
     // The rows and headings in the list: hidden under what is held, the held section's own heading entirely while the
     // held one stands in for it.
-    for (UITableViewCell *cell in table.visibleCells) cutUnder(cell, table, cut);
+    for (UITableViewCell *cell in table.visibleCells) {
+        if (cell != _lifted) cutUnder(cell, table, cut);
+    }
     for (NSInteger s = 0; s < table.numberOfSections; s++) {
         UIView *head = [table headerViewForSection:s];
         if (head) [self showHeading:head section:s];
@@ -1154,7 +1231,7 @@ static const CGFloat kPinZ = 100;
     NSUInteger count = subviews.count;
     BOOL ordered = heldShown ? count >= 2 && subviews[count - 1] == _pinnedHeading && subviews[count - 2] == controls
                              : subviews.lastObject == controls;
-    if (!ordered) {
+    if (!ordered && !_reordering) {
         [table bringSubviewToFront:controls];
         if (heldShown) [table bringSubviewToFront:_pinnedHeading];
     }
@@ -1313,21 +1390,42 @@ static const CGFloat kSnapDistance = 200;
     [self placeAtUpcomingForcingLayout:NO];
 }
 
+// Restore the display independently of the last move's write permission.
+- (void)restorePlayerStateRetrying:(BOOL)retry {
+    _optimisticMove = NO;
+    _snapshot = nil;
+    SPTPlayerState *state = SGPlayerState();
+    NSArray *key = reportKey(state);
+    _reportedKey = retry || [_submittedKey isEqual:key.firstObject] ? key : nil;
+    [self showPlayerState:state key:key];
+    if (retry && key) [self refreshQueue];
+}
+
 - (void)refreshQueue {
     id<SGRQueuePlayer> player = SGPlayerInstance();
     if (![player respondsToSelector:@selector(fetchQueue:on:)]) {
-        _reportedKey = nil;
+        [self restorePlayerStateRetrying:NO];
         return;
     }
+    NSUInteger generation = ++_fetchGeneration;
     _fetching = YES;
     NSArray *reported = _reportedKey;
     __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        typeof(self) self = weakSelf;
+        if (!self || generation != self->_fetchGeneration) return;
+        BOOL retry = self->_optimisticMove || (self->_reportedKey && ![self->_reportedKey isEqual:reported]);
+        self->_fetchGeneration++;
+        self->_fetching = NO;
+        [self restorePlayerStateRetrying:retry];
+    });
     [player fetchQueue:^(id<SGRQueueSnapshot> queue) {
         typeof(self) self = weakSelf;
-        if (!self) return;
+        if (!self || generation != self->_fetchGeneration || !self->_fetching) return;
         self->_fetching = NO;
         if (self->_reportedKey != reported) {
             // A newer state is already on screen. Fetch for that report, not the one that just completed.
+            self->_fetchGeneration++;
             if (self->_reportedKey) [self refreshQueue];
             return;
         }
@@ -1336,10 +1434,19 @@ static const CGFloat kSnapDistance = 200;
             (queue.nextTracks && ![queue.nextTracks isKindOfClass:NSArray.class]) ||
             (queue.prevTracks && ![queue.prevTracks isKindOfClass:NSArray.class]) ||
             (queue.track && ![queue.track isKindOfClass:NSClassFromString(@"SPTPlayerTrack")])) {
-            self->_reportedKey = nil; // Keep the state fallback; retry on the next report, even the same revision.
+            if (!self->_submittedKey) self->_fetchGeneration++;
+            [self restorePlayerStateRetrying:NO];
             return;
         }
-        if (self->_musicStyle) self->_snapshot = queue;
+        // Spotify can answer the post-drop fetch before applying setQueue. Keep the optimistic
+        // rows and leave the deadline armed until a new revision, even if this read looks editable.
+        if ([self->_submittedKey isEqual:reported.firstObject]) return;
+        self->_fetchGeneration++;
+        if (self->_musicStyle) {
+            self->_snapshot = queue;
+            self->_submittedKey = nil;
+            self->_optimisticMove = NO;
+        }
         [self showTracks:queue.nextTracks past:queue.prevTracks current:queue.track];
         [self takeState:SGPlayerState()];
     } on:dispatch_get_main_queue()];
@@ -1402,7 +1509,10 @@ static UIImage *coverPlaceholder(void) {
 }
 
 - (void)showCoverOf:(NSString *)uri {
-    if (_reordering) return; // The rows take their cached covers on the post-drop reload.
+    if (_reordering) {
+        _coversChangedDuringReorder = YES;
+        return;
+    }
     NSMutableArray<NSIndexPath *> *rows = [NSMutableArray array];
     for (NSIndexPath *path in self.tableView.indexPathsForVisibleRows) {
         SPTPlayerTrack *track = [self trackAt:path];
@@ -1492,6 +1602,7 @@ static const CGFloat kMusicHistoryGap = 25;
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [table dequeueReusableCellWithIdentifier:@"track"]
         ?: [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:@"track"];
+    if (_musicStyle) clearCut(cell);
     cell.backgroundColor = [UIColor colorWithWhite:1 alpha:0.08];
     SPTPlayerTrack *track = [self trackAt:path];
     NSString *title = track.trackTitle, *artist = track.artistName.length ? track.artistName : nil;
@@ -1543,7 +1654,7 @@ static const CGFloat kMusicHistoryGap = 25;
 
 - (void)tableView:(UITableView *)table willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)path {
     // A row coming on screen under what is held at the top is hidden from its first frame.
-    if (_musicStyle) cutUnder(cell, table, _cut);
+    if (_musicStyle && cell != _lifted) cutUnder(cell, table, _cut);
     // A prepared cell can return without another cellForRow: (even after its download failed).
     UIImage *image = [self coverOf:[self trackAt:path]];
     UIListContentConfiguration *content = (id)cell.contentConfiguration;
@@ -1557,7 +1668,7 @@ static const CGFloat kMusicHistoryGap = 25;
 
 - (BOOL)tableView:(UITableView *)table canMoveRowAtIndexPath:(NSIndexPath *)path {
     SGRQueueGroup *group = [self groupAt:path.section];
-    return _musicStyle && !_returning && group.upcoming && group.tracks.count > 1 && queueEditable(_snapshot);
+    return _musicStyle && !_returning && group.upcoming && group.tracks.count > 1 && (_optimisticMove || queueEditable(_snapshot));
 }
 
 // Only rows that move take the table's editing mode: their grip, no indent and no delete button.
@@ -1585,6 +1696,8 @@ static const CGFloat kMusicHistoryGap = 25;
 // UIKit's own calls around a drag (the ones Spotify's queue screen answers), so a report coming in meanwhile does not
 // reload the list under the finger.
 - (void)tableView:(UITableView *)table willBeginReorderingRowAtIndexPath:(NSIndexPath *)path {
+    if (!_musicStyle) return;
+    if (_reordering) [self finishReordering];
     _dragGeneration++;
     _reordering = YES;
     _dragSnapshot = _snapshot;
@@ -1593,12 +1706,10 @@ static const CGFloat kMusicHistoryGap = 25;
 }
 
 - (void)tableView:(UITableView *)table didEndReorderingRowAtIndexPath:(NSIndexPath *)path {
-    if ([table isKindOfClass:SGRQueueTableView.class]) [(SGRQueueTableView *)table restoreOuterPans];
     [self endReordering];
 }
 
 - (void)tableView:(UITableView *)table didCancelReorderingRowAtIndexPath:(NSIndexPath *)path {
-    if ([table isKindOfClass:SGRQueueTableView.class]) [(SGRQueueTableView *)table restoreOuterPans];
     [self endReordering];
 }
 
@@ -1606,6 +1717,7 @@ static const CGFloat kMusicHistoryGap = 25;
 // down. Its blur and its corners are not taken.
 - (void)lift:(UITableViewCell *)cell {
     if (!cell) return;
+    clearCut(cell);
     UIView *plate = [UIView new];
     plate.backgroundColor = [UIColor colorWithWhite:1 alpha:0.05];
     plate.layer.shadowColor = UIColor.blackColor.CGColor;
@@ -1618,24 +1730,37 @@ static const CGFloat kMusicHistoryGap = 25;
 }
 
 - (void)endReordering {
+    if (!_reordering) return;
+    [(SGRQueueTableView *)self.tableView restoreOuterPans];
     // Finish outside UIKit's delegate stack, including its moveRow callback. A long hold has no timeout.
     NSUInteger generation = _dragGeneration;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!self->_reordering || self->_dragGeneration != generation) return;
-        self->_reordering = NO;
-        self->_dragSnapshot = nil;
-        self->_lifted.backgroundView = nil;
-        self->_lifted = nil;
-        self->_signature = nil; // UIKit already moved a row visually, even if no command could be sent.
-        [self applyHeldTracks];
-        [self takeState:SGPlayerState()];
-        if (!self->_signature) {
-            self->_signature = [self signature];
-            [self.tableView reloadData];
-            [self placeAtUpcomingForcingLayout:YES];
-            [self showBlend];
-        }
+        if (self->_dragGeneration == generation) [self finishReordering];
     });
+}
+
+- (void)finishReordering {
+    if (!_reordering) return;
+    _reordering = NO;
+    [(SGRQueueTableView *)self.tableView restoreOuterPans];
+    _dragSnapshot = nil;
+    _lifted.backgroundView = nil;
+    _lifted = nil;
+    // UIKit can have moved a row even though the snapshot changed and no command was sent.
+    if (!_movedRow) _signature = nil;
+    _movedRow = NO;
+    [self applyHeldTracks];
+    [self takeState:SGPlayerState()];
+    if (!_signature) [self showTracks:_tracks past:_history current:_current];
+    if (_coversChangedDuringReorder) {
+        _coversChangedDuringReorder = NO;
+        for (NSIndexPath *path in self.tableView.indexPathsForVisibleRows) {
+            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:path];
+            [self tableView:self.tableView willDisplayCell:cell forRowAtIndexPath:path];
+        }
+    }
+    [self showBlend];
+    [self reportScroll];
 }
 
 - (void)tableView:(UITableView *)table moveRowAtIndexPath:(NSIndexPath *)from toIndexPath:(NSIndexPath *)to {
@@ -1673,9 +1798,22 @@ static const CGFloat kMusicHistoryGap = 25;
     }
     if (place == NSNotFound || place > next.count) return;
     [next insertObject:moving atIndex:place];
+    _tracks = queueTracks(next, kMaxRows, NO);
+    _groups = [self musicGroups];
+    _movedRow = YES;
+    _submittedKey = _reportedKey.firstObject;
+    _optimisticMove = YES;
     _snapshot = nil;
-    _reportedKey = nil;
+    _signature = [self signature];
+    NSArray *submitted = _reportedKey;
     sendMove(snapshot, next);
+    // A queue command can be rejected without changing the reported revision. Reconcile from a fresh
+    // Spotify snapshot in that case too. Until it arrives the grips stay drawn but no lift has a write base.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        typeof(self) self = weakSelf;
+        if (self && self->_submittedKey == submitted.firstObject && self->_reportedKey == submitted && !self->_fetching) [self refreshQueue];
+    });
 }
 
 - (BOOL)canReplay:(SGRQueueGroup *)group {

@@ -4,6 +4,7 @@
 #import "Shared/Player/SleepTimer.h"
 #import "Redesigned/Player/PlayerMix.h"
 #import "Redesigned/Player/PlayerQueue.h"
+#import "Redesigned/Player/Player.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "../harness-fail.h"
 
@@ -52,15 +53,22 @@
 @property BOOL withoutQueueAPI;
 @property NSArray<SPTPlayerTrack *> *sentNextTracks;
 @property BOOL sentOverrideRestrictions;
+@property NSUInteger moves;
+@property BOOL delayFetch;
+@property (copy) void (^reply)(id);
 @end
 @implementation QueuePlayer
 - (BOOL)respondsToSelector:(SEL)selector {
     if (selector == @selector(fetchQueue:on:) && self.withoutQueueAPI) return NO;
     return [super respondsToSelector:selector];
 }
-- (void)fetchQueue:(void (^)(id))callback on:(dispatch_queue_t)queue { callback(self.currentQueue); }
+- (void)fetchQueue:(void (^)(id))callback on:(dispatch_queue_t)queue {
+    if (self.delayFetch) self.reply = callback;
+    else callback(self.currentQueue);
+}
 - (id)setQueue:(QueueSnapshot *)queue options:(SPTCommandOptions *)options {
     self.sentNextTracks = queue.nextTracks;
+    self.moves++;
     self.sentOverrideRestrictions = options.overrideRestrictions;
     return nil;
 }
@@ -90,6 +98,7 @@ NSString *SGURIString(id uri) { return [uri isKindOfClass:NSURL.class] ? [uri ab
 NSArray *SGPlayerUpcomingTracks(SPTPlayerState *value, NSUInteger limit) { return value.future ?: @[]; }
 NSString *SGL(NSString *key, NSString *english) { return english; }
 static BOOL stubAutoMixFlag;
+static NSNumber *historyPreference;
 static BOOL stubAutoMixApplied;
 static NSInteger stubAutoMixApplies;
 static BOOL stubTransitionKnown;
@@ -97,6 +106,7 @@ static SGTransitionSettings stubTransitionSettings;
 BOOL SGRedesignedUI(void) { return YES; }
 BOOL SGFlag(NSString *key, BOOL fallback) {
     if ([key isEqualToString:@"spotifyglass.automix"]) return stubAutoMixFlag;
+    if ([key isEqualToString:SGRKeyPlayerQueueHistory] && historyPreference) return historyPreference.boolValue;
     return fallback;
 }
 NSInteger SGInt(NSString *key, NSInteger fallback) { return fallback; }
@@ -226,6 +236,18 @@ static UIView *findReorderControl(UIView *view) {
 - (void)tableView:(UITableView *)table willBeginReorderingRowAtIndexPath:(NSIndexPath *)path;
 - (void)tableView:(UITableView *)table moveRowAtIndexPath:(NSIndexPath *)from toIndexPath:(NSIndexPath *)to;
 - (void)tableView:(UITableView *)table didEndReorderingRowAtIndexPath:(NSIndexPath *)path;
+- (void)tableView:(UITableView *)table didCancelReorderingRowAtIndexPath:(NSIndexPath *)path;
+- (SPTPlayerTrack *)trackAt:(NSIndexPath *)path;
+- (CGFloat)restOffset;
+- (void)playerStateDidReport:(SPTPlayerState *)state;
+@end
+
+// Hand the data source a known, previously clipped cell on its next dequeue.
+@interface ReuseTable : UITableView
+@property UITableViewCell *reused;
+@end
+@implementation ReuseTable
+- (UITableViewCell *)dequeueReusableCellWithIdentifier:(NSString *)identifier { return self.reused; }
 @end
 @interface MusicQueueCheck : SGRPlayerQueueController
 @end
@@ -238,6 +260,269 @@ static UIView *findReorderControl(UIView *view) {
     [super viewDidLayoutSubviews];
 }
 @end
+
+// UIKit has no touch stream in the harness. Supply the recognizer's motion and hit-test the mounted
+// queue at the resulting coordinates, leaving gestureRecognizerShouldBegin: to the production table.
+@interface QueuePan : UIPanGestureRecognizer
+@property CGPoint start;
+@end
+@implementation QueuePan
+- (CGPoint)locationInView:(UIView *)view { return CGPointMake(_start.x - 60, _start.y + 24); }
+- (CGPoint)translationInView:(UIView *)view { return CGPointMake(-60, 24); }
+@end
+@interface SGRQueueTableView : UITableView
+@end
+@interface PanTable : SGRQueueTableView
+@property QueuePan *testPan;
+@property (weak) UITableView *mounted;
+@end
+@implementation PanTable
+- (UIPanGestureRecognizer *)panGestureRecognizer { return _testPan ?: super.panGestureRecognizer; }
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event { return [_mounted hitTest:point withEvent:event]; }
+@end
+
+static BOOL panCanBeginOn(UITableView *table, UIView *target) {
+    CGPoint center = CGPointMake(CGRectGetMidX(target.bounds), CGRectGetMidY(target.bounds));
+    CGPoint start = [target convertPoint:center toView:table];
+    if (!target.window || ![[table hitTest:start withEvent:nil] isDescendantOfView:target])
+        HARNESS_FAIL(@"pan target is not hittable: %@", target);
+    PanTable *probe = [PanTable new];
+    probe.mounted = table;
+    probe.testPan = [QueuePan new];
+    probe.testPan.start = start;
+    return [probe gestureRecognizerShouldBegin:probe.panGestureRecognizer];
+}
+
+static void dropRow(SGRPlayerQueueController *list, NSIndexPath *from, NSIndexPath *to) {
+    [list tableView:list.tableView willBeginReorderingRowAtIndexPath:from];
+    [list tableView:list.tableView moveRowAtIndexPath:from toIndexPath:to];
+    [list tableView:list.tableView didEndReorderingRowAtIndexPath:to];
+    until(@"drop finished", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+}
+
+static void checkFetchRecovery(SGRPlayerQueueController *list, NSIndexPath *from, NSIndexPath *to) {
+    SPTPlayerTrack *original = [list trackAt:from];
+    NSUInteger moves = player.moves;
+    NSInteger history = [list tableView:list.tableView numberOfRowsInSection:0];
+    player.delayFetch = YES;
+    dropRow(list, from, to);
+    until(@"rejected move's fetch", ^BOOL { return player.reply != nil; });
+    player.reply(nil);
+    player.reply = nil;
+    check(player.moves == moves + 1 && [list trackAt:from] == original &&
+          [list tableView:list.tableView numberOfRowsInSection:0] == history &&
+          ![list tableView:list.tableView canMoveRowAtIndexPath:from],
+          @"a nil response immediately restores the player's row order and matching History");
+
+    player.delayFetch = NO;
+    [list playerStateDidReport:state];
+    dropRow(list, from, to);
+    check(player.moves == moves + 1 && [list trackAt:from] == original,
+          @"a failed read restores the display without releasing the submitted revision for another move");
+    state.queueRevision = @"303-retry";
+    [list playerStateDidReport:state];
+    dropRow(list, from, to);
+    player.delayFetch = YES;
+    until(@"post-drop fetch to withhold", ^BOOL { return player.reply != nil; });
+    void (^expired)(id) = player.reply;
+    player.reply = nil;
+    QueueSnapshot *late = [player.currentQueue copy];
+    late.nextTracks = @[];
+    state.queueRevision = @"304";
+    [list playerStateDidReport:state];
+    until(@"new fetch after missing response expires", ^BOOL { return player.reply != nil; });
+    expired(late);
+    check(player.moves == moves + 2 && [list trackAt:from] == original &&
+          ![list tableView:list.tableView canMoveRowAtIndexPath:from],
+          @"a lost reply expires, rolls back the move and cannot replace the in-flight retry with stale rows");
+    player.delayFetch = NO;
+    player.reply(player.currentQueue);
+    player.reply = nil;
+    dropRow(list, from, to);
+    check(player.moves == moves + 3 && [list trackAt:to] == original,
+          @"editing works again after the retry supplies a fresh snapshot");
+    player.delayFetch = YES;
+    until(@"read on unchanged revision", ^BOOL { return player.reply != nil; });
+    player.reply = nil; // The read expires with both the revision and the queue still unchanged.
+    until(@"retry on unchanged revision", ^BOOL { return player.reply != nil; });
+    player.delayFetch = NO;
+    player.reply(player.currentQueue);
+    player.reply = nil;
+    dropRow(list, from, to);
+    check(player.moves == moves + 3 && [list trackAt:from] == original &&
+          ![list tableView:list.tableView canMoveRowAtIndexPath:from],
+          @"the pre-move queue after a timeout cannot authorize another submission on the same revision");
+    player.currentQueue.nextTracks = player.sentNextTracks;
+    [state setValue:player.sentNextTracks forKey:@"future"];
+    QueueTrack *current = (QueueTrack *)state.track;
+    current.UID = nil;
+    report(@"305");
+    dropRow(list, to, from);
+    check(player.moves == moves + 4 && [list trackAt:from] == original,
+          @"the acknowledged revision permits the next move after timeout recovery");
+    player.delayFetch = YES;
+    current.UID = @"resolved-current-uid";
+    [list playerStateDidReport:state];
+    check(player.reply != nil, @"a newly available current track UID refreshes the queue display");
+    player.delayFetch = NO;
+    player.reply(player.currentQueue);
+    player.reply = nil;
+    dropRow(list, to, from);
+    check(player.moves == moves + 4,
+          @"a late current track UID cannot authorize a second move on the same playback ID and revision");
+    state.playbackId = @"new playback";
+    [list playerStateDidReport:state];
+    dropRow(list, to, from);
+    check(player.moves == moves + 5 && [list trackAt:from] == original,
+          @"a new playback session can edit its own queue with the same revision number");
+    player.currentQueue.nextTracks = player.sentNextTracks;
+    [state setValue:player.sentNextTracks forKey:@"future"];
+    report(@"306");
+}
+
+static void checkQueueDrag(SGRPlayerQueueController *list, UIViewController *page, UIScrollView *outer, NSArray *past) {
+    UITableView *table = list.tableView;
+    until(@"previous drop finished", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+    outer.frame = CGRectMake(0, 0, 320, 460);
+    page.view.frame = outer.bounds;
+    [page.view layoutIfNeeded];
+    NSMutableArray *next = [NSMutableArray array];
+    for (NSInteger i = 0; i < 28; i++) {
+        NSString *title = [NSString stringWithFormat:@"Upcoming %ld", (long)i];
+        [next addObject:song(title, title)];
+    }
+    [state setValue:player.currentQueue.track forKey:@"track"];
+    [state setValue:next forKey:@"future"];
+    player.currentQueue.nextTracks = next;
+    player.currentQueue.prevTracks = past;
+    report(@"300");
+    NSInteger section = table.numberOfSections - 1;
+    CGFloat rest = [list restOffset], shift = 320;
+    table.contentOffset = CGPointMake(0, rest + shift);
+    [table layoutIfNeeded];
+    NSIndexPath *from = row(section, 6), *to = row(section, 7);
+    UITableViewCell *lifted = [table cellForRowAtIndexPath:from];
+    check(lifted && !table.dragInteractionEnabled && table.estimatedRowHeight == 0 && table.estimatedSectionHeaderHeight == 0,
+          @"narrow queue uses measured heights and native editing grips");
+    check(!panCanBeginOn(table, findReorderControl(lifted)), @"the table pan yields a drag that began on the mounted grip");
+    check(panCanBeginOn(table, [page valueForKey:@"mix"]), @"the table pan accepts a drag that began on a queue toggle");
+    check(panCanBeginOn(table, lifted.contentView), @"the table pan accepts a drag that began on an ordinary row");
+
+    // Both cells have the same local frame. Only the one under the pin in TABLE coordinates should be clipped.
+    UIView *wrapper = [[UIView alloc] initWithFrame:CGRectMake(0, table.contentOffset.y + 200, 100, 100)];
+    UITableViewCell *probe = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"track"];
+    probe.frame = CGRectMake(0, 0, 100, 56);
+    [table addSubview:wrapper];
+    [wrapper addSubview:probe];
+    [list tableView:table willDisplayCell:probe forRowAtIndexPath:from];
+    check(!probe.layer.mask, @"a row in a translated container stays visible below the pins");
+    wrapper.frame = CGRectOffset(wrapper.frame, 0, -200);
+    [list tableView:table willDisplayCell:probe forRowAtIndexPath:from];
+    CALayer *cut = probe.layer.mask;
+    ReuseTable *reuse = [ReuseTable new];
+    reuse.reused = probe;
+    [list tableView:reuse cellForRowAtIndexPath:to];
+    check(cut && !probe.layer.mask, @"reconfiguring a reused row clears the queue's clipping mask");
+    CALayer *other = [CAGradientLayer layer];
+    probe.layer.mask = other;
+    [list tableView:reuse cellForRowAtIndexPath:to];
+    [list tableView:table willDisplayCell:probe forRowAtIndexPath:from];
+    check(probe.layer.mask == other, @"reuse and pinning preserve another component's mask");
+    [wrapper removeFromSuperview];
+
+    NSUInteger before = player.moves;
+    lifted.layer.mask = cut;
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    table.contentOffset = CGPointMake(0, CGRectGetMinY([table rectForRowAtIndexPath:from]) - 1);
+    [list tableView:table willDisplayCell:lifted forRowAtIndexPath:from];
+    check(lifted.backgroundView && !lifted.layer.mask, @"a lifted row loses its clipping mask and stays unmasked");
+    table.contentOffset = CGPointMake(0, rest + shift);
+    [list tableView:table moveRowAtIndexPath:from toIndexPath:to];
+    [list tableView:table didEndReorderingRowAtIndexPath:to];
+    until(@"optimistic drop finished", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+    check(player.moves == before + 1 && [list trackAt:to] == next[6] && [list trackAt:from] == next[7] &&
+          fabs(table.contentOffset.y - rest - shift) < 1 && [list tableView:table numberOfRowsInSection:0] == 10,
+          @"the scrolled queue keeps its dropped order, viewport and History before Spotify acknowledges the move");
+
+    player.delayFetch = YES;
+    until(@"post-drop fetch before acknowledgement", ^BOOL { return player.reply != nil; });
+    player.reply(player.currentQueue);
+    player.reply = nil;
+    dropRow(list, from, to);
+    check(player.moves == before + 1 && [list trackAt:to] == next[6],
+          @"an old queue fetched before the new revision cannot undo the move or authorize a second submission");
+    state.queueRevision = @"301";
+    [list playerStateDidReport:state];
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    [list tableView:table moveRowAtIndexPath:from toIndexPath:to];
+    [list tableView:table didCancelReorderingRowAtIndexPath:from];
+    until(@"unconfirmed second lift cancelled", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+    check(player.reply && player.moves == before + 1 && [list trackAt:to] == next[6] &&
+          [list tableView:table numberOfRowsInSection:0] == 10 && [list tableView:table canMoveRowAtIndexPath:from],
+          @"a report with empty reverse keeps History and grips while a second drag cannot submit the old revision");
+    player.currentQueue.nextTracks = player.sentNextTracks;
+    player.currentQueue.prevTracks = [past subarrayWithRange:NSMakeRange(0, 4)];
+    player.delayFetch = NO;
+    player.reply(player.currentQueue);
+    player.reply = nil;
+    check([list restOffset] < rest && fabs(table.contentOffset.y - [list restOffset] - shift) < 1 &&
+          [list trackAt:to] == next[6], @"a shorter fetched History keeps the same upcoming songs under the viewport");
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    [list tableView:table moveRowAtIndexPath:from toIndexPath:to];
+    [list tableView:table didEndReorderingRowAtIndexPath:to];
+    until(@"confirmed second lift finished", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+    check(player.moves == before + 2 && [player.sentNextTracks isEqual:next], @"a fresh snapshot accepts the next edit");
+    player.currentQueue.nextTracks = player.sentNextTracks;
+    report(@"302");
+
+    historyPreference = @NO;
+    report(@"302");
+    check(table.numberOfSections == 2 && screen.tableView.numberOfSections == 2 &&
+          [[screen tableView:screen.tableView titleForHeaderInSection:0] isEqual:@"Now Playing"],
+          @"turning off History removes its section from the Music and sheet lists on the same revision");
+    historyPreference = @YES;
+    report(@"302");
+    check(table.numberOfSections == 3 && screen.tableView.numberOfSections == 3 &&
+          [list tableView:table numberOfRowsInSection:0] == 4 && titles(0).count == 4,
+          @"turning History on restores the cached tracks to both lists");
+
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    NSArray *replacement = next.reverseObjectEnumerator.allObjects;
+    [state setValue:replacement forKey:@"future"];
+    player.currentQueue.nextTracks = replacement;
+    report(@"303");
+    [list tableView:table moveRowAtIndexPath:from toIndexPath:to];
+    [list tableView:table didEndReorderingRowAtIndexPath:to];
+    until(@"interrupted drop finished", ^BOOL { return ![[list valueForKey:@"reordering"] boolValue]; });
+    check(player.moves == before + 2 && [list trackAt:from] == replacement[6],
+          @"an authoritative queue received during a lift wins without submitting the interrupted move");
+    checkFetchRecovery(list, from, to);
+
+    UIView *host = outer.superview;
+    UIPanGestureRecognizer *active = [UIPanGestureRecognizer new], *disabled = [UIPanGestureRecognizer new];
+    [host addGestureRecognizer:active];
+    [host addGestureRecognizer:disabled];
+    disabled.enabled = NO;
+    [table layoutIfNeeded];
+    lifted = [table cellForRowAtIndexPath:from];
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    check(lifted.backgroundView && !active.enabled && !outer.panGestureRecognizer.enabled,
+          @"a lift pauses pans on both scrolling and ordinary ancestor views");
+    [list viewWillDisappear:NO];
+    check(![[list valueForKey:@"reordering"] boolValue] && active.enabled && !disabled.enabled && !lifted.backgroundView,
+          @"a disappearing controller releases its lift and ancestor pans before detachment");
+    [list tableView:table willBeginReorderingRowAtIndexPath:from];
+    lifted = [table cellForRowAtIndexPath:from];
+    check(lifted.backgroundView && !active.enabled, @"a second lift starts cleanly before window detachment");
+    [page.view removeFromSuperview];
+    [list tableView:table didCancelReorderingRowAtIndexPath:from];
+    [list viewWillDisappear:NO];
+    check(![[list valueForKey:@"reordering"] boolValue] && ![list valueForKey:@"dragSnapshot"] &&
+          !lifted.backgroundView && active.enabled && outer.panGestureRecognizer.enabled && !disabled.enabled,
+          @"detaching mid-drag clears the lift and restores only originally active pans across repeated cleanup");
+    [host removeGestureRecognizer:active];
+    [host removeGestureRecognizer:disabled];
+}
 
 static void run(void) {
     fetchedCover = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(8, 8)] imageWithActions:^(UIGraphicsImageRendererContext *context) {}];
@@ -449,6 +734,7 @@ static void run(void) {
     [mixToggle sendActionsForControlEvents:UIControlEventTouchUpInside];
     check(stubAutoMixApplies == 1 && stubAutoMixApplied && [[mixToggle valueForKey:@"on"] boolValue],
           @"tapping the AutoMix toggle after Spotify disabled transitions re-applies AutoMix");
+    checkQueueDrag(musicList, musicPage, outer, past);
     [musicPage willMoveToParentViewController:nil];
     [musicPage.view removeFromSuperview];
     [musicPage removeFromParentViewController];

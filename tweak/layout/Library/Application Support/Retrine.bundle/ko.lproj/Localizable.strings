@@ -15,6 +15,7 @@
 "settings.player.queue.sleep.left" = "수면 타이머, %@ 남음";
 "settings.player.queue.sleep.minutes" = "%ld분";
 "settings.player.queue.sleep.track" = "곡이 끝나면";
+"settings.player.queue_history.title" = "대기열에 최근 재생한 곡 표시";
 "settings.player.queue_style.music" = "Apple Music";
 "settings.player.queue_style.music_note" = "Apple Music처럼 대기열이 플레이어 안에서 작은 커버 아래에 열리고, 그 위에 셔플, 반복, 수면 타이머, AutoMix가 있습니다. 곡의 손잡이를 끌어 순서를 바꿀 수 있습니다. 버튼을 다시 누르면 커버가 돌아옵니다. AutoMix 버튼은 전역 곡 전환을 켜고 끄며, 플레이리스트별 믹스는 플레이리스트 화면의 ⋯ 메뉴에서 설정합니다.";
 "settings.player.queue_style.spotify" = "Spotify";

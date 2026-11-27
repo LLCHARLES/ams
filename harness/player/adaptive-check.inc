@@ -84,6 +84,7 @@ static UIButton *lyricsMenuIn(UIView *stage) {
     __block CGRect originalHost, originalBand;
     __block UIUserInterfaceSizeClass originalWidthClass;
     __block UIView *compactOverlay;
+    __block UIView *expandHolder;
     runScript(@[
         @[^BOOL {
             return SGRNowPlayingArtwork(NULL, NULL) != nil;
@@ -230,10 +231,24 @@ static UIButton *lyricsMenuIn(UIView *stage) {
             CGRect compact = originalHost;
             compact.size.width = MIN(compact.size.width, 375);
             self->_host.frame = compact;
-            // During resizing the artwork band can still begin above the stationary header.
-            CGRect staleBand = originalBand;
-            staleBand.origin.y = 0;
-            band.frame = staleBand;
+            if (getenv("HARNESS_COMPACT")) {
+                // The settled side panel keeps its expand button even after close and more go.
+                UIViewController *unit = self->_units[0];
+                expandHolder = box(unit.view, UIView.class, CGRectMake(12, 0, 48, 48), nil);
+                box(expandHolder, UIButton.class, expandHolder.bounds, nil);
+                expandHolder.alpha = 0;
+                [unit viewDidLayoutSubviews];
+                HARNESS_CHECK(SGRPlayerLiveRowBottomIn(self->_host) == -CGFLOAT_MAX);
+                expandHolder.alpha = 1;
+                [unit viewDidLayoutSubviews];
+                CGRect row = [unit.view convertRect:unit.view.bounds toView:self->_host];
+                HARNESS_CHECK(SGRPlayerLiveRowBottomIn(self->_host) == CGRectGetMaxY(row));
+            } else {
+                // During resizing the artwork band can still begin above the stationary header.
+                CGRect staleBand = originalBand;
+                staleBand.origin.y = 0;
+                band.frame = staleBand;
+            }
             [self layOut];
             HARNESS_CHECK(!SGRPlayerTwoColumns() && !SGRPlayerLyricsOpen());
             SGRPlayerToggleLyrics();
@@ -256,12 +271,26 @@ static UIButton *lyricsMenuIn(UIView *stage) {
             if (CGRectGetMinY(thumbnail) < CGRectGetMaxY(headerFrame))
                 HARNESS_FAIL(@"compact lyrics thumbnail %@ overlaps header %@", NSStringFromCGRect(thumbnail), NSStringFromCGRect(headerFrame));
             NSLog(@"[harness] rendered compact lyrics thumbnail %@ below header %@", NSStringFromCGRect(thumbnail), NSStringFromCGRect(headerFrame));
-            SGRPlayerToggleLyrics();
+            if (expandHolder) {
+                SGRPlayerToggleQueuePage();
+                UITableView *list = (id)SGRFindByIdentifier(compactOverlay, @"retrine.queue", NULL);
+                HARNESS_CHECK(SGRPlayerQueueShown() && list.window);
+                [list layoutIfNeeded];
+                CGRect rest = [thumb convertRect:thumb.bounds toView:self->_host];
+                CGFloat clearance = CGRectGetMinY(rest) - CGRectGetMaxY(headerFrame);
+                HARNESS_CHECK(clearance >= 0 && thumb.alpha == 1);
+                list.contentOffset = CGPointMake(0, list.contentOffset.y + clearance + 1);
+                HARNESS_CHECK(thumb.alpha == 0);
+                SGRPlayerToggleQueuePage();
+            } else {
+                SGRPlayerToggleLyrics();
+            }
         }],
         @[^BOOL {
             return !checkCompactHeader || !compactOverlay.superview;
         }, ^{
             if (!checkCompactHeader) return;
+            [expandHolder removeFromSuperview];
             self->_host.frame = originalHost;
             self->_tilt.superview.superview.frame = originalBand;
             self.window.traitOverrides.horizontalSizeClass = originalWidthClass;
