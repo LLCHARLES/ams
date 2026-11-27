@@ -218,7 +218,7 @@ UIViewController *SGRArtistSettingsPage(void) {
     cutOut.waitsOn = SGRKeyArtistRoundPlay;
     SGModRow *accentPlay = SGOptionRow(SGL(@"settings.artist.accent_play.title", @"Accent Play button"), nil, SGRKeyAccentPlay);
     accentPlay.waitsOn = SGRKeyArtistCutOutPlay;
-    accentPlay.visible = ^BOOL { return SGFlag(SGRKeyArtistCutOutPlay, NO); };
+    accentPlay.visible = ^BOOL { return SGFlag(SGRKeyArtistRoundPlay, NO) && SGFlag(SGRKeyArtistCutOutPlay, NO); };
     NSArray<SGModRow *> *play = @[roundPlay, cutOut, accentPlay];
     NSArray<SGModRow *> *header = @[
         SGOptionRow(SGL(@"settings.artist.adaptive_photo.title", @"Picture-aware photo"),

@@ -31,5 +31,6 @@ void SGLyricsCredentialPrompt(NSString *title, NSString *message, NSString *plac
     [alert addAction:save];
     if (hasKey()) [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.remove", @"Remove") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { remove(); }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }

@@ -89,7 +89,7 @@ static NSString *unreadable(void) {
     return SGL(@"settings.translation.google.error.unreadable", @"Google Translate's answer could not be read. Try again.");
 }
 static NSString *disabled(void) {
-    return SGL(@"settings.translation.google.error.disabled", @"Turn on Google Translate on the Lyrics page first.");
+    return SGL(@"settings.translation.google.error.disabled", @"Turn on Google Translate in Lyrics › Translation & AI first.");
 }
 
 @interface SGGoogleTranslation : NSObject

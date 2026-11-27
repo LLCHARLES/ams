@@ -35,7 +35,7 @@ typedef NS_ENUM(NSInteger, SGLyricsTaskKind) {
 @property (nonatomic) SGLyricsTaskKind kind;
 @property (nonatomic, copy) NSString *track;
 @property (nonatomic) NSInteger status;
-@property (nonatomic) NSUInteger pinGeneration;
+@property (nonatomic, strong) SGLyricsPinStamp *pinGeneration;
 @property (nonatomic) BOOL donor, artwork;
 @property (nonatomic, strong) NSMutableData *body;     // collected, none of it forwarded
 @property (nonatomic) BOOL dropping;                   // the server's bytes go nowhere
@@ -113,12 +113,12 @@ static NSURLRequest *lyricsRequestFor(NSURLRequest *request) {
     if (!track) return request;
     NSMutableURLRequest *marked = [request mutableCopy];
     if (![NSURLProtocol propertyForKey:kPinGenerationKey inRequest:marked])
-        [NSURLProtocol setProperty:@(SGLyricsPinGeneration(track)) forKey:kPinGenerationKey inRequest:marked];
+        [NSURLProtocol setProperty:SGLyricsPinGeneration(track) forKey:kPinGenerationKey inRequest:marked];
     return sg_everyTrack ? (donorRequestFor(marked) ?: marked) : marked;
 }
 
 static BOOL currentChoice(SGLyricsTaskState *state) {
-    return state.pinGeneration == SGLyricsPinGeneration(state.track);
+    return [state.pinGeneration isEqual:SGLyricsPinGeneration(state.track)];
 }
 
 static NSError *staleChoiceError(void) {
@@ -327,9 +327,9 @@ static SGLyricsTaskState *classify(NSURLSessionTask *task, NSURLResponse *respon
     if (!track) track = SGLyricsTrackInURL(original.URL) ?: SGLyricsTrackInURL(current.URL);
     if (!track) return nil;
     state.track = track;
-    NSNumber *generation = [NSURLProtocol propertyForKey:kPinGenerationKey inRequest:original] ?:
+    SGLyricsPinStamp *generation = [NSURLProtocol propertyForKey:kPinGenerationKey inRequest:original] ?:
         [NSURLProtocol propertyForKey:kPinGenerationKey inRequest:current];
-    state.pinGeneration = generation ? generation.unsignedIntegerValue : SGLyricsPinGeneration(track);
+    state.pinGeneration = generation ?: SGLyricsPinGeneration(track);
     SGLog(@"lyrics: Spotify answered %ld for %@%@", (long)state.status, track, state.donor ? @" through the donor" : @"");
     if (state.status == 200 && !state.donor) {
         state.kind = SGLyricsTaskSpotify;

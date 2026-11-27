@@ -12,6 +12,7 @@
 #import "SGRAccent.h"
 #import "SGRDownload.h"
 #import "SGRHeaderInfo.h"
+#import "Redesigned/Player/Player.h"
 #import "Shared/AlbumQueue/AlbumQueue.h"
 
 // The capsule: the glyph is Spotify's own 48pt canvas with the triangle small in the middle of it, so the
@@ -43,6 +44,52 @@ static NSString *wordIn(UIView *button) {
         if (!word && v.accessibilityLabel.length) word = v.accessibilityLabel;
     });
     return word;
+}
+
+static id stringsAsset(NSBundle *bundle, NSString *asset) {
+    NSData *data = bundle ? [[NSDataAsset alloc] initWithName:asset bundle:bundle].data : nil;
+    return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+}
+
+NSDictionary<NSString *, NSSet<NSString *> *> *SGRSpotifyControlWords(void) {
+    static NSDictionary *words;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURL *url = [NSBundle.mainBundle URLForResource:@"SPTStrings" withExtension:@"bundle"];
+        NSBundle *bundle = url ? [NSBundle bundleWithURL:url] : nil;
+        NSArray *keys = stringsAsset(bundle, @"_i18n.KEYS");
+        NSDictionary *files = stringsAsset(bundle, @"_i18n.INDEX");
+        NSMutableDictionary *found = [NSMutableDictionary dictionary];
+        for (NSString *language in [NSBundle.mainBundle.preferredLocalizations arrayByAddingObject:@"en"]) {
+            NSString *file = [files isKindOfClass:NSDictionary.class] ? files[language] : nil;
+            NSArray *values = stringsAsset(bundle, [@"_i18n." stringByAppendingString:file ?: language]);
+            if (![keys isKindOfClass:NSArray.class] || ![values isKindOfClass:NSArray.class]) continue;
+            for (NSString *key in @[@"ShuffleButtonOff", @"ShuffleButtonOn", @"ShuffleButtonOnSmartShuffle",
+                                    @"AccessibilityPlay", @"AccessibilityPause", @"AccessibilityShufflePlay"]) {
+                NSUInteger i = [keys indexOfObject:[@"encore:sEncore" stringByAppendingString:key]];
+                if (i >= values.count || ![values[i] isKindOfClass:NSString.class] || ![values[i] length]) continue;
+                if (!found[key]) found[key] = [NSMutableSet set];
+                [found[key] addObject:values[i]];
+            }
+        }
+        words = found;
+    });
+    return words;
+}
+
+BOOL SGRPlayButtonPlaying(UIView *button, BOOL *playing) {
+    static Class playButton;
+    static ptrdiff_t offset = -1;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        playButton = NSClassFromString(@"_TtC28EncoreConsumerMobile_BaseKit14PlayButtonView");
+        Ivar ivar = playButton ? class_getInstanceVariable(playButton, "isPlaying") : NULL;
+        if (ivar) offset = ivar_getOffset(ivar);
+        SGLog(@"redesign kit: PlayButtonView isPlaying %@", ivar ? [NSString stringWithFormat:@"at %td", offset] : @"missing");
+    });
+    if (offset < 0 || ![button isKindOfClass:playButton]) return NO;
+    if (playing) *playing = *((const uint8_t *)(__bridge const void *)button + offset) != 0;
+    return YES;
 }
 
 // The capsule's word, made again only when the text size changes: the header feeds the capsule on every step of its collapse.
@@ -91,6 +138,11 @@ static void takeEnabled(UIControl *mirror, UIView *source, NSArray<UIView *> *dr
     NSString *_cutWord;
     UIFont *_cutFont;
     CGRect _cutWordFrame;
+    // Every word shown for the source, and the width they and Spotify's Play and Pause ask for in `_fitFont` (0 until
+    // measured): sgr_width.
+    NSMutableSet<NSString *> *_words;
+    UIFont *_fitFont;
+    CGFloat _fitWidth;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -112,9 +164,26 @@ static void takeEnabled(UIControl *mirror, UIView *source, NSArray<UIView *> *dr
     return self;
 }
 
-- (CGFloat)sgr_width {
+// The width the word showing asks for.
+- (CGFloat)sgr_wordWidth {
     [_title sizeToFit];
     return kCapsuleLead + kGlyphSide + ceil(_title.bounds.size.width) + kCapsuleTrail;
+}
+
+// Measured once per set of words and font: the header asks on every step of its collapse.
+- (CGFloat)sgr_width {
+    UIFont *font = _title.font ?: capsuleFont();
+    if (_fitWidth > 0 && [font isEqual:_fitFont]) return _fitWidth;
+    NSDictionary<NSString *, NSSet<NSString *> *> *spotify = SGRSpotifyControlWords();
+    NSMutableSet<NSString *> *words = [NSMutableSet setWithSet:_words ?: [NSSet set]];
+    for (NSString *key in @[@"AccessibilityPlay", @"AccessibilityPause"]) {
+        if (spotify[key]) [words unionSet:spotify[key]];
+    }
+    CGFloat widest = 0;
+    for (NSString *word in words) widest = MAX(widest, ceil([word sizeWithAttributes:@{NSFontAttributeName: font}].width));
+    _fitFont = font;
+    _fitWidth = kCapsuleLead + kGlyphSide + widest + kCapsuleTrail;
+    return _fitWidth;
 }
 
 - (void)layoutSubviews {
@@ -130,7 +199,7 @@ static void takeEnabled(UIControl *mirror, UIView *source, NSArray<UIView *> *dr
     // Given more room than the word asks for, the glyph and the word stay together in the middle; round, the glyph
     // is alone there.
     CGFloat lead = self.round ? round((bounds.size.width - kGlyphSide) / 2)
-                              : kCapsuleLead + MAX(0, round((bounds.size.width - [self sgr_width]) / 2));
+                              : kCapsuleLead + MAX(0, round((bounds.size.width - [self sgr_wordWidth]) / 2));
     _glyph.frame = CGRectMake(lead, round((bounds.size.height - kGlyphSide) / 2), kGlyphSide, kGlyphSide);
     // Spotify's glyph comes on a 48pt canvas and is scaled down into the frame; one drawn tight is shown at
     // its own size instead of blown up to fill it.
@@ -216,6 +285,10 @@ static void takeEnabled(UIControl *mirror, UIView *source, NSArray<UIView *> *dr
 
 - (void)feedFrom:(UIView *)source {
     if (!source) return;
+    if (source != _source) {
+        _words = [NSMutableSet set];
+        _fitWidth = 0;
+    }
     _source = source;
     takeEnabled(self, source, nil);
     [self sgr_paintDrawn];
@@ -238,7 +311,12 @@ static void takeEnabled(UIControl *mirror, UIView *source, NSArray<UIView *> *dr
         _title.text = word;
         self.accessibilityLabel = word;
         [self setNeedsLayout];
-        // The header sizes the capsule to its word ("Play", "Shuffle Play" with shuffle on).
+    }
+    // The header sizes the capsule to every word it can show ("Play", "Pause", "Shuffle Play" with shuffle on): one it
+    // has not seen yet may widen it.
+    if (word && ![_words containsObject:word]) {
+        [_words addObject:word];
+        _fitWidth = 0;
         [self.superview setNeedsLayout];
     }
     if (![_glyph.tintColor isEqual:content]) _glyph.tintColor = content;
@@ -330,6 +408,8 @@ static void claimPinnedMore(SGRMirrorButton *button);
     NSTimeInterval _downloadInterval;
     BOOL _downloadInactive;
     BOOL _downloadWatching;
+    BOOL _downloadPaused;
+    NSHashTable *_downloadScrolls;
     // A two-state glyph drawn for Spotify (add-to, readState): 1 on, 0 off, -1 none drawn.
     NSInteger _stateShown;
 }
@@ -358,6 +438,7 @@ static void claimPinnedMore(SGRMirrorButton *button);
     [super layoutSubviews];
     CGRect bounds = self.bounds;
     // Until its state is known the button draws nothing: a guess would flash the wrong glyph first.
+    if (_downloadPaused) [self sgr_updateDownloadTimer];
     if (self.readState && _stateShown < 0) {
         ((UIView *)objc_getAssociatedObject(self, &kMirrorGlassKey)).hidden = YES;
         return;
@@ -401,12 +482,14 @@ static void claimPinnedMore(SGRMirrorButton *button);
     [super didMoveToWindow];
     // Read again on the way in -- the state may have moved on while the page was away -- and not at all
     // while out of the window.
-    if ([self sgr_downloadVisible] && self.source && (_download || _stateShown >= 0 || self.readState))
+    if (!_downloadPaused && [self sgr_downloadVisible] && self.source && (_download || _stateShown >= 0 || self.readState))
         [self feedFrom:self.source];
     [self sgr_updateDownloadTimer];
 }
 
 - (void)dealloc {
+    for (UIView *scroll in _downloadScrolls)
+        [scroll removeObserver:self forKeyPath:@"contentOffset" context:&_downloadScrolls];
     [_downloadTimer invalidate];
     [NSNotificationCenter.defaultCenter removeObserver:self];
 }
@@ -448,18 +531,51 @@ static void claimPinnedMore(SGRMirrorButton *button);
     return YES;
 }
 
-// Draws `offSymbol`, or `onSymbol` in the accent color, switching between them in place.
-- (void)sgr_showOn:(BOOL)on off:(NSString *)offSymbol on:(NSString *)onSymbol source:(UIView *)source {
+// The add-to button's saved state, as downloaded is drawn (SGRDownload.m): a fixed 22pt disc in the accent color with a
+// dark check, in the middle of the glyph's canvas. Drawn into a bitmap, which the glyph's tint leaves alone; drawn again
+// only when the accent resolves to another color (the accent is a live token, one color object for every color it takes).
+static const CGFloat kSavedDisc = 22, kSavedCheck = 11;
+static UIImage *savedDisc(void) {
+    static UIImage *disc;
+    static CGFloat drawnIn[4];
+    UIColor *accent = [SGRAccent() resolvedColorWithTraitCollection:UITraitCollection.currentTraitCollection];
+    CGFloat rgba[4];
+    [accent getRed:&rgba[0] green:&rgba[1] blue:&rgba[2] alpha:&rgba[3]];
+    if (disc && !memcmp(rgba, drawnIn, sizeof rgba)) return disc;
+    UIImageSymbolConfiguration *config = [UIImageSymbolConfiguration configurationWithPointSize:kSavedCheck weight:UIImageSymbolWeightBold];
+    UIImage *check = [[UIImage systemImageNamed:@"checkmark" withConfiguration:config] imageWithTintColor:UIColor.blackColor
+                                                                                             renderingMode:UIImageRenderingModeAlwaysOriginal];
+    UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(kMirrorGlyph, kMirrorGlyph)];
+    disc = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+        CGFloat inset = (kMirrorGlyph - kSavedDisc) / 2;
+        [accent setFill];
+        [[UIBezierPath bezierPathWithOvalInRect:CGRectMake(inset, inset, kSavedDisc, kSavedDisc)] fill];
+        CGSize size = check.size;
+        [check drawAtPoint:CGPointMake((kMirrorGlyph - size.width) / 2, (kMirrorGlyph - size.height) / 2)];
+    }] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
+    memcpy(drawnIn, rgba, sizeof rgba);
+    return disc;
+}
+
+// Draws `offImage`, or `onImage` (a symbol in the accent color), switching between them in place: a symbol turns into a
+// symbol, anything else crossfades. A bitmap drawn in the accent (savedDisc) is put in again when it is another one, as the
+// accent changes with the state unchanged: the tint does not reach it.
+- (void)sgr_showOn:(BOOL)on off:(UIImage *)offImage on:(UIImage *)onImage source:(UIView *)source {
+    UIImage *shown = on ? onImage : offImage;
+    if (_stateShown == on && !shown.isSymbolImage && _glyph.image != shown) _glyph.image = shown;
     if (_stateShown != on) {
-        UIImage *image = [UIImage systemImageNamed:on ? onSymbol : offSymbol];
+        UIImage *image = shown;
         BOOL animated = _stateShown >= 0 && self.window && !SGRReduceMotion();
         BOOL first = _stateShown < 0;
         _stateShown = on;
         _takenGlyph = nil;
         _glyph.hidden = NO;
-        if (@available(iOS 17.0, *)) {
-            if (animated) [_glyph setSymbolImage:image withContentTransition:[NSSymbolReplaceContentTransition replaceDownUpTransition]];
+        if (animated && image.isSymbolImage && _glyph.image.isSymbolImage) {
+            if (@available(iOS 17.0, *)) [_glyph setSymbolImage:image withContentTransition:[NSSymbolReplaceContentTransition replaceDownUpTransition]];
             else _glyph.image = image;
+        } else if (animated) {
+            [UIView transitionWithView:_glyph duration:SGRCrossfade options:UIViewAnimationOptionTransitionCrossDissolve
+                            animations:^{ self->_glyph.image = image; } completion:nil];
         } else {
             _glyph.image = image;
         }
@@ -480,7 +596,7 @@ static void claimPinnedMore(SGRMirrorButton *button);
         _stateShown = -1;
         return NO;
     }
-    [self sgr_showOn:added off:@"plus" on:@"checkmark" source:source];
+    [self sgr_showOn:added off:[UIImage systemImageNamed:@"plus"] on:savedDisc() source:source];
     return YES;
 }
 
@@ -490,6 +606,11 @@ static void claimPinnedMore(SGRMirrorButton *button);
     BOOL watch = interval > 0;
     if (watch != _downloadWatching) {
         _downloadWatching = watch;
+        if (watch)
+            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sgr_updateDownloadTimer)
+                name:SGRPlayerVisibilityDidChangeNotification object:nil];
+        else
+            [NSNotificationCenter.defaultCenter removeObserver:self name:SGRPlayerVisibilityDidChangeNotification object:nil];
         __weak SGRMirrorButton *weakSelf = self;
         SGRObserveVisibility(self, watch ? ^{ [weakSelf sgr_updateDownloadTimer]; } : nil);
     }
@@ -500,7 +621,12 @@ static void claimPinnedMore(SGRMirrorButton *button);
     if (!self.window || _downloadInactive || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return NO;
     for (UIView *view = self; view; view = view.superview)
         if (view.hidden || view.alpha <= 0.01) return NO;
-    return YES;
+    return SGRViewInViewport(self, SGRSettledPlayerRect(self.window));
+}
+
+- (void)observeValueForKeyPath:(NSString *)path ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
+    if (context == &_downloadScrolls) [self sgr_updateDownloadTimer];
+    else [super observeValueForKeyPath:path ofObject:object change:change context:context];
 }
 
 - (void)sgr_downloadResigned {
@@ -516,18 +642,40 @@ static void claimPinnedMore(SGRMirrorButton *button);
 
 - (void)sgr_updateDownloadTimer {
     NSTimeInterval interval = _downloadInterval;
-    if (interval <= 0 || ![self sgr_downloadVisible] || !self.source) {
+    BOOL run = interval > 0 && self.source && [self sgr_downloadVisible];
+    // Watch for a scroll back into view only when clipped out, never during ordinary visible polling.
+    if (!run && interval > 0 && self.window && CGRectIsEmpty(SGRVisibleRectInWindow(self))) {
+        if (!_downloadScrolls) _downloadScrolls = [NSHashTable weakObjectsHashTable];
+        SGRBindViewportScrolls(self, _downloadScrolls, self, &_downloadScrolls);
+    } else if (_downloadScrolls) {
+        for (UIView *scroll in _downloadScrolls)
+            [scroll removeObserver:self forKeyPath:@"contentOffset" context:&_downloadScrolls];
+        _downloadScrolls = nil;
+    }
+    if (!run) {
+        _downloadPaused = interval > 0;
         [_downloadTimer invalidate];
         _downloadTimer = nil;
         return;
+    }
+    if (_downloadPaused) {
+        _downloadPaused = NO;
+        [self feedFrom:self.source];
+        // The refreshed state may select a different polling interval.
+        interval = _downloadInterval;
+        if (!interval) return;
     }
     if (_downloadTimer.valid && fabs(_downloadTimer.timeInterval - interval) < 0.01) return;
     [_downloadTimer invalidate];
     __weak SGRMirrorButton *weakSelf = self;
     _downloadTimer = [NSTimer scheduledTimerWithTimeInterval:interval repeats:YES block:^(NSTimer *timer) {
         SGRMirrorButton *button = weakSelf;
-        if (!button || ![button sgr_downloadVisible] || !button.source) {
+        if (!button) {
             [timer invalidate];
+            return;
+        }
+        if (![button sgr_downloadVisible] || !button.source) {
+            [button sgr_updateDownloadTimer];
             return;
         }
         [button feedFrom:button.source];
@@ -544,7 +692,8 @@ static void claimPinnedMore(SGRMirrorButton *button);
 
     if (self.readState) {
         BOOL on = NO;
-        if (self.readState(&on)) [self sgr_showOn:on off:self.stateOffSymbol on:self.stateOnSymbol source:source];
+        if (self.readState(&on)) [self sgr_showOn:on off:[UIImage systemImageNamed:self.stateOffSymbol]
+                                                  on:[UIImage systemImageNamed:self.stateOnSymbol] source:source];
         else [self sgr_followDownload:2];
         BOOL known = _stateShown >= 0;
         if (_glyph.hidden == known) _glyph.hidden = !known;

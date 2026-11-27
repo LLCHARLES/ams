@@ -5,12 +5,13 @@ static UIImage *secondFrame;
 BOOL harnessMotionSourcesOff;
 static BOOL publicationRenderedOnMain, publicationEntered, publicationGateTimedOut, holdPublicationRender;
 static dispatch_semaphore_t publicationRelease;
+static NSString *heldPublicationLine;
 CGImageRef harnessPublicationFrame(NSString *line, CGImageRef backdrop) {
     BOOL hold = NO;
     @synchronized (cacheRoot) {
         if (publicationFixture) {
             publicationRenderedOnMain |= NSThread.isMainThread;
-            if (holdPublicationRender) {
+            if (holdPublicationRender && (!heldPublicationLine || [line isEqual:heldPublicationLine])) {
                 holdPublicationRender = NO;
                 publicationEntered = YES;
                 hold = !NSThread.isMainThread;
@@ -18,9 +19,11 @@ CGImageRef harnessPublicationFrame(NSString *line, CGImageRef backdrop) {
         }
     }
     if (hold) {
-        BOOL timedOut = dispatch_semaphore_wait(publicationRelease, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0;
+        BOOL timedOut = dispatch_semaphore_wait(publicationRelease, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) != 0;
         @synchronized (cacheRoot) { publicationGateTimedOut = timedOut; }
     }
+    // Mark the interrupted ahead render; a fresh request for this line produces green instead.
+    if (hold && [line isEqual:@"Pressure target"]) return CGImageRetain(blue.CGImage);
     // Distinct fixture pixels name the two lyric frames, independently of their fallback handler.
     return CGImageRetain(publicationFixture ? ([line isEqual:@"First"] ? red.CGImage : secondFrame.CGImage) : backdrop);
 }
@@ -111,8 +114,11 @@ void publicationChecks(void) {
               @"every system publication between lyric frames has the previous or next composed frame");
     }
     publishedLyricFrames = nil;
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidReceiveMemoryWarningNotification object:nil];
+    check(sameImage([secondStill imageWithSize:CGSizeMake(24, 32)], secondFrame),
+          @"memory pressure preserves the immediately available composed fallback");
     // Direct mode switch: no Off step, no new native info and no metadata URL completing later.
-    runFor(.05); // finish the preceding resend's notification and any ready-frame publication first
+    drainMain();
     id outgoing = artwork();
     harnessMotionSourcesOff = YES;
     sourceFile = nil;
@@ -126,6 +132,29 @@ void publicationChecks(void) {
     choose(SGLockArtworkOff);
     check(sameImage([harnessSystem()[MPMediaItemPropertyArtwork] imageWithSize:CGSizeMake(24, 32)], blue),
           @"turning lyrics off restores the native cover");
+    track(@"pressure-sequence", SGLockArtworkLyrics, nil, @[lineOf(@"First", 0, 10000),
+          lineOf(@"Middle", 12000, 20000), lineOf(@"Pressure target", 24000, 30000)]);
+    preview(artwork()); // establish preview demand before the next line is offered
+    @synchronized (cacheRoot) {
+        heldPublicationLine = @"Pressure target";
+        holdPublicationRender = YES;
+        publicationEntered = NO;
+    }
+    position = 12000;
+    report();
+    check(await(^BOOL { @synchronized (cacheRoot) { return publicationEntered; } }),
+          @"next-line preview is rendering before the warning, without a request for that line");
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidReceiveMemoryWarningNotification object:nil];
+    dispatch_semaphore_signal(publicationRelease);
+    position = 24000;
+    report();
+    check(sameImage(preview(artwork()), secondFrame),
+          @"a speculative preview finishing after pressure is not reinserted");
+    @synchronized (cacheRoot) {
+        heldPublicationLine = nil;
+        check(!publicationGateTimedOut, @"held speculative preview was released by the fixture");
+    }
+    choose(SGLockArtworkOff);
     publicationFixture = NO;
     [NSFileManager.defaultManager removeItemAtURL:cacheRoot error:nil];
 }

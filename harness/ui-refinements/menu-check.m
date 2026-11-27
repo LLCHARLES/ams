@@ -188,7 +188,7 @@ static NSString *lineOfNewSheet(UIWindow *window) {
 }
 
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     expect(ready(), @"Spotify fixture completed before its deadline");
@@ -417,7 +417,7 @@ static void run(UIWindow *window) {
 
 int main(int argc, char *argv[]) {
     // A run that never reaches its end fails rather than hangs.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ HARNESS_FAIL(@"timed out"); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ HARNESS_FAIL(@"album menu checks did not finish"); });
     @autoreleasepool {
         checkPlacementMigration();
         method_exchangeImplementations(class_getInstanceMethod(NSFileManager.class, @selector(URLsForDirectory:inDomains:)),

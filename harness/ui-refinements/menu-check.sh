@@ -12,7 +12,7 @@ mkdir -p "$APP/Contents/MacOS"
 "$LOGOS" -c generator=internal "$SRC/Redesigned/Album/AlbumPlaysMenu.x" > "$OUT/AlbumPlaysMenu.m"
 "$LOGOS" -c generator=internal "$SRC/Redesigned/Album/AlbumRows.x" > "$OUT/AlbumRows.m"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -I"$SRC" -I"$SRC/Redesigned/Album" -Wall -Wno-unused-parameter -Wno-deprecated-declarations \
     "$OUT/AlbumPlaysMenu.m" "$OUT/AlbumRows.m" "$HERE/menu-check.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGPrefs.m" \

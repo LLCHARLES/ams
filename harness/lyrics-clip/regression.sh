@@ -8,10 +8,12 @@ trap 'rm -rf "$WORK"' EXIT
 OUT=${OUT:-$WORK/shots}
 xcrun clang -fobjc-arc -O2 -Wno-deprecated-declarations -I "$SRC" \
     -DCTFrameDraw=SGLyricsHarnessDrawFrame -DCGBitmapContextCreate=SGLyricsHarnessCreateContext \
+    -DSGLyricsBackgroundCreate=SGLyricsHarnessBackground -Dmalloc=SGLyricsHarnessMalloc \
+    -Dfree=SGLyricsHarnessFree -DCGImageCreateWithImageInRect=SGLyricsHarnessCrop -DCGImageRelease=SGLyricsHarnessRelease \
     -c "$SRC/Shared/LockScreenLyrics/SGLyricsClip.m" -o "$WORK/renderer.o"
 xcrun clang -fobjc-arc -O2 -Wno-deprecated-declarations ${BASELINE_FLAGS:-} -I "$SRC" \
     -framework Foundation -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework CoreImage \
     -framework CoreText -framework CoreGraphics -framework ImageIO -framework Accelerate -framework AppKit \
     regression.m "$WORK/renderer.o" "$SRC/Shared/LyricsBackground/LyricsBackground.m" \
     -o "$WORK/regression"
-"$WORK/regression" "$OUT"
+"$WORK/regression" "$OUT" "$WORK/leased.mp4"

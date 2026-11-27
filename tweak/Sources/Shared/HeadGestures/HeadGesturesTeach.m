@@ -188,8 +188,11 @@ static BOOL headOffset(double *pitch, double *yaw) {
     _check.center = centre;
 }
 
+static __weak SGTeachRing *sg_ringOwner;
+
 - (void)start {
     if (_link) return;
+    sg_ringOwner = self;
     SGHeadMotionListen(@"teaching", ^(CMDeviceMotion *motion) { headMoved(motion); });
     _lastFrame = 0;
     _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(frame:)];
@@ -200,7 +203,10 @@ static BOOL headOffset(double *pitch, double *yaw) {
 - (void)stop {
     [_link invalidate];
     _link = nil;
-    SGHeadMotionListen(@"teaching", nil);
+    if (sg_ringOwner == self) {
+        sg_ringOwner = nil;
+        SGHeadMotionListen(@"teaching", nil);
+    }
 }
 
 - (void)frame:(CADisplayLink *)link {
@@ -289,8 +295,12 @@ static BOOL headOffset(double *pitch, double *yaw) {
     SGHeadAxis _axis;
     BOOL _running, _finished, _ordinary, _sessionActive;
     BOOL _listening;      // a recording is open
+    NSUInteger _registration;
     NSUInteger _step;     // which scheduled step is current: Redo, a restart and closing move it on
 }
+
+// The named motion listener belongs to only one teaching session at a time.
+static NSUInteger sg_teachingRegistration;
 
 - (instancetype)initWithClosed:(void (^)(void))closed {
     if (!(self = [super initWithNibName:nil bundle:nil])) return nil;
@@ -420,9 +430,12 @@ static BOOL headOffset(double *pitch, double *yaw) {
     [super viewDidAppear:animated];
     if (_finished) return;
     _sessionActive = YES;
+    NSUInteger registration = _registration = ++sg_teachingRegistration;
     __weak SGTeachController *weakSelf = self;
     SGHeadMotionListen(@"teaching-session", ^(CMDeviceMotion *motion) {
-        if (!motion) dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf interrupted]; });
+        if (!motion) dispatch_async(dispatch_get_main_queue(), ^{
+            if (registration == sg_teachingRegistration) [weakSelf interrupted];
+        });
     });
     SGHeadGesturesHold(YES);
     [_dial start];
@@ -440,6 +453,8 @@ static BOOL headOffset(double *pitch, double *yaw) {
     _step++;
     _listening = NO;
     [_dial stop];
+    if (_registration != sg_teachingRegistration) return;
+    ++sg_teachingRegistration;
     SGHeadMotionListen(@"teaching-session", nil);
     SGHeadGesturesStopListening();
     SGHeadGesturesHold(NO);

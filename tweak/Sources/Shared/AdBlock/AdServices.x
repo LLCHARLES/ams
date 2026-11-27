@@ -1,8 +1,7 @@
 // EeveeSpotify's service suppression, extended from EeveeSpotifyReincarnated d4daa49.
 // Only verified Objective-C selectors are added; several upstream Swift services
 // have no Objective-C -load there. The audit records those explicitly rather than inventing it.
-// AdServices owns both the target list and installation. Existing load hooks are kept for older
-// versions, but each now requires a compatible method; the two view fallbacks stay separate.
+// Each installed target needs a compatible instance method; the two view fallbacks stay separate.
 #import "Core/SGCore.h"
 #import "AdBlock.h"
 
@@ -16,12 +15,8 @@ static const SGServiceTarget serviceTargets[] = {
     {"_TtC19AdsPlatform_AdsImpl14AdsServiceImpl", "load", NO},
     {"_TtC29AdsNowPlaying_InStreamAdsImpl18InStreamAdsService", "load", NO},
     {"_TtC29AdsNowPlaying_EmbeddedNPVImpl22EmbeddedNPVServiceImpl", "load", NO},
-    {"_TtC36AdsStandalone_LeavebehindAdsBaseImpl25LeavebehindAdsBaseService", "load", NO},
-    {"_TtC36AdsStandalone_LeavebehindAdsBaseImpl33LeavebehindAdsBaseInternalService", "load", NO},
     {"_TtC35AdsEmbedded_AdsSponsoredContextImpl30AdsSponsoredContextServiceImpl", "load", NO},
     {"_TtC48AdsEmbedded_AdsSponsoredContextNPBAttachmentImpl43AdsSponsoredContextNPBAttachmentServiceImpl", "load", NO},
-    {"_TtC42AdsEmbedded_AdsSponsoredPlaylistHeaderImpl37AdsSponsoredPlaylistHeaderServiceImpl", "load", NO},
-    {"_TtC20NativeAds_LoggerImpl26NativeAdsLoggerServiceImpl", "load", NO},
     // This class registers scroll cards; unlike Eevee's hook, do not add a nonexistent -load.
     {"_TtC32AdsEmbedded_EmbeddedCTACardsImpl23EmbeddedCTACardsService", "registerScrollProviderIn:", NO},
     {"_TtC28AdsPlatform_AdsBaseSwiftImpl23AdsBaseSwiftServiceImpl", "load", NO},
@@ -31,11 +26,7 @@ static const SGServiceTarget serviceTargets[] = {
     {"_TtC29AdsStandalone_AdOnAppOpenImpl22AdOnAppOpenServiceImpl", "load", NO},
     {"_TtC32AdsEmbedded_EmbeddedPlaylistImpl27EmbeddedPlaylistServiceImpl", "load", NO},
     {"_TtC28AdsStandalone_RewardedAdImpl28OnDemandAdEventLoggerService", "load", NO},
-    {"_TtC19Upsells_ServiceImpl18UpsellsServiceImpl", "load", YES},
-    {"_TtC31PremiumUpsell_UpsellServiceImpl17UpsellServiceImpl", "load", YES},
     {"_TtC45ReinventFree_ContextualUpsellPremiumPromoImpl39ContextualUpsellPremiumPromoServiceImpl", "load", YES},
-    {"_TtC40Referrals_ReferralsUpsellCardElementImpl37ReferralsUpsellCardElementServiceImpl", "load", YES},
-    {"_TtC31ReinventFree_DownloadUpsellImpl21DownloadUpsellService", "load", YES},
     {"_TtC28Jam_FreeHostedJamsUpsellImpl31FreeHostedJamsUpsellServiceImpl", "load", YES},
     {"_TtC30Jam_FreeUserSkipUpsellPageImpl29FreeUserSkipUpsellPageService", "load", YES},
     {"_TtC38Jam_FreeUserShuffleUpsellSheetPageImpl37FreeUserShuffleUpsellSheetPageService", "load", YES},

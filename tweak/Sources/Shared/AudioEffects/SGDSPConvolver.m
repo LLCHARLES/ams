@@ -315,31 +315,37 @@ static size_t audibleLength(const SGDSPImpulse *impulse) {
     return length;
 }
 
-static bool makeMinimumPhase(SGDSPImpulse *impulse) {
-    int log2n = 0;
-    while ((1ul << log2n) < 2 * impulse->length) log2n++;
-    if (log2n > 21) log2n = 21;
+// Finish and discard the single-precision FFT before building the much larger double setup.
+static bool readMagnitude(const float *response, size_t length, int log2n, double *magnitude) {
     size_t n = 1ul << log2n;
     FFTSetup setup = vDSP_create_fftsetup(log2n, kFFTRadix2);
     float *re = malloc(n / 2 * sizeof(float)), *im = malloc(n / 2 * sizeof(float)), *time = calloc(n, sizeof(float));
-    double *magnitude = malloc((n / 2 + 1) * sizeof(double));
-    bool ok = setup && re && im && time && magnitude;
-    for (int p = 0; p < impulse->paths && ok; p++) {
-        size_t take = impulse->length < n ? impulse->length : n;
-        memset(time, 0, n * sizeof(float));
-        memcpy(time, impulse->responses[p], take * sizeof(float));
+    bool ok = setup && re && im && time;
+    if (ok) {
+        memcpy(time, response, length * sizeof(float));
         DSPSplitComplex split = {re, im};
         vDSP_ctoz((const DSPComplex *)time, 2, &split, 1, n / 2);
         vDSP_fft_zrip(setup, &split, 1, log2n, kFFTDirection_Forward);
         magnitude[0] = fabs(re[0]) / 2;
         magnitude[n / 2] = fabs(im[0]) / 2;
         for (size_t k = 1; k < n / 2; k++) magnitude[k] = hypot(re[k], im[k]) / 2;
-        ok = SGDSPMinimumPhase(magnitude, log2n, impulse->responses[p], (int)impulse->length);
     }
     if (setup) vDSP_destroy_fftsetup(setup);
     free(re);
     free(im);
     free(time);
+    return ok;
+}
+
+static bool makeMinimumPhase(SGDSPImpulse *impulse) {
+    int log2n = 0;
+    while ((1ul << log2n) < 2 * impulse->length) log2n++;
+    double *magnitude = malloc(((1ul << (log2n - 1)) + 1) * sizeof(double));
+    bool ok = magnitude != NULL;
+    for (int p = 0; p < impulse->paths && ok; p++) {
+        ok = readMagnitude(impulse->responses[p], impulse->length, log2n, magnitude)
+             && SGDSPMinimumPhase(magnitude, log2n, impulse->responses[p], (int)impulse->length);
+    }
     free(magnitude);
     return ok;
 }

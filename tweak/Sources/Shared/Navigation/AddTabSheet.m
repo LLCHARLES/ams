@@ -145,6 +145,7 @@ static UIView *withChevron(UIView *view) {
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.addtab.action.use_link", @"Use Link") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self useLink:alert.textFields.firstObject.text];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -527,6 +528,7 @@ typedef NS_ENUM(NSInteger, SGAddTabSection) {
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     alert.popoverPresentationController.sourceView = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:SGAddTabSectionRemove]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

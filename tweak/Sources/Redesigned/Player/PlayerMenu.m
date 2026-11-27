@@ -348,6 +348,9 @@ static const CGFloat kMoreGlyphSize = 20;
 // The slot the ⋯ takes in the row's end, where the row has no add button or keeps it for the star: Spotify's add
 // button's own size.
 static const CGFloat kMoreSlot = 48;
+// The Music app's ⋯ stands this much nearer the title than the slot's middle puts it: measured over two animated covers
+// (402 by 874 pt), its dots end 39.3 pt in from the screen's trailing edge, where the slot's ended 37.3.
+static const CGFloat kMoreTowardTitle = 2;
 static char kAddKey, kBanKey;
 
 // `button`'s slot in `row`: the arranged view holding it (Spotify's ElementView).
@@ -396,5 +399,7 @@ void SGRPlayerMenuInTitleRow(UIView *title) {
         CGRect bounds = row.bounds;
         frame = CGRectMake(rtl ? CGRectGetMinX(bounds) : CGRectGetMaxX(bounds) - kMoreSlot, CGRectGetMidY(bounds) - kMoreSlot / 2, kMoreSlot, kMoreSlot);
     }
+    BOOL rtl = row.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    frame = CGRectOffset(frame, rtl ? kMoreTowardTitle : -kMoreTowardTitle, 0);
     if (!CGRectEqualToRect(more.frame, frame)) more.frame = frame;
 }

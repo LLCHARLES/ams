@@ -67,7 +67,7 @@ a driver build. Port 8088 is the test simulator; use the recorded native tab ide
 
 ## Remaining limits
 
-Physical iPhone behavior and Spotify 9.1.78/9.1.88 have not been validated for this addition. The native
+Physical iPhone behavior has not been validated for this addition. The native
 queue command retains Spotify's own capacity and rejection behavior. Album responses with a nonempty
 `next_page_url`, unresolved pages, no tracks, or over 5000 tracks currently fail before submission;
 they are not partially queued. The action is on the album page's header menu, not every album card's

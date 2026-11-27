@@ -7,6 +7,12 @@
 #import "../harness-fail.h"
 
 @implementation SGModRow @end
+@implementation SGModSection @end
+SGModSection *SGSection(NSString *title, NSArray *rows) {
+    SGModSection *section = [SGModSection new]; section.title = title; section.rows = rows; return section;
+}
+static BOOL glassAvailable = YES;
+BOOL SGRedesignAvailable(void) { return glassAvailable; }
 // In-memory settings boundary: row callbacks are real, no shared preferences domain is written.
 static NSMutableDictionary *values;
 NSInteger SGInt(NSString *key, NSInteger fallback) { return values[key] ? [values[key] integerValue] : fallback; }
@@ -74,7 +80,10 @@ static void checkRecents(NSArray<NSNumber *> *(*from)(id),
 // as Regular and None, on the rows and in what SGRGlass.m builds the launch's glass from.
 static void checkGlassRows(void) {
     values = [NSMutableDictionary dictionary];
-    NSArray *rows = SGRAppearanceRows();
+    glassAvailable = NO;
+    expect(![[SGRAppearanceSections() valueForKey:@"title"] containsObject:@"Glass"], @"older systems omit Glass");
+    glassAvailable = YES;
+    NSArray *rows = SGRAppearanceSections()[1].rows;
     SGModRow *material = named(rows, @"Glass material"), *tint = named(rows, @"Glass tint"), *touch = named(rows, @"Glass touch response");
     expect([material.menu isEqual:@[@"Regular", @"Clear"]] && [tint.menu isEqual:@[@"None", @"Light", @"Dark"]], @"exact glass choices");
     expect([material.value() isEqualToString:@"Regular"] && SGRStoredGlassMaterial() == SGRGlassMaterialRegular, @"unset material is Regular");
@@ -110,7 +119,7 @@ static void checkSavedMark(void) {
            && SGRSavedMarkFrom(9, YES) == SGRSavedMarkPlainCheck && SGRSavedMarkFrom(9, NO) == SGRSavedMarkSpotify,
            @"what the launch reads (SGRSavedMarkFrom)");
     values = [NSMutableDictionary dictionary];
-    NSArray *rows = SGRAppearanceRows();
+    NSArray *rows = SGRAppearanceSections().lastObject.rows;
     expect(named(rows, @"Plain checkmark") == nil, @"no Plain checkmark switch beside Saved mark");
     SGModRow *mark = named(rows, @"Saved mark");
     expect([mark.menu isEqual:@[@"Spotify's", @"Plain checkmark", @"Dot"]], @"exact saved mark choices");
@@ -138,7 +147,9 @@ int main(void) {
         expect([SGRAccentRecentAdding(@[], 0x1ED760, 0x37F200) isEqual:@[]], @"Spotify preset not saved");
         expect([SGAccentRecentAdding(@[], 0x37F200, 0x1ED760) isEqual:@[@0x37F200]], @"native history owns its colors");
         values = [@{SGRKeyAccent: @0x123456} mutableCopy];
-        NSArray *native = SGNativeAppearanceRows(), *redesign = SGRAppearanceRows();
+        NSArray *nativeSections = SGNativeAppearanceSections(), *redesignSections = SGRAppearanceSections();
+        expect([[redesignSections valueForKey:@"title"] isEqual:@[@"Accent", @"Glass", @"Pages & badges"]], @"redesigned look groups");
+        NSArray *native = [nativeSections valueForKeyPath:@"@unionOfArrays.rows"], *redesign = [redesignSections valueForKeyPath:@"@unionOfArrays.rows"];
         SGModRow *mode = named(redesign, @"Accent source");
         expect([mode.menu isEqual:@[@"Picked", @"Automatic"]], @"exact automatic choices");
         expect([mode.value() isEqualToString:@"Picked"], @"Picked is the default");

@@ -28,6 +28,7 @@ typedef struct {
     float intensity;      // 0...1
     float sharpness;      // 0...1
     SGMusicEventKind kind;
+    unsigned beatGeneration; // stamped at publication for levels; unused for taps
 } SGMusicEvent;
 
 typedef void (*SGMusicEmit)(const SGMusicEvent *event, void *context);

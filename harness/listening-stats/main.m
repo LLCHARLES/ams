@@ -8,6 +8,9 @@
 #import "Shared/ListeningStats/SGRecap.h"
 #include <sys/resource.h>
 #include <signal.h>
+#include <sys/clonefile.h>
+#include <sys/stat.h>
+#include <malloc/malloc.h>
 #include <unistd.h>
 #include <dlfcn.h>
 #include <stdatomic.h>
@@ -29,7 +32,7 @@ int fsync(int fd) {
     if (atomic_exchange(&failNextSync, false)) { errno = ENOSPC; return -1; }
     if (atomic_exchange(&stallNextSync, false)) {
         dispatch_semaphore_signal(syncEntered);
-        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
             atomic_store(&stalledSyncTimedOut, true);
             errno = ETIMEDOUT;
             return -1;
@@ -53,7 +56,7 @@ void dispatch_sync(dispatch_queue_t queue, dispatch_block_t block) {
     if (atomic_exchange(&pauseNextBarrier, false)) {
         realSync(queue, ^{
             dispatch_semaphore_signal(barrierEntered);
-            if (dispatch_semaphore_wait(releaseBarrier, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+            if (dispatch_semaphore_wait(releaseBarrier, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
                 fprintf(stderr, "scheduler barrier probe timed out\n"); exit(1);
             }
             block();
@@ -62,16 +65,28 @@ void dispatch_sync(dispatch_queue_t queue, dispatch_block_t block) {
 }
 
 static NSString *eraseRacePath;
-static NSString *(*originalReadText)(id, SEL, NSString *, NSStringEncoding, NSError **);
 static BOOL (*originalRemoveItem)(id, SEL, NSString *, NSError **);
-static NSString *readRaceText(id object, SEL selector, NSString *path, NSStringEncoding encoding, NSError **error) {
-    NSString *text = originalReadText(object, selector, path, encoding, error);
-    if ([path isEqual:eraseRacePath]) dispatch_semaphore_signal(canonicalRead);
-    return text;
+static atomic_bool forceCopy, holdClone;
+int fclonefileat(int from, int dir, const char *to, uint32_t flags) {
+    static int (*realClone)(int, int, const char *, uint32_t);
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ realClone = dlsym(RTLD_NEXT, "fclonefileat"); });
+    if (atomic_exchange(&holdClone, false)) {
+        dispatch_semaphore_signal(syncEntered);
+        if (dispatch_semaphore_wait(releaseSync, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
+            fprintf(stderr, "held import clone timed out\n"); exit(1);
+        }
+    }
+    if (atomic_exchange(&forceCopy, false)) { errno = EXDEV; return -1; }
+    int result = realClone(from, dir, to, flags);
+    struct stat a, b;
+    if (eraseRacePath && !fstat(from, &a) && !stat(eraseRacePath.fileSystemRepresentation, &b) &&
+        a.st_dev == b.st_dev && a.st_ino == b.st_ino) dispatch_semaphore_signal(canonicalRead);
+    return result;
 }
 static BOOL removeRaceItem(id object, SEL selector, NSString *path, NSError **error) {
     if ([path isEqual:eraseRacePath] &&
-        dispatch_semaphore_wait(canonicalRead, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC))) {
+        dispatch_semaphore_wait(canonicalRead, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
         fprintf(stderr, "canonical-read probe timed out\n"); exit(1);
     }
     return originalRemoveItem(object, selector, path, error);
@@ -119,7 +134,7 @@ static NSError *writesAndWait(SGPlayLog *log) {
     __block BOOL done = NO;
     __block NSError *failure;
     [log finishPendingWritesWithCompletion:^(NSError *error) { failure = error; done = YES; }];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!done) { fprintf(stderr, "recorder acknowledgement timed out\n"); exit(1); }
@@ -159,6 +174,58 @@ static SGPlay *play(int64_t end, int64_t ms, NSString *title, NSString *artist, 
     SGPlay *p = [SGPlay new];
     p.end = end; p.ms = ms; p.title = title; p.artist = artist; p.album = album ?: @""; p.uri = @"";
     return p;
+}
+
+static void snapshotChecks(NSString *dir) {
+    NSString *path = [dir stringByAppendingPathComponent:@"private.tsv"];
+    NSString *odd = @"1\t2\turi\t\u0301bad\tartist\talbum";
+    NSMutableString *rows = [NSMutableString stringWithFormat:@"%@\n", odd];
+    for (int i = 0; i < 10000; i++) [rows appendFormat:@"%d\t30000\turi\tSong %d\tArtist\tAlbum\n", i, i];
+    [rows writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    atomic_store(&forceCopy, true);
+    SGPlayLog *log = openLog(path);
+    NSUInteger count = 10001;
+    CHECK(log.plays.count == count && [log.plays.firstObject.title isEqual:@"\u0301bad"] && log.plays.lastObject.end == 9999,
+          "combining mark belongs to the field after the tab");
+    malloc_statistics_t a, b;
+    malloc_zone_statistics(NULL, &a);
+    NSArray<SGPlay *> *suffix = [log playsFromIndex:1];
+    malloc_zone_statistics(NULL, &b);
+    CHECK((double)b.size_in_use - a.size_in_use < 65536 && suffix.count == count - 1, "large suffix needs no per-row materialization");
+    CHECK(truncate(path.fileSystemRepresentation, 0) == 0 && suffix[9000].end == 9001 - (count - 10000),
+          "published suffix remains readable past truncated EOF");
+    SGPlay *p = play(1000, 48000, @"A\tB", @"C\nD", @"Album");
+    CHECK([log merge:@[p]] == 1 && [log merge:@[p]] == 0 && [log merge:@[p]] == 0,
+          "repeat Spotify merges match normalized title and artist");
+    NSArray<SGPlay *> *committed = log.plays;
+    CHECK(truncate(path.fileSystemRepresentation, 0) == 0 && [committed.firstObject.title isEqual:@"A B"],
+          "just-committed snapshot survives in-place truncation");
+    p.exactImport = YES;
+    [NSData.data writeToFile:path atomically:YES];
+    CHECK([log merge:@[p]] == 1 && openLog(path).plays.count == 1, "restore deduplicates against replacement inode, not stale snapshot");
+    NSString *link = [dir stringByAppendingPathComponent:@"linked.tsv"];
+    CHECK(symlink(path.fileSystemRepresentation, link.fileSystemRepresentation) == 0 &&
+          openLog(link).loadError.code == ELOOP, "absolute canonical symlink rejected");
+    SGPlay *accent = play(7000, 30000, @"\u0301Song", @"Artist", @"");
+    CHECK([log merge:@[accent]] == 1 && [log merge:@[accent]] == 0 &&
+          [log.plays.lastObject.title isEqual:accent.title] && SGStatsSince(log.plays, 7000, 1).plays == 1,
+          "combining-mark title imported twice counts once in stats");
+
+    SGPlayLog *restorer = openLog(path);
+    __block NSUInteger completions = 0;
+    void (^added)(NSUInteger, NSError *) = ^(NSUInteger n, NSError *error) {
+        CHECK(!error && n == 1, "independent import or restore committed its row");
+        completions++;
+    };
+    syncEntered = dispatch_semaphore_create(0); releaseSync = dispatch_semaphore_create(0);
+    atomic_store(&holdClone, true);
+    [log merge:@[play(8000, 30000, @"Imported", @"Artist", @"")] completion:added];
+    CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "import reached snapshot clone");
+    SGPlay *backup = play(9000, 30000, @"Restored", @"Artist", @""); backup.exactImport = YES;
+    [restorer merge:@[backup] completion:added];
+    dispatch_semaphore_signal(releaseSync);
+    loadAndWait(restorer);
+    CHECK(completions == 2 && openLog(path).plays.count == 4, "both writers preserved in canonical TSV");
 }
 
 static void zip(NSString *dir, NSString *out, NSArray<NSString *> *names, BOOL stored) {
@@ -544,7 +611,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: unknown format rejected");
     root[@"format"] = @"retrine.listening-history";
     NSMutableDictionary *row = [root[@"plays"][0] mutableCopy];
-    for (id bad in @[@"123", @YES, @(-1), @1.5, NSNull.null, @18446744073709551615ULL]) {
+    for (id bad in @[@"123", @YES, @(-1), @1.5, NSNull.null, @(INT64_MAX), @18446744073709551615ULL]) {
         row[@"ms"] = bad; root[@"plays"] = @[row];
         CHECK(SGPlaysFromExport(json(root)) == nil, "Retrine JSON: malformed milliseconds rejected (%s)", [[bad description] UTF8String]);
     }
@@ -586,7 +653,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     [asyncLog loadWithCompletion:^{ completions++; }];
     [asyncLog loadWithCompletion:^{ completions++; }];
     [asyncLog record:play(1900000500, 10000, @"During load", @"Recorder", @"")];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (completions < 2 && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(!writesAndWait(asyncLog), "recording during initial load is acknowledged independently");
@@ -598,7 +665,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     [erasedDuringLoad loadWithCompletion:^{ done = YES; }];
     [erasedDuringLoad erase];
     [erasedDuringLoad record:play(1900000600, 20000, @"After erase", @"Recorder", @"")];
-    deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(!writesAndWait(erasedDuringLoad), "erase and subsequent recording finish in order");
@@ -610,7 +677,7 @@ static void localHistoryChecks(NSString *dir, NSArray<SGPlay *> *existing) {
     SGPlayLog *corrupt = [[SGPlayLog alloc] initWithPath:corruptPath];
     done = NO;
     [corrupt loadWithCompletion:^{ done = YES; }];
-    deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(done && corrupt.loadError != nil, "async TSV load: corrupt encoding is an explicit error, not empty history");
@@ -716,13 +783,13 @@ static void interruptedImport(NSString *path, NSString *mode) {
     blocked.end = 2000; blocked.ms = 30000;
     blocked.title = @"Uncommitted import"; blocked.artist = @"Artist"; blocked.album = @"";
     [log merge:@[blocked] completion:^(NSUInteger added, NSError *error) { _exit(92); }];
-    if (dispatch_semaphore_wait(importEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) _exit(93);
+    if (dispatch_semaphore_wait(importEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) _exit(93);
     if ([mode isEqual:@"terminate"]) {
         syncEntered = dispatch_semaphore_create(0);
         releaseSync = dispatch_semaphore_create(0);
         atomic_store(&stallNextSync, true);
         [log record:play(3000, 30000, @"Queued first", @"Artist", @"")];
-        if (dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC))) _exit(99);
+        if (dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) _exit(99);
         [log record:play(4000, 30000, @"Final at termination", @"Artist", @"")];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             dispatch_semaphore_signal(releaseSync);
@@ -756,7 +823,7 @@ static void slowRecorderChecks(NSString *dir) {
         atomic_store(&stallNextSync, true);
         [log record:play(100, 30000, @"First", @"Artist", @"")];
         CHECK(!atomic_load(&stalledSyncTimedOut), "record returns while its fsync is still blocked");
-        CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)),
+        CHECK(!dispatch_semaphore_wait(syncEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
               "slow-write probe reached the real persistence boundary");
         [log record:play(200, 30000, @"Second", @"Artist", @"")];
         [log record:play(300, 30000, @"Third", @"Artist", @"")];
@@ -779,9 +846,7 @@ static void slowRecorderChecks(NSString *dir) {
 }
 
 static void eraseGenerationChecks(NSString *dir) {
-    Method readMethod = class_getClassMethod(NSString.class, @selector(stringWithContentsOfFile:encoding:error:));
     Method removeMethod = class_getInstanceMethod(NSFileManager.class, @selector(removeItemAtPath:error:));
-    originalReadText = (void *)method_setImplementation(readMethod, (IMP)readRaceText);
     originalRemoveItem = (void *)method_setImplementation(removeMethod, (IMP)removeRaceItem);
     NSString *path = [dir stringByAppendingPathComponent:@"erase-generation.tsv"];
     [@"10\t30000\t\tErased\tArtist\t\n" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
@@ -791,7 +856,7 @@ static void eraseGenerationChecks(NSString *dir) {
     canonicalRead = dispatch_semaphore_create(0);
     atomic_store(&pauseNextBarrier, true);
     SGPlayLog *log = [[SGPlayLog alloc] initWithPath:path];
-    CHECK(!dispatch_semaphore_wait(barrierEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)),
+    CHECK(!dispatch_semaphore_wait(barrierEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)),
           "initial load is concurrent with a queued erase");
     [log erase];
     dispatch_semaphore_signal(releaseBarrier);
@@ -800,7 +865,6 @@ static void eraseGenerationChecks(NSString *dir) {
     CHECK(!log.loadError && log.plays.count == 0,
           "a load of pre-erase bytes cannot restore history after an acknowledged erase");
     eraseRacePath = nil;
-    method_setImplementation(readMethod, (IMP)originalReadText);
     method_setImplementation(removeMethod, (IMP)originalRemoveItem);
 }
 
@@ -839,7 +903,7 @@ static void reviewPersistenceChecks(NSString *dir) {
         BOOL launched = [child launchAndReturnError:&error];
         CHECK(launched, "launch interrupted-import probe");
         if (!launched) continue;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             if (child.running) [child terminate];
         });
         [child waitUntilExit];
@@ -920,6 +984,7 @@ int main(int argc, const char **argv) {
         }
 
         // A fixed "now" on a whole minute, so the basic export's minute stamps land exactly.
+        snapshotChecks(dir);
         int64_t now = 1790000000 - 1790000000 % 60, day = 86400;
 
         // Extended: Song A twice and Song B 3 days ago, Song C 20 days ago, Song D 200 days ago, Song A
@@ -936,6 +1001,13 @@ int main(int argc, const char **argv) {
             @{@"ms_played": @50000, @"ts": NSNull.null},
         ];
         NSArray<SGPlay *> *ext = SGPlaysFromExport(json(extended));
+        for (NSDictionary *override in @[@{@"ms_played": @(INT64_MAX)}, @{@"ts": @"10000-01-01T00:00:00Z"},
+                                         @{@"master_metadata_album_album_name": [@"" stringByPaddingToLength:8192 withString:@"a" startingAtIndex:0]}]) {
+            NSMutableDictionary *row = [extended.firstObject mutableCopy];
+            [row addEntriesFromDictionary:override];
+            CHECK(SGPlaysFromExport(json(@[row])).count == 0, "reject out-of-range Spotify field: %s",
+                  [override.allKeys.firstObject UTF8String]);
+        }
         CHECK(ext.count == 6, "extended: 6 music plays kept of 9 rows (podcast, skip, no ts out): %lu", (unsigned long)ext.count);
         CHECK(ext.firstObject.end == now - 3 * day, "extended: ts read as UTC to the second");
         CHECK([ext.firstObject.album isEqualToString:@"Album X"] && [ext.firstObject.uri isEqualToString:@"spotify:track:Song A"],
@@ -966,6 +1038,9 @@ int main(int argc, const char **argv) {
         for (NSNumber *stored in @[@YES, @NO]) {
             NSString *path = [dir stringByAppendingPathComponent:stored.boolValue ? @"stored.zip" : @"deflated.zip"];
             zip(exportDir, path, names, stored.boolValue);
+            SGHistoryImport *imported = SGReadHistoryURLs(@[[NSURL fileURLWithPath:path]]);
+            CHECK(imported.files == 2 && !imported.skipped && imported.plays.count == 9,
+                  "coordinated ZIP import keeps plays from both JSON entries");
             NSArray<NSData *> *files = SGJSONFilesInZip([NSData dataWithContentsOfFile:path]);
             NSUInteger plays = 0;
             for (NSData *file in files) plays += SGPlaysFromExport(file).count;

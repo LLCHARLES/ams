@@ -78,6 +78,11 @@ BOOL SGWGActiveThisLaunch(void) { return recoveryFixture; }
 BOOL SGWGIsSupportedOS(void) { return YES; }
 BOOL SGWGIsSupportedVersion(void) { return YES; }
 BOOL SGWGReady(void) { return readyFixture; }
+dispatch_block_t SGWGRecoveryPresentationCompletion(void) {
+    static BOOL presented;
+    if (readyFixture || presented) return nil;
+    return ^{ presented = YES; };
+}
 BOOL SGWGGuardsInstalled(void) { return NO; }
 SGWGState SGWGCurrentState(void) { return SGWGStateOff; }
 BOOL SGWGHasProfile(void) { return NO; }

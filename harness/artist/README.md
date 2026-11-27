@@ -8,8 +8,7 @@ shuffle off manually. Holding for 0.8 s then dragging outside before lift left p
 Neither artist header offered a Smart Shuffle step. On 9.2.0 the Korean custom action `셔플` was invoked
 through its registered target and selector; it declined a missing or disabled source and started shuffled
 playback with both sources available. This was not a spoken VoiceOver or physical vibration test.
-9.1.78 and 9.1.88 rely on the existing artist header identifiers and Spotify's Encore accessibility strings;
-an unrecognized control state leaves the hold inactive.
+An unrecognized control state leaves the hold inactive.
 
 Spotify's artist page mocked under its own class names and accessibility identifiers (from
 `trees/clean/artist/01.txt` and `05.txt`, recorded 2026-09-16), so `Redesigned/Artist/` can be laid out and

@@ -24,7 +24,7 @@ static NSURL *creditURL(id value) {
     NSString *text = optionalText(value);
     NSURL *url = text ? [NSURL URLWithString:text] : nil;
     NSString *scheme = url.scheme.lowercaseString;
-    return url.host.length && ([scheme isEqual:@"https"] || [scheme isEqual:@"http"]) ? url : nil;
+    return url.host.length && [scheme isEqual:@"https"] ? url : nil;
 }
 
 static NSArray *encodeLinks(NSArray<SGLyricsLink *> *links) {
@@ -173,9 +173,16 @@ static dispatch_queue_t storeQueue(void) {
 
 // These are confined to storeQueue, including directory discovery.
 static NSURL *sg_storeDirectory;
+NSNotificationName const SGLyricsStoreChanged = @"spotifyglass.lyrics.storeChanged";
+static void changed(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsStoreChanged object:nil];
+    });
+}
 static NSUInteger sg_countCap = 1000;
 static unsigned long long sg_byteCap = 30 * 1024 * 1024;
-static NSTimeInterval sg_lastPrune, sg_pruneInterval = 60;
+static NSTimeInterval sg_lastPrune;
+static const NSTimeInterval sg_pruneInterval = 60;
 
 static NSURL *directory(void) {
     if (!sg_storeDirectory) {
@@ -190,11 +197,14 @@ static NSURL *fileFor(NSString *track) {
     return [directory() URLByAppendingPathComponent:[key stringByAppendingPathExtension:@"plist"]];
 }
 
-static NSArray<NSDictionary *> *inventory(unsigned long long *total) {
+static NSMutableArray<NSDictionary *> *inventory(unsigned long long *total) {
     NSMutableArray *files = [NSMutableArray array];
     *total = 0;
+    NSError *error = nil;
     NSArray *urls = [NSFileManager.defaultManager contentsOfDirectoryAtURL:directory()
-        includingPropertiesForKeys:@[NSURLFileSizeKey, NSURLContentModificationDateKey, NSURLIsRegularFileKey] options:0 error:nil];
+        includingPropertiesForKeys:@[NSURLFileSizeKey, NSURLContentModificationDateKey, NSURLIsRegularFileKey] options:0 error:&error];
+    if (!urls && !([error.domain isEqual:NSCocoaErrorDomain] &&
+        (error.code == NSFileReadNoSuchFileError || error.code == NSFileNoSuchFileError))) return nil;
     for (NSURL *url in urls) {
         NSDictionary *values = [url resourceValuesForKeys:@[NSURLFileSizeKey, NSURLContentModificationDateKey, NSURLIsRegularFileKey] error:nil];
         if (![url.pathExtension isEqualToString:@"plist"] || ![values[NSURLIsRegularFileKey] boolValue]) continue;
@@ -205,20 +215,22 @@ static NSArray<NSDictionary *> *inventory(unsigned long long *total) {
     return files;
 }
 
-static void prune(NSArray<NSDictionary *> *files, unsigned long long bytes) {
-    if (files.count <= sg_countCap && bytes <= sg_byteCap) return;
-    sg_lastPrune = NSProcessInfo.processInfo.systemUptime;
-    NSUInteger count = files.count, removed = 0;
+// Plan against the projected size, excluding the destination from the victims.
+// Nothing is evicted unless the staged playback write actually publishes.
+static NSArray *evictionOrder(NSArray<NSDictionary *> *files, unsigned long long bytes, BOOL *prunePlayback) {
     NSArray *oldest = [files sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"date"] compare:b[@"date"]];
     }];
+    NSMutableArray *automatic = NSMutableArray.array, *foreground = NSMutableArray.array;
     for (NSDictionary *file in oldest) {
-        if (count <= sg_countCap * 9 / 10 && bytes <= sg_byteCap * 9 / 10) break;
-        if ([NSFileManager.defaultManager removeItemAtURL:file[@"url"] error:nil]) {
-            bytes -= [file[@"size"] unsignedLongLongValue]; count--; removed++;
-        }
+        if ([[NSDictionary dictionaryWithContentsOfURL:file[@"url"] error:nil][@"automatic"] boolValue]) {
+            [automatic addObject:file]; bytes -= [file[@"size"] unsignedLongLongValue];
+        } else [foreground addObject:file];
     }
-    SGLog(@"lyrics store: pruned %lu files", (unsigned long)removed);
+    *prunePlayback = foreground.count + 1 > sg_countCap || bytes > sg_byteCap;
+    if (!*prunePlayback) return automatic;
+    if (sg_lastPrune && NSProcessInfo.processInfo.systemUptime - sg_lastPrune < sg_pruneInterval) return nil;
+    return [automatic arrayByAddingObjectsFromArray:foreground];
 }
 
 // Only needed when optional metadata pushes a record over the whole-store byte cap.
@@ -258,42 +270,126 @@ void SGLyricsStoreSave(NSString *track, NSArray<SGKaraokeLine *> *lines, NSStrin
     SGLyricsStoreSaveWithLease(track, lines, credit, [SGLyricsLease new]);
 }
 
-void SGLyricsStoreSaveWithLease(NSString *track, NSArray<SGKaraokeLine *> *lines, NSString *credit, SGLyricsLease *lease) {
-    if (!track.length || !lines.count) return;
+static void save(NSString *track, NSArray<SGKaraokeLine *> *lines, NSString *credit, NSArray *creditLinks,
+                 BOOL required, SGLyricsLease *lease, void (^done)(SGBulkWrite)) {
     // The keeper calls on main, where the provider credit registry lives. Snapshot before
     // generated translations/pronunciation can be attached; serialization and I/O stay off main.
     NSMutableDictionary *record = [SGLyricsStoreEncode(lines, credit) mutableCopy];
-    if (!record) return;
-    NSArray *links = encodeLinks(SGLyricsCreditLinks(credit));
+    if (!track.length || !record) { if (done) done(SGBulkFailed); return; }
+    if (done) record[@"automatic"] = @YES;
+    NSArray *links = encodeLinks(creditLinks);
     if (links) record[@"creditLinks"] = links;
-    if (SGLyricsCreditRequired(credit)) record[@"creditRequired"] = @YES;
+    if (required) record[@"creditRequired"] = @YES;
     dispatch_async(storeQueue(), ^{
-        [lease perform:^{
+        __block SGBulkWrite outcome = SGBulkFailed;
+        dispatch_block_t write = ^{
+        if (!lease.isCurrent) return;
         NSError *error = nil;
         NSData *data = record ? dataForRecord(record, &error) : nil;
         if (!data) { SGLog(@"lyrics store: write failed (encode): %@", error); return; }
         // A single oversized track cannot be kept, even in an empty store.
-        if (data.length > sg_byteCap || !sg_countCap) return;
+        if (data.length > sg_byteCap || !sg_countCap) { outcome = SGBulkCapacity; return; }
         NSURL *url = fileFor(track);
         if (!url) return;
         unsigned long long bytes;
-        NSArray *files = inventory(&bytes);
-        NSUInteger count = files.count + 1;
-        for (NSDictionary *file in files) if ([file[@"url"] isEqual:url]) {
-            bytes -= [file[@"size"] unsignedLongLongValue]; count--; break;
+        NSMutableArray *files = inventory(&bytes);
+        if (!files) return; // Cannot admit a write without knowing the remaining budget.
+        for (NSUInteger i = 0; i < files.count; i++) {
+            NSDictionary *file = files[i];
+            // Enumeration can return relative file URLs; both names are in directory().
+            if (![[file[@"url"] lastPathComponent] isEqual:url.lastPathComponent]) continue;
+            if (done) { outcome = SGBulkAlreadyPresent; return; }
+            bytes -= [file[@"size"] unsignedLongLongValue];
+            [files removeObjectAtIndex:i];
+            break;
         }
-        BOOL canPrune = !sg_lastPrune || NSProcessInfo.processInfo.systemUptime - sg_lastPrune >= sg_pruneInterval;
-        // Keep the hard caps even between prune passes. Defer an over-budget save
-        // rather than evicting more often than once a minute.
-        if (!canPrune && (count > sg_countCap || bytes + data.length > sg_byteCap)) return;
+        bytes += data.length;
+        BOOL overBudget = files.count + 1 > sg_countCap || bytes > sg_byteCap;
+        BOOL prunePlayback = NO;
+        NSArray *victims = nil;
+        if (overBudget && (done || !(victims = evictionOrder(files, bytes, &prunePlayback)))) {
+            outcome = SGBulkCapacity; return;
+        }
+        // Only this queue reads or writes the store. Stage the bytes first; the last
+        // lease check orders publication against cancellation, without locking over I/O.
+        NSURL *staged = [directory() URLByAppendingPathComponent:@".pending"];
         if (![NSFileManager.defaultManager createDirectoryAtURL:directory() withIntermediateDirectories:YES attributes:nil error:&error]
             || ![directory() setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&error]
-            || ![data writeToURL:url options:NSDataWritingAtomic error:&error]) {
+            || ![data writeToURL:staged options:0 error:&error]) {
             SGLog(@"lyrics store: write failed: %@", error);
+            [NSFileManager.defaultManager removeItemAtURL:staged error:nil];
             return;
         }
-        if (canPrune) { files = inventory(&bytes); prune(files, bytes); }
-        }];
+        if (!lease.isCurrent) { [NSFileManager.defaultManager removeItemAtURL:staged error:nil]; return; }
+        if (rename(staged.fileSystemRepresentation,url.fileSystemRepresentation) != 0) {
+            SGLog(@"lyrics store: publish failed (errno %d)",errno);
+            [NSFileManager.defaultManager removeItemAtURL:staged error:nil];
+            return;
+        }
+        outcome = SGBulkWritten;
+        if (victims) {
+            NSUInteger count = files.count + 1, removed = 0;
+            NSUInteger countLimit = prunePlayback ? sg_countCap * 9 / 10 : sg_countCap;
+            unsigned long long byteLimit = prunePlayback ? sg_byteCap * 9 / 10 : sg_byteCap;
+            if (prunePlayback) sg_lastPrune = NSProcessInfo.processInfo.systemUptime;
+            for (NSDictionary *file in victims) {
+                if (count <= countLimit && bytes <= byteLimit) break;
+                if ([NSFileManager.defaultManager removeItemAtURL:file[@"url"] error:nil]) {
+                    bytes -= [file[@"size"] unsignedLongLongValue]; count--; removed++;
+                }
+            }
+            SGLog(@"lyrics store: pruned %lu files", (unsigned long)removed);
+        }
+        };
+        write();
+        if (outcome == SGBulkWritten) changed();
+        if (done) dispatch_async(dispatch_get_main_queue(), ^{ done(outcome); });
+    });
+}
+
+void SGLyricsStoreSaveWithLease(NSString *track, NSArray<SGKaraokeLine *> *lines, NSString *credit, SGLyricsLease *lease) {
+    save(track, lines, credit, SGLyricsCreditLinks(credit), SGLyricsCreditRequired(credit), lease, nil);
+}
+
+void SGLyricsStoreAddAutomatic(NSString *track, SGLyricsResult *result, SGLyricsLease *lease, void (^done)(SGBulkWrite)) {
+    save(track, result.karaokeLines, result.provider, result.creditLinks, result.creditRequired, lease, done);
+}
+
+static NSUInteger minimumAutomaticSheetBytes(void) {
+    static NSUInteger bytes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary *record = [SGLyricsStoreEncode(SGKaraokeStaticLines(@[@"a"]), @"a") mutableCopy];
+        record[@"automatic"] = @YES;
+        bytes = [NSPropertyListSerialization dataWithPropertyList:record format:NSPropertyListBinaryFormat_v1_0
+                                                          options:0 error:nil].length;
+    });
+    return bytes;
+}
+
+void SGLyricsStoreInventory(NSArray<NSString *> *tracks, void (^done)(NSSet<NSString *> *,unsigned long long)) {
+    dispatch_async(storeQueue(), ^{
+        unsigned long long bytes;
+        NSArray *files = inventory(&bytes);
+        NSSet *names = [NSSet setWithArray:[files valueForKeyPath:@"url.lastPathComponent"] ?: @[]];
+        NSMutableSet *found = [NSMutableSet set];
+        for (NSString *track in tracks) if ([names containsObject:fileFor(track).lastPathComponent]) [found addObject:track];
+        unsigned long long room = files.count < sg_countCap && bytes < sg_byteCap ? sg_byteCap - bytes : 0;
+        if (room < minimumAutomaticSheetBytes()) room = 0;
+        dispatch_async(dispatch_get_main_queue(), ^{ done(files ? found : nil,room); });
+    });
+}
+
+void SGLyricsStoreRemoveAutomatic(NSArray<NSString *> *tracks) {
+    dispatch_async(storeQueue(), ^{
+        BOOL removed = NO;
+        for (NSString *track in tracks) @autoreleasepool {
+            NSURL *url = fileFor(track);
+            // A later playback write owns its file even if a removal raced the ledger write.
+            if ([[NSDictionary dictionaryWithContentsOfURL:url error:nil][@"automatic"] isEqual:@YES])
+                removed |= [NSFileManager.defaultManager removeItemAtURL:url error:nil];
+        }
+        if (removed) changed();
     });
 }
 
@@ -354,7 +450,7 @@ void SGLyricsStoreLoad(NSString *track, void (^done)(NSArray<SGKaraokeLine *> *,
 void SGLyricsStoreDelete(NSString *track) {
     if (!track.length) return;
     dispatch_async(storeQueue(), ^{
-        if ([NSFileManager.defaultManager removeItemAtURL:fileFor(track) error:nil]) SGLog(@"lyrics store: deleted track");
+        if ([NSFileManager.defaultManager removeItemAtURL:fileFor(track) error:nil]) { changed(); SGLog(@"lyrics store: deleted track"); }
     });
 }
 
@@ -371,6 +467,7 @@ void SGLyricsStoreDeleteAll(void (^done)(unsigned long long)) {
         BOOL deleted = [NSFileManager.defaultManager removeItemAtURL:directory() error:&error];
         SGLog(@"lyrics store: delete saved lyrics: %@", deleted ? @"done" : error.localizedDescription);
         sg_lastPrune = 0;
+        changed();
         unsigned long long bytes; inventory(&bytes);
         dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(bytes); });
     });
@@ -379,6 +476,6 @@ void SGLyricsStoreDeleteAll(void (^done)(unsigned long long)) {
 void SGLyricsStoreConfigureForTests(NSURL *url, NSUInteger countCap, unsigned long long byteCap) {
     dispatch_async(storeQueue(), ^{
         sg_storeDirectory = [url copy]; sg_countCap = countCap; sg_byteCap = byteCap;
-        sg_lastPrune = 0; sg_pruneInterval = 0;
+        sg_lastPrune = 0;
     });
 }

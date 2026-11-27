@@ -117,6 +117,7 @@ UIViewController *SGRAlbumSettingsPage(void) {
     SGModRow *source = SGChoiceRow(SGL(@"settings.album.play_counts.source", @"Count source"), nil, SGRKeyAlbumPlayCountsSource,
         @[SGL(@"settings.album.play_counts.your_plays", @"Your plays"), SGL(@"settings.album.play_counts.spotify_plays", @"Spotify plays")],
         SGRAlbumUsesSpotifyCounts());
+    source.visible = ^BOOL { return SGRAlbumPlayCountsWhere() != SGRAlbumPlayCountsOff; };
     SGModRow *plays = SGChoiceRow(SGL(@"settings.album.play_counts.title", @"Play counts"), nil, SGRKeyAlbumPlayCountsPlace,
                                   @[SGL(@"settings.album.play_counts.choice.off", @"Off"), SGL(@"settings.album.play_counts.choice.in_row", @"In the row"),
                                     SGL(@"settings.album.play_counts.choice.in_menu", @"In menu")], SGRAlbumPlayCountsWhere());
@@ -136,17 +137,13 @@ UIViewController *SGRAlbumSettingsPage(void) {
     names[SGRKeyAlbumPlayCountsPlace] = plays.title;
 
     return SGRPagePreviewPage(SGL(@"settings.album.title", @"Albums"), albumPreview(names), SGRestartNote, @[
-        SGSection(SGL(@"settings.album.cover.header", @"Cover"), @[cover,
-            SGSwitchRow(SGL(@"settings.pages.cover_beside", @"Cover beside the title"),
-                        SGL(@"settings.pages.cover_beside.subtitle", @"Albums and playlists in wide iPad windows. Applies immediately."),
-                        SGRKeyCoverBeside)]),
+        SGSection(SGL(@"settings.album.cover.header", @"Cover"), @[cover]),
         SGNotedSection(nil, @[adaptive], SGL(@"settings.album.adaptive_cover.footer",
                                              @"Picks the page colour from the cover and keeps it sharp under the title.")),
         SGSection(nil, @[artistPicture]),
         SGNotedSection(SGL(@"settings.album.apple_music.header", @"Apple Music"), @[
             motion,
             notes,
-            SGOptionRow(SGL(@"settings.album.motion_low_data.title", @"Download in Low Data Mode"), SGL(@"settings.album.motion_low_data.subtitle", @"Applies to animated artwork throughout Retrine."), SGKeyMotionLowData),
         ], SGL(@"settings.album.apple_music.note", @"Only the album's name is sent to Apple Music. A cover stays still in Low Power Mode.")),
         SGNotedSection(SGL(@"settings.album.tracks.header", @"Tracks"), @[
             SGOptionRow(SGL(@"settings.album.track_numbers", @"Track numbers"), nil, SGRKeyAlbumTrackNumbers), plays, source],

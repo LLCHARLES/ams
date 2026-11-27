@@ -1,4 +1,5 @@
 #import "../shared/redesigned-page-stubs.m"
+#import "../shared/no-music-spectrum.h"
 
 #import "../album/motion-player-double.h"
 #import "Shared/Haptics/Haptics.h"

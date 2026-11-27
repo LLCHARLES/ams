@@ -5,4 +5,5 @@ static CTLineRef countedLine(CFAttributedStringRef value) {
     return CTLineCreateWithAttributedString(value);
 }
 #define CTLineCreateWithAttributedString countedLine
+#define SG_MEDIA_CLOCK SGHarnessDigitsTime
 #import "SGRRollingDigits.m"

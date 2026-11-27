@@ -8,6 +8,56 @@
 
 static int failures;
 
+// First demand withholds readiness until the producer registers its callback. Only the production translation unit
+// uses these selectors; the underlying AVFoundation writer is unmodified.
+static BOOL registeredDemand;
+static BOOL stall, refuseAppend;
+// Only the terminal fault is synthetic. Forward setup to the real writer so
+// the failure occurs with its session open and its partial on disk.
+@interface StalledWriter : NSObject
+@property (nonatomic, strong) AVAssetWriter *writer;
+@property AVAssetWriterStatus status;
+@end
+@implementation StalledWriter
+- (id)forwardingTargetForSelector:(SEL)selector { return _writer; }
+@end
+static StalledWriter *stalledWriter;
+@implementation AVAssetWriter (ShapeFixture)
++ (id)fixtureWriterWithURL:(NSURL *)url fileType:(AVFileType)type error:(NSError **)error {
+    AVAssetWriter *writer = [self assetWriterWithURL:url fileType:type error:error];
+    if (!stalledWriter) return writer;
+    stalledWriter.writer = writer;
+    stalledWriter.status = AVAssetWriterStatusWriting;
+    return stalledWriter;
+}
+@end
+static NSUInteger stalledReads;
+@implementation AVAssetWriterInput (ShapeFixture)
+- (BOOL)isFixtureReady {
+    if (stall && !registeredDemand) {
+        fputs("FAIL: producer polled the blocked writer before the readiness callback\n", stderr);
+        exit(1);
+    }
+    return self.readyForMoreMediaData;
+}
+- (void)fixtureRequestOnQueue:(dispatch_queue_t)queue usingBlock:(dispatch_block_t)feed {
+    if (stalledWriter) {
+        dispatch_async(queue, ^{
+            [stalledWriter.writer cancelWriting];
+            stalledWriter.status = AVAssetWriterStatusFailed;
+        });
+        return; // no readiness callback, even after failure
+    }
+    dispatch_async(queue, ^{
+        if (stall) registeredDemand = YES;
+        [self requestMediaDataWhenReadyOnQueue:queue usingBlock:feed];
+    });
+}
+- (BOOL)fixtureAppend:(CMSampleBufferRef)sample {
+    return !refuseAppend && [self appendSampleBuffer:sample];
+}
+@end
+
 static void check(BOOL ok, NSString *what) {
     printf("  %s %s\n", ok ? "ok  " : "FAIL", what.UTF8String);
     if (!ok) failures++;
@@ -133,9 +183,38 @@ int main(int argc, const char **argv) {
         printf("a 9:16 Canvas cut to 3:4\n");
         check(writeBands(tall, CGSizeMake(720, 1280), 60, CGAffineTransformIdentity, NO), @"the stand-in Canvas written");
         CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+        [NSFileManager.defaultManager removeItemAtURL:cut error:nil]; // This fixture owns its destination.
+        stall = YES;
         BOOL shaped = SGMotionClipShape(tall, 0.75, cut);
+        stall = NO;
+        check(registeredDemand && !stalledReads, @"no producer wakes during sustained writer backpressure");
         printf("  (cut in %.0f ms)\n", (CFAbsoluteTimeGetCurrent() - start) * 1000);
         check(shaped, @"cut and written");
+        NSData *original = [NSData dataWithContentsOfURL:cut];
+        refuseAppend = YES;
+        NSURL *failed = [folder URLByAppendingPathComponent:@"refused.mp4"];
+        check(!SGMotionClipShape(tall, 1, failed) && ![NSFileManager.defaultManager fileExistsAtPath:failed.path] &&
+              ![NSFileManager.defaultManager fileExistsAtPath:[failed URLByAppendingPathExtension:@"partial"].path],
+              @"refused append cancels without publishing or leaving a partial");
+        refuseAppend = NO;
+        stalledWriter = [StalledWriter new];
+        dispatch_semaphore_t returned = dispatch_semaphore_create(0);
+        __block BOOL published;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            published = SGMotionClipShape(tall, 1, failed);
+            dispatch_semaphore_signal(returned);
+        });
+        if (dispatch_semaphore_wait(returned, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC))) {
+            check(NO, @"writer failure without readiness hung");
+            return 1;
+        }
+        check(stalledWriter.status == AVAssetWriterStatusFailed && !published && ![NSFileManager.defaultManager fileExistsAtPath:failed.path] &&
+              ![NSFileManager.defaultManager fileExistsAtPath:[failed URLByAppendingPathExtension:@"partial"].path],
+              @"terminal writer failure without another readiness callback returns and cleans up");
+        stalledWriter = nil;
+        check(!SGMotionClipShape(tall, 1, cut) && [[NSData dataWithContentsOfURL:cut] isEqual:original] &&
+              ![NSFileManager.defaultManager fileExistsAtPath:[cut URLByAppendingPathExtension:@"partial"].path],
+              @"a failed move keeps the existing clip and retires its local partial");
         AVAssetTrack *track = videoOf(cut);
         check(CGSizeEqualToSize(shownSize(track), CGSizeMake(720, 960)), [NSString stringWithFormat:@"720 x 960 (%@)", NSStringFromSize(shownSize(track))]);
         check(framesIn(cut) == 60 && framesIn(tall) == 60, [NSString stringWithFormat:@"every frame kept (%d of %d)", framesIn(cut), framesIn(tall)]);
@@ -154,6 +233,7 @@ int main(int argc, const char **argv) {
         CGAffineTransform quarter = CGAffineTransformMake(0, 1, -1, 0, 720, 0);
         check(writeBands(side, CGSizeMake(1280, 720), 30, quarter, YES), @"written");
         check(CGSizeEqualToSize(shownSize(videoOf(side)), CGSizeMake(720, 1280)), @"shown 720 x 1280");
+        [NSFileManager.defaultManager removeItemAtURL:sideCut error:nil];
         check(SGMotionClipShape(side, 0.75, sideCut), @"cut and written");
         AVAssetTrack *sideTrack = videoOf(sideCut);
         check(CGSizeEqualToSize(shownSize(sideTrack), CGSizeMake(720, 960)), [NSString stringWithFormat:@"shown 720 x 960 (%@, stored %@)",

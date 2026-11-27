@@ -1,6 +1,7 @@
 // PlayerState.h names the hooks and why they are the ones.
 #import "Core/SGCore.h"
 #import "PlayerState.h"
+#import <os/lock.h>
 
 NSString *SGURIString(id uri) {
     if ([uri isKindOfClass:NSString.class]) return uri;
@@ -134,11 +135,10 @@ id SGPlayer(void) {
 - (void)addPlayerObserver:(id)observer {
     %orig;
     id player = self;
-    // Kept outside the dispatch_once: the players after the first are the mod's own observer being
-    // added, and the hook must still see them should the first one go.
-    if (!sg_playerInstance) sg_playerInstance = player;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
+    static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
+    os_unfair_lock_lock(&lock);
+    if (!sg_playerInstance) {
+        sg_playerInstance = player;
         dispatch_async(dispatch_get_main_queue(), ^{
             sg_player = player;
             sg_ownObserver = [SGPlayerObserver new];
@@ -146,7 +146,8 @@ id SGPlayer(void) {
             id state = [player respondsToSelector:@selector(state)] ? [(id<SPTPlayer>)player state] : nil;
             if (state) report(state, NO);
         });
-    });
+    }
+    os_unfair_lock_unlock(&lock);
 }
 %end
 

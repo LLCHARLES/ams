@@ -41,7 +41,8 @@ static NSString *titleFor(NSString *kind) {
 static UILabel *label(NSString *text, UIFontTextStyle style, UIFontWeight weight, UIColor *color) {
     UILabel *view = [UILabel new];
     view.text = text;
-    UIFont *font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:style].pointSize weight:weight];
+    UITraitCollection *large = [UITraitCollection traitCollectionWithPreferredContentSizeCategory:UIContentSizeCategoryLarge];
+    UIFont *font = [UIFont systemFontOfSize:[UIFont preferredFontForTextStyle:style compatibleWithTraitCollection:large].pointSize weight:weight];
     view.font = [[UIFontMetrics metricsForTextStyle:style] scaledFontForFont:font];
     view.adjustsFontForContentSizeCategory = YES;
     view.textColor = color;

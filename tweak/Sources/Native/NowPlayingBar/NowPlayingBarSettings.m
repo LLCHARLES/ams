@@ -3,7 +3,7 @@
 #import "NowPlayingBar.h"
 
 UIViewController *SGNowPlayingBarSettingsPage(void) {
-    return [[SGModPage alloc] initWithTitle:SGL(@"settings.nowplayingbar.title", @"Now playing bar") intro:SGRestartNote sections:@[
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.player.mini_player.header", @"Mini player") intro:SGRestartNote sections:@[
         SGSection(nil, @[
             SGHideRow(SGL(@"settings.nowplayingbar.hide_connect.title", @"Hide the device button"), nil, SGHideBarConnect),
         ]),

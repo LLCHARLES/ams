@@ -1966,13 +1966,17 @@ static void *nseel_getEELFunctionAddress(compileContext *ctx,
 
 
 // returns true if does something (other than calculating and throwing away a value)
-static char optimizeOpcodes(compileContext *ctx, opcodeRec *op, int needsResult)
+// -1 is an error, not a pure expression the optimizer may discard.
+static int optimizeOpcodes(compileContext *ctx, opcodeRec *op, int needsResult, int depth)
 {
   opcodeRec *lastJoinOp=NULL;
-  char retv, retv_parm[3], joined_retv=0;
+  int retv, retv_parm[3], joined_retv=0;
+  if (depth > 256) return -1;
   while (op && op->opcodeType == OPCODETYPE_FUNC2 && op->fntype == FN_JOIN_STATEMENTS)
   {
-    if (!optimizeOpcodes(ctx,op->parms.parms[0], 0) || OPCODE_IS_TRIVIAL(op->parms.parms[0]))
+    int left = optimizeOpcodes(ctx,op->parms.parms[0], 0, depth+1);
+    if (left < 0) return -1;
+    if (!left || OPCODE_IS_TRIVIAL(op->parms.parms[0]))
     {
       // direct value, can skip ourselves
       memcpy(op,op->parms.parms[1],sizeof(*op));
@@ -2017,11 +2021,12 @@ start_over: // when an opcode changed substantially in optimization, goto here t
     }
   }
 
-  if (op->opcodeType>=OPCODETYPE_FUNC2) retv_parm[1] = optimizeOpcodes(ctx,op->parms.parms[1], needsResult);
-  if (op->opcodeType>=OPCODETYPE_FUNC3) retv_parm[2] = optimizeOpcodes(ctx,op->parms.parms[2], needsResult);
+  if (op->opcodeType>=OPCODETYPE_FUNC2 && (retv_parm[1] = optimizeOpcodes(ctx,op->parms.parms[1], needsResult, depth+1)) < 0) return -1;
+  if (op->opcodeType>=OPCODETYPE_FUNC3 && (retv_parm[2] = optimizeOpcodes(ctx,op->parms.parms[2], needsResult, depth+1)) < 0) return -1;
 
   retv_parm[0] = optimizeOpcodes(ctx,op->parms.parms[0], needsResult || 
-      (FNPTR_HAS_CONDITIONAL_EXEC(op) && (retv_parm[1] || retv_parm[2] || op->opcodeType <= OPCODETYPE_FUNC1)) );
+      (FNPTR_HAS_CONDITIONAL_EXEC(op) && (retv_parm[1] || retv_parm[2] || op->opcodeType <= OPCODETYPE_FUNC1)), depth+1);
+  if (retv_parm[0] < 0) return -1;
 
   if (op->opcodeType != OPCODETYPE_MOREPARAMS)
   {
@@ -4357,12 +4362,22 @@ int compileOpcodes(compileContext *ctx, opcodeRec *op, unsigned char *bufOut, in
   int fpsu=0;
   int codesz;
   int denorm=0;
+  // Includes re-entry through user-function generation (several KiB/frame).
+  // Compile workers may overlap; this counter is never used by the VM.
+  static _Thread_local unsigned depth;
+  if (depth >= 64)
+  {
+    lstrcpyn_safe(ctx->last_error_string,"compiler recursion limit",sizeof(ctx->last_error_string));
+    return -1;
+  }
 
 #ifdef DUMP_OPS_DURING_COMPILE
   dumpOp(ctx,op,1);
 #endif
   
+  depth++;
   codesz = compileOpcodesInternal(ctx,op,bufOut,bufOut_len,computTableSize,namespacePathToThis,&code_returns, supportedReturnValues,&fpsu,&denorm);
+  depth--;
   if (denorm && canHaveDenormalOutput) *canHaveDenormalOutput=1;
 
 #ifdef DUMP_OPS_DURING_COMPILE
@@ -4878,7 +4893,11 @@ NSEEL_CODEHANDLE NSEEL_code_compile_ex(NSEEL_VMCTX _ctx, const char *_expression
       }
 #endif
 
-      if (!(ctx->optimizeDisableFlags&OPTFLAG_NO_OPTIMIZE)) optimizeOpcodes(ctx,start_opcode,is_fname[0] ? 1 : 0);
+      if (!(ctx->optimizeDisableFlags&OPTFLAG_NO_OPTIMIZE) && optimizeOpcodes(ctx,start_opcode,is_fname[0] ? 1 : 0,0) < 0)
+      {
+        lstrcpyn_safe(ctx->last_error_string,"optimizer recursion limit",sizeof(ctx->last_error_string));
+        goto had_error;
+      }
 #ifdef LOG_OPT
       wdl_log("post opt sz=%d, stack depth=%d\n",compileOpcodes(ctx,start_opcode,NULL,1024*1024*256,NULL,NULL, RETURNVALUE_IGNORE,NULL,&sd,NULL),sd);
 #endif
@@ -5186,6 +5205,14 @@ had_error:
 }
 
 //------------------------------------------------------------------------------
+#if defined(EEL_TARGET_PORTABLE) && !defined(EEL_PORTABLE_TAILCALL)
+int NSEEL_code_execute_budget(NSEEL_CODEHANDLE code, unsigned budget)
+{
+  codeHandleType *h = (codeHandleType *)code;
+  return !h || !h->code || GLUE_CALL_CODE_BUDGET((INT_PTR)h->workTable,(INT_PTR)h->code,(INT_PTR)h->ramPtr,budget);
+}
+#endif
+
 void NSEEL_code_execute(NSEEL_CODEHANDLE code)
 {
 #ifndef GLUE_TABPTR_IGNORED

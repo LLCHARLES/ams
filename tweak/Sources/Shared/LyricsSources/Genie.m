@@ -43,16 +43,48 @@ static NSString *unescape(NSString *text) {
     return [out stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
+// Search for each delimiter once. In particular a missing closer ends the scan instead of
+// restarting a body match at every subsequent opener.
+static BOOL nextTag(NSString *text, NSString *start, NSString *finish, NSUInteger *cursor,
+                    NSRange *opening, NSRange *body) {
+    NSRange tail = NSMakeRange(*cursor, text.length - *cursor);
+    NSRange name = [expression(start) rangeOfFirstMatchInString:text options:0 range:tail];
+    if (name.location == NSNotFound) return NO;
+    NSUInteger at = NSMaxRange(name);
+    NSRange gt = [text rangeOfString:@">" options:NSLiteralSearch range:NSMakeRange(at, text.length - at)];
+    if (gt.location == NSNotFound) return NO;
+    at = NSMaxRange(gt);
+    NSRange end = [expression(finish) rangeOfFirstMatchInString:text options:0 range:NSMakeRange(at, text.length - at)];
+    if (end.location == NSNotFound) return NO;
+    *opening = NSMakeRange(name.location, at - name.location);
+    *body = NSMakeRange(at, end.location - at);
+    *cursor = NSMaxRange(end);
+    return YES;
+}
+
 static NSString *anchor(NSString *row, NSString *kind) {
-    for (NSTextCheckingResult *match in matches(@"<a\\b[^>]*>.*?</a\\s*>", row)) {
-        NSString *tag = [row substringWithRange:match.range];
+    NSUInteger cursor = 0;
+    NSRange opening, content;
+    while (nextTag(row, @"<a\\b", @"</a\\s*>", &cursor, &opening, &content)) {
+        NSString *tag = [row substringWithRange:NSMakeRange(opening.location, cursor - opening.location)];
         NSString *classes = capture(@"\\bclass\\s*=\\s*['\"]([^'\"]*)['\"]", tag);
         if (![[classes componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] containsObject:kind]) continue;
         NSString *title = capture(@"\\btitle\\s*=\\s*['\"]([^'\"]*)['\"]", tag);
         if ([kind isEqualToString:@"title"] && title.length) return unescape(title);
-        NSString *body = capture(@"<a\\b[^>]*>(.*?)</a\\s*>", tag);
-        NSRegularExpression *tags = expression(@"<[^>]*>");
-        return unescape([tags stringByReplacingMatchesInString:body options:0 range:NSMakeRange(0, body.length) withTemplate:@""]);
+        NSString *body = [row substringWithRange:content];
+        NSMutableString *text = [NSMutableString string];
+        NSUInteger at = 0;
+        while (at < body.length) {
+            NSRange open = [body rangeOfString:@"<" options:NSLiteralSearch range:NSMakeRange(at, body.length - at)];
+            if (open.location == NSNotFound) break;
+            NSUInteger afterOpen = NSMaxRange(open);
+            NSRange close = [body rangeOfString:@">" options:NSLiteralSearch range:NSMakeRange(afterOpen, body.length - afterOpen)];
+            if (close.location == NSNotFound) break;
+            [text appendString:[body substringWithRange:NSMakeRange(at, open.location - at)]];
+            at = NSMaxRange(close);
+        }
+        [text appendString:[body substringFromIndex:at]];
+        return unescape(text);
     }
     return nil;
 }
@@ -60,16 +92,17 @@ static NSString *anchor(NSString *row, NSString *kind) {
 static NSString *songFor(NSString *html, NSString *title, NSString *artist, BOOL *empty) {
     if (!html.length || html.length > 1024 * 1024) return nil;
     *empty = [html containsString:@"검색 결과가 없습니다"];
-    NSUInteger count = 0;
-    for (NSTextCheckingResult *match in matches(@"<tr\\b[^>]*>.*?</tr\\s*>", html)) {
+    NSUInteger count = 0, cursor = 0;
+    NSRange head, content;
+    while (nextTag(html, @"<tr\\b", @"</tr\\s*>", &cursor, &head, &content)) {
         if (++count > 300) { *empty = NO; break; }
-        NSString *row = [html substringWithRange:match.range];
-        if (row.length > 32768) { *empty = NO; continue; }
-        NSString *opening = capture(@"^(<tr\\b[^>]*>)", row);
+        if (cursor - head.location > 32768) { *empty = NO; continue; }
+        NSString *opening = [html substringWithRange:head];
         NSString *classes = capture(@"\\bclass\\s*=\\s*['\"]([^'\"]*)['\"]", opening);
         if (![[classes componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] containsObject:@"list"]) continue;
         *empty = NO;
         NSString *song = SGLyricsDecimalID(capture(@"\\bsongid\\s*=\\s*['\"]([0-9]+)['\"]", opening));
+        NSString *row = [html substringWithRange:content];
         if (song && [SGLyricsMatchKey(anchor(row, @"title")) isEqualToString:SGLyricsMatchKey(title)] && SGLyricsSameArtist(anchor(row, @"artist"), artist)) return song;
     }
     return nil;

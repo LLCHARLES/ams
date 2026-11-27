@@ -325,6 +325,7 @@ typedef NS_ENUM(NSInteger, SGNavbarSection) {
         self->_entries = navbarEntries();
         [self.tableView reloadData];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

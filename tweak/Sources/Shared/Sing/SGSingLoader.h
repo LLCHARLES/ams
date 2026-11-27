@@ -53,7 +53,8 @@ NSURL *SGSingLoaderURL(void);
 void SGSingLoaderRelease(void);
 // Both copies dropped at once and any load abandoned, `why` logged when there was something to drop.
 void SGSingLoaderPurge(NSString *why);
-// The Neural Engine copy alone dropped, the CPU's kept.
+// Drop the Neural Engine copy. If its proven run already retired the CPU copy, reload the CPU
+// asynchronously while wanted; otherwise keep the warm CPU fallback.
 void SGSingLoaderDropFast(NSString *why);
 // Spotify became active or stopped being active: a load starts only while it is, the Neural Engine copy's when it
 // becomes so.

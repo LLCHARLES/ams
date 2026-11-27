@@ -9,6 +9,7 @@ cleanup() {
     rm -rf "$work"
 }
 trap cleanup EXIT
+trap 'exit 143' TERM INT
 OUT="$work/build" sh "$here/build.sh"
 udid=$(xcrun simctl create "SponsorBlock-tour-$$" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro)
 xcrun simctl boot "$udid"
@@ -16,9 +17,19 @@ xcrun simctl bootstatus "$udid" -b >/dev/null
 app="$work/build/OnboardingHarness.app"
 xcrun simctl spawn "$udid" "$app/OnboardingHarness" environment-check
 xcrun simctl install "$udid" "$app"
-for language in 1 2; do
-    xcrun simctl launch --console "$udid" com.retrine.onboardingharness old sponsorblock-check \
-        -spotifyglass.language "$language" >"$work/result" 2>&1 || { cat "$work/result"; exit 1; }
+launch() {
+    expected=$1; shift
+    status=0
+    python3 "$here/../sim-launch.py" --timeout 240 "$udid" com.retrine.onboardingharness "$@" >"$work/result" 2>&1 || status=$?
     cat "$work/result"
-    grep -q 'PASS SponsorBlock settings layout and tour opt-in' "$work/result"
+    if [ "$status" -ne 0 ] || ! grep -Fq "$expected" "$work/result"; then
+        echo "[harness] FAIL $*: launch status $status, expected '$expected'" >&2
+        # Preserve scene/termination diagnostics before deleting the device.
+        xcrun simctl spawn "$udid" log show --last 5m --style compact --info --predicate 'process == "OnboardingHarness" OR (process IN {"SpringBoard", "runningboardd"} AND eventMessage CONTAINS[c] "com.retrine.onboardingharness")' | tail -40 >&2
+        exit 1
+    fi
+}
+launch 'PASS kept cleanup size, delete action and dark environment alerts' kept-cleanup -spotifyglass.language 1
+for language in 1 2; do
+    launch 'PASS SponsorBlock settings layout and tour opt-in' old sponsorblock-check -spotifyglass.language "$language"
 done

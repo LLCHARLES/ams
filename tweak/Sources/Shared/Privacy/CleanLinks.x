@@ -159,7 +159,21 @@ static void cleanSource(id item) {
 }
 %end
 
+%group SGMessageBody
+%hook MFMessageComposeViewController
+- (void)setBody:(NSString *)body {
+    %orig(cleaning() ? SGCleanLinksInText(body) : body);
+}
+%end
+%end
+
 %ctor {
     %init;
+    // Both Spotify executables import this class; a host without MessageUI
+    // still gets the pasteboard and activity-item hooks.
+    Class composer = NSClassFromString(@"MFMessageComposeViewController");
+    if (composer) {
+        %init(SGMessageBody, MFMessageComposeViewController = composer);
+    }
     SGRequireClasses(@[@"_UIConcretePasteboard"]);
 }

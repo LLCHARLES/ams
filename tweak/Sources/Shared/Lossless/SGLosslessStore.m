@@ -1,5 +1,6 @@
 #import "SGLosslessStore.h"
 #import <AudioToolbox/AudioToolbox.h>
+#import <sys/stat.h>
 
 static NSString *const kIndex = @".index.plist";   // track URI -> file name
 
@@ -24,9 +25,12 @@ static NSString *folded(NSString *text) {
 static NSDictionary *tags(NSString *path) {
     static NSMutableDictionary<NSString *, NSDictionary *> *cache;
     if (!cache) cache = [NSMutableDictionary dictionary];
-    NSDate *modified = [NSFileManager.defaultManager attributesOfItemAtPath:path error:NULL].fileModificationDate;
-    NSString *key = [NSString stringWithFormat:@"%@|%f", path, modified.timeIntervalSince1970];
-    if (cache[key]) return cache[key];
+    struct stat info;
+    if (stat(path.fileSystemRepresentation, &info)) { [cache removeObjectForKey:path]; return nil; }
+    NSArray *generation = @[@(info.st_ino), @(info.st_size), @(info.st_mtimespec.tv_sec), @(info.st_mtimespec.tv_nsec),
+                            @(info.st_ctimespec.tv_sec), @(info.st_ctimespec.tv_nsec)];
+    NSDictionary *entry = cache[path];
+    if ([entry[@"generation"] isEqual:generation]) return entry[@"tags"];
     NSMutableDictionary *found = [NSMutableDictionary dictionary];
     AudioFileID file;
     if (AudioFileOpenURL((__bridge CFURLRef)[NSURL fileURLWithPath:path], kAudioFileReadPermission, 0, &file) == noErr) {
@@ -39,7 +43,8 @@ static NSDictionary *tags(NSString *path) {
         }
         AudioFileClose(file);
     }
-    cache[key] = found;
+    if (!entry && cache.count >= 256) [cache removeObjectForKey:cache.keyEnumerator.nextObject];
+    cache[path] = @{@"generation":generation, @"tags":found};
     return found;
 }
 

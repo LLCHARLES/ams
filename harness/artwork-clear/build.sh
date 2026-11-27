@@ -9,13 +9,13 @@ SRC=../../tweak/Sources
 ART=$SRC/Shared/AnimatedArtwork
 mkdir -p "$OUT"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi \
     -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -I $SRC -I $ART \
     -framework UIKit -framework Foundation -framework CoreGraphics -framework AVFoundation -framework CoreMedia -framework CoreVideo \
     -framework Network -Wl,-undefined,dynamic_lookup \
     clear-check.m "${STORE:-$ART/SGMotionStore.m}" "${CATALOG:-$ART/SGMotionCatalog.m}" "${SETTINGS:-$ART/AnimatedArtworkSettings.m}" \
     "$SRC"/Shared/Lyrics/LyricsLanguage.m -framework NaturalLanguage -Wl,-dead_strip \
-    $ART/SGMotionTicket.m $ART/SGMotionClip.m $SRC/Shared/AdBlock/Protobuf.m $SRC/Core/SGLog.m \
+    $ART/SGMotionTicket.m $ART/SGMotionClip.m $SRC/Shared/AdBlock/Protobuf.m $SRC/Core/SGLog.m $SRC/Core/SGGlass.m \
     "$SRC/Core/SGDataRoot.m" -o "$OUT/artwork-clear-check"
 "$OUT/artwork-clear-check"

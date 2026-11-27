@@ -14,6 +14,4 @@ UISearchController *SGSettingsSearchField(SGModPage *page);
 // titles from the searched page's row down to the row. Query text is never stored.
 #define SGKeySearchRecents @"spotifyglass.search.recents"
 NSArray<NSArray<NSString *> *> *SGSearchRecents(void);
-// Puts a place at the front, once, keeping at most six, and drops a repeated one.
-void SGSearchRememberPlace(NSArray<NSString *> *place);
 void SGSearchForgetRecents(void);

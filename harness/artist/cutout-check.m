@@ -13,6 +13,7 @@
 // must leave alone, for a comparison against another build. With CUTOUT_PNG set, every drawing checked is written
 // there. Exits nonzero on the first failure (../harness-fail.h).
 #import <UIKit/UIKit.h>
+#import "../album/motion-player-double.h"
 #import "../harness-fail.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
@@ -531,7 +532,7 @@ static void checkSettings(UINavigationController *nav) {
     UIViewController *page = SGRArtistSettingsPage();
     nav.viewControllers = @[page];
     [nav.view layoutIfNeeded];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
+    [page.view layoutIfNeeded];
 
     SGModRow *round = rowWithKey((SGModPage *)page, SGRKeyArtistRoundPlay), *cut = rowWithKey((SGModPage *)page, SGRKeyArtistCutOutPlay);
     SGModRow *accent = rowWithKey((SGModPage *)page, SGRKeyAccentPlay);

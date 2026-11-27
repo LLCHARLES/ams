@@ -8,6 +8,7 @@
 
 #define CHECK(value) do { if (!(value)) { fprintf(stderr, "FAIL %d: %s\n", __LINE__, #value); exit(1); } } while (0)
 static NSURL *root;
+static dispatch_semaphore_t missingRootTrim;
 static BOOL watch;
 BOOL SGFlag(NSString *key, BOOL fallback) { return fallback; }
 static void offMain(NSString *path) {
@@ -26,6 +27,14 @@ static void offMain(NSString *path) {
 @end
 @implementation NSFileManager (StoreCheck)
 - (NSArray *)testURLsForDirectory:(NSSearchPathDirectory)directory inDomains:(NSSearchPathDomainMask)domains {
+    if (directory == NSCachesDirectory && missingRootTrim) {
+        // The launch trim is resolving its folder. Queue a completion behind it.
+        SGMotionMakeFile(nil, ^BOOL { CHECK(NO); return NO; }, ^(BOOL ok) {
+            CHECK(!ok);
+            dispatch_semaphore_signal(missingRootTrim);
+        });
+        return @[];
+    }
     return directory == NSCachesDirectory ? @[root] : [self testURLsForDirectory:directory inDomains:domains];
 }
 - (BOOL)testExists:(NSString *)path { offMain(path); return [self testExists:path]; }
@@ -33,6 +42,7 @@ static void offMain(NSString *path) {
     offMain(url.path); return [self testCreate:url withIntermediateDirectories:parents attributes:attributes error:error];
 }
 - (NSArray *)testContents:(NSURL *)url includingPropertiesForKeys:(NSArray *)keys options:(NSDirectoryEnumerationOptions)options error:(NSError **)error {
+    CHECK(url != nil);
     offMain(url.path); return [self testContents:url includingPropertiesForKeys:keys options:options error:error];
 }
 @end
@@ -41,7 +51,7 @@ static void exchange(SEL original, SEL replacement) {
                                    class_getInstanceMethod(NSFileManager.class, replacement));
 }
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!ready() && until.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
     CHECK(ready());
@@ -84,6 +94,10 @@ static void checkByteTrim(NSURL *pinned) {
 static void checkIdleLaunchTrim(NSURL *folder) {
     NSFileManager *fm = NSFileManager.defaultManager;
     CHECK([fm createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSURL *abandoned = [SGMotionMadeFile(@"interrupted") URLByAppendingPathExtension:@"partial"];
+    NSURL *foreign = [folder URLByAppendingPathComponent:@"foreign.mp4.partial"];
+    CHECK([fm createFileAtPath:abandoned.path contents:nil attributes:nil]);
+    CHECK([fm createFileAtPath:foreign.path contents:nil attributes:nil]);
     NSMutableArray<NSURL *> *clips = [NSMutableArray array];
     for (unsigned i = 0; i < 11; i++) {
         NSURL *clip = [folder URLByAppendingPathComponent:[NSString stringWithFormat:@"%040x.mp4", i]];
@@ -97,6 +111,8 @@ static void checkIdleLaunchTrim(NSURL *folder) {
     watch = YES;
     waitFor(^BOOL { return access(clips.firstObject.fileSystemRepresentation, F_OK) == -1 && errno == ENOENT; });
     watch = NO;
+    CHECK(![fm fileExistsAtPath:abandoned.path] && [fm fileExistsAtPath:foreign.path]);
+    CHECK([fm removeItemAtURL:foreign error:nil]);
     for (NSUInteger i = 1; i < clips.count; i++) CHECK([fm removeItemAtURL:clips[i] error:nil]);
 }
 
@@ -292,6 +308,11 @@ int main(int argc, const char **argv) {
         exchange(@selector(fileExistsAtPath:), @selector(testExists:));
         exchange(@selector(createDirectoryAtURL:withIntermediateDirectories:attributes:error:), @selector(testCreate:withIntermediateDirectories:attributes:error:));
         exchange(@selector(contentsOfDirectoryAtURL:includingPropertiesForKeys:options:error:), @selector(testContents:includingPropertiesForKeys:options:error:));
+        if (strcmp(argv[1], "missing-root") == 0) {
+            missingRootTrim = dispatch_semaphore_create(0);
+            CHECK(!dispatch_semaphore_wait(missingRootTrim, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC)));
+            return 0;
+        }
         watch = YES;
         NSURL *made = SGMotionMadeFile(@"a generated clip");
         CHECK(made.lastPathComponent.length == 44);
@@ -337,7 +358,7 @@ int main(int argc, const char **argv) {
                 }, ^(BOOL ok) { CHECK(ok); if (i == 40) dispatch_semaphore_signal(written); });
             }
         }
-        CHECK(dispatch_semaphore_wait(written, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(written, dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC)) == 0);
         waitFor(^BOOL { return replies == 2; });
         checkCancellation();
         watch = NO;

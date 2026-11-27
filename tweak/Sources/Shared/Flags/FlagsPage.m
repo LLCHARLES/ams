@@ -27,7 +27,7 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
 
 - (instancetype)init {
     if (!(self = [super initWithStyle:UITableViewStylePlain])) return nil;
-    self.title = SGL(@"settings.flags.title", @"Flags");
+    self.title = SGL(@"settings.main.all_flags.title", @"All flags");
     return self;
 }
 
@@ -157,6 +157,7 @@ static NSString *flagState(const SGFlagDef *flag, id value) {
         if (!text.length) return;
         [self store:flag->type == SGFlagInt ? @(text.integerValue) : text forKey:key row:path.row];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

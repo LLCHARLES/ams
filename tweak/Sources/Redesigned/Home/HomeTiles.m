@@ -42,6 +42,15 @@ static UIColor *untinted(void) {
     return color;
 }
 
+// With the shortcuts' glass, the tinted surface lets the page show through it a little (the white title still stands
+// well over 4.5:1 on it over Home's dark page); without, it stays solid.
+static const CGFloat kGlassSurfaceAlpha = 0.72;
+
+static UIColor *surfaceColor(UIColor *color) {
+    color = color ?: untinted();
+    return SGRHomeShortcutGlass() ? [color colorWithAlphaComponent:kGlassSurfaceAlpha] : color;
+}
+
 @interface SGRTileParts : NSObject
 @property (nonatomic, weak) UIView *fill;
 @property (nonatomic, weak) UIView *square;
@@ -69,7 +78,7 @@ static UIView *surfaceIn(UIView *tile, UIView *fill) {
         surface = [UIView new];
         surface.userInteractionEnabled = NO;
         surface.accessibilityElementsHidden = YES;
-        surface.backgroundColor = untinted();
+        surface.backgroundColor = surfaceColor(nil);
         objc_setAssociatedObject(tile, &kSurfaceKey, surface, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     if (surface.superview != tile) {
@@ -197,7 +206,7 @@ void SGRHomeUnstyleTile(UIView *button) {
 }
 
 static void tint(UIView *tile, UIView *surface, UIColor *color, BOOL animated) {
-    color = color ?: untinted();
+    color = surfaceColor(color);
     if ([surface.backgroundColor isEqual:color]) return;
     if (!animated || !tile.window) {
         surface.backgroundColor = color;

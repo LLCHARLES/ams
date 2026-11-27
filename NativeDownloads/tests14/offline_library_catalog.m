@@ -12,6 +12,15 @@ static NSString *uri(NSUInteger n,NSString *kind){const char *abc="0123456789abc
 static NSData *item(NSUInteger n,unsigned state){return join(@[text(1,uri(n,@"track")),SAPProtoInteger(2,state)]);}
 static NSUInteger mode,total=260,calls,cancels,active,maximum,batches,contextCalls,metadataCalls,artistCalls;
 static NSMutableArray *pending,*requestedBatches;
+@interface CatalogResponse : NSObject
+@property(nonatomic,strong) NSData *payload;
+@end
+@implementation CatalogResponse
+- (BOOL)isKindOfClass:(Class)c {return c==NSData.class||[super isKindOfClass:c];}
+- (NSUInteger)length{return self.payload.length;}
+- (const void *)bytes{assert(!NSThread.isMainThread);return self.payload.bytes;}
+- (NSData *)subdataWithRange:(NSRange)range{return [self.payload subdataWithRange:range];}
+@end
 static NSData *metadata(NSString *u){
  NSArray *parts=[u componentsSeparatedByString:@":"];NSString *kind=parts[1];NSUInteger n=0;const char *abc="0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
  for(NSUInteger i=0;i<[parts[2]length];i++)n=n*62+(strchr(abc,[parts[2]characterAtIndex:i])-abc);
@@ -41,6 +50,7 @@ dispatch_block_t SAPCallReadOnlyServiceCancellable(NSString *service,NSString *m
   if(mode==2)response=SAPProtoInteger(2,5);
   if(mode==3)response=[NSData dataWithBytes:(uint8_t[]){0x0a,0xff} length:2];
   if(mode==9)response=NSData.data;
+  if(mode==0 && response){CatalogResponse *checked=CatalogResponse.new;checked.payload=response;response=(id)checked;}
  }else if([method isEqual:@"GetItems"]){
   assert([service isEqual:@"spotify.offline_esperanto.proto.Offline"]);batches++;[requestedBatches addObject:@(f.count)];assert(f.count<=128);
   NSMutableData *d=NSMutableData.data;
@@ -51,6 +61,7 @@ dispatch_block_t SAPCallReadOnlyServiceCancellable(NSString *service,NSString *m
  }else{
   assert([service isEqual:@"spotify.metadata_esperanto.proto.ClassicMetadataService"] && [method isEqual:@"GetEntity"]);metadataCalls++;
   assert(f.count==1);NSString *u=SAPProtoString(f,1);response=metadata(u);if(mode==13 && [u hasPrefix:@"spotify:album:"])error=@"Album unavailable";if([u hasPrefix:@"spotify:artist:"]){artistCalls++;if(mode==11)error=@"Portrait unavailable";}
+  if(mode==14)response=metadata(uri(90,@"track"));
   if(mode==5)error=@"Metadata unavailable";
  }
  __block BOOL done=NO;active++;maximum=MAX(maximum,active);
@@ -64,6 +75,14 @@ static void reset(NSUInteger m,NSUInteger count){SAPUpdateOfflineLibraryCachedTr
 static NSArray *fetch(NSString **failure){__block BOOL done=NO;__block NSArray *rows;__block NSString *error;
  SAPFetchOfflineLibrary(^(NSUInteger a,NSUInteger b){assert(NSThread.isMainThread && a<=b);},^(NSArray *r,NSString *e){assert(NSThread.isMainThread);rows=r;error=e;done=YES;});waitFor(^{return done;});if(failure)*failure=error;return rows;}
 int main(void){@autoreleasepool{
+ reset(0,3);SAPUpdateOfflineLibraryCachedTracks(@[@{@"uri":uri(77,@"track")}]);
+ __block NSArray *ids;SAPFetchDownloadedTrackURIs(^(NSArray *result,NSString *error){ids=result;});
+ waitFor(^BOOL{return ids!=nil;});
+ assert(([ids isEqual:@[uri(1,@"track")]] && metadataCalls==0 && [SAPOfflineLibraryCachedTracks()[0][@"uri"] isEqual:uri(77,@"track")]));
+ __block NSDictionary *named;SAPFetchDownloadedTrackMetadata(uri(1,@"track"),^(NSDictionary *row){named=row;});
+ waitFor(^BOOL{return named!=nil;});assert([named[@"artist_name"]isEqual:@"Artist"] && [named[@"name"]isEqual:@"Track 1"]);
+ mode=14;__block BOOL rejected=NO;SAPFetchDownloadedTrackMetadata(uri(1,@"track"),^(NSDictionary *row){rejected=[row[@"unavailable"] boolValue] && !row[@"name"];});waitFor(^{return rejected;});
+ __block BOOL waiting=NO;SAPFetchDownloadedTrackMetadata(uri(3,@"track"),^(NSDictionary *row){waiting=row==nil;});waitFor(^{return waiting;});
  NSString *error=nil;reset(0,260);NSArray *rows=fetch(&error);assert(!error && rows.count==258 && contextCalls==1 && batches==3 && maximum<=4);
  assert(metadataCalls==260 && artistCalls==1 && [rows[0][@"artist_cover_url"]hasPrefix:@"https://i.scdn.co/image/02"] && [rows[0][@"artist_image_uri"]hasPrefix:@"spotify:image:02"]);
  NSMutableSet *seen=NSMutableSet.set;for(NSDictionary *r in rows){assert(![seen containsObject:r[@"uri"]]);[seen addObject:r[@"uri"]];assert([r[@"artist_name"]isEqual:@"Artist"] && [r[@"album_name"]isEqual:@"Album"] && [r[@"category"]isEqual:@"Albums"] && [r[@"year"]intValue]==2026 && [r[@"duration_ms"]intValue]==180000 && [r[@"disc"]intValue]==1 && [r[@"number"]intValue]==1 && [r[@"cover_url"]hasPrefix:@"https://i.scdn.co/image/"]);}

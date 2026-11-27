@@ -245,7 +245,7 @@ extern NSUInteger sgHarnessModSettingsOpens;
 extern void SGHarnessHold(UIWindow *window, CGPoint point, NSTimeInterval seconds);
 
 // `symbols hold`: Apple symbols on, the names hidden (main.m) and the tab of the mod's own wearing house, as Home does,
-// so the two show one glyph. A finger held on the tab of the mod's own, the bar's last, opens nothing; held on Home,
+// drawn as the Music house for Home and the SF Symbol for the custom tab. A finger held on the tab of the mod's own, the bar's last, opens nothing; held on Home,
 // its first, Mod Settings once.
 static void expectHoldOpensHomeOnly(UIViewController *owner) {
     SGSetEnabled(SGRKeyNavbarSymbols, YES);
@@ -253,7 +253,8 @@ static void expectHoldOpensHomeOnly(UIViewController *owner) {
     UITabBar *bar = barIn(owner.view);
     HARNESS_CHECK(bar && bar.items.count == spotifyTabs().count + 1);
     for (UITabBarItem *item in bar.items) if (item.title) HARNESS_FAIL(@"symbols hold: the bar names %@", item.title);
-    if (![png(bar.items.firstObject.image) isEqual:png(bar.items.lastObject.image)]) HARNESS_FAIL(@"symbols hold: Home and the tab of the mod's own do not wear one glyph");
+    HARNESS_CHECK(bar.items.firstObject.image && bar.items.lastObject.image);
+    HARNESS_CHECK(![png(bar.items.firstObject.image) isEqual:png(bar.items.lastObject.image)]);
     // The tabs' buttons left to right, outside the copy UIKit draws lit under the selection's bubble.
     NSMutableArray<UIView *> *buttons = [NSMutableArray array];
     SGForEachView(bar, ^(UIView *view) {
@@ -293,8 +294,8 @@ static void holdForScreenshot(void) {
 
 // `symbols`: the Tab bar page over the bar, with a tab of the mod's own on it. Apple symbols starts off, so the bar, the
 // preview and the list show Spotify's glyphs; switched on from the page they show symbols at once, and switched off
-// Spotify's glyphs again, the tab of the mod's own keeping its icon throughout. On the bar, Home's selected glyph is
-// house.fill against house, and Search's is the same magnifyingglass, which has no filled variant.
+// Spotify's glyphs again, the custom tab keeping its icon throughout. Home keeps the Music house when selected
+// and Search keeps its magnifyingglass.
 // `symbols show` holds the bar with the switch off (`on`: on), `symbols page` the page over it, switched on from the
 // page with `on` and scrolled to the tabs with `list`, for a screenshot. Not `off`: that word switches the fade off.
 void SGHarnessRunSymbols(SGHarnessChrome *chrome) {
@@ -378,9 +379,9 @@ void SGHarnessRunSymbols(SGHarnessChrome *chrome) {
     expectGlyphs(@"switch on", @"preview", barGlyphs(preview, NO), YES, previewOff);
     expectGlyphs(@"switch on", @"list", listGlyphs(table), YES, listOff);
     NSDictionary *barLit = barGlyphs(bar, YES), *barPlain = barGlyphs(bar, NO);
-    if ([barLit[@"Home"] isEqual:barPlain[@"Home"]]) HARNESS_FAIL(@"switch on: Home's selected glyph is not house.fill");
+    if (![barLit[@"Home"] isEqual:barPlain[@"Home"]]) HARNESS_FAIL(@"switch on: Home lost the Music house when selected");
     if (![barLit[@"Search"] isEqual:barPlain[@"Search"]]) HARNESS_FAIL(@"switch on: Search's selected glyph is not magnifyingglass");
-    printf("PASS switch on: Home fills when selected, Search keeps its one symbol\n");
+    printf("PASS switch on: Home keeps the Music house and Search keeps its magnifying glass\n");
     expectOwnSymbol(@"switch on", bar, preview);
 
     // The list read off the main thread naming Home's page for Search: once on it, the bar draws Search as Home.

@@ -106,12 +106,16 @@ def patch(data, profile=V9190):
     if uuid!=profile.main_uuid:raise ValueError('Unsupported trace executable UUID')
     _verify_dlsym_binding(data, profile);out=bytearray(data);reports=[]
     text=next(s for s in segments if s[0]==b'__TEXT');_,vm,_,fo,size,protection=text
+    from patch_layout import text_tail_padding
+    tail_start,tail_end=text_tail_padding(data)
     def off(address,length):
         if not vm<=address or address+length>vm+size:raise ValueError('Trace outside executable text')
         return fo+address-vm
     for point in profile.trace_points:
         name,address,cave,expected,kind=point;code=trampoline(point, profile);target=off(cave,len(code));source=off(address,len(expected))
-        if protection&5!=5 or target<end or target+len(code)>first or any(data[target:target+len(code)]):raise ValueError('Trace padding is occupied or unavailable')
+        header_padding=end<=target and target+len(code)<=first
+        tail_padding=tail_start<=target and target+len(code)<=tail_end
+        if protection&5!=5 or not (header_padding or tail_padding) or any(data[target:target+len(code)]):raise ValueError('Trace padding is occupied or unavailable')
         if data[source:source+len(expected)]!=expected:raise ValueError(f'Trace {name} prologue differs')
         if kind==0 and data[source+4:source+8]!=bytes.fromhex('20013fd6'):raise ValueError('Native key call target instruction differs')
         out[target:target+len(code)]=code;struct.pack_into('<I',out,source,branch(address,cave))

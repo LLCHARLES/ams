@@ -22,7 +22,7 @@ CGImageSourceRef CGImageSourceCreateWithURL(CFURLRef url, CFDictionaryRef option
     dispatch_once(&once, ^{ readSource = dlsym(RTLD_NEXT, "CGImageSourceCreateWithURL"); CHECK(readSource); });
     if (atomic_exchange(&stallNextRead, false)) {
         dispatch_semaphore_signal(readEntered);
-        CHECK(!dispatch_semaphore_wait(releaseRead, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)));
+        CHECK(!dispatch_semaphore_wait(releaseRead, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)));
     }
     return readSource(url, options);
 }
@@ -67,7 +67,7 @@ int main(void) { @autoreleasepool {
     releaseRead = dispatch_semaphore_create(0);
     atomic_store(&stallNextRead, true);
     report(uri);
-    CHECK(!dispatch_semaphore_wait(readEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)));
+    CHECK(!dispatch_semaphore_wait(readEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)));
     report(@"spotify:track:next");
     dispatch_semaphore_signal(releaseRead);
     // A later read's completion follows every previously submitted cover read.

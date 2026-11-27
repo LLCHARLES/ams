@@ -50,6 +50,7 @@ breaks = frame(3, b'SYLT', b'\x03eng\x02\x01\0 \0' + struct.pack('>I', 20) +
                '♪'.encode() + b'\0' + struct.pack('>I', 40))
 tag('breaks-and-plain', 3, breaks + frame(3, b'USLT', b'\x03eng\0Words after breaks'))
 tag('only-breaks', 3, breaks)
+tag('empty-sylt-entries', 3, frame(3, b'SYLT', b'\x03eng\x02\x01\0' + bytes(5 * 4096) + b'Line\0' + bytes(4)))
 tag('large-picture', 3, frame(3, b'APIC', bytes(9 << 20)) + frame(3, b'USLT', b'\x03eng\0After artwork'))
 vorbis('flac-plain', b'lyrics=Plain text')
 vorbis('flac-synced', b'LYRICS=Plain text', b'UNSYNCEDLYRICS=[00:01.25]Stamped')

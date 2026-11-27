@@ -1,6 +1,13 @@
 #pragma once
 #import <Foundation/Foundation.h>
 
+// Main-queue callbacks. A failed scan is nil; an empty verified library is @[].
+__attribute__((visibility("default"))) dispatch_block_t SAPFetchDownloadedTrackURIs(void (^completion)(NSArray<NSString *> *, NSString *));
+// Rechecks current-library membership first (a queued job may outlive its login).
+// nil: unverifiable; removed: no longer downloaded; unavailable: still downloaded,
+// metadata failed verification. Only a verified metadata record can establish missing names.
+__attribute__((visibility("default"))) dispatch_block_t SAPFetchDownloadedTrackMetadata(NSString *uri, void (^completion)(NSDictionary *));
+
 // Enumerates native local Offline contexts with item policy enabled, then
 // validates each unique track using GetItems (DOWNLOADED == 3). No journal,
 // session or export-folder fallback. Main-queue callbacks; cancellation is

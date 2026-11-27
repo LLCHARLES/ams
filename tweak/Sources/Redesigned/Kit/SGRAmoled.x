@@ -36,18 +36,15 @@ static CGColorRef copyBlack(CGColorRef color) {
 
 %hook CAGradientLayer
 - (void)setColors:(NSArray *)colors {
-    NSMutableArray *mapped = [[NSMutableArray alloc] initWithCapacity:colors.count];
-    for (id entry in colors) {
-        CGColorRef color = (__bridge CGColorRef)entry;
-        if (!isBaseGrey(color)) {
-            [mapped addObject:entry];
-            continue;
-        }
+    NSMutableArray *mapped = nil;
+    for (NSUInteger index = 0; index < colors.count; ++index) {
+        CGColorRef color = (__bridge CGColorRef)colors[index];
+        if (!isBaseGrey(color)) continue;
+        if (!mapped) mapped = [colors mutableCopy];
         CGColorRef black = copyBlack(color);
-        [mapped addObject:(__bridge id)black];
-        CGColorRelease(black);
+        mapped[index] = CFBridgingRelease(black);
     }
-    %orig(colors ? mapped : nil);
+    %orig(mapped ?: colors);
 }
 %end
 

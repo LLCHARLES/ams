@@ -8,8 +8,8 @@ static void fail(NSString *reason) {
 
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
-        if (argc != 2) fail(@"expected an output .mp4 path");
-        const int width = 360, height = 640, framesPerSecond = 25, durationSeconds = 4;
+        if (argc != 2 && argc != 3) fail(@"expected an output .mp4 path and optional square flag");
+        const int width = 360, height = argc == 3 ? width : 640, framesPerSecond = 25, durationSeconds = 4;
         NSError *error = nil;
         AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:
             [NSURL fileURLWithPath:@(argv[1])] fileType:AVFileTypeMPEG4 error:&error];

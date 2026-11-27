@@ -4,8 +4,8 @@
   scripts/merge-appintents.py <ipa> <Payload/X.app/> <Metadata.appintents dir>
 
 The system looks an intent up in the metadata of the bundle that runs it, and a LiveActivityIntent
-runs in the app, so the widget's intents have to be listed in Spotify's file next to its own. Spotify
-9.1.78 has no file, so ours goes in whole; with one, each list and table gets ours added, and the rest
+runs in the app, so the widget's intents have to be listed in Spotify's file next to its own. Both
+supported IPAs have metadata: each list and table gets ours added, and the rest
 (an App Shortcuts provider among it) stays the app's where it has its own.
 """
 import json

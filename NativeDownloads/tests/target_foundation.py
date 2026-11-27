@@ -1,4 +1,4 @@
-"""Both clean IPAs: independent ABI-2 byte/flow proofs and fail-closed boundaries.
+"""Every clean IPA: independent ABI-2 byte/flow proofs and fail-closed boundaries.
 
 Expected entry addresses are from the pinned upstream patch sources. Replay
 bytes come from the unmodified supplied IPA, not from emitted code or headers.
@@ -16,7 +16,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
-from pixie_target import V9190, V9200
+from pixie_target import V9190, V9200, V9202
 from generate_target import generate_headers, validate_headers
 from build_retrine_9190 import prepare_foundation, verify_caves, reject_native_overlay
 from patch_native_restrictions import layout
@@ -29,7 +29,13 @@ ENTRIES = {
                0x103594d70, 0x1020fd560, 0x107970fe8, 0x1020fd5f0, 0x103cc61f8),
     "9.2.0": (0x10559a704, 0x10985aad8, 0x101a51d8c, 0x1027929f4,
               0x1061407a4, 0x10774139c, 0x10503253c, 0x10774142c, 0x1059344f4),
+    "9.2.2": (0x1092c36e8, 0x109ee7bcc, 0x10936b554, 0x10936b8a8,
+              0x1098d054c, 0x10993139c, 0x109361888, 0x10993142c, 0x109362d60),
 }
+# Eevee tools/port/caves_9.2.2.json: tail-padding caves, in ENTRIES order.
+CAVES_922 = (0x10d11ace0, 0x10d11ae80, 0x10d11b020, 0x10d11b1c0,
+             0x10d11b360, 0x10d11b500, 0x10d11b6a0, 0x10d11b830, 0x10d11b9c0)
+DLSYM = {"9.1.90": 0x109b65b68, "9.2.0": 0x10a7bc268, "9.2.2": 0x10a868de0}
 
 
 def branch_target(word, pc):
@@ -42,8 +48,8 @@ def branch_target(word, pc):
 
 
 class Foundation(unittest.TestCase):
-    def test_both_export_images(self):
-        for profile in (V9190, V9200):
+    def test_every_export_image(self):
+        for profile in (V9190, V9200, V9202):
             with self.subTest(version=profile.version), ZipFile(ROOT.parent / f"ipa/Spotify-{profile.version}.ipa") as z:
                 raw = z.read("Payload/Spotify.app/Spotify")
                 imported, imports = patch_imports.patch(raw)
@@ -71,7 +77,8 @@ class Foundation(unittest.TestCase):
                 occupied = []
                 for index, entry in enumerate(ENTRIES[profile.version]):
                     kind = index if index < 8 else 10
-                    cave = 0x10d11f000 if profile.version == "9.2.0" and index == 1 else 0x10001e000 + kind*512
+                    cave = (CAVES_922[index] if profile.version == "9.2.2" else
+                            0x10d11f000 if profile.version == "9.2.0" and index == 1 else 0x10001e000 + kind*512)
                     displaced_length = 16 if index < 6 else 4
                     code_length = 407 if index < 6 else 395
                     at, dest = entry-BASE, cave-BASE
@@ -101,7 +108,7 @@ class Foundation(unittest.TestCase):
                                 pages -= 1 << 21
                             add = struct.unpack_from("<I", code, pos+4)[0]
                             destination = ((cave+pos) & ~4095) + pages*4096 + ((add >> 10) & 4095)
-                            self.assertEqual(destination, 0x109b65b68 if profile.version == "9.1.90" else 0x10a7bc268)
+                            self.assertEqual(destination, DLSYM[profile.version])
                     restored[at:at+4] = raw[at:at+4]
                     restored[dest:dest+code_length] = raw[dest:dest+code_length]
                 occupied.sort()
@@ -124,7 +131,7 @@ class Foundation(unittest.TestCase):
                         self.assertTrue(all("SpotifyAudioProbe" in line for line in lines))
 
     def test_export_rejections_preserve_input(self):
-        for profile in (V9190, V9200):
+        for profile in (V9190, V9200, V9202):
             with ZipFile(ROOT.parent / f"ipa/Spotify-{profile.version}.ipa") as z:
                 raw = z.read("Payload/Spotify.app/Spotify")
             imported = patch_imports.patch(raw)[0]
@@ -165,11 +172,11 @@ class Foundation(unittest.TestCase):
     def test_concurrent_headers_and_compiled_manager_shift(self):
         with tempfile.TemporaryDirectory(prefix="pixie-targets-") as temp:
             root = Path(temp)
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                jobs = [pool.submit(generate_headers, root/p.version, p) for p in (V9190, V9200)]
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                jobs = [pool.submit(generate_headers, root/p.version, p) for p in (V9190, V9200, V9202)]
                 for job in jobs:
                     job.result()
-            for profile, expected in ((V9190, "0 688 111"), (V9200, "8 696 222")):
+            for profile, expected in ((V9190, "0 688 111"), (V9200, "8 696 222"), (V9202, "136 824 333")):
                 folder = root/profile.version
                 validate_headers(folder, profile)
                 source = root/"read.c"
@@ -178,9 +185,9 @@ class Foundation(unittest.TestCase):
 #include <string.h>
 #include <Generated/TargetProfile.h>
 int main(void) {
-    unsigned char manager[800]={0};
-    int first=111,second=222,value=0;
-    memcpy(manager+688,&first,4);memcpy(manager+696,&second,4);
+    unsigned char manager[900]={0};
+    int first=111,second=222,third=333,value=0;
+    memcpy(manager+688,&first,4);memcpy(manager+696,&second,4);memcpy(manager+824,&third,4);
     memcpy(&value,manager+SAPProfileQuotaBlockOffset,4);
     printf("%d %d %d",SAP_TARGET_MANAGER_FIELD_SHIFT,SAPProfileQuotaBlockOffset,value);
     return 0;

@@ -294,6 +294,7 @@ static void wantModel(void) {
 
 // The Neural Engine copy given up on for the rest of the launch: the CPU's carries on alone.
 static void apply(void);
+static void updateSpatial(void);
 static void neuralFailed(NSString *why) {
     if (sg_neuralFailed) return;
     sg_neuralFailed = why;
@@ -330,21 +331,28 @@ static void loaderChanged(void) {
         default: break;
     }
     holdBudget(engine);
+    updateSpatial();
     announce();
 }
 
 // After an install or an iOS update the Neural Engine copy compiles again (48-65 s on an iPhone 15 Pro), a minute in
 // which the mic has only the CPU's copy, which a warm iPhone cannot keep up with. With the model in and the mic off it
-// compiles ahead instead, once Spotify has been in front a while, the iPhone is below Serious and nothing else loads.
+// compiles ahead instead, once Spotify has been in front a while with the music paused, the iPhone is below Fair,
+// Low Power Mode is off and nothing else loads: compiled while music plays, it heated the iPhone for a minute with
+// nobody asking for it. Pausing, cooling down or Low Power Mode going off looks again.
 static const NSTimeInterval kPrepareAfter = 15;
 
 static void prepareAhead(void) {
     NSString *compiled = neuralCompiled();
     if (!SGEnabled(SGKeySingPrepareAhead) || SGSingOn() || !sg_active || !neuralWanted() || SGSingModelCurrentState() != SGSingModelReady
         || [[NSUserDefaults.standardUserDefaults stringForKey:kNeuralReadyOn] isEqualToString:compiled]) return;
-    if (NSProcessInfo.processInfo.thermalState >= NSProcessInfoThermalStateSerious) {
+    SPTPlayerState *player = SGPlayerState();
+    BOOL playing = player.isPlaying && !player.isPaused;
+    if (playing || NSProcessInfo.processInfo.lowPowerModeEnabled || NSProcessInfo.processInfo.thermalState >= NSProcessInfoThermalStateFair) {
         static BOOL told;
-        if (!told) SGLog(@"sing: the Neural Engine copy waits to be prepared until the iPhone is cooler (thermal state %s)", SGSingThermalName());
+        if (!told) SGLog(@"sing: the Neural Engine copy waits to be prepared until the music is paused, the iPhone is cool and Low Power Mode is off "
+                         "(%s, thermal state %s%s)", playing ? "playing" : "paused", SGSingThermalName(),
+                         NSProcessInfo.processInfo.lowPowerModeEnabled ? ", Low Power Mode" : "");
         told = YES;
         return;
     }
@@ -357,8 +365,13 @@ static void prepareAhead(void) {
     if (started) SGLog(@"sing: prepares the Neural Engine copy ahead of the mic, for this install");
 }
 
+// Main thread. One look at a time, however many pauses and changes ask for it.
 static void prepareAheadSoon(void) {
+    static BOOL waiting;
+    if (waiting) return;
+    waiting = YES;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kPrepareAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        waiting = NO;
         prepareAhead();
     });
 }
@@ -394,7 +407,7 @@ static BOOL systemSpatial(void) {
 // place itself; otherwise the voice goes back ahead (HeadGestures hands a listener taken out nil).
 static void updateSpatial(void) {
     SPTPlayerState *player = SGPlayerState();
-    BOOL wanted = SGSingOn() && !SGSingMissing() && SGSingSpatial() && player.isPlaying && !player.isPaused;
+    BOOL wanted = SGSingEngineSeparating(atomic_load(&sg_engine)) && SGSingSpatial() && player.isPlaying && !player.isPaused;
     BOOL listen = wanted && !systemSpatial();
     if (listen == sg_spatialListening) return;
     sg_spatialListening = listen;
@@ -512,6 +525,7 @@ static void apply(void) {
     SGSingEngineSetSeparator(engine, separatorNow());
     holdBudget(engine);
     SGSingEngineSetPaused(engine, held || rest || sg_interrupted);
+    SGSingEngineSetPlaybackPaused(engine, SGPlayerState().isPaused);
     SGSingEngineSetOn(engine, on);
     double lead = SGSingEngineLead(engine);
     if ((!on || held || rest || sg_interrupted) && lead > 0.05) SGLog(@"sing: keeps the %.2f s held ahead, played as it is, until Spotify pauses, seeks or skips", lead);
@@ -535,7 +549,7 @@ void SGSetSingOn(BOOL on) {
     sg_giveUps = 0;
     SGLog(@"sing: the mic is %@", on ? @"on" : @"off");
     // Read only while on: what it was when last on may be gone.
-    readRefusal();
+    if (on) readRefusal();
     apply();
     announce();
 }
@@ -756,7 +770,7 @@ NSString *SGSingSummary(void) {
         case SGSingStateNoModel: return SGL(@"common.off", @"Off");
         case SGSingStateDownloading: return [NSString stringWithFormat:SGL(@"settings.karaoke.status.download_percent", @"%.0f%%"), SGSingModelProgress() * 100];
         case SGSingStateOff: return SGL(@"common.off", @"Off");
-        default: return SGL(@"common.on", @"On");
+        default: return SGSingSpatialAvailable() && SGSingSpatial() ? SGL(@"settings.karaoke.status.spatial", @"On · Spatial") : SGL(@"common.on", @"On");
     }
 }
 
@@ -1063,7 +1077,11 @@ static void tick(void) {
     // A Neural Engine copy that failed a window (Core ML's error) is given up on for the launch. One that is only slow
     // stays: falling behind is the budget's, as on any copy.
     SGSingSeparator *current = SGSingLoaderSeparator();
-    if (current && [current stats].fastFailed) neuralFailed(@"failed a window");
+    if (current && [current stats].fastFailed) {
+        // Even with the screen locked: the CPU may no longer be resident in this running session.
+        SGSingLoaderDropFast(@"failed a window");
+        neuralFailed(@"failed a window");
+    }
     if (engine && SGSingOn() && !sg_stopped && SGSingEngineGaveUp(engine)) {
         BOOL forGood = ++sg_giveUps >= kGiveUpsKept;
         sg_stopKind = forGood ? SGSingStopForGood : SGSingStopBehind;
@@ -1116,11 +1134,14 @@ static void watch(void) {
         apply();
         announce();
     }
+    // Paused music is when the Neural Engine copy may be prepared ahead (prepareAhead).
+    if (state.isPaused) prepareAheadSoon();
     updateSpatial();
     checkLanding(state);
     // Paused while not separating: the lead is dropped with nothing heard lost. Not through an interruption, which
     // holds the worker and keeps the lead for when Spotify plays again.
     SGSingEngine *engine = atomic_load(&sg_engine);
+    if (engine) SGSingEngineSetPlaybackPaused(engine, state.isPaused);
     if (state.isPaused && !sg_interrupted && !SGSingEngineSeparating(engine)) dropLead(@"paused while not separating", state);
     NSString *track = SGURIString(state.track.URI);
     BOOL another = track && sg_lastTrack && ![track isEqualToString:sg_lastTrack];
@@ -1258,9 +1279,12 @@ static void readHeat(void) {
     // value of the earlier key (GPU, GPU and Neural Engine, Neural Engine). The GPU's memory of a stuck load and the
     // one-model test's switch are gone with them.
     NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
-    if (runsOn() > 1) SGLog(@"sing: Runs on was %ld, which is gone, so it is Automatic", (long)runsOn());
-    if (runsOn() != 1) [defaults removeObjectForKey:SGKeySingComputeUnits];
-    for (NSString *key in @[SGKeySingComputeUnitsBefore, @"spotifyglass.sing.gpuStuckOn", @"spotifyglass.sing.oneModel"]) [defaults removeObjectForKey:key];
+    NSInteger units = runsOn();
+    if (units > 1) SGLog(@"sing: Runs on was %ld, which is gone, so it is Automatic", (long)units);
+    for (NSString *key in @[SGKeySingComputeUnits, SGKeySingComputeUnitsBefore, @"spotifyglass.sing.gpuStuckOn", @"spotifyglass.sing.oneModel"]) {
+        if (units == 1 && [key isEqualToString:SGKeySingComputeUnits]) continue;
+        if ([defaults objectForKey:key]) [defaults removeObjectForKey:key];
+    }
     // The 489 MB model this one replaces, deleted off the main thread once this one is in (kept and run until then).
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ SGSingRemoveOldModel(); });
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1272,6 +1296,10 @@ static void readHeat(void) {
         // Posted on whichever thread saw the change: handed to main without waiting.
         [center addObserverForName:NSProcessInfoThermalStateDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             dispatch_async(dispatch_get_main_queue(), ^{ readHeat(); });
+        }];
+        // Low Power Mode going off may let the Neural Engine copy be prepared ahead.
+        [center addObserverForName:NSProcessInfoPowerStateDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            dispatch_async(dispatch_get_main_queue(), ^{ prepareAheadSoon(); });
         }];
         // Headphones in or out, or iOS's own spatial audio switched.
         for (NSNotificationName name in @[AVAudioSessionRouteChangeNotification, AVAudioSessionSpatialPlaybackCapabilitiesChangedNotification]) {
@@ -1308,7 +1336,7 @@ static void readHeat(void) {
             SGSingLoaderSetForeground(NO);
         }];
         // Low on memory, the model goes at once, before iOS closes Spotify for it.
-        [center addObserverForName:UIApplicationDidReceiveMemoryWarningNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        void (^memoryWarning)(void) = ^{
             if (SGHidden(SGKeySingIgnoreMemory)) {
                 SGLog(@"sing: iOS warned that memory is low; the model is kept (Ignore memory warnings)");
                 return;
@@ -1320,6 +1348,10 @@ static void readHeat(void) {
             sg_stopped = SGL(@"settings.karaoke.note.stopped_memory", @"Karaoke stopped to free memory, so the song plays as it is. It loads the voice model again with the next song if there is room, or switch Karaoke off and on.");
             apply();
             announce();
+        };
+        [center addObserverForName:UIApplicationDidReceiveMemoryWarningNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+            if (NSThread.isMainThread) memoryWarning();
+            else dispatch_async(dispatch_get_main_queue(), memoryWarning);
         }];
         [center addObserverForName:SGSingChangedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
             if (SGSingModelCurrentState() != SGSingModelReady) {
@@ -1334,8 +1366,10 @@ static void readHeat(void) {
         sg_active = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
         SGSingLoaderSetForeground(sg_active);
         readHeat();
-        readRefusal();
-        if (SGSingOn()) apply();
+        if (SGSingOn()) {
+            readRefusal();
+            apply();
+        }
         prepareAheadSoon();
     });
 }

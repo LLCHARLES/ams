@@ -11,12 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
-class Profile:
+class Target:
     version: str
     build: str
     main_uuid: bytes
     shared_uuid: bytes
     enabled: bool
+    reason: str
+
+
+@dataclass(frozen=True)
+class Profile(Target):
     primary: bool
     setter: int
     setter_head: bytes
@@ -78,8 +83,14 @@ class Profile:
 
 def load_target(path):
     data = json.loads(Path(path).read_text())
+    admission = data["admission"]
+    identity = dict(version=data["spotify_version"], build=data["spotify_build"],
+                    main_uuid=bytes.fromhex(data["uuid"]), shared_uuid=bytes.fromhex(data["shared_uuid"]),
+                    enabled=admission["enabled"], reason=admission.get("reason", "admission disabled"))
+    if not identity["enabled"]:
+        return Target(**identity)
     runtime = json.loads((ROOT / "targets" / data["runtime"]).read_text())
-    native, admission, export = data["native"], data["admission"], data["export"]
+    native, export = data["native"], data["export"]
     address = lambda key: int(native[key], 16)
     code = lambda key: bytes.fromhex(native[key])
     traces = data["trace_points"]
@@ -89,9 +100,7 @@ def load_target(path):
     if address("call_site") != address("window") + 12:
         raise ValueError("Unsupported key request window layout")
     return Profile(
-        version=data["spotify_version"], build=data["spotify_build"],
-        main_uuid=bytes.fromhex(data["uuid"]), shared_uuid=bytes.fromhex(data["shared_uuid"]),
-        enabled=admission["enabled"], primary=data["primary"],
+        **identity, primary=data["primary"],
         setter=address("setter"), setter_head=code("setter_original"),
         vtable=address("manager_vtable"), window=address("window"), provider=address("provider"),
         provider_head=code("provider_head"), mapping=address("mapping"), mapping_bytes=code("mapping_original"),
@@ -113,7 +122,10 @@ def load_target(path):
 
 V9190 = load_target(ROOT / "targets/spotify-9.1.90.json")
 V9200 = load_target(ROOT / "targets/spotify-9.2.0.json")
-PROFILES = (V9190, V9200)
+V9202 = load_target(ROOT / "targets/spotify-9.2.2.json")
+TARGETS = (V9190, V9200, V9202)
+# Only admitted layouts are available to header generation and binary validation.
+PROFILES = tuple(target for target in TARGETS if target.enabled)
 
 def artifact_name(mod_version, profile=None):
     suffix = "" if profile is None else "-pixie" + ("" if profile.primary else f"-spotify-{profile.version}")
@@ -121,14 +133,14 @@ def artifact_name(mod_version, profile=None):
 
 
 def select_profile(info, main_uuid, shared_uuid, *, require_enabled=True, jailbreak=False):
-    for profile in PROFILES:
-        if (info.get("CFBundleShortVersionString"), str(info.get("CFBundleVersion")),
-                main_uuid, shared_uuid) == (
-                profile.version, profile.build, profile.main_uuid, profile.shared_uuid):
+    key = (info.get("CFBundleShortVersionString"), str(info.get("CFBundleVersion")), main_uuid, shared_uuid)
+    for profile in TARGETS:
+        if key == (profile.version, profile.build, profile.main_uuid, profile.shared_uuid):
+            # Static callers also receive a patchable layout; admission is mandatory.
+            if not profile.enabled:
+                raise ValueError(f"Pixie disabled for Spotify {profile.version} ({profile.build}): {profile.reason}")
             if jailbreak and not profile.jailbreak:
                 raise ValueError("Jailbreak Pixie supports only the exact Spotify 9.1.90 profile")
-            if require_enabled and not profile.enabled:
-                raise ValueError(f"Pixie not yet enabled for Spotify {profile.version}; static-only, real-device capture required")
             return profile
     raise ValueError("No exact Pixie profile matches version, CFBundleVersion and both image UUIDs")
 

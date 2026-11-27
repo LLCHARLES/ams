@@ -1,6 +1,7 @@
 #import "SGPage.h"
 #import "SGPageStyle.h"
 #import "Core/SGCore.h"
+#import "../../../NativeDownloads/src/UI/PixiePageNavigation.h"
 
 
 // Spotify's navigation controller asserts that everything on its stack is one of its own pages
@@ -10,7 +11,6 @@
 // is pressed, from wherever it was left. The pages below answer the protocol's two questions
 // instead and are registered as conforming at load; if the protocol is gone they are presented
 // rather than pushed, so a rename in some later Spotify costs the push, not the app.
-static BOOL sg_pagesConform;
 
 @implementation SGPage {
     NSTimer *_refreshTimer;
@@ -87,16 +87,14 @@ static BOOL sg_pagesConform;
 @end
 
 void SGRegisterPages(void) {
-    // Swift's own name for the protocol, which is what the runtime registers it under.
-    Protocol *page = objc_getProtocol("_TtP19Tome_PageAttributes17SPTPageController_") ?: objc_getProtocol("SPTPageController");
-    sg_pagesConform = page && class_addProtocol(SGPage.class, page);
-    if (!sg_pagesConform) SGLog(@"SPTPageController not found, the mod's pages are presented instead of pushed");
+    if (!SAPSpotifyPageContract(SGPage.class, YES)) SGLog(@"SPTPageController unavailable or incompatible; presenting mod pages");
 }
 
 void SGShowPage(UIViewController *owner, UIViewController *page) {
-    if (owner.navigationController && sg_pagesConform) [owner.navigationController pushViewController:page animated:YES];
+    if (!page) return;
+    if (SAPCanPushPage(owner.navigationController,page)) [owner.navigationController pushViewController:page animated:YES];
     else {
-        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:page];
+        UINavigationController *nav = SAPFallbackPageStack(page);
         SGPresentDark(nav);
         [owner presentViewController:nav animated:YES completion:nil];
     }

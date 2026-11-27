@@ -109,6 +109,8 @@ static UIViewController *settingsPage(void) {
 }
 
 SGModSection *SGSponsorBlockSettingsSection(void) {
-    return SGSection(nil, @[SGSearchIdentified(SGPageRow(SGL(@"settings.sponsorblock.title", @"SponsorBlock"),
-        ^{ return settingsPage(); }), @"page.sponsorblock")]);
+    SGModRow *row = SGSearchIdentified(SGPageRow(SGL(@"settings.sponsorblock.title", @"SponsorBlock"),
+        ^{ return settingsPage(); }), @"page.sponsorblock");
+    row.value = ^NSString *{ return SGHidden(SGKeySponsorBlock) ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off"); };
+    return SGSection(nil, @[row]);
 }

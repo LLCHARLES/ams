@@ -106,8 +106,13 @@ static NSInteger colorRGB(UIColor *color) {
 // Count KVC metadata writes at the CAAnimation boundary, not allocations inside Apple's setters.
 @interface MeasuredBasicAnimation : CABasicAnimation
 @property (nonatomic) NSUInteger metadataWrites;
+@property (nonatomic) NSUInteger metadataReads;
 @end
 @implementation MeasuredBasicAnimation
+- (id)valueForKey:(NSString *)key {
+    if ([key isEqual:@"sgr.accent.sources"]) self.metadataReads++;
+    return [super valueForKey:key];
+}
 - (void)setValue:(id)value forKey:(NSString *)key {
     self.metadataWrites++;
     [super setValue:value forKey:key];
@@ -134,6 +139,7 @@ static void checkAnimationMetadata(void) {
         keys.values = plain;
     }
     expect(basic.metadataWrites == 0 && keys.metadataWrites == 0, @"no-token animation setters write no metadata");
+    expect(!basic.metadataReads, @"numeric animation setters never consult accent provenance");
     expect([keys.values isEqual:plain], @"no-token keyframes preserve their values");
     keys.values = nil;
     expect(keys.values == nil && keys.metadataWrites == 0, @"nil keyframes remain nil without metadata");

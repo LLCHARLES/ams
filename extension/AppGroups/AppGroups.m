@@ -85,7 +85,7 @@ static NSURL *SGContainerURL(id self, SEL _cmd, NSString *group) {
 static id SGInitWithSuiteName(NSUserDefaults *self __attribute__((ns_consumed)), SEL _cmd, NSString *suite) NS_RETURNS_RETAINED {
   NSURL *url = RedirectedContainer(suite);
   if (url && [self respondsToSelector:@selector(_initWithSuiteName:container:)]) {
-    os_log(sLog, "[spotifyglass] appgroups: %{public}@ -> %{public}@", suite, url.path);
+    os_log(sLog, "[spotifyglass] appgroups: redirected settings container");
     return [self _initWithSuiteName:suite container:url];
   }
   return sOrigInitWithSuiteName(self, _cmd, suite);
@@ -109,7 +109,7 @@ static id SGBaseDictionary(id self, SEL _cmd, id domain, id key, NSString *group
   // Spotify's entitlements and is left alone, and the Watch groups never match the suffix.
   if ([group isKindOfClass:NSString.class] && [group hasSuffix:kCredentialsGroupSuffix] && ![sKeychainEntitled containsObject:group]) {
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ os_log(sLog, "[spotifyglass] keychain: %{public}@ -> %{public}@", group, sKeychainGroup); });
+    dispatch_once(&once, ^{ os_log(sLog, "[spotifyglass] keychain: redirected credentials group"); });
     group = sKeychainGroup;
   }
   return sOrigBaseDictionary(self, _cmd, domain, key, group, attr, sync);
@@ -120,8 +120,6 @@ static id SGBaseDictionary(id self, SEL _cmd, id domain, id key, NSString *group
 static void InstallKeychainHook(void) {
   sKeychainEntitled = EntitledGroups(CFSTR("keychain-access-groups"));
   sKeychainGroup = CredentialsGroup();
-  os_log(sLog, "[spotifyglass] keychain: entitled to %{public}@, credentials in %{public}@",
-         [sKeychainEntitled componentsJoinedByString:@", "], sKeychainGroup);
   if (!sKeychainGroup) return;
   Method m = class_getInstanceMethod(objc_getClass("SPTKeychainManagerImpl"),
                                      @selector(getBaseDictionaryForDomain:key:accessGroup:accessAttr:synchronizable:));
@@ -132,16 +130,18 @@ static void InstallKeychainHook(void) {
   sOrigBaseDictionary = (void *)method_setImplementation(m, (IMP)SGBaseDictionary);
 }
 
-__attribute__((constructor)) static void SGAppGroupsInit(void) {
+static void InstallAppGroups(void) {
   sLog = os_log_create("spotifyglass", "appgroups");
   InstallKeychainHook();
   sEntitled = EntitledGroups(CFSTR("com.apple.security.application-groups"));
-  os_log(sLog, "[spotifyglass] appgroups: %{public}@ entitled to %{public}@",
-         NSBundle.mainBundle.bundleIdentifier, [sEntitled componentsJoinedByString:@", "]);
   if (sEntitled.count == 0) return;
 
   Method m = class_getInstanceMethod(NSFileManager.class, @selector(containerURLForSecurityApplicationGroupIdentifier:));
   sOrigContainerURL = (void *)method_setImplementation(m, (IMP)SGContainerURL);
   m = class_getInstanceMethod(NSUserDefaults.class, @selector(initWithSuiteName:));
   sOrigInitWithSuiteName = (void *)method_setImplementation(m, (IMP)SGInitWithSuiteName);
+}
+
+__attribute__((constructor)) static void SGAppGroupsInit(void) {
+  @autoreleasepool { InstallAppGroups(); }
 }

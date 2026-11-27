@@ -6,6 +6,7 @@
 #import <objc/runtime.h>
 #import <stdatomic.h>
 #import <stdlib.h>
+#import <unistd.h>
 #import <string.h>
 #import "Core/SGCore.h"
 #import "Core/SGDataRoot.h"
@@ -18,6 +19,7 @@ static NSCountedSet<NSString *> *sg_inUse; // store queue only; counts retained 
 // Bumped by each clear. A file the mod was asked to make before a clear is not made after it.
 static _Atomic uint64_t sg_clearGeneration;
 static void trim(void);
+static BOOL ownedClip(NSURL *file);
 
 static NSURL *folder(void) {
     return [SGDataRoot(NSCachesDirectory) URLByAppendingPathComponent:@"Motion" isDirectory:YES];
@@ -32,7 +34,17 @@ static dispatch_queue_t storeQueue(void) {
 
 // An existing cache can be over budget even if artwork is never requested this launch.
 __attribute__((constructor)) static void scheduleLaunchTrim(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), storeQueue(), ^{ trim(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), storeQueue(), ^{
+        NSURL *directory = folder();
+        if (!directory) return;
+        // Local generators run synchronously on this queue; no partial here can be active.
+        for (NSURL *file in [NSFileManager.defaultManager contentsOfDirectoryAtURL:directory
+               includingPropertiesForKeys:nil options:NSDirectoryEnumerationSkipsHiddenFiles error:nil]) {
+            if ([file.pathExtension isEqual:@"partial"] && ownedClip(file.URLByDeletingPathExtension))
+                unlink(file.fileSystemRepresentation);
+        }
+        trim();
+    });
 }
 
 // The URL is the consumer's existing ownership handle. Its lease does not retain the

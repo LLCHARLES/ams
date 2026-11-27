@@ -91,5 +91,6 @@ BOOL SGLiveActivityLyricsActive(void);
 // The Live Activity page: a preview of the card (SGLiveActivityPreview.m), its switch, which view it shows, the
 // lyrics' options and the card's.
 UIViewController *SGLiveActivitySettingsPage(void);
+NSString *SGLiveActivitySummary(void);
 // Requires both NSSupportsLiveActivities and Retrine's bundled Live Activity extension.
 BOOL SGLiveActivityAllowedByInstall(void);

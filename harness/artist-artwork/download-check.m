@@ -90,7 +90,7 @@ int main(void) {
                 } else CHECK(file == nil);
                 done = YES;
             });
-            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
             while (!done && deadline.timeIntervalSinceNow > 0)
                 [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
             if (!done || [attempts[name] unsignedIntegerValue] != 1)

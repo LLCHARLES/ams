@@ -28,6 +28,7 @@ run() {
 }
 
 run "PASS all glyphs" glyphs
+run "PASS unsupported forwarding" unsupported-tap
 run "PASS all glyphs" glyphs swift
 run "PASS all symbols" symbols
 run "PASS hold on Home only" symbols hold
@@ -50,4 +51,12 @@ run "PASS all search" search own
 run "PASS all search" search leaves
 run "PASS all states" states
 run "PASS all states" states split
+HARNESS_COMPOSED=1 OUT="$OUT/composed" sh "$HERE/build.sh"
+xcrun simctl install "$UDID" "$OUT/composed/TabBarHarness.app"
+run "PASS launch with four visible glyphs" launch
+run "PASS launch with four visible glyphs" launch late-ink
+run "PASS launch with four visible glyphs" launch replace-search
+run "PASS launch with four visible glyphs" launch unlabeled
+run "PASS Search replaced during glyph drawing" launch reentrant
+run "PASS detached and replaced stock bars" launch replace-bar
 echo "PASS tab bar glyph, edge, Search and state checks"

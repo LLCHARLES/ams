@@ -21,5 +21,5 @@ UIViewController *SGAlbumSettingsPage(void) {
             SGHideRow(SGL(@"settings.album.hide.you_might_like.title", @"You might also like"), nil, SGHideAlbumYouMightLike),
         ], SGL(@"settings.album.hide_on_page.note", @"Works only with Spotify in English.")),
     ];
-    return [[SGModPage alloc] initWithTitle:SGL(@"settings.album.native.title", @"Album") intro:SGRestartNote sections:sections footer:nil];
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.main.albums.title", @"Albums") intro:SGRestartNote sections:sections footer:nil];
 }

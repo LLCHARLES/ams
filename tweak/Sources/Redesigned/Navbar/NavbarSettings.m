@@ -34,6 +34,10 @@ static NSArray<NSDictionary *> *tabPresets(void) {
     ];
 }
 
+static NSString *entryTitle(NSDictionary *entry) {
+    return entry[SGRNavbarURI] ? entry[SGRNavbarTitle] : SGRStockTabTitle(entry[SGRNavbarTitle]);
+}
+
 // The list the Navbar page edits: the saved order first, then every tab of Spotify's it does not
 // name, in Spotify's order. Entries for tabs Spotify no longer has drop out.
 static NSMutableArray<NSMutableDictionary *> *navbarEntries(void) {
@@ -213,7 +217,7 @@ typedef NS_ENUM(NSInteger, SGRSplitSection) {
         cell.accessibilityTraits = UIAccessibilityTraitButton;
     } else if (path.section == SGRSplitSectionApart) {
         NSDictionary *entry = _split[(NSUInteger)path.row];
-        SGFillCell(cell, entry[SGRNavbarTitle], nil, nil, nil);
+        SGFillCell(cell, entryTitle(entry), nil, nil, nil);
         UIListContentConfiguration *content = (UIListContentConfiguration *)cell.contentConfiguration;
         content.image = glyphFor(entry, NO);
         content.imageProperties.tintColor = UIColor.whiteColor;
@@ -222,7 +226,7 @@ typedef NS_ENUM(NSInteger, SGRSplitSection) {
         cell.contentConfiguration = content;
         cell.accessibilityHint = entry[SGRNavbarURI] ? SGL(@"settings.tabbar.item.hint_edit", @"Opens the tab to edit it") : nil;
     } else {
-        SGFillCell(cell, _stock[(NSUInteger)path.row], nil, nil, nil);
+        SGFillCell(cell, SGRStockTabTitle(_stock[(NSUInteger)path.row]), nil, nil, nil);
         cell.accessibilityHint = SGL(@"settings.tabbar.split_tabs.move_hint", @"Moves the tab to the right end of the bar");
     }
     return cell;
@@ -416,7 +420,7 @@ static const CGFloat kPreviewTitleShare = 0.45, kPreviewDetailShare = 0.3;   // 
 static NSArray<UITabBarItem *> *itemsFor(NSArray<NSDictionary *> *entries, BOOL names) {
     NSMutableArray<UITabBarItem *> *items = [NSMutableArray array];
     for (NSDictionary *entry in entries) {
-        UITabBarItem *item = [[UITabBarItem alloc] initWithTitle:names ? entry[SGRNavbarTitle] : nil image:glyphFor(entry, NO) tag:(NSInteger)items.count];
+        UITabBarItem *item = [[UITabBarItem alloc] initWithTitle:names ? entryTitle(entry) : nil image:glyphFor(entry, NO) tag:(NSInteger)items.count];
         item.selectedImage = glyphFor(entry, YES);
         [items addObject:item];
     }
@@ -444,7 +448,8 @@ static NSArray<UITabBarItem *> *itemsFor(NSArray<NSDictionary *> *entries, BOOL 
     _apart.selectedItem = nil;
     _apart.hidden = !apart.count;
     _fade.hidden = !SGEnabled(SGRKeyNavbarFade);
-    NSMutableArray<NSString *> *read = [[[main arrayByAddingObjectsFromArray:apart] valueForKey:SGRNavbarTitle] mutableCopy];
+    NSMutableArray<NSString *> *read = [NSMutableArray array];
+    for (NSDictionary *entry in [main arrayByAddingObjectsFromArray:apart]) [read addObject:entryTitle(entry)];
     if (!_fade.hidden) [read addObject:SGL(@"settings.tabbar.fade.title", @"Fade under the bar")];
     self.accessibilityValue = [read componentsJoinedByString:@", "];
     [self setNeedsLayout];
@@ -791,7 +796,8 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
     SGRTabCell *cell = [table dequeueReusableCellWithIdentifier:@"tab"] ?: [[SGRTabCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"tab"];
     NSDictionary *entry = _entries[(NSUInteger)path.row];
     BOOL hidden = [entry[SGRNavbarHidden] boolValue];
-    SGFillCell(cell, entry[SGRNavbarTitle], [splitStockIDs() containsObject:entry[SGRNavbarID]] ? SGL(@"settings.tabbar.placement.apart", @"Apart, on the right") : nil, hidden ? SGGrey() : nil, nil);
+    NSString *title = entryTitle(entry);
+    SGFillCell(cell, title, [splitStockIDs() containsObject:entry[SGRNavbarID]] ? SGL(@"settings.tabbar.placement.apart", @"Apart, on the right") : nil, hidden ? SGGrey() : nil, nil);
     UIListContentConfiguration *content = (UIListContentConfiguration *)cell.contentConfiguration;
     content.image = glyphFor(entry, NO);
     content.imageProperties.tintColor = hidden ? SGGrey() : UIColor.whiteColor;
@@ -815,7 +821,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
     UIImageSymbolConfiguration *size = [UIImageSymbolConfiguration configurationWithPointSize:22 weight:UIImageSymbolWeightRegular];
     [cell.check setImage:[UIImage systemImageNamed:hidden ? @"circle" : @"checkmark.circle.fill" withConfiguration:size] forState:UIControlStateNormal];
     cell.check.tintColor = hidden ? SGGrey() : SGRAccent();
-    cell.check.accessibilityLabel = [NSString stringWithFormat:SGL(@"settings.tabbar.item.show_format.a11y", @"Show %@ on the bar"), entry[SGRNavbarTitle]];
+    cell.check.accessibilityLabel = [NSString stringWithFormat:SGL(@"settings.tabbar.item.show_format.a11y", @"Show %@ on the bar"), title];
     cell.check.accessibilityValue = hidden ? SGL(@"common.off", @"Off") : SGL(@"common.on", @"On");
     return cell;
 }
@@ -1012,6 +1018,7 @@ typedef NS_ENUM(NSInteger, SGRNavbarSection) {
         SGRRefreshTabBar();
         [self reload];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

@@ -228,6 +228,7 @@ static NSArray<SGModSection *> *sections(SGVibrationsPreview *preview, void (^ex
     }];
     [alert addAction:open];
     alert.preferredAction = open;
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

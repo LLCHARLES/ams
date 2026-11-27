@@ -4,7 +4,7 @@ SRC=$(cd "$(dirname "$0")/../../tweak/Sources" && pwd)
 OUT=${HARNESS_BUILD_DIR:-$(dirname "$0")/build}
 rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/ArtistHarness.app"
 
-for f in Redesigned/Artist/ArtistField.x Redesigned/Artist/ArtistHeader.x Redesigned/Artist/ArtistSections.x Redesigned/Artist/ArtistFollow.x; do
+for f in Redesigned/Artist/ArtistField.x Redesigned/Artist/ArtistHeader.x Redesigned/Artist/ArtistSections.x Redesigned/Artist/ArtistFollow.x Redesigned/Kit/SGRHeaderAppearance.x; do
     name=$(basename "$f" .x)
     source="$SRC/$f"
     if [ "$name" = ArtistSections ] && [ -n "${HARNESS_ARTIST_SECTIONS_SOURCE:-}" ]; then
@@ -14,7 +14,7 @@ for f in Redesigned/Artist/ArtistField.x Redesigned/Artist/ArtistHeader.x Redesi
 done
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/Artist" -I"$OUT/gen" -isysroot "$SDK" \
     -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" "$(dirname "$0")/stubs.m" \
@@ -25,7 +25,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC"/Shared/Lyrics/LyricsLanguage.m -framework NaturalLanguage -Wl,-dead_strip \
     "$SRC"/Redesigned/Kit/SGRGlass.m "$SRC"/Redesigned/Kit/SGRGlyph.m "$SRC"/Redesigned/Kit/SGRRestyle.m \
     "$SRC"/Redesigned/Kit/SGRActionRow.m "$SRC"/Redesigned/Kit/SGRDownload.m "$SRC"/Redesigned/Kit/SGRHeaderInfo.m "$SRC"/Redesigned/Kit/SGRHeroVeil.m "$SRC"/Redesigned/Kit/SGRStretchHero.m \
-    "$SRC"/Redesigned/Kit/SGRedesign.m \
+    "$SRC"/Redesigned/Kit/SGRedesign.m "$SRC"/Redesigned/Kit/SGRHeaderClip.m -I"$SRC/Redesigned/Kit" \
     "$SRC"/Redesigned/Artist/ArtistArtwork.m "$SRC"/Shared/AnimatedArtwork/SGMotionClip.m "$SRC"/Shared/AdBlock/Protobuf.m \
     "$SRC"/Redesigned/Kit/SGRRollingDigits.m "$SRC"/Redesigned/Kit/SGRRefinements.m "$SRC"/Redesigned/Kit/SGRCoverRead.m \
     -framework UIKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework CoreImage -framework Foundation -framework Symbols -framework CoreText -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Vision \

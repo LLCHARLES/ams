@@ -13,22 +13,44 @@
 // preventPersistentCaching answer YES), so a stored cover is read from disk each time and passed on
 // the same way. The system's now playing artwork is added too, in case Spotify fetches it apart.
 #import <MediaPlayer/MediaPlayer.h>
+#import <mach/mach.h>
+#import <ptrauth.h>
 #import "Core/SGCore.h"
 #import "Headers/SPTLocalAVAssetImageLoaderRequest.h"
 #import "Headers/SPTPlayer.h"
 #import "Shared/Player/NowPlayingExtras.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/WireGuard/SGWGABI.h"
 #import "LocalFiles.h"
+
+static NSURL *(*sg_coverURL)(id, SEL);
+
+// Metadata is rewritten before a loader instance exists. A typed property alone cannot
+// prove what a custom getter returns. Both admitted arm64 getters are exactly a load of
+// the NSURL field into the return register followed by ret. Don't invoke a test getter
+// on an uninitialized request, or publish replacement addresses for an unknown accessor.
+static BOOL directURLGetter(IMP getter, Ivar field) {
+    ptrdiff_t offset = ivar_getOffset(field);
+    if (offset < 0 || offset % 8 || offset / 8 > 0xfff) return NO;
+    uint32_t code[2];
+    vm_size_t copied = 0;
+    vm_address_t imp = (vm_address_t)ptrauth_strip(getter, ptrauth_key_function_pointer);
+    if (vm_read_overwrite(mach_task_self(), imp, sizeof(code), (vm_address_t)code, &copied) != KERN_SUCCESS ||
+        copied != sizeof(code)) return NO;
+    const uint32_t loadX0FromX0 = 0xf9400000, ret = 0xd65f03c0;
+    return code[0] == (loadX0FromX0 | ((uint32_t)(offset / 8) << 10)) && code[1] == ret;
+}
 
 // Called for every track in every list many times a second: one prefix check for any other track.
 static NSDictionary *withEdit(NSDictionary *metadata, NSString *uri) {
+    if (metadata && ![metadata isKindOfClass:NSDictionary.class]) return metadata;
     NSDictionary *edit = SGLocalFileEditFor(uri);
     if (!edit) return metadata;
     NSMutableDictionary *edited = metadata ? [metadata mutableCopy] : [NSMutableDictionary dictionary];
     if ([edit[@"title"] length]) edited[@"title"] = edit[@"title"];
     if ([edit[@"artist"] length]) edited[@"artist_name"] = edit[@"artist"];
     if ([edit[@"album"] length]) edited[@"album_title"] = edit[@"album"];
-    NSString *cover = SGLocalFileCoverURL(SGLocalFileCoverPath(edit));
+    NSString *cover = sg_coverURL ? SGLocalFileCoverURL(SGLocalFileCoverPath(edit)) : nil;
     // Every size, since a reader may take any of them: Spotify's loader, and the redesign's artwork bridge
     // (Redesigned/Kit/SGRBridges.x), which reads the stored file itself.
     if (cover) {
@@ -81,6 +103,7 @@ static NSDictionary *withEdit(NSDictionary *metadata, NSString *uri) {
 
 #pragma mark - hooks
 
+%group SGLocalTrackHooks
 %hook SPTPlayerTrack
 - (NSDictionary *)metadata {
     NSDictionary *metadata = %orig;
@@ -88,10 +111,14 @@ static NSDictionary *withEdit(NSDictionary *metadata, NSString *uri) {
     return SGLocalFileIs(uri) ? withEdit(metadata, uri) : metadata;
 }
 %end
+%end
 
+%group SGLocalCoverHooks
 %hook SPTLocalAVAssetImageLoaderRequest
 - (void)loadLocalFileImage {
-    NSString *path = SGLocalFileCoverInURL(self.URL.absoluteString);
+    // The admitted getter reads the base request's NSURL slot, also on inherited requests.
+    NSURL *url = sg_coverURL(self, @selector(URL));
+    NSString *path = [url isKindOfClass:NSURL.class] ? SGLocalFileCoverInURL(url.absoluteString) : nil;
     if (!path) {
         %orig;
         return;
@@ -108,9 +135,37 @@ static NSDictionary *withEdit(NSDictionary *metadata, NSString *uri) {
     });
 }
 %end
+%end
 
 %ctor {
-    %init;
+    Class loader = NSClassFromString(@"SPTLocalAVAssetImageLoaderRequest");
+    // Both supported getters load _URL directly. The method ABI only says '@'; check
+    // the declared result and its backing storage before publishing any replacement URL.
+    objc_property_t property = class_getProperty(loader, "URL");
+    char *result = property ? property_copyAttributeValue(property, "T") : NULL;
+    char *storage = property ? property_copyAttributeValue(property, "V") : NULL;
+    Ivar field = storage ? class_getInstanceVariable(loader, storage) : NULL;
+    const char *type = field ? ivar_getTypeEncoding(field) : NULL;
+    BOOL urlResult = result && !strcmp(result, "@\"NSURL\"") && type && !strcmp(type, result);
+    free(storage);
+    free(result);
+    Method getter = class_getInstanceMethod(loader, @selector(URL));
+    IMP readURL = getter ? method_getImplementation(getter) : NULL;
+    if (urlResult && SGWGMethodMatches(getter, "@", @[]) && directURLGetter(readURL, field) &&
+        SGWGMethodMatches(class_getInstanceMethod(loader, @selector(loadLocalFileImage)), "v", @[]) &&
+        SGWGMethodMatches(class_getInstanceMethod(loader, @selector(dispatchSuccess:)), "v", @[@"@"])) {
+        sg_coverURL = (void *)readURL;
+        %init(SGLocalCoverHooks);
+    } else {
+        SGLog(@"local files: cover loader API unavailable");
+    }
+    Class track = NSClassFromString(@"SPTPlayerTrack");
+    if (!SGWGMethodMatches(class_getInstanceMethod(track, @selector(metadata)), "@", @[]) ||
+        !SGWGMethodMatches(class_getInstanceMethod(track, @selector(URI)), "@", @[])) {
+        SGLog(@"local files: track metadata API unavailable");
+        return;
+    }
+    %init(SGLocalTrackHooks);
     static SGLocalFileNowPlaying *nowPlaying;
     nowPlaying = [SGLocalFileNowPlaying new];
     SGAddPlayerStateObserver(nowPlaying);

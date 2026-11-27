@@ -10,7 +10,7 @@ FX="$SRC/Shared/AudioEffects"
 OUT=${OUT:-build/presets-page}
 mkdir -p "$OUT/PresetsPageHarness.app"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$FX" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     sim/presets-page.m ../scene.m ../audio-effects-page/stubs.m \
     "$FX"/AudioEffectsSettings.m "$FX"/AudioEffectsPage.m "$FX"/SGDSPCurveView.m "$FX"/AudioEffectsLibraryPage.m "$FX"/SGDSPFilters.m \

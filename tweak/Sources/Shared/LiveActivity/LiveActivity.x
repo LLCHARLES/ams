@@ -1,8 +1,5 @@
-// Polls the player at most once a second, waking sooner for a lyric boundary, and sends a new state only when
-// what its view shows changes: the
-// lyrics' line, what is up next, the control menu's tab, track, shuffle, repeat or sleep timer, or a
-// pause. The view is read on every tick, so picking another one shows within a tick. Spotify keeps
-// playing in the background, so the timer keeps running there too. The sleep timer is
+// Player, metadata, preference and lifecycle events update the card. Between events one deadline
+// follows the lyrics or maintains the activity; an empty player needs neither. The sleep timer is
 // Shared/Player/SleepTimer's, which keeps its own time; the card only sets it and shows it.
 // The activity is started only while the app is in front, the one place ActivityKit allows it.
 //
@@ -14,6 +11,8 @@
 #import <MediaPlayer/MediaPlayer.h>
 #import "Core/SGCore.h"
 #import "Shared/Player/PlayerState.h"
+#import "Shared/Player/NowPlayingExtras.h"
+#import "Shared/Player/SpeedPitch.h"
 #import "Shared/Player/SleepTimer.h"
 #import "Headers/SPTPlayer.h"
 #import "Shared/Lyrics/Lyrics.h"
@@ -29,7 +28,7 @@ API_AVAILABLE(ios(17.0))
 @property (class, nonatomic, readonly) BOOL isShowing;
 @property (class, nonatomic, readonly) NSDate *startedAt;
 @property (class, nonatomic, readonly) BOOL canStart;
-+ (void)showWithView:(NSInteger)view paused:(BOOL)paused line:(NSString *)line nextLine:(NSString *)nextLine
++ (BOOL)showWithView:(NSInteger)view paused:(BOOL)paused line:(NSString *)line nextLine:(NSString *)nextLine
               titles:(NSArray<NSString *> *)titles artists:(NSArray<NSString *> *)artists uris:(NSArray<NSString *> *)uris
                  tab:(NSInteger)tab title:(NSString *)title artist:(NSString *)artist shuffle:(BOOL)shuffle repeatMode:(NSInteger)repeatMode
             timerEnd:(NSDate *)timerEnd timerEndOfTrack:(BOOL)timerEndOfTrack timerEndOfAlbum:(BOOL)timerEndOfAlbum
@@ -48,9 +47,9 @@ typedef NS_ENUM(NSInteger, SGLiveActivityTab) {
     SGLiveActivityTabTimer,
 };
 
-// Bounds discovery of seeks, settings and metadata that have no activity notification.
-// Known lyric boundaries wake earlier rather than repeatedly rebuilding the same card at 4 Hz.
-static const NSTimeInterval kPoll = 1;
+extern NSNotificationName const SGKaraokeLookupReadyNotification;
+extern BOOL SGKaraokeLookupEnded(NSString *trackID);
+extern id SGKaraokeObserveLinesKept(void (^changed)(NSNotification *));
 // Seconds between attempts to start one, so a refused request (activities turned off) is not retried every tick.
 static const NSTimeInterval kStartRetry = 10;
 // A card that has not changed for this long is sent again, so its stale date (the bridge's staleAfter,
@@ -84,12 +83,9 @@ static const double kAccentLuminance = 0.48;
 static dispatch_source_t sg_timer;
 static NSString *sg_shown;
 static NSString *sg_missingLyrics;
-// The tracks whose look for lyrics ended (SGKaraokeLinesKeptNotification), with lines or without: a set, since
-// the track up next is looked up too, ahead of the one playing.
-// ponytail: grows by one short ID a track for the session; clear it on a track change if that ever matters.
-static NSMutableSet<NSString *> *sg_lookEnded;
 static NSDate *sg_lastStart;
 static NSDate *sg_lastSent;
+static NSDate *sg_ageDeadline;
 static SGLiveActivityTab sg_tab;
 // After PiP, wait for playback before restoring the card; send() already waits for foreground.
 static BOOL sg_pipResumePending;
@@ -115,36 +111,35 @@ static BOOL heldBack(void) {
         && UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
 }
 
-// As for lock-screen artwork, a strict dispatch timer keeps polling while the screen is off:
-// iOS can defer run-loop timers there even while background audio keeps the process running.
-// Lyrics/cache access remains on main, never on the audio render thread.
-static void startTimer(NSTimeInterval every) API_AVAILABLE(ios(17.0)) {
-    if (!sg_timer) {
-        sg_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, dispatch_get_main_queue());
-        dispatch_source_set_event_handler(sg_timer, ^{ tick(); });
-        dispatch_resume(sg_timer);
-    }
-    uint64_t interval = (uint64_t)(every * NSEC_PER_SEC);
-    dispatch_source_set_timer(sg_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
+// An enabled but idle owner keeps a disarmed source. A strict GCD deadline, unlike a
+// run-loop timer, can deliver the next line while the locked phone is playing audio.
+static void wakeIn(NSTimeInterval seconds, dispatch_time_t deadline) {
+    dispatch_time_t when = seconds < 0 ? DISPATCH_TIME_FOREVER :
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC));
+    dispatch_source_set_timer(sg_timer, MIN(when, deadline), DISPATCH_TIME_FOREVER, 10 * NSEC_PER_MSEC);
 }
 
 // Sends `shown`, what the activity is to show as one string, unless it is showing that already and was
 // sent within kRefresh; starts the activity when there is none and the app is in front.
-static void send(NSString *shown, void (^show)(void)) API_AVAILABLE(ios(17.0)) {
+static NSTimeInterval send(NSString *shown, BOOL (^show)(void)) API_AVAILABLE(ios(17.0)) {
     // ActivityKit is asked only when there is something to send: each question is a round trip to the system,
     // and polling usually finds the same card. An activity ended from outside is started again within kRefresh.
-    if ([shown isEqualToString:sg_shown] && -sg_lastSent.timeIntervalSinceNow < kRefresh) return;
-    if (heldBack()) return;
+    NSTimeInterval remaining = kRefresh + sg_lastSent.timeIntervalSinceNow;
+    if (sg_ageDeadline) remaining = MIN(remaining, sg_ageDeadline.timeIntervalSinceNow);
+    if ([shown isEqualToString:sg_shown] && remaining > 0) return remaining;
     sg_noneAt = nil;
     BOOL background = UIApplication.sharedApplication.applicationState != UIApplicationStateActive;
     BOOL showing = SGLiveActivityBridge.isShowing;
     NSDate *started = showing ? SGLiveActivityBridge.startedAt : nil;
     NSTimeInterval age = started ? -started.timeIntervalSinceNow : 0;
     // In front, only when a fresh one can start: activities turned off since would leave none.
-    if (showing && (background ? age > kEndAfter : (!started || age > kRenewAfter) && SGLiveActivityBridge.canStart)) {
+    NSTimeInterval limit = background ? kEndAfter : kRenewAfter;
+    sg_ageDeadline = started && age < limit ? [started dateByAddingTimeInterval:limit] : nil;
+    if (showing && (background ? age >= limit : (!started || age >= limit) && SGLiveActivityBridge.canStart)) {
         SGLog(@"live activity: %.0f min old, %@", age / 60, background ? @"ended before iOS freezes it" : @"started again");
         [SGLiveActivityBridge end];
         sg_lastStart = nil;
+        sg_ageDeadline = nil;
         showing = NO;
     }
     if (!showing) {
@@ -153,14 +148,19 @@ static void send(NSString *shown, void (^show)(void)) API_AVAILABLE(ios(17.0)) {
             static NSUInteger told;
             if (told++ < 5) SGLog(@"live activity: none showing, not sent in the background");
             sg_noneAt = [NSDate date];
-            return;
+            return kRefresh;
         }
-        if (sg_lastStart && -sg_lastStart.timeIntervalSinceNow < kStartRetry) return;
+        if (sg_lastStart && -sg_lastStart.timeIntervalSinceNow < kStartRetry)
+            return kStartRetry + sg_lastStart.timeIntervalSinceNow;
         sg_lastStart = [NSDate date];
+    }
+    if (!show() && !showing) {
+        sg_shown = nil;
+        return kStartRetry;
     }
     sg_shown = shown;
     sg_lastSent = [NSDate date];
-    show();
+    return sg_ageDeadline ? MIN(kRefresh, MAX(0, sg_ageDeadline.timeIntervalSinceNow)) : kRefresh;
 }
 
 // 0 off, 1 the playlist or album, 2 the track.
@@ -168,11 +168,26 @@ static NSInteger repeatModeOf(SPTPlayerOptions *options) {
     return options.repeatingTrack ? 2 : options.repeatingContext ? 1 : 0;
 }
 
+// Distinguish an answered miss (or plain text) from a lookup that hasn't answered yet.
+static NSArray<SGKaraokeLine *> *timedLinesForCard(NSString *trackID, NSArray<SGKaraokeLine *> *lines, BOOL *none) {
+    if (!lines) {
+        SGKaraokeRequestLyrics(trackID);
+        if (trackID && ![trackID isEqualToString:sg_missingLyrics]) {
+            sg_missingLyrics = trackID;
+            SGLog(@"live activity: no lyrics yet for %@", trackID);
+        }
+    }
+    if (lines && SGKaraokeLinesTiming(lines) == SGKaraokeTimingNone) lines = nil;
+    *none = !lines && SGKaraokeLookupEnded(trackID);
+    return lines;
+}
+
 // The line being sung and the one after it; before the first line, between lines and without lyrics
 // at all, a note holds the place. `none` says the track has no timed lines to follow, no lyrics or plain text,
 // and only once a look for them has ended and no other is under way: a look that never ends, as with
 // EeveeSpotify answering the lyrics, leaves the track in the note's place without the line saying so.
-static NSString *lyricsLine(NSString *trackID, NSString **next, NSString **translation, BOOL *none) API_AVAILABLE(ios(17.0)) {
+static NSString *lyricsLine(NSString *trackID, NSInteger position, BOOL paused, NSString **next,
+                            NSString **translation, BOOL *none, NSInteger *until) API_AVAILABLE(ios(17.0)) {
     NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
     if (lines.count && SGFlag(SGKeyLiveActivityTranslation, NO)) {
         NSString *language = SGLyricsGeminiLanguage();
@@ -193,19 +208,11 @@ static NSString *lyricsLine(NSString *trackID, NSString **next, NSString **trans
         sg_translationTrack = nil;
         sg_translationRevision++;
     }
-    if (!lines) {
-        SGKaraokeRequestLyrics(trackID);
-        if (trackID && ![trackID isEqualToString:sg_missingLyrics]) {
-            sg_missingLyrics = trackID;
-            SGLog(@"live activity: no lyrics yet for %@", trackID);
-        }
+    lines = timedLinesForCard(trackID, lines, none);
+    if (position >= 0) {
+        position += (paused ? 0 : kRenderLeadMs) - SGKaraokeDelayMs();
+        if (!paused) *until = SGKaraokeMsToChange(lines, position, -1);
     }
-    // Plain text has no line being sung: the note, as for a track with no lyrics.
-    if (lines && SGKaraokeLinesTiming(lines) == SGKaraokeTimingNone) lines = nil;
-    *none = !lines && [sg_lookEnded containsObject:trackID] && !SGKaraokeLooking(trackID);
-    NSInteger position = SGKaraokePositionMs();
-    if (position >= 0 && !SGPlayerState().isPaused) position += kRenderLeadMs;
-    if (position >= 0) position -= SGKaraokeDelayMs();
     // With two voices at once, the one that came in first, and the one singing over it as the next.
     NSInteger index = SGKaraokeLeadLine(lines, position);
     // Each line as the lyrics show it: the larger of the words and their pronunciation (SGLyricsShownLine).
@@ -303,40 +310,32 @@ static void readArtwork(SPTPlayerState *state, NSString *trackID) {
 }
 
 static void tick(void) API_AVAILABLE(ios(17.0)) {
-    // Rearm even when the player has not produced a track yet.
-    if (sg_timer) startTimer(kPoll);
-    if (SGLyricsPiPActive()) return;
-    id<SPTPlayer> player = SGKaraokePlayer();
-    SPTPlayerState *state = player.state;
-    if (sg_pipResumePending) {
-        if (!state.isPlaying || state.isPaused) return;
-        sg_pipResumePending = NO;
-    }
+    if (!sg_timer) return;
+    SPTPlayerState *state = SGPlayerState() ?: [(id<SPTPlayer>)SGKaraokePlayer() state];
     SPTPlayerTrack *track = state.track;
-    if (!track.trackTitle.length) return;
+    if (SGLyricsPiPActive() || !track.trackTitle.length ||
+        (sg_pipResumePending && (!state.isPlaying || state.isPaused))) {
+        wakeIn(-1, DISPATCH_TIME_FOREVER);
+        return;
+    }
+    sg_pipResumePending = NO;
     NSString *trackID = SGKaraokePlayingTrack();
 
     NSInteger view = SGInt(SGKeyLiveActivityView, SGLiveActivityLyrics);
     BOOL paused = state.isPaused;
-    // Only the lyrics follow the song line by line; the other views' bar runs by itself from its dates.
-    if (!paused && view == SGLiveActivityLyrics) {
-        NSInteger position = SGKaraokePositionMs();
-        NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
-        double speed = state.playbackSpeed;
-        if (position >= 0 && isfinite(speed) && speed > 0 && SGKaraokeLinesTiming(lines) != SGKaraokeTimingNone) {
-            NSInteger until = SGKaraokeMsToChange(lines, position + kRenderLeadMs - SGKaraokeDelayMs(), -1);
-            if (until > 0 && sg_timer) startTimer(MIN(kPoll, until / (1000.0 * speed)));
-        }
-    }
     // send() would send nothing yet, so nothing is worked out for it.
     // The lyrics are still asked for, so they are there when it sends again.
     if (heldBack()) {
         if (view == SGLiveActivityLyrics && !SGKaraokeLinesForTrack(trackID)) SGKaraokeRequestLyrics(trackID);
+        wakeIn(MAX(0, kRefresh + sg_noneAt.timeIntervalSinceNow), DISPATCH_TIME_FOREVER);
         return;
     }
     NSString *line = @"", *next = @"", *translation = nil;
     BOOL noLyrics = NO;
-    if (view == SGLiveActivityLyrics) line = lyricsLine(trackID, &next, &translation, &noLyrics);
+    NSDate *positionDate = NSDate.date;
+    dispatch_time_t sampledAt = dispatch_time(DISPATCH_TIME_NOW, 0);
+    NSInteger position = SGKaraokePositionMs(), until = -1;
+    if (view == SGLiveActivityLyrics) line = lyricsLine(trackID, position, paused, &next, &translation, &noLyrics, &until);
     NSInteger textSize = view == SGLiveActivityLyrics ? SGInt(SGKeyLiveActivityTextSize, SGLiveActivityTextMedium) : SGLiveActivityTextMedium;
     NSInteger alignment = SGInt(SGKeyLiveActivityAlignment, SGLiveActivityAlignCenter);
     NSInteger withoutLyrics = SGInt(SGKeyLiveActivityWithoutLyrics, SGLiveActivityWithoutLyricsNote);
@@ -349,17 +348,18 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
     BOOL progressBar = SGEnabled(SGKeyLiveActivityProgressBar);
     // The bar runs by itself from where the track started; paused, it holds at the share played.
     double duration = [state respondsToSelector:@selector(duration)] ? state.duration : 0;
-    NSInteger position = SGKaraokePositionMs();
     NSDate *trackStart = nil, *trackEnd = nil;
     NSNumber *pausedAt = nil;
     static NSDate *sentStart;
     double rate = state.playbackSpeed;
+    // Sing clamps the new track to zero while the previous track is still audible.
+    BOOL heldStart = progressBar && !paused && duration > 0 && position == 0 && SGSingLeadOf(state) > 0;
     if (duration > 0 && position >= 0 && (paused || (isfinite(rate) && rate > 0))) {
         double played = position / 1000.0;
         // A paused bar uses its fraction, not dates; no rate is needed while stopped.
         double timelineRate = paused ? 1 : rate;
-        trackStart = [NSDate dateWithTimeIntervalSinceNow:-played / timelineRate];
-        trackStart = [NSDate dateWithTimeIntervalSince1970:round(trackStart.timeIntervalSince1970)];
+        trackStart = [positionDate dateByAddingTimeInterval:-played / timelineRate];
+        if (!heldStart) trackStart = [NSDate dateWithTimeIntervalSince1970:round(trackStart.timeIntervalSince1970)];
         // Playing, the start only moves on a seek or a new track; paused, it creeps on with the clock and
         // the bar is drawn from pausedAt, so it is left out of what tells a new state.
         if (paused) pausedAt = @(MIN(1, played / duration));
@@ -386,6 +386,12 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
     NSInteger tab = panel ? sg_tab : 0;
     SGSleepTimerMode sleepMode = SGSleepTimerCurrentMode();
     NSDate *sleepEnd = SGSleepTimerEnd();
+    // The card's deadline can run just before SleepTimer's expiry callback on main.
+    // Its absolute end has passed either way; don't show Add/Cancel or rearm for the past.
+    if (sleepMode == SGSleepTimerAtTime && sleepEnd.timeIntervalSinceNow <= 0) {
+        sleepMode = SGSleepTimerOff;
+        sleepEnd = nil;
+    }
 
     NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithObjects:@(view).stringValue, paused ? @"1" : @"0", line, next,
         @(tab).stringValue, title, artist, shuffle ? @"1" : @"0", @(repeatMode).stringValue,
@@ -395,8 +401,8 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
         cover ? sg_artTrack : @"", @(textSize).stringValue, @(alignment).stringValue, noLyrics ? @"1" : @"0",
         @(withoutLyrics).stringValue, @(colors).stringValue, accent ?: @"", progressBar ? @"1" : @"0", nil];
     for (NSUInteger i = 0; i < titles.count; i++) [parts addObject:[NSString stringWithFormat:@"%@\t%@\t%@", titles[i], artists[i], uris[i]]];
-    send([parts componentsJoinedByString:@"\n"], ^{
-        [SGLiveActivityBridge showWithView:view paused:paused line:line nextLine:next titles:titles artists:artists uris:uris
+    NSTimeInterval wait = send([parts componentsJoinedByString:@"\n"], ^BOOL {
+        return [SGLiveActivityBridge showWithView:view paused:paused line:line nextLine:next titles:titles artists:artists uris:uris
                                         tab:tab title:title artist:artist shuffle:shuffle repeatMode:repeatMode
                                    timerEnd:sleepEnd timerEndOfTrack:sleepMode == SGSleepTimerEndOfTrack
                             timerEndOfAlbum:sleepMode == SGSleepTimerEndOfAlbum
@@ -404,6 +410,14 @@ static void tick(void) API_AVAILABLE(ios(17.0)) {
                                       cover:cover textSize:textSize alignment:alignment noLyrics:noLyrics
                               withoutLyrics:withoutLyrics colors:colors accent:accent progressBar:progressBar];
     });
+    dispatch_time_t lyricDeadline = DISPATCH_TIME_FOREVER;
+    if (!sg_noneAt && sg_shown) {
+        if (until > 0 && isfinite(rate) && rate > 0)
+            lyricDeadline = dispatch_time(sampledAt, (int64_t)(until / (1000.0 * rate) * NSEC_PER_SEC));
+        if (heldStart && trackStart) wait = MIN(wait, kStartSlack + trackStart.timeIntervalSinceNow);
+        if (sleepEnd) wait = MIN(wait, sleepEnd.timeIntervalSinceNow);
+    }
+    wakeIn(MAX(0, wait), lyricDeadline);
 }
 
 // A tap on a track up next: skips ahead to it, found again by its URI in case the queue moved since
@@ -506,12 +520,34 @@ static void runShortcut(NSString *action, NSMutableDictionary *reply) API_AVAILA
     SGLog(@"shortcut: %@ -> %@", action, reply);
 }
 
+// DidReport includes seeks and changes anywhere in the queue, even when the first
+// upcoming URI (and the ordinary DidChange key) are unchanged.
+@interface SGActivityPlayerObserver : NSObject <SGPlayerStateObserver>
+@property (nonatomic) BOOL pending;
+@end
+@implementation SGActivityPlayerObserver
+- (void)playerStateDidChange:(SPTPlayerState *)state {}
+- (void)playerStateDidReport:(SPTPlayerState *)state {
+    if (@available(iOS 17.0, *)) {
+        if (!sg_timer || self.pending) return;
+        self.pending = YES;
+        // Karaoke selects the new track's offset in DidChange, after DidReport.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.pending = NO;
+            tick();
+        });
+    }
+}
+@end
+
 void SGSetLiveActivityEnabled(BOOL on) {
     if (@available(iOS 17.0, *)) {
         if (sg_timer) dispatch_source_cancel(sg_timer);
         sg_timer = nil;
         sg_shown = nil;
         sg_lastStart = nil;
+        sg_ageDeadline = nil;
+        sg_noneAt = nil;
         sg_translationTrack = nil;
         sg_translationRevision++;
         // A sleep timer runs on its own clock (SleepTimer.m) and stays set: the shortcut and the control set it
@@ -524,6 +560,27 @@ void SGSetLiveActivityEnabled(BOOL on) {
         static dispatch_once_t observing;
         dispatch_once(&observing, ^{
             NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+            [center addObserverForName:SGLyricsAIResultDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+                // The lyrics view applies the saved reading in place during the notification.
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (sg_timer && (!note.object || [note.object isEqual:SGKaraokePlayingTrack()])) tick();
+                });
+            }];
+            static SGActivityPlayerObserver *player;
+            player = [SGActivityPlayerObserver new];
+            SGAddPlayerStateObserver(player);
+            for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationDidEnterBackgroundNotification]) {
+                [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+                    sg_shown = nil; // Reevaluate foreground-only starts and the new age limit.
+                    tick();
+                }];
+            }
+            for (NSNotificationName name in @[SGNowPlayingInfoDidChangeNotification, SGPlayerSpeedDidChangeNotification]) {
+                [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) { tick(); }];
+            }
+            [center addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+                dispatch_async(dispatch_get_main_queue(), ^{ tick(); });
+            }];
             for (NSNotificationName name in @[SGLyricsTranslationSavedNotification, SGLyricsTranslationsDidChangeNotification]) {
                 [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
                     dispatch_async(dispatch_get_main_queue(), ^{
@@ -561,7 +618,10 @@ void SGSetLiveActivityEnabled(BOOL on) {
                 [SGLiveActivityBridge endBeforeExit];
             }];
         });
-        startTimer(kPoll);
+        sg_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, DISPATCH_TIMER_STRICT, dispatch_get_main_queue());
+        dispatch_source_set_event_handler(sg_timer, ^{ tick(); });
+        dispatch_resume(sg_timer);
+        tick();
         SGLog(@"live activity: on");
     }
 }
@@ -578,17 +638,13 @@ void SGSetLiveActivityEnabled(BOOL on) {
                 SGSetLiveActivityEnabled(SGFlag(SGKeyLiveActivity, NO));
             });
         }];
-        // From launch, card on or off, so a look that ends before the card is switched on still counts. Posted on
-        // the main queue, so no queue: it is noted before the post returns.
-        sg_lookEnded = [NSMutableSet set];
-        [NSNotificationCenter.defaultCenter addObserverForName:SGKaraokeLinesKeptNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-            if ([note.object isKindOfClass:NSString.class]) [sg_lookEnded addObject:note.object];
-        }];
+        void (^lyricsChanged)(NSNotification *) = ^(NSNotification *note) {
+            if (sg_timer && (!note.object || [note.object isEqual:SGKaraokePlayingTrack()])) tick();
+        };
+        SGKaraokeObserveLinesKept(lyricsChanged);
         for (NSNotificationName name in @[SGLyricsReadingsDidChangeNotification, SGLyricsLanguageDidChangeNotification,
-                                          SGKaraokeLinesKeptNotification]) {
-            [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
-                if (sg_timer && (!note.object || [note.object isEqual:SGKaraokePlayingTrack()])) tick();
-            }];
+                                          SGKaraokeLookupReadyNotification, SGLyricsOffsetsDidChangeNotification]) {
+            [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:lyricsChanged];
         }
         // Answered inside the post, which the intent makes on the main thread, so the reply is there when it returns.
         [NSNotificationCenter.defaultCenter addObserverForName:@"SGShortcut" object:nil queue:nil usingBlock:^(NSNotification *note) {

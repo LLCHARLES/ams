@@ -6,11 +6,11 @@
 static NSHashTable<UIView *> *badges;
 static char originalMaskKey, hiddenMaskKey;
 static BOOL applying, enabled;
+static Class retrieval;
+static void installBadgeHooks(void);
 
 static BOOL explicitBadge(UIView *view) {
     if ([view.accessibilityIdentifier isEqualToString:@"Components.UI.ExplicitIcon"]) return YES;
-    static Class retrieval;
-    if (!retrieval) retrieval = NSClassFromString(@"_TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_9D5FF3EB21C9757CC8B47C2445B48C7B13ExplicitBadge");
     return retrieval && [view isKindOfClass:retrieval];
 }
 
@@ -42,6 +42,7 @@ static void applyBadge(UIView *view) {
 }
 
 void SGRRefreshExplicitBadges(void) {
+    if (!SGRedesignedUI()) return;
     BOOL next = SGFlag(SGRKeyHideExplicit, NO);
     if (next == enabled) return;
     enabled = next;
@@ -49,6 +50,7 @@ void SGRRefreshExplicitBadges(void) {
         for (UIView *view in badges.allObjects) applyBadge(view);
         return;
     }
+    installBadgeHooks();
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
         if ([scene isKindOfClass:UIWindowScene.class])
             for (UIWindow *window in ((UIWindowScene *)scene).windows) SGForEachView(window, ^(UIView *view) { applyBadge(view); });
@@ -71,6 +73,10 @@ void SGRRefreshExplicitBadges(void) {
 
 %hook CALayer
 - (void)setMask:(CALayer *)mask {
+    if (!NSThread.isMainThread) {
+        %orig;
+        return;
+    }
     id delegate = enabled && !applying ? self.delegate : nil;
     if (delegate && [delegate isKindOfClass:UIView.class] && ((UIView *)delegate).layer == self && explicitBadge(delegate)) {
         objc_setAssociatedObject(delegate, &originalMaskKey, mask ?: NSNull.null, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -81,10 +87,18 @@ void SGRRefreshExplicitBadges(void) {
 }
 %end
 
+static void installBadgeHooks(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        retrieval = SGFileprivateViewClass("_TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_9D5FF3EB21C9757CC8B47C2445B48C7B13ExplicitBadge", UIView.class);
+        %init;
+    });
+}
+
 %ctor {
     if (!SGRedesignedUI()) return;
     enabled = SGFlag(SGRKeyHideExplicit, NO);
-    %init;
+    if (enabled) installBadgeHooks();
     [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         dispatch_async(dispatch_get_main_queue(), ^{ SGPrefsChanged(); SGRRefreshExplicitBadges(); });
     }];

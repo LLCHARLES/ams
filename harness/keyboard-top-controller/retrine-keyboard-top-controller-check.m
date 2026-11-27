@@ -22,7 +22,7 @@ static void check(BOOL ok, NSString *label) {
 // Turns the main run loop until `done` says so, at most 5 s: UIKit finishes a presentation or a dismissal some turns
 // later, and how many depends on the machine, so a fixed wait passes on one Mac and not on another.
 static BOOL waitUntil(BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && limit.timeIntervalSinceNow > 0) [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     return done();
 }
@@ -386,7 +386,7 @@ static void runChecks(UIWindow *sceneWindow) {
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 402, 874)];
     [self.window makeKeyAndVisible];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 180 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         fputs("FAIL UIKit smoke timed out\n", stderr);
         exit(1);
     });

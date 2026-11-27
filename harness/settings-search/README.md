@@ -16,7 +16,7 @@ Mac Catalyst's UIKit, no simulator, no window, no network, no phone. The build p
   the first pass builds one page and the second the one after it; a query typed between passes matches the rows read
   already and is matched again as each pass adds to them; a stopped build is not continued by a pass already
   requested, and an old build's pass leaves a new build alone; the results are told once per pass that read a page and
-  once when the pages end. Depth two and the 60-result cap hold. One case drives the **real run loop**: after
+  once when the pages end. Depth three and the 60-result cap hold. One case drives the **real run loop**: after
   `scheduleStep` nothing else calls the index, and every page within reach is read and `running` ends.
 - **Keywords (candidate 4).** A word only `SGModRow.searchKeywords` holds is found; a row whose title holds the word
   lands over one that only its keywords or its trail hold (both ways round); the trail's page and the row's subtitle

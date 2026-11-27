@@ -411,6 +411,35 @@ static NSString *stackedValue(SGModRow *row) {
     return row.subtitle.length ? [NSString stringWithFormat:@"%@\n%@", row.subtitle, value] : value;
 }
 
+// Two views in reading order, centred on the height: the first at the left end and the second at the right,
+// swapped right to left.
+@interface SGReadingPairView : UIView
+@property (nonatomic, strong) UIView *first;
+@property (nonatomic, strong) UIView *second;
+@end
+
+@implementation SGReadingPairView
+- (instancetype)initWithFirst:(UIView *)first second:(UIView *)second gap:(CGFloat)gap {
+    CGFloat height = MAX(first.bounds.size.height, second.bounds.size.height);
+    if ((self = [super initWithFrame:CGRectMake(0, 0, first.bounds.size.width + gap + second.bounds.size.width, height)])) {
+        _first = first;
+        _second = second;
+        [self addSubview:first];
+        [self addSubview:second];
+    }
+    return self;
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat width = self.bounds.size.width, height = self.bounds.size.height;
+    CGFloat firstWidth = _first.bounds.size.width, secondWidth = _second.bounds.size.width;
+    BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    _first.center = CGPointMake(rtl ? width - firstWidth / 2 : firstWidth / 2, height / 2);
+    _second.center = CGPointMake(rtl ? secondWidth / 2 : width - secondWidth / 2, height / 2);
+}
+@end
+
 static UIView *valueAndChevron(NSString *text) {
     UILabel *label = [UILabel new];
     label.font = SGTitleFont();
@@ -419,14 +448,7 @@ static UIView *valueAndChevron(NSString *text) {
     label.lineBreakMode = NSLineBreakByTruncatingTail;
     [label sizeToFit];
     if (label.bounds.size.width > kValueMaxWidth) label.bounds = CGRectMake(0, 0, kValueMaxWidth, label.bounds.size.height);
-    UIImageView *chevron = SGChevronView();
-    CGFloat height = MAX(label.bounds.size.height, chevron.bounds.size.height);
-    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, label.bounds.size.width + 6 + chevron.bounds.size.width, height)];
-    label.center = CGPointMake(label.bounds.size.width / 2, height / 2);
-    chevron.center = CGPointMake(box.bounds.size.width - chevron.bounds.size.width / 2, height / 2);
-    [box addSubview:label];
-    [box addSubview:chevron];
-    return box;
+    return [[SGReadingPairView alloc] initWithFirst:label second:SGChevronView() gap:6];
 }
 
 // What a row with a value and no page shows on the right: the value, after a swatch of the row's color
@@ -439,24 +461,19 @@ static UIView *valueView(SGModRow *row) {
     label.text = row.value();
     [label sizeToFit];
     if (!row.swatch) return label;
-    CGFloat side = 16, height = MAX(side, label.bounds.size.height);
+    CGFloat side = 16;
     UIColor *fill = row.swatch();
     UIImage *image = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(side, side)] imageWithActions:^(UIGraphicsImageRendererContext *context) {
         [fill setFill];
         [context fillRect:CGRectMake(0, 0, side, side)];
     }];
     UIImageView *swatch = [[UIImageView alloc] initWithImage:image];
-    swatch.frame = CGRectMake(0, (height - side) / 2, side, side);
     swatch.clipsToBounds = YES;
     swatch.layer.cornerRadius = 4;
     swatch.layer.cornerCurve = kCACornerCurveContinuous;
     swatch.layer.borderWidth = 1 / UIScreen.mainScreen.scale;
     swatch.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.3].CGColor;
-    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, side + 8 + label.bounds.size.width, height)];
-    label.center = CGPointMake(side + 8 + label.bounds.size.width / 2, height / 2);
-    [box addSubview:swatch];
-    [box addSubview:label];
-    return box;
+    return [[SGReadingPairView alloc] initWithFirst:swatch second:label gap:8];
 }
 
 // On means the row's own override is in place; anything else, including the opposite override
@@ -1116,7 +1133,7 @@ static void light(UITableViewCell *cell, NSTimeInterval hold, NSTimeInterval fad
     }
     // A switch is seen when it is flipped and a menu when it is picked from, not when their row is touched.
     if (!row.key && !row.readSwitch && !row.menu && markSeen(row)) dropNew([table cellForRowAtIndexPath:path], row);
-    if (row.page) [self.navigationController pushViewController:row.page() animated:YES];
+    if (row.page) SGShowPage(self,row.page());
     if (!row.action) return;
     row.action();
     [table deselectRowAtIndexPath:path animated:YES];
@@ -1181,6 +1198,7 @@ static void light(UITableViewCell *cell, NSTimeInterval hold, NSTimeInterval fad
     SGModRow *row = [self rowAt:path];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:row.title message:row.info preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -1219,6 +1237,7 @@ static void light(UITableViewCell *cell, NSTimeInterval hold, NSTimeInterval fad
                          message:SGL(@"settings.page.locked.alert.message", @"Another switch is forcing this flag, so the row shows what it forces instead of taking a value of its own.")
                   preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -1230,6 +1249,7 @@ static void light(UITableViewCell *cell, NSTimeInterval hold, NSTimeInterval fad
         SGOpenURL(SGRepoURL);
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

@@ -14,6 +14,7 @@
 #import "../UI/ArtistDownloadComponents.h"
 #import "../UI/ArtistListAppearance.h"
 #import "PixiePageController.h"
+#import "PixiePageNavigation.h"
 #import <QuartzCore/QuartzCore.h>
 
 static NSString * const SAPOfflineUnknownArtist = @"Unknown artist";
@@ -341,18 +342,11 @@ static NSString *SAPOfflineReleaseKey(NSDictionary *row) {
             [self showMessage:SAPL(@"settings.pixie.library.still_downloading",@"Still downloading") detail:SAPL(@"settings.pixie.library.wait_to_delete",@"This album is still downloading. Wait until the download finishes, then delete the tracks.")];
             return;
         }
-        NSUInteger offline=0,library=0;NSMutableArray *details=NSMutableArray.array;
-        for(NSDictionary *result in results) {
-            BOOL local=[result[@"offline_removed"]isEqual:@YES],saved=[result[@"library_removed"]isEqual:@YES];offline+=local;library+=saved;
-            if((!local||!saved)&&details.count<5)[details addObject:[NSString stringWithFormat:@"%@: %@",SAPOfflineString(result[@"name"],SAPL(@"settings.pixie.ui.track",@"Track")),SAPOfflineString(result[@"detail"],SAPL(@"settings.pixie.library.removal_unconfirmed",@"Removal was not confirmed."))]];
-        }
         self.tracks=SAPOfflineLibraryRemainingTracks(self.tracks,selection,results);SAPUpdateOfflineLibraryCachedTracks(self.tracks);self.artists=[SAPOfflineLibraryController artistRowsForTracks:self.tracks];
         self.selecting=NO;[self.selectedURIs removeAllObjects];[self.selectedArtistKeys removeAllObjects];[self refresh];
-        BOOL complete=offline==selection.count&&library==selection.count&&!error.length;
-        if(complete){[self showDeleted:SAPL(@"settings.pixie.library.deleted",@"Deleted") detail:SAPL(@"settings.pixie.library.clear_after_delete",@"Clear Spotify's cache to fully remove what you just deleted.") offerCacheClear:YES];return;}
-        NSString *message=[NSString stringWithFormat:SAPL(@"settings.pixie.library.removal_counts",@"Offline removal confirmed: %lu / %lu\nLibrary removal confirmed: %lu / %lu"),(unsigned long)offline,(unsigned long)selection.count,(unsigned long)library,(unsigned long)selection.count];
-        if(details.count)message=[message stringByAppendingFormat:@"\n\n%@",[details componentsJoinedByString:@"\n"]];
-        if(error.length)message=[message stringByAppendingFormat:@"\n\n%@",error];
+        NSUInteger offline=0;
+        NSString *message=SAPOfflineLibraryRemovalSummary(results,selection.count,error,&offline);
+        if(!message){[self showDeleted:SAPL(@"settings.pixie.library.deleted",@"Deleted") detail:SAPL(@"settings.pixie.library.clear_after_delete",@"Clear Spotify's cache to fully remove what you just deleted.") offerCacheClear:YES];return;}
         [self showDeleted:SAPL(@"settings.pixie.library.removal_incomplete",@"Removal incomplete") detail:message offerCacheClear:offline>0];
     });
     [self refreshProgress];
@@ -865,15 +859,19 @@ static NSString *SAPOfflineReleaseKey(NSDictionary *row) {
     SAPOfflineLibraryController *next = SAPOfflineLibraryController.new; next.state = self.state;next.artistKey=self.artistKey;
     if (self.level == 0) { NSDictionary *artist = [self artists][indexPath.row]; next.level = 1; next.pageTitle = artist[@"name"]; next.artistKey = artist[@"key"]; next.scope = artist[@"tracks"]; next.releaseSections = [next buildReleaseSections]; }
     else { NSDictionary *release = self.releaseSections[indexPath.section][@"releases"][indexPath.row]; next.level = 2; next.pageTitle = release[@"name"]; next.releaseKey = release[@"key"]; next.scope = release[@"tracks"]; }
-    next.title = next.pageTitle; [self.navigationController pushViewController:next animated:YES];
+    next.title = next.pageTitle; SAPShowPixiePage(self,next);
 }
 @end
 
 void SAPShowOfflineLibrary(UIViewController *presenter) {
     if(!NSThread.isMainThread){dispatch_async(dispatch_get_main_queue(),^{SAPShowOfflineLibrary(presenter);});return;}
     UINavigationController *navigation=presenter.navigationController;
-    if(!navigation || presenter.presentedViewController)return;
-    SAPOfflineLibraryState *state=SAPOfflineLibraryState.new;state.navigation=navigation;state.originalToolbarHidden=navigation.toolbarHidden;
+    if(presenter.presentedViewController)return;
+    SAPOfflineLibraryState *state=SAPOfflineLibraryState.new;
     SAPOfflineLibraryController *root=SAPOfflineLibraryController.new;root.state=state;root.level=0;root.title=SAPL(@"settings.pixie.library.title",@"Downloaded tracks");state.root=root;
-    [navigation pushViewController:root animated:YES];
+    BOOL push=SAPCanPushPage(navigation,root);
+    if(!push)navigation=SAPFallbackPageStack(root);
+    state.navigation=navigation;state.originalToolbarHidden=navigation.toolbarHidden;
+    if(push)[navigation pushViewController:root animated:YES];
+    else [presenter presentViewController:navigation animated:YES completion:nil];
 }

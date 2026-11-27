@@ -16,6 +16,10 @@ enum { kInNowPlaying = 1, kInLyrics = 2, kInPage = 4 };
 
 %hook CALayer
 - (void)setBackgroundColor:(CGColorRef)color {
+    if (!NSThread.isMainThread) {
+        %orig;
+        return;
+    }
     if (!color) {
         %orig;
         return;

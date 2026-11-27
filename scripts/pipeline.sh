@@ -127,11 +127,11 @@ if ! xcrun -sdk iphoneos --find clang >/dev/null 2>&1; then
 fi
 # Theos builds its Swift support tools only at MAKELEVEL 0, and `make release` hands this script MAKELEVEL 1.
 # A build with FLEX carries the phone driver too (tweak/Makefile, SG_DRIVER); --no-flex leaves it out.
-env -u MAKELEVEL gmake -C "$ROOT/tweak" clean package SG_DRIVER="$WITH_FLEX"
-TWEAK_DEB="$(ls -t "$ROOT"/tweak/packages/*.deb | head -1)"
-echo "    $TWEAK_DEB"
-
-FILES=("$TWEAK_DEB")
+env -u MAKELEVEL gmake -C "$ROOT/tweak" clean stage SG_DRIVER="$WITH_FLEX"
+# cyan injects every dylib in a deb as a host load command. Give it the
+# staged tweak and resources, not the on-demand Go sibling.
+STAGE="$(find "$ROOT/tweak/.theos/_" -type d -path '*/Library/Application Support/Retrine.bundle')"
+FILES=("$ROOT/tweak/.theos/obj/spotifyglass.dylib" "$STAGE")
 [ "$WITH_FLEX" = 1 ] && FILES+=("$FLEX_DEB")
 
 # Source-built Live Activity and share-sheet action extensions.
@@ -198,6 +198,18 @@ WATCH=(-w)
 [ -n "$KEEP_WATCH" ] && WATCH=()
 cyan -i "$IN" -o "$OUT" -f "${FILES[@]}" -l "$OVERLAY" ${BUNDLE_ID:+-b "$BUNDLE_ID"} ${NAME:+-n "$NAME"} ${ICON:+-k "$ICON"} ${WATCH[@]+"${WATCH[@]}"} -s -u --overwrite
 rm -f "$OVERLAY"
+
+if [ "$WIREGUARD" = 1 ]; then
+  (
+    PATCH="$(mktemp -d)"
+    trap 'rm -rf "$PATCH"' EXIT
+    OUT_ABS="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
+    mkdir -p "$PATCH/${APP_DIR}Frameworks"
+    cp "$ROOT/WireGuard/build/libsgwg.dylib" "$PATCH/${APP_DIR}Frameworks/"
+    cd "$PATCH"
+    zip -q "$OUT_ABS" "${APP_DIR}Frameworks/libsgwg.dylib"
+  )
+fi
 
 if [ -n "$KEEP_WATCH" ]; then
   echo "==> keeping the Watch app, its arm64 build only (untested)"
@@ -280,10 +292,16 @@ fi
 
 if [ "$PIXIE" = 1 ]; then
   echo "==> adding the guarded Pixie companion"
-  python3 -B "$ROOT/NativeDownloads/tools/build_retrine_9190.py" "$OUT" --output "$FINAL_OUT"
+  python3 -B "$ROOT/NativeDownloads/tools/build_retrine_9190.py" "$OUT" --output "$PIXIE_WORK/complete.ipa"
+  if [ "$WIREGUARD" = 1 ]; then
+    python3 -B "$ROOT/scripts/spotify-transport-scan.py" "$PIXIE_WORK/complete.ipa" --check-packaged-host
+  fi
+  mv "$PIXIE_WORK/complete.ipa" "$FINAL_OUT"
   OUT="$FINAL_OUT"
   rm -rf "$PIXIE_WORK"
   trap - EXIT
+elif [ "$WIREGUARD" = 1 ]; then
+  python3 -B "$ROOT/scripts/spotify-transport-scan.py" "$OUT" --check-packaged-host
 fi
 
 echo "==> done: $OUT"

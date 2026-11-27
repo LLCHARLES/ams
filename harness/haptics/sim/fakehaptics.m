@@ -169,6 +169,7 @@ BOOL FakeHapticsRecovered(void) {
 FakeHaptics FakeHapticsTake(void) {
     os_unfair_lock_lock(&sg_lock);
     FakeHaptics counts = sg_counts;
+    counts.running = sg_running;
     sg_counts = (FakeHaptics){0};
     sg_counts.rumbling = counts.rumbling;
     os_unfair_lock_unlock(&sg_lock);

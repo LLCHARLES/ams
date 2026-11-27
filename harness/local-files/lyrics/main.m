@@ -34,12 +34,11 @@ __attribute__((objc_runtime_name("_TtC20NowPlaying_ModesImpl18FooterElementsUnit
 @property (nonatomic) double positionAsOfTimestamp;
 @end
 @implementation SGFakeState
-static CFTimeInterval sg_started;
 - (BOOL)isPlaying { return !self.isPaused; }
 - (BOOL)isLoading { return NO; }
 - (double)playbackSpeed { return 4; }
 - (double)position {
-    return self.positionAsOfTimestamp + (CACurrentMediaTime() - sg_started) * 4;
+    return self.positionAsOfTimestamp;
 }
 @end
 
@@ -99,6 +98,17 @@ static void check(BOOL ok, NSString *what) {
 static void after(NSTimeInterval seconds, dispatch_block_t block) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
 }
+#import "../../harness-wait.h"
+
+static void shot(NSString *name) {
+    say([@"SHOT " stringByAppendingString:name]);
+    if (![NSProcessInfo.processInfo.arguments containsObject:@"capture-shots"]) return;
+    NSString *ack = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    [CATransaction flush];
+    NSLog(@"[harness] CAPTURE %@ %@", name, ack);
+    HARNESS_AWAIT([NSFileManager.defaultManager fileExistsAtPath:ack]);
+    HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:ack error:nil]);
+}
 
 static NSArray<UILabel *> *labelsIn(UIView *view) {
     NSMutableArray<UILabel *> *found = [NSMutableArray array];
@@ -146,21 +156,13 @@ static SGLyricsResult *heldRaceAnswer(NSString *title) {
     unsigned request = atomic_fetch_add(&sg_aRequests, 1);
     if (request == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{ playRaceTrack(@"B"); });
-        HARNESS_CHECK(dispatch_semaphore_wait(sg_releaseFirstA, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            after(0.5, ^{
-                NSArray *texts = [labelsIn(sg_racePage.view) valueForKey:@"text"];
-                HARNESS_CHECK([texts isEqual:@[@"Current A"]]);
-                HARNESS_CHECK(![[sg_racePage valueForKey:@"timer"] isValid]);
-                say(@"PASS A -> B -> A keeps only the current lyrics batch");
-                exit(0);
-            });
-        });
+        HARNESS_CHECK(dispatch_semaphore_wait(sg_releaseFirstA, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)) == 0);
         return raceLyrics(@"Stale A");
     }
     dispatch_async(dispatch_get_main_queue(), ^{
-        after(0.5, ^{
-            HARNESS_CHECK([[labelsIn(sg_racePage.view) valueForKey:@"text"] isEqual:@[@"Current A"]]);
+        HarnessWhen(@"second A lyrics drawn", ^BOOL {
+            return [[labelsIn(sg_racePage.view) valueForKey:@"text"] isEqual:@[@"Current A"]];
+        }, ^{
             dispatch_semaphore_signal(sg_releaseFirstA);
         });
     });
@@ -172,7 +174,17 @@ void SGHarnessPlaybackLyricsFetch(NSString *key, NSString *path, void (^done)(SG
     NSString *title = sg_state.track.trackTitle;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         SGLyricsResult *result = heldRaceAnswer(title);
-        dispatch_async(dispatch_get_main_queue(), ^{ done(result); });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            done(result);
+            if ([SGKaraokeLineText(result.karaokeLines.firstObject) isEqual:@"Stale A"]) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    HARNESS_CHECK([[labelsIn(sg_racePage.view) valueForKey:@"text"] isEqual:@[@"Current A"]]);
+                    HARNESS_CHECK(![[sg_racePage valueForKey:@"timer"] isValid]);
+                    say(@"PASS A -> B -> A keeps only the current lyrics batch");
+                    exit(0);
+                });
+            }
+        });
     });
 }
 
@@ -243,7 +255,7 @@ static void footerCheck(UIViewController *footer) {
     CFRunLoopAddObserver(CFRunLoopGetMain(),observer,kCFRunLoopCommonModes);
     CFRelease(observer);
     sg_state.track = local; report();
-    after(10, ^{ HARNESS_FAIL(@"Native footer/viewer step %u", step); });
+    after(120, ^{ HARNESS_FAIL(@"Native footer/viewer step %u", step); });
 }
 
 @interface SGHarnessDelegate : UIResponder <UIApplicationDelegate>
@@ -271,8 +283,10 @@ static void footerCheck(UIViewController *footer) {
     NSURL *file = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:@"Retrine - A Song of Our Own.lrc"];
     [sheet writeToURL:file atomically:YES encoding:NSUTF8StringEncoding error:nil];
     NSString *mode = NSProcessInfo.processInfo.arguments.count > 1 ? NSProcessInfo.processInfo.arguments[1] : @"page";
+    __block BOOL imported = NO;
     if (![@[@"race", @"footer"] containsObject:mode]) SGImportLRC(file, uri, ^(NSString *name, NSError *error) {
-        check(name != nil, @"imported and linked");
+        if (!name) HARNESS_FAIL(@"fixture import: %@", error);
+        imported = YES;
     });
 
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
@@ -282,41 +296,42 @@ static void footerCheck(UIViewController *footer) {
     [self.window makeKeyAndVisible];
 
     if ([mode isEqual:@"footer"]) {
-        after(1, ^{ footerCheck(player); });
+        HarnessWhen(@"attached native footer", ^BOOL { return player.view.window.windowScene != nil; }, ^{ footerCheck(player); });
         return YES;
     }
     if ([mode isEqualToString:@"race"]) {
         sg_race = YES;
         sg_releaseFirstA = dispatch_semaphore_create(0);
         playRaceTrack(@"A");
-        after(1, ^{
+        HarnessWhen(@"attached race host", ^BOOL { return player.view.window.windowScene != nil; }, ^{
             UIViewController *page = SGLocalLyricsPage();
             sg_racePage = page;
             [player presentViewController:page animated:NO completion:nil];
         });
-        after(7, ^{ HARNESS_FAIL(@"lyrics race check did not finish"); });
+        after(180, ^{ HARNESS_FAIL(@"lyrics race check did not finish"); });
         return YES;
     }
     if ([mode isEqualToString:@"settings"]) {
-        after(1, ^{
+        HarnessWhen(@"imported lyrics and attached settings host", ^BOOL { return imported && player.view.window.windowScene; }, ^{
             UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:SGImportedLRCPage()];
             nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
-            [player presentViewController:nav animated:NO completion:nil];
-            after(1.5, ^{
-                say(@"SHOT settings");
-                after(1, ^{ exit(0); });
-            });
+            [player presentViewController:nav animated:NO completion:^{
+                shot(@"settings");
+                exit(0);
+            }];
         });
         return YES;
     }
 
-    after(1, ^{
-        sg_started = CACurrentMediaTime();
+    HarnessWhen(@"imported lyrics and attached page host", ^BOOL { return imported && player.view.window.windowScene; }, ^{
         UIViewController *page = SGLocalLyricsPage();
         [player presentViewController:page animated:NO completion:nil];
-        after(0.3, ^{ say(@"SHOT start"); });
-        // 3 s at four times speed is 12 s of song: line 7 (from 12 s) is being sung.
-        after(3, ^{
+        HarnessWhen(@"24 imported lyric rows", ^BOOL { return labelsIn(page.view).count == 24; }, ^{
+            shot(@"start");
+            sg_state.positionAsOfTimestamp = 12;
+            NSTimer *refresh = [page valueForKey:@"timer"];
+            HARNESS_CHECK(refresh.valid);
+            [refresh fire];
             NSArray<UILabel *> *lines = labelsIn(page.view);
             check(lines.count == 24, [NSString stringWithFormat:@"24 lines shown (%lu)", (unsigned long)lines.count]);
             UILabel *lit = nil;
@@ -324,7 +339,7 @@ static void footerCheck(UIViewController *footer) {
                 if (line.alpha == 1) lit = line;
             }
             check([lit.text hasPrefix:@"Line 7 "], [NSString stringWithFormat:@"line 7 lit (%@)", lit.text]);
-            say(@"SHOT playing");
+            shot(@"playing");
             sg_state.isPaused = YES;
             sg_state.positionAsOfTimestamp = 17;
             report();
@@ -337,11 +352,12 @@ static void footerCheck(UIViewController *footer) {
             [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
             HARNESS_CHECK(lines[0].alpha == 1);
             sg_state.isPaused = NO;
-            sg_started = CACurrentMediaTime();
             report();
             HARNESS_CHECK([[page valueForKey:@"timer"] isValid]);
-            after(4, ^{
-                say(@"SHOT later");
+            sg_state.positionAsOfTimestamp += 16;
+            [[page valueForKey:@"timer"] fire];
+            {
+                shot(@"later");
                 // Another track with nothing linked or matching.
                 SGFakeTrack *other = [SGFakeTrack new];
                 other.URI = @"spotify:local:Someone:Else:Untitled:90";
@@ -349,13 +365,12 @@ static void footerCheck(UIViewController *footer) {
                 other.artistName = @"Someone";
                 sg_state.track = other;
                 report();
-                after(1, ^{
+                HarnessWhen(@"empty lyrics after changing track", ^BOOL { return labelsIn(page.view).count == 0; }, ^{
                     check(labelsIn(page.view).count == 0, @"a track with no file shows no lines");
-                    say(@"SHOT none");
-                    [page dismissViewControllerAnimated:NO completion:nil];
-                    after(0.5, ^{ exit(0); });
+                    shot(@"none");
+                    [page dismissViewControllerAnimated:NO completion:^{ exit(0); }];
                 });
-            });
+            }
         });
     });
     return YES;

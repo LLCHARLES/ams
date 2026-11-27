@@ -4,6 +4,9 @@
 //
 // Threading: any thread (the engine's queue reads the paths too); a library is made once.
 #import <os/lock.h>
+#import <fcntl.h>
+#import <sys/stat.h>
+#import <unistd.h>
 #import "Core/SGCore.h"
 #import "Core/SGDataRoot.h"
 #import "AudioEffects.h"
@@ -112,6 +115,29 @@ static NSError *fileError(NSString *message) {
     return [NSError errorWithDomain:SGDSPFileErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey: message}];
 }
 
+// Shared by import and re-opening a library entry: validate and read the same
+// descriptor. A file growing after fstat must not lift the allocation limit.
+NSMutableData *SGDSPReadTextFile(NSURL *url, NSError **error) {
+    const NSUInteger limit = 1 << 20;
+    int fd = url.isFileURL ? open(url.fileSystemRepresentation, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC) : -1;
+    struct stat st;
+    NSMutableData *data = nil;
+    if (fd >= 0 && fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size >= 0 && st.st_size <= limit) {
+        data = [NSMutableData dataWithCapacity:(NSUInteger)st.st_size];
+        char bytes[16384];
+        for (;;) {
+            ssize_t n = read(fd, bytes, MIN(sizeof bytes, limit + 1 - data.length));
+            if (n < 0 && errno == EINTR) continue;
+            if (n < 0 || data.length + (NSUInteger)n > limit) data = nil;
+            if (!data || !n) break;
+            [data appendBytes:bytes length:(NSUInteger)n];
+        }
+    }
+    if (fd >= 0) close(fd);
+    if (!data && error) *error = fileError(@"Choose a regular text file of at most 1 MiB.");
+    return data;
+}
+
 // Whether the bytes look like a file of the kind, before it goes into the library: a WAV (RIFF, RF64) or
 // FLAC stream, a DDC file's two rates, a Liveprog script's @sample section.
 static BOOL looksLike(SGDSPFileKind kind, NSData *data) {
@@ -137,7 +163,9 @@ NSString *SGDSPImportFile(SGDSPFileKind kind, NSURL *url, NSError **error) {
     }
     BOOL scoped = [url startAccessingSecurityScopedResource];
     NSError *readError = nil;
-    NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&readError];
+    NSData *data = kind == SGDSPFileImpulseResponse
+        ? [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:&readError]
+        : SGDSPReadTextFile(url, &readError);
     if (scoped) [url stopAccessingSecurityScopedResource];
     if (!data) {
         if (error) *error = readError ?: fileError([NSString stringWithFormat:@"%@ could not be read", name]);

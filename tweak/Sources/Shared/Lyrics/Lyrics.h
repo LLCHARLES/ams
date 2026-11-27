@@ -12,13 +12,15 @@
 // from, naming the source (read by the redesign's lyrics view only), the lock screen, which
 // language a line's translation is taken in, of those the lyrics come with, and the one Musixmatch's
 // community translations are asked in (the redesign's lyrics being where translations show), whether lines timed only by the line are swept word by word, whether lines in other alphabets show again in Latin letters, and how much later than the song every line shows.
-SGModSection *SGLyricsSourcesSection(BOOL namingSource);
+NSArray<SGModSection *> *SGLyricsSourcesSections(BOOL namingSource);
+SGModRow *SGDeleteSavedLyricsRow(dispatch_block_t openOfflineSettings);
 SGModRow *SGLockScreenLyricsRow(void);
 SGModRow *SGLyricsTranslationLanguageRow(void);
 SGModRow *SGLyricsWordTimingRow(void);
 SGModRow *SGLyricsRomanisedRow(void);
-// Opens the alphabet and Japanese-reading choices, beneath the existing pronunciation switch.
+// Inline choices beneath the pronunciation switch.
 SGModRow *SGLyricsJapaneseReadingRow(void);
+SGModRow *SGLyricsAlphabetRow(void);
 SGModRow *SGLyricsDelayRow(void);
 
 // Shows a line written in another alphabet (Japanese, Korean, Chinese, Cyrillic, Greek, Thai, Arabic,

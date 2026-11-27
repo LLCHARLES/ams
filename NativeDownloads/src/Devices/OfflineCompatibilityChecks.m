@@ -54,6 +54,14 @@ NSString *SAPDownloadCompatibilityText(NSDictionary *report) {
         l[@"free_licenses"]?:SAPL(@"settings.pixie.compat.value.unknown",@"unknown"),l[@"max_licenses"]?:SAPL(@"settings.pixie.compat.value.unknown",@"unknown"),p[@"allowed"]?([p[@"allowed"]boolValue]?SAPL(@"settings.pixie.compat.value.allowed",@"allowed"):SAPL(@"settings.pixie.compat.value.not_allowed",@"not allowed")):SAPL(@"settings.pixie.compat.value.unknown",@"unknown"),
         n[@"current_tracks"]?:SAPL(@"settings.pixie.compat.value.unknown",@"unknown"),n[@"music_limit"]?:SAPL(@"settings.pixie.compat.value.unknown",@"unknown"),SAPModeChangeBlockReason(report)?:SAPL(@"settings.pixie.compat.permitted_not_guaranteed",@"The checks permit changing the configured mode; downloading is not guaranteed.")];
 }
+// Raw protobuf and registry identities are for the live comparison only, not
+// for the journal, trace or the compatibility snapshot attached to Send log.
+static NSDictionary *diagnosticSource(NSString *name,NSDictionary *source) {
+    if([name isEqual:@"devices"] || [name isEqual:@"local_device"])
+        return @{@"read_status":source[@"read_status"]?:@"unavailable",
+                 @"response_bytes":source[@"response_bytes"]?:@0};
+    NSMutableDictionary *copy=[source mutableCopy];[copy removeObjectForKey:@"response_base64"];return copy;
+}
 static void finishCompatibility(void) {
     if(!currentRead)return;
     if(deadline){dispatch_source_cancel(deadline);deadline=nil;}
@@ -63,9 +71,12 @@ static void finishCompatibility(void) {
     currentRead[@"status"]=complete?@"complete":@"partial";
     currentRead[@"finished_at"]=@(NSDate.date.timeIntervalSince1970);
     NSDictionary *value=[currentRead copy];currentRead=nil;
-    os_unfair_lock_lock(&compatibilityLock);latestCompatibility=value;os_unfair_lock_unlock(&compatibilityLock);
-    SAP_JOURNAL_ACTION(@"quota_license_check_finished",value);
-    SAP_TRACE("compatibility","fresh_check_finished",traceOperation,value);
+    NSMutableDictionary *safe=[value mutableCopy],*safeSources=[NSMutableDictionary dictionary];
+    for(NSString *name in sources)safeSources[name]=diagnosticSource(name,sources[name]);
+    safe[@"sources"]=safeSources;
+    os_unfair_lock_lock(&compatibilityLock);latestCompatibility=safe;os_unfair_lock_unlock(&compatibilityLock);
+    SAP_JOURNAL_ACTION(@"quota_license_check_finished",safe);
+    SAP_TRACE("compatibility","fresh_check_finished",traceOperation,safe);
     NSArray *callbacks=[waiting copy];waiting=nil;
     for(void (^callback)(NSDictionary *) in callbacks)callback(value);
 }
@@ -74,7 +85,7 @@ static void receiveCompatibility(NSString *identifier,NSString *name,NSDictionar
     NSMutableDictionary *sources=currentRead[@"sources"];
     if(sources[name])return;
     sources[name]=result;
-    SAP_TRACE("compatibility","source_observed",traceOperation,@{@"check_id":identifier,@"source":name,@"result":result,@"server_origin_proven":@NO});
+    SAP_TRACE("compatibility","source_observed",traceOperation,@{@"check_id":identifier,@"source":name,@"result":diagnosticSource(name,result),@"server_origin_proven":@NO});
     if(remaining && --remaining==0)finishCompatibility();
 }
 void SAPRefreshDownloadCompatibility(void (^completion)(NSDictionary *)) {

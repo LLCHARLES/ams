@@ -146,10 +146,10 @@ static NSURLSessionConfiguration *carryingProtocol(NSURLSessionConfiguration *co
 %end
 
 %ctor {
-    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) {
-        [counter() flush];
-    }];
+    for (NSNotificationName name in @[UIApplicationWillResignActiveNotification, UIApplicationWillTerminateNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            [counter() flush];
+        }];
     if (SGEnabled(SGKeyBlockTelemetry)) {
         [NSURLProtocol registerClass:SGBlockProtocol.class];
         %init;

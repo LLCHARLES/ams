@@ -35,7 +35,7 @@ NSArray<SGModRow *> *SGRNowPlayingBarRows(void) {
     SGModRow *inlineArtist = SGOptionRow(SGL(@"settings.nowplayingbar.inline_artist.title", @"Artist under the title when minimized"), SGL(@"settings.nowplayingbar.inline_artist.subtitle", @"A second line on the bar between the tabs, when it fits"), SGRKeyBarInlineArtist);
     inlineArtist.waitsOn = SGRKeyNavbarMinimize;
     inlineArtist.changed = ^(BOOL on) { SGRNowPlayingBarFollowTabBar(); };
-    SGModRow *next = SGSwitchRow(SGL(@"settings.nowplayingbar.next_button.title", @"Next button"), SGL(@"settings.nowplayingbar.next_button.subtitle", @"After play on the full now playing bar"), SGRKeyBarNextButton);
+    SGModRow *next = SGSwitchRow(SGL(@"settings.nowplayingbar.next_button.title", @"Next button"), SGL(@"settings.nowplayingbar.next_button.subtitle", @"After play on the full mini player"), SGRKeyBarNextButton);
     next.changed = ^(BOOL on) { SGRNowPlayingBarFollowTabBar(); };
     SGModRow *shape = SGChoiceRow(SGL(@"settings.nowplayingbar.artwork_shape.title", @"Artwork shape"), nil, SGRKeyBarArtworkShape,
                                   @[SGL(@"settings.nowplayingbar.artwork_shape.rounded_square", @"Rounded square"), SGL(@"settings.nowplayingbar.artwork_shape.circle", @"Circle")],
@@ -43,17 +43,19 @@ NSArray<SGModRow *> *SGRNowPlayingBarRows(void) {
     shape.chosen = ^(NSInteger index) { SGRNowPlayingBarFollowTabBar(); };
     // Spotify's own flag for the bar's save button, off unless shown (SGRBarAddFlag): a flip stores the override
     // either way, so a stored choice wins over the redesign's default.
-    SGModRow *hideAdd = SGBlockSwitchRow(SGL(@"settings.nowplayingbar.hide_like.title", @"Hide the like button"), nil,
-        ^BOOL { return SGRBarAddHidden(); },
-        ^(BOOL on) { SGSetFlagOverride(SGRBarAddFlag, @(!on)); });
-    hideAdd.searchIdentifier = SGRBarAddFlag;
+    SGModRow *like = SGBlockSwitchRow(SGL(@"settings.nowplayingbar.hide_like.title", @"Like button"), SGRestartNote,
+        ^BOOL { return !SGRBarAddHidden(); },
+        ^(BOOL on) { SGSetFlagOverride(SGRBarAddFlag, @(on)); });
+    like.searchIdentifier = SGRBarAddFlag;
+    SGModRow *device = SGShownRow(SGL(@"settings.nowplayingbar.hide_device_button.title", @"Device button"),
+        SGL(@"settings.nowplayingbar.hide_device_button.subtitle", @"On the full mini player"), SGRHideBarConnect);
+    device.defaultOn = YES;
     return @[
         minimize,
         inlineConnect,
         inlineArtist,
         next,
         shape,
-        SGSwitchRow(SGL(@"settings.nowplayingbar.hide_device_button.title", @"Hide the device button"), SGL(@"settings.nowplayingbar.hide_device_button.subtitle", @"On the full now playing bar"), SGRHideBarConnect),
-        hideAdd,
+        device, like,
     ];
 }

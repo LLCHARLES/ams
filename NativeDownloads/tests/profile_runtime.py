@@ -7,7 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
-from pixie_target import V9190,V9200
+from pixie_target import V9190,V9200,V9202
 from generate_target import generate_headers
 
 fixture=r'''
@@ -51,6 +51,7 @@ with tempfile.TemporaryDirectory(prefix="pixie-runtime-profile-") as temporary:
     for profile,args in (
         (V9190,("9.1.90","919002269","fbce22c17e1b3e0d9be866ff9291943e","2e074234cfc63f0e9255c9881824167a")),
         (V9200,("9.2.0","920002054","b49e75781d8635d38bb57daf68fed8a8","30bac55f8361373aad607f0535395641")),
+        (V9202,("9.2.2","920202587","bedf0071845d39bbb2d096f9a8095e66","527ccb30a88f3dadb1b985336d3bcad6")),
     ):
         include=folder/profile.version
         generate_headers(include,profile)

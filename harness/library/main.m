@@ -134,6 +134,7 @@ static CGFloat spotifyHeaderHeight(UIView *view) {
 @interface _TtC28YourLibrary_YourLibraryXImpl21YourLibraryHeaderView : UIView
 @property (nonatomic, strong) UIView *gradient, *row, *filters;
 @property (nonatomic) BOOL chained;
+@property (nonatomic) CGFloat rowDisplacement;
 @end
 
 @implementation _TtC28YourLibrary_YourLibraryXImpl21YourLibraryHeaderView
@@ -159,7 +160,15 @@ static CGFloat spotifyHeaderHeight(UIView *view) {
     CGFloat width = self.bounds.size.width;
     CGFloat top = self.window ? self.safeAreaInsets.top : 62;
     self.gradient.frame = CGRectMake(0, 0, width, spotifyHeaderHeight(self));
-    if (self.chained) return;
+    if (self.chained) {
+        // A header-only pass can move the row without changing its size or laying its controls out.
+        if (self.rowDisplacement) {
+            CGRect frame = self.row.frame;
+            frame.origin.y = top + self.rowDisplacement;
+            self.row.frame = frame;
+        }
+        return;
+    }
     self.row.frame = CGRectMake(0, top, width, kRowHeight);
     self.filters.frame = CGRectMake(0, top + kRowHeight, width, kChipsHeight);
 }
@@ -175,10 +184,15 @@ static CGFloat spotifyHeaderHeight(UIView *view) {
 // `bottomfirst`: each pass sets the list's bottom inset on a set of its own first, the top carried in it as the list
 // has it, then the whole inset.
 @property (nonatomic) BOOL bottomFirst;
+@property (nonatomic) BOOL liveInset, omitInset;
 @end
 
 @implementation _TtC28YourLibrary_YourLibraryXImpl15YourLibraryView {
     BOOL _rested;
+}
+- (UIEdgeInsets)safeAreaInsets {
+    // Model a tab whose detached page no longer reports its window's safe top.
+    return self.window ? super.safeAreaInsets : UIEdgeInsetsZero;
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
@@ -190,9 +204,12 @@ static CGFloat spotifyHeaderHeight(UIView *view) {
         carried.bottom = self.safeAreaInsets.bottom;
         self.list.contentInset = carried;
     }
-    UIEdgeInsets inset = self.list.contentInset;
-    inset.top = spotifyHeaderHeight(self);
-    self.list.contentInset = inset;
+    if (!self.omitInset) {
+        if (self.liveInset) [self.wrapper layoutIfNeeded];
+        UIEdgeInsets inset = self.list.contentInset;
+        inset.top = self.liveInset ? self.header.bounds.size.height : spotifyHeaderHeight(self);
+        self.list.contentInset = inset;
+    }
     // The list opens at its top, under the header.
     if (!_rested) {
         _rested = YES;
@@ -957,6 +974,21 @@ void SGRRunSettingsChecks(UIWindow *window);
     [self expectChipsFolded:@"after another page pass"];
 
     if ([args containsObject:@"noclear"]) [self checkFilterWithoutClearChip];
+    if ([args containsObject:@"headerpass"]) {
+        _TtC28YourLibrary_YourLibraryXImpl21YourLibraryHeaderView *header = (id)page.header;
+        UIView *search = self.controls[@"search"];
+        CGFloat before = CGRectGetMidY(SGFrameIn(search, header));
+        header.rowDisplacement = 33;
+        [header setNeedsLayout];
+        [header layoutIfNeeded];
+        CGFloat control = CGRectGetMidY(SGFrameIn(search, header));
+        CGFloat title = CGRectGetMidY(titleIn(header).frame), menu = CGRectGetMidY(menuButtonIn(header).frame);
+        HARNESS_CHECK(near(control - before, header.rowDisplacement));
+        if (fabs(title - control) > 0.5 || !near(menu, control))
+            HARNESS_FAIL(@"header-only pass: title %.1f, menu %.1f, controls %.1f", title, menu, control);
+        printf("PASS all headerpass: title %.1f, menu %.1f, controls %.1f\n", title, menu, control);
+        exit(0);
+    }
     if ([args containsObject:@"safearea"]) [self checkSafeAreaChange];
 
     UICollectionView *list = page.list;
@@ -1069,6 +1101,8 @@ void SGRRunSettingsChecks(UIWindow *window);
 // list Spotify's new inset.
 - (void)checkSafeAreaChange {
     UIViewController *root = self.window.rootViewController;
+    CGFloat normal = self.page.safeAreaInsets.top;
+    self.page.liveInset = [NSProcessInfo.processInfo.arguments containsObject:@"liveinset"];
     root.additionalSafeAreaInsets = UIEdgeInsetsMake(20, 0, 0, 0);
     [self pass];
     [self.window layoutIfNeeded];
@@ -1083,6 +1117,38 @@ void SGRRunSettingsChecks(UIWindow *window);
     root.additionalSafeAreaInsets = UIEdgeInsetsZero;
     [self pass];
     [self expectChipsFolded:@"the safe area back"];
+    if (self.page.liveInset) {
+        // A transient tab pass with a smaller safe area, and no Spotify inset write on return.
+        root.additionalSafeAreaInsets = UIEdgeInsetsMake(8 - normal, 0, 0, 0);
+        [self pass];
+        HARNESS_CHECK(near(self.page.safeAreaInsets.top, 8));
+        [self expectChipsFolded:@"transient small safe area"];
+        self.page.omitInset = YES;
+        root.additionalSafeAreaInsets = UIEdgeInsetsZero;
+        [self pass];
+        HARNESS_CHECK(near(self.page.safeAreaInsets.top, normal));
+        [self expectChipsFolded:@"back without a Spotify inset write"];
+
+        UICollectionView *list = self.page.list;
+        UIView *host = self.page.superview;
+        for (NSString *write in @[@"bottom-only", @"full"]) {
+            CGFloat offset = -list.contentInset.top + 20;
+            list.contentOffset = CGPointMake(list.contentOffset.x, offset);
+            [self.page removeFromSuperview];
+            HARNESS_CHECK(!self.page.window && self.page.safeAreaInsets.top == 0);
+            UIEdgeInsets inset = list.contentInset;
+            inset.bottom += 10;
+            if ([write isEqualToString:@"full"]) inset.top = kRowHeight + kChipsHeight;
+            list.contentInset = inset;
+            [host addSubview:self.page];
+            [self pass];   // omitInset is still on: only the tweak reconciles the inset.
+            CGFloat bottom = CGRectGetMaxY(SGFrameIn(self.page.header, self.page));
+            if (!near(list.contentInset.top, bottom) || !near(list.contentOffset.y, offset))
+                HARNESS_FAIL(@"detached %@ write: inset %.2f (header bottom %.2f), offset %.2f (expected %.2f)",
+                             write, list.contentInset.top, bottom, list.contentOffset.y, offset);
+            printf("PASS detached %s write: inset %.2f, offset %.2f\n", write.UTF8String, list.contentInset.top, list.contentOffset.y);
+        }
+    }
     root.additionalSafeAreaInsets = UIEdgeInsetsMake(20, 0, 0, 0);
     [self pass];
     // The sort row gone when the menu fires it, the list at its top: the chips come back.

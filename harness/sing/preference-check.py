@@ -33,6 +33,11 @@ keys = "\n".join(line for line in header.splitlines()
 keys += "\n" + next(line for line in header.splitlines()
                     if line.startswith("#define SGKeySingButton "))
 helper = body(settings, "BOOL SGSingButtonShown(void)")
+control = (SRC / "Shared/Sing/Sing.x").read_text()
+migration = control[control.index("    NSUserDefaults *defaults =", control.index("%ctor {")):
+                    control.index("    // The 489 MB model", control.index("%ctor {"))]
+keys += "\n" + "\n".join(line for line in header.splitlines()
+                         if line.startswith("#define SGKeySingComputeUnits"))
 row = settings[settings.index("    SGModRow *button ="):
                settings.index("    SGModRow *heat =")]
 initial = next(line for line in view.splitlines() if "_sing.hidden =" in line)
@@ -65,6 +70,19 @@ SGModRow *SGSwitchRow(NSString *title, NSString *subtitle, NSString *key) {
 test = r'''
 int main(void) { @autoreleasepool {
     NSUserDefaults *prefs = NSUserDefaults.standardUserDefaults;
+    [prefs setInteger:1 forKey:SGKeySingComputeUnits];
+    [prefs setInteger:3 forKey:SGKeySingComputeUnitsBefore];
+    migrate();
+    if ([prefs integerForKey:SGKeySingComputeUnits] != 1 || [prefs objectForKey:SGKeySingComputeUnitsBefore]) return 1;
+    [prefs setInteger:2 forKey:SGKeySingComputeUnits];
+    migrate();
+    if ([prefs objectForKey:SGKeySingComputeUnits]) return 1;
+    __block unsigned changes = 0;
+    id observer = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
+        object:nil queue:nil usingBlock:^(NSNotification *n) { changes++; }];
+    migrate();
+    [NSNotificationCenter.defaultCenter removeObserver:observer];
+    if (changes) { NSLog(@"FAIL clean Sing launch posted %u changes", changes); return 1; }
     [prefs removeObjectForKey:SGKeyStock];
     [prefs setBool:YES forKey:SGKeySing];
     NSArray *values = @[NSNull.null, @YES, @NO];
@@ -95,7 +113,9 @@ int main(void) { @autoreleasepool {
     return 0;
 }}
 '''
-source = fixture + keys + "\n" + helper + "\nSGModRow *makeRow(void) {\n" + row + "\nreturn button;\n}\n"
+source = fixture + keys + "\n#define SGLog(...) ((void)0)\n" + body(control, "static NSInteger runsOn(void)")
+source += "\nstatic void migrate(void) {\n" + migration + "}\n"
+source += helper + "\nSGModRow *makeRow(void) {\n" + row + "\nreturn button;\n}\n"
 source += r'''
 @interface Lyrics : NSObject
 @property Mic *sing;

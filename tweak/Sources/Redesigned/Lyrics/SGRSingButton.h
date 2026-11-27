@@ -16,4 +16,6 @@
 // Goes with the host's controls when they are hidden, in the host's animation: its glass dematerializes
 // rather than fading under an alpha, and it takes no touches while tucked.
 @property (nonatomic) BOOL tucked;
+// Its glass drawn again (SGRRefreshGlass), after a view above it faded in.
+- (void)refreshGlass;
 @end

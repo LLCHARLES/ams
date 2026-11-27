@@ -879,6 +879,8 @@ UIView *SGRPreviewAddShelf(SGRPagePreview *card, NSString *headingText, NSUInteg
 #pragma mark - the page
 
 @interface SGRPreviewPage : SGModPage
+@property (nonatomic, copy) NSArray<SGRPagePreview *> *cards;
+@property (nonatomic, strong) UISegmentedControl *picker;
 - (instancetype)initWithTitle:(NSString *)title card:(SGRPagePreview *)card note:(NSString *)note sections:(NSArray<SGModSection *> *)sections;
 @end
 
@@ -901,6 +903,10 @@ UIView *SGRPreviewAddShelf(SGRPagePreview *card, NSString *headingText, NSUInteg
 - (void)viewDidLoad {
     [super viewDidLoad];
     _header = [UIView new];
+    if (_picker) {
+        [_header addSubview:_picker];
+        [_picker addTarget:self action:@selector(pickCard) forControlEvents:UIControlEventValueChanged];
+    }
     [_header addSubview:_card];
     [_header addSubview:_note];
     self.tableView.tableHeaderView = _header;
@@ -913,7 +919,12 @@ UIView *SGRPreviewAddShelf(SGRPagePreview *card, NSString *headingText, NSUInteg
     UITableView *table = self.tableView;
     CGFloat width = table.bounds.size.width, inset = table.layoutMargins.left, inner = width - 2 * inset;
     if (inner <= 0) return;
-    _card.frame = CGRectMake(inset, 2 * SGRGrid, inner, _card.preferredHeight);
+    CGFloat top = 2 * SGRGrid;
+    if (_picker) {
+        _picker.frame = CGRectMake(inset, top, inner, _picker.intrinsicContentSize.height);
+        top = CGRectGetMaxY(_picker.frame) + kNoteGap;
+    }
+    _card.frame = CGRectMake(inset, top, inner, _card.preferredHeight);
     _note.font = SGSubtitleFont();
     CGFloat noteHeight = _note.text.length ? ceil([_note sizeThatFits:CGSizeMake(inner, CGFLOAT_MAX)].height) : 0;
     _note.frame = CGRectMake(inset, CGRectGetMaxY(_card.frame) + kNoteGap, inner, noteHeight);
@@ -927,8 +938,24 @@ UIView *SGRPreviewAddShelf(SGRPagePreview *card, NSString *headingText, NSUInteg
     [_card drawIfStaleInSight];
 }
 
+- (void)pickCard {
+    [_card removeFromSuperview];
+    _card = _cards[(NSUInteger)_picker.selectedSegmentIndex];
+    [_header addSubview:_card];
+    [self.view setNeedsLayout];
+}
+
 @end
 
 UIViewController *SGRPagePreviewPage(NSString *title, SGRPagePreview *card, NSString *note, NSArray<SGModSection *> *sections) {
     return [[SGRPreviewPage alloc] initWithTitle:title card:card note:note sections:sections];
+}
+
+UIViewController *SGRPairedPreviewPage(NSString *title, SGRPagePreview *first, SGRPagePreview *second,
+                                      NSArray<NSString *> *labels, NSString *note, NSArray<SGModSection *> *sections) {
+    SGRPreviewPage *page = [[SGRPreviewPage alloc] initWithTitle:title card:first note:note sections:sections];
+    page.cards = @[first, second];
+    page.picker = [[UISegmentedControl alloc] initWithItems:labels];
+    page.picker.selectedSegmentIndex = 0;
+    return page;
 }

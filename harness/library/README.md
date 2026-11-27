@@ -64,7 +64,13 @@ moves it; the mock's header and its inset for the list follow the safe area the 
 list's inset the chips' band under Spotify's new one each time, and Spotify's new one once the chips come back
 (`SHOTS=<dir>` keeps `library-safearea.png`). `wrapped safearea` checks that the folded stacked header ends at the
 control row and the list inset follows it both ways. `safearea bottomfirst` runs with each page pass setting the list's bottom
-inset on a set of its own, the top carried in it as it stands, before the whole inset. Every menu read and pick goes through the header's own menu button, its deferred element's provider
+inset on a set of its own, the top carried in it as it stands, before the whole inset.
+`wrapped headerpass` moves the row 33pt on a header-only pass and checks the title and menu against Search before
+the page or controls lay out again. `wrapped safearea liveinset` has Spotify write the stacked header's live height
+instead of its chips-included height. The list must meet the folded header as the safe top moves down and back,
+then to 8pt and back without another inset write; unfolding must restore the full inset for the current safe top.
+These reproduce the two stale positions in issue #59, not the unknown tab or settings sequence that triggered them.
+Every menu read and pick goes through the header's own menu button, its deferred element's provider
 run the way UIKit runs it as the menu opens, so the page the button finds from the header is the one checked. `noclear` chooses a filter with no clear chip the menu knows in the chips alone, with no pass of the page's:
 the chips come back on the chips' own pass, fold again when it is cleared there, and with no pass at all are back by
 the time the menu opens. The same run at the largest accessibility text size and right to left, then `settings`

@@ -11,7 +11,7 @@ for f in Redesigned/Library/LibraryHeader.x; do
 done
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER=1 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER=1 \
     -I"$SRC" -I"$SRC/Redesigned/Library" -I"$OUT/gen" -isysroot "$SDK" \
     -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/kit-check.m" "$(dirname "$0")/settings-check.m" "$(dirname "$0")/stubs.m" \

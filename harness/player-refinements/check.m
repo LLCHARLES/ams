@@ -18,7 +18,7 @@
 #import "Redesigned/Kit/SGRAccent.h"
 #import "Redesigned/Kit/SGRRestyle.h"
 #import "Redesigned/Kit/SGRTokens.h"
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 
 static NSUInteger sg_checks;
 static BOOL sg_reduceMotion;
@@ -46,9 +46,9 @@ UIFont *SGMonospacedDigitsFont(UIFont *font) { return [UIFont monospacedDigitSys
 @interface _TtC20NowPlaying_ModesImpl23InformationElementsUnit : UIViewController @end
 @implementation _TtC20NowPlaying_ModesImpl23InformationElementsUnit @end
 
-static void settle(NSTimeInterval seconds) {
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
-}
+static CFTimeInterval digitTime = 1000;
+CFTimeInterval SGHarnessDigitsTime(void) { return digitTime; }
+static void advanceDigits(NSTimeInterval seconds) { digitTime += seconds; }
 
 #pragma mark - rolling time digits: the rules
 
@@ -188,27 +188,28 @@ static void checkRollingLabel(UIWindow *window) {
 
     expectJump(label, @"1:30", @"the first value");
     expectJump(label, @"0:00", @"a scrub right after the first value");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"0:01", @"1", @"0", YES, @"0:00 -> 0:01");
+    advanceDigits(0.020);
     expectJump(label, @"1:45", @"a seek 20 ms later");
     expectJump(label, @"1:46", @"the scrub's next frame");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"1:47", @"7", @"6", YES, @"1:46 -> 1:47");
     UIView *first = overlayOver(label).subviews.firstObject;
     UIImage *seven = [first isKindOfClass:UIImageView.class] ? [(UIImageView *)first image] : nil;
     if (seven) checkDigitPixels(label, seven);
-    settle(0.2);
+    advanceDigits(0.2);
     extern NSUInteger harnessShapedLines;
     NSUInteger shaped = harnessShapedLines;
     expectRoll(label, @"1:50", @"50", @"47", YES, @"1:47 -> 1:50");
     CHECK(shaped == harnessShapedLines, @"unchanged tabular columns shaped again");
     CHECK(seven && seven == [(UIImageView *)overlayOver(label).subviews.lastObject image], @"7 was rasterized twice");
-    settle(0.2);
+    advanceDigits(0.2);
     // The roll before is still running: it is finished first, and this one stands alone.
     expectRoll(label, @"1:59", @"9", @"0", YES, @"1:50 -> 1:59");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"2:00", @"200", @"159", YES, @"1:59 -> 2:00");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"10:00", @"10:00", @"2:00", YES, @"2:00 -> 10:00 (length changes)");
     // The same text again, while that roll runs: nothing new, and the roll goes on.
     UIView *running = overlayOver(label);
@@ -223,40 +224,40 @@ static void checkRollingLabel(UIWindow *window) {
     [label removeFromSuperview];
     CHECK(label.layer.mask == nil && overlayOver(label) == nil, @"leaving the window kept the roll");
     [host addSubview:label];
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"10:01", @"the first change after attaching");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"10:02", @"2", @"1", YES, @"10:01 -> 10:02 after attaching");
 
     // Off any window, nothing rolls.
     [label removeFromSuperview];
     UIView *loose = [UIView new];
     [loose addSubview:label];
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"10:03", @"a label in no window");
     [label removeFromSuperview];
     [host addSubview:label];
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"10:04", @"back in the window");
 
     sg_reduceMotion = YES;
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"10:05", @"5", @"4", NO, @"Reduce Motion crossfades");
     sg_reduceMotion = NO;
 
     // Right to left (a right-to-left mark before Arabic digits) and mixed (a Hebrew letter after the time): shown at
     // once, going in, between two such texts, and going out; a plain time rolls again after.
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"\u200F-\u0663:\u0662\u0661", @"to a right-to-left text");
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"\u200F-\u0663:\u0662\u0660", @"a right-to-left text's change");
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"-3:21 \u05D0", @"to a mixed text");
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"-3:20 \u05D0", @"a mixed text's change");
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(label, @"-3:19", @"from a mixed text");
-    settle(0.2);
+    advanceDigits(0.2);
     expectRoll(label, @"-3:18", @"8", @"9", YES, @"-3:19 -> -3:18 after them");
 
     // A label not marked keeps its digits one width and never rolls.
@@ -264,7 +265,7 @@ static void checkRollingLabel(UIWindow *window) {
     [host addSubview:plain];
     plain.text = @"0:01";
     SGRMonospacedDigits(plain);
-    settle(0.2);
+    advanceDigits(0.2);
     expectJump(plain, @"0:02", @"an unmarked label");
     NSAttributedString *given = [[NSAttributedString alloc] initWithString:@"1:23" attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:13]}];
     label.attributedText = given;
@@ -280,7 +281,7 @@ static void checkRollingLabel(UIWindow *window) {
           @"external same-text attribute edit was not repaired");
     label.font = [UIFont systemFontOfSize:18];
     label.overrideUserInterfaceStyle = UIUserInterfaceStyleLight;
-    settle(.3);
+    advanceDigits(.3);
     expectRoll(label, @"1:27", @"7", @"3", YES, @"font and appearance changed");
     UIImage *resized = [(UIImageView *)overlayOver(label).subviews.firstObject image];
     CHECK(resized != seven, @"old style's bitmap reused");
@@ -294,7 +295,7 @@ static void checkRollingLabel(UIWindow *window) {
     NSDictionary *style = @{NSFontAttributeName:requested};
     CHECK([@"8" sizeWithAttributes:style].width > [@"1" sizeWithAttributes:style].width, @"fixture digits are not proportional");
     for (NSString *time in @[@"0:11", @"1:11", @"1:18"]) {
-        settle(.3);
+        advanceDigits(.3);
         label.attributedText = [[NSAttributedString alloc] initWithString:time attributes:style];
     }
     UIImageView *eight = (UIImageView *)overlayOver(label).subviews.firstObject;
@@ -491,8 +492,7 @@ static void run(UIWindow *window) {
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 390, 844)];
     self.window.rootViewController = [UIViewController new];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (!self.window.windowScene) HARNESS_FAIL(@"the window never joined a scene");
+    HarnessWhen(@"player refinements window joined its scene", ^BOOL { return self.window.windowScene != nil; }, ^{
         run(self.window);
     });
     return YES;

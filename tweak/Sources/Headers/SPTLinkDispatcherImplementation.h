@@ -3,5 +3,5 @@
 #import <Foundation/Foundation.h>
 
 @interface SPTLinkDispatcherImplementation : NSObject
-- (void)navigateToURI:(NSURL *)uri options:(long long)options interactionID:(id)interactionID;
+- (void)navigateToURI:(NSURL *)uri options:(long long)options reason:(id)reason completionHandler:(id)completion resultHandler:(id)result;
 @end

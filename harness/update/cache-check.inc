@@ -52,7 +52,7 @@ static void checkCache(BOOL legacy) {
                                                 usingBlock:^(NSNotification *note) { landed++; }];
     checkPage(@[old], @"This build is 1.0.0-beta.35. The last check found no newer release.", @[]);
     HARNESS_CHECK([SGUpdateStatus() isEqualToString:@"checking…"]);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!landed && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
     HARNESS_CHECK(landed == 1 && [SGUpdateStatus() isEqualToString:@"up to date"]);

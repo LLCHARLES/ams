@@ -107,7 +107,10 @@ NSURL *SGPublicSpotifyURLFromText(NSString *text) {
         return publicWebURL([@"https://" stringByAppendingString:[rest substringFromIndex:@"https//".length]]);
     BOOL eevee = [scheme isEqualToString:@"spotify"] && [rest hasPrefix:@"eevee/"];
     if (eevee) rest = [rest substringFromIndex:@"eevee/".length];
-    if ([rest.lowercaseString hasPrefix:@"https%3a%2f%2f"]) rest = rest.stringByRemovingPercentEncoding;
+    if ([rest.lowercaseString hasPrefix:@"https%3a%2f%2f"]) {
+        rest = rest.stringByRemovingPercentEncoding;
+        if (!rest || [rest rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound) return nil;
+    }
     if ([rest.lowercaseString hasPrefix:@"https://"]) return publicWebURL(rest);
     NSString *host = [rest componentsSeparatedByString:@"/"].firstObject;
     if (spotifyHost(host)) return publicWebURL([@"https://" stringByAppendingString:rest]);

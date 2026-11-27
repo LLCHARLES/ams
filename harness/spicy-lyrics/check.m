@@ -212,6 +212,8 @@ int main(void) {
         CHECK(parse(@"{\"Body\":{\"Type\":\"Static\",\"source\":\"spicy_lyrics\",\"Lines\":[{\"Text\":\"a\"}],"
             "\"UploadAttribution\":{\"Uploader\":{\"username\":\"up\",\"url\":\"javascript:x\"},"
             "\"Maker\":{\"username\":\"mk\",\"url\":\"https://spicylyrics.org/u/mk\"}}}}").creditLinks.count == 1);
+        CHECK(!parse(@"{\"Body\":{\"Type\":\"Static\",\"source\":\"spicy_lyrics\",\"Lines\":[{\"Text\":\"a\"}],"
+            "\"UploadAttribution\":{\"Uploader\":{\"username\":\"up\",\"url\":\"http://spicylyrics.org/u/up\"}}}}").creditLinks.count);
         CHECK([parse(@"{\"Body\":{\"Type\":\"Static\",\"source\":\"other\",\"Lines\":[{\"Text\":\"a\"}]}}").provider
                isEqualToString:@"Spicy Lyrics, source unknown"]);
 
@@ -236,6 +238,7 @@ int main(void) {
         CHECK(!same.pronunciation && !same.translation);   // both read the same as the line
 
         SGLyricsResult *line = parse(@"{\"Body\":{\"Type\":\"Line\",\"source\":\"spotify\",\"Content\":["
+            "{\"Type\":\"Vocal\",\"Text\":\"bad clock\",\"StartTime\":\"broken\",\"EndTime\":5},"
             "{\"Type\":\"Vocal\",\"Text\":\"one line\",\"StartTime\":10.81,\"EndTime\":12,\"OppositeAligned\":false},"
             "{\"Type\":\"Vocal\",\"Text\":\"\",\"StartTime\":12,\"EndTime\":20},"
             "{\"Type\":\"Vocal\",\"Text\":\"two line\",\"StartTime\":20,\"EndTime\":23,\"OppositeAligned\":true,\"TranslatedText\":\"zwei\"}]}}");
@@ -245,6 +248,11 @@ int main(void) {
         CHECK(line.karaokeLines[1].align == SGKaraokeAlignTrailing);
         CHECK(!line.karaokeLines[0].translation && [line.karaokeLines[1].translation isEqualToString:@"zwei"]);
         CHECK([line.provider isEqualToString:@"Spotify via Spicy Lyrics"]);
+        SGLyricsResult *timed = parse(@"{\"Body\":{\"Type\":\"Syllable\",\"Content\":["
+            "{\"Lead\":{\"Syllables\":[{\"Text\":\"bad\",\"StartTime\":86401,\"EndTime\":1}]}},"
+            "{\"Lead\":{\"Syllables\":[{\"Text\":\"zero\",\"StartTime\":0,\"EndTime\":1}]}}]}}");
+        CHECK(timed.karaokeLines.count == 1 && timed.karaokeLines.firstObject.start == 0 &&
+              [SGKaraokeLineText(timed.karaokeLines.firstObject) isEqual:@"zero"]);
         CHECK([SGKaraokeLineText(parse(@"{\"Body\":{\"Type\":\"Line\",\"Content\":[{\"Text\":\"東京\",\"TransliteratedText\":\"Tokyo\","
             "\"StartTime\":1,\"EndTime\":3}]}}").karaokeLines[0].pronunciation) isEqualToString:@"Tokyo"]);
 

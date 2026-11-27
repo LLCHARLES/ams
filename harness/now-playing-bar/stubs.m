@@ -24,6 +24,10 @@ UIColor *SGColorRGB(NSInteger rgb) {
 }
 void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) {}
 BOOL sg_harnessLyricsOpened, sg_harnessQueueOpened;
+NSString *const SGRPlayerVisibilityDidChangeNotification = @"harness.visibility";
+CGRect SGRSettledPlayerRect(UIWindow *window) { return CGRectNull; }
+BOOL SGRPlayerLandscapeCovers(UIWindow *window) { return NO; }
+void SGRObserveVisibility(UIView *view, dispatch_block_t changed) {}
 void SGRPlayerShowLyricsOnOpen(void) { sg_harnessLyricsOpened = YES; }
 void SGRPlayerShowQueue(UIView *from) { sg_harnessQueueOpened = YES; }
 BOOL SGOpenSpotifyURI(NSURL *uri) { return [uri.absoluteString isEqualToString:@"spotify:now-playing"]; }

@@ -17,6 +17,7 @@
 // chevron the left to right one turned around.
 // Exits nonzero on the first failure (harness-fail.h).
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
@@ -70,6 +71,15 @@ static SGRPagePreview *cardIn(UIView *view) {
 
 static UITableView *tableOf(UIViewController *page) {
     return ((UITableViewController *)page).tableView;
+}
+
+static BOOL showsRow(UITableView *table, NSString *title) {
+    for (NSInteger s = 0; s < table.numberOfSections; s++)
+        for (NSInteger r = 0; r < [table numberOfRowsInSection:s]; r++) {
+            UITableViewCell *cell = [table.dataSource tableView:table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:r inSection:s]];
+            if ([((UIListContentConfiguration *)cell.contentConfiguration).text isEqual:title]) return YES;
+        }
+    return NO;
 }
 
 static SGRPagePreview *show(UIViewController *(^builder)(void)) {
@@ -168,6 +178,11 @@ static void runArtistField(void) {
     spin(1.0);
     if ([card.fieldColor isEqual:spotify]) HARNESS_FAIL(@"artist: the field kept Spotify's photo's color under Apple Music's");
     printf("PASS artist field follows the photo\n");
+    SGSetEnabled(SGRKeyArtistCutOutPlay, YES);
+    for (NSNumber *round in @[@NO, @YES]) {
+        SGSetEnabled(SGRKeyArtistRoundPlay, round.boolValue);
+        HARNESS_CHECK(showsRow(tableOf(SGRArtistSettingsPage()), @"Accent Play button") == round.boolValue);
+    }
 }
 
 static UIView *partNamed(UIView *view, NSString *name) {
@@ -197,6 +212,7 @@ static void runReveal(NSString *name, UIViewController *(^builder)(void), void (
 // which the card grows with.
 static void runLooks(NSString *name, UIViewController *(^builder)(void)) {
     reset();
+    window.traitOverrides.preferredContentSizeCategory = UIContentSizeCategoryLarge;
     CGFloat height = show(builder).bounds.size.height;
     NSDictionary<NSString *, NSNumber *> *accents = @{@"accent-light": @0xFFD60A, @"accent-dark": @0x2A1B6E};
     for (NSString *accent in accents) {
@@ -264,6 +280,9 @@ static void runCoverChoices(void) {
     SGSetInt(SGRKeyAlbumPlayCountsSource, 0);
     spin(0.4);
     if (!visibleText(card, @"Your plays: 12")) HARNESS_FAIL(@"menu preview must restore personal source");
+    HARNESS_CHECK(showsRow(tableOf(SGRAlbumSettingsPage()), @"Count source"));
+    SGSetInt(SGRKeyAlbumPlayCountsPlace, SGRAlbumPlayCountsOff);
+    HARNESS_CHECK(!showsRow(tableOf(SGRAlbumSettingsPage()), @"Count source"));
     printf("PASS four cover combinations and both count sources in row/menu previews\n");
 }
 
@@ -435,7 +454,7 @@ static void runMirrors(void) {
         layouts = [NSMutableDictionary dictionary];
     }
     runMirror(@"playlist", ^UIViewController *{ return SGRPlaylistSettingsPage(); }, nil);
-    runMirror(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); }, nil);
+    runMirror(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); }, nil);
     runMirror(@"home", ^UIViewController *{ return SGRHomeSettingsPage(); }, nil);
     runMirror(@"home-plain", ^UIViewController *{ return SGRHomeSettingsPage(); }, ^{ SGSetEnabled(SGRKeyHomeLook, NO); });
     runMirror(@"album", ^UIViewController *{ return SGRAlbumSettingsPage(); }, nil);
@@ -491,7 +510,7 @@ static void runChecks(void) {
                 SGSetEnabled(SGRKeyPlaylistMenuSortMix, NO);
             }, @"Curation pills");
 
-    runPage(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); },
+    runPage(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); },
             @"Tinted glass",
             ^{
                 SGSetEnabled(SGRKeySearchHideWatchFeeds, NO);
@@ -547,7 +566,7 @@ static void runChecks(void) {
     runReveal(@"artist", ^UIViewController *{ return SGRArtistSettingsPage(); }, ^{ SGSetEnabled(SGRKeyArtistHideVideos, NO); }, @"Videos");
 
     runLooks(@"playlist", ^UIViewController *{ return SGRPlaylistSettingsPage(); });
-    runLooks(@"search", ^UIViewController *{ return SGRSearchSettingsPage(); });
+    runLooks(@"search", ^UIViewController *{ return SGRPagePreviewPage(@"Search", SGRSearchPreview(), SGRestartNote, SGRSearchSections()); });
     runLooks(@"home", ^UIViewController *{ return SGRHomeSettingsPage(); });
     runLooks(@"album", ^UIViewController *{ return SGRAlbumSettingsPage(); });
     runLooks(@"artist", ^UIViewController *{ return SGRArtistSettingsPage(); });
@@ -578,6 +597,7 @@ static void runChecks(void) {
 
 @implementation HarnessScene
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    harnessMotion = allowMotion;
     UIWindowScene *windowScene = (UIWindowScene *)scene;
     window = [[UIWindow alloc] initWithWindowScene:windowScene];
     window.frame = windowScene.coordinateSpace.bounds;

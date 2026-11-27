@@ -11,7 +11,10 @@ static const CGFloat kFontSize = 11, kFontMax = 15, kPadX = 7, kPadY = 2, kGlyph
 // The redesign's, measured on the Music app's player (iOS 26, 3x): regular type in a rounded rectangle 18.3 pt tall
 // with 4.6 pt corners, lit by adding light to what is behind it: 17 of 255 for the fill, 107 more for the ink.
 // Increase Contrast draws it over the backdrop in the label colors instead, as the native look's.
-static const CGFloat kRedesignPadY = 2.6, kRedesignCornerShare = 0.25, kRedesignFillLight = 17 / 255.0, kRedesignInkLight = 107 / 255.0;
+// The ink is lifted from 107 to 0.40 (102 of 255), the same as the times' (SGRRestyle.m), and the type from regular to
+// semibold, the times' too: the two read alike. Over a light backdrop the redesign raises both again, and draws them
+// plain where plusL cannot see what is behind (SGAudioQualitySetRedesignedInk).
+static const CGFloat kRedesignPadY = 2.6, kRedesignCornerShare = 0.25, kRedesignFillLight = 17 / 255.0, kRedesignInkLight = 0.40;
 // Kept clear between the badge and either time, and around the badge for a finger.
 static const CGFloat kTimeGap = 8, kTouchOutset = 4;
 static const NSTimeInterval kFade = 0.25;
@@ -314,6 +317,10 @@ static void checkDetails(void) {
 @property (nonatomic) SGAudioTier tier;
 // The redesign's words and glyph (AudioQuality.h), set before the tier.
 @property (nonatomic) BOOL redesigned;
+// The redesign's ink, fill and whether plusL carries them, as it works them out from the backdrop behind the badge
+// (SGAudioQualitySetRedesignedInk); until then the standard ones.
+@property (nonatomic) CGFloat inkAlpha, fillAlpha;
+@property (nonatomic) BOOL plain;
 // Placed, faded in and fitting between the times.
 @property (nonatomic) BOOL shown;
 @property (nonatomic, strong) SGAudioQualityTap *tap;
@@ -381,7 +388,7 @@ static void checkDetails(void) {
 }
 
 - (UIFont *)font {
-    UIFontWeight weight = _redesigned ? UIFontWeightRegular : UIFontWeightSemibold;
+    UIFontWeight weight = UIFontWeightSemibold;
     return [[UIFontMetrics metricsForTextStyle:UIFontTextStyleCaption2] scaledFontForFont:[UIFont systemFontOfSize:kFontSize weight:weight]
                                                                        maximumPointSize:kFontMax compatibleWithTraitCollection:self.traitCollection];
 }
@@ -391,13 +398,27 @@ static void checkDetails(void) {
     return _redesigned && self.traitCollection.accessibilityContrast != UIAccessibilityContrastHigh;
 }
 
+// Whether the light is added to the backdrop (plusL) rather than drawn as a plain white of the same result.
+- (BOOL)adds {
+    return self.lit && !_plain;
+}
+
+- (void)setInk:(CGFloat)ink fill:(CGFloat)fill plain:(BOOL)plain {
+    if (ink == _inkAlpha && fill == _fillAlpha && plain == _plain) return;
+    _inkAlpha = ink;
+    _fillAlpha = fill;
+    _plain = plain;
+    [self updateCompositing];
+    [self setNeedsDisplay];
+}
+
 - (void)setRedesigned:(BOOL)redesigned {
     _redesigned = redesigned;
     [self updateCompositing];
 }
 
 - (void)updateCompositing {
-    self.layer.compositingFilter = self.lit ? @"plusL" : nil;
+    self.layer.compositingFilter = self.adds ? @"plusL" : nil;
 }
 
 // The redesign's before every tier, the native look's before the lossless ones only.
@@ -422,8 +443,8 @@ static void checkDetails(void) {
     UITraitCollection *traits = self.traitCollection;
     BOOL lit = self.lit;
     CGContextRef context = UIGraphicsGetCurrentContext();
-    UIColor *ink = lit ? [UIColor colorWithWhite:1 alpha:kRedesignInkLight] : [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits];
-    UIColor *fill = lit ? [UIColor colorWithWhite:1 alpha:kRedesignFillLight] : [UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits];
+    UIColor *ink = lit ? [UIColor colorWithWhite:1 alpha:_inkAlpha > 0 ? _inkAlpha : kRedesignInkLight] : [UIColor.secondaryLabelColor resolvedColorWithTraitCollection:traits];
+    UIColor *fill = lit ? [UIColor colorWithWhite:1 alpha:_fillAlpha > 0 ? _fillAlpha : kRedesignFillLight] : [UIColor.quaternaryLabelColor resolvedColorWithTraitCollection:traits];
     [fill setFill];
     if (_redesigned) {
         // Circular corners: the Music app's edge follows a circle's, not UIBezierPath's continuous curve.
@@ -436,7 +457,7 @@ static void checkDetails(void) {
         [[UIBezierPath bezierPathWithRoundedRect:bounds cornerRadius:bounds.size.height / 2] fill];
     }
     // The ink adds its light to the fill's, as the Music app's does over its own.
-    CGBlendMode inkBlend = lit ? kCGBlendModePlusLighter : kCGBlendModeNormal;
+    CGBlendMode inkBlend = self.adds ? kCGBlendModePlusLighter : kCGBlendModeNormal;
     CGContextSetBlendMode(context, inkBlend);
 
     UIFont *font = self.font;
@@ -610,6 +631,18 @@ void SGAudioQualityPlaceBadge(UIView *unit) {
 
 void SGAudioQualityPlaceRedesignedBadge(UIView *unit, CGFloat timesDrop) {
     placeBadge(unit, YES, timesDrop);
+}
+
+void SGAudioQualitySetRedesignedInk(UIView *unit, CGFloat ink, CGFloat fill, BOOL plusL) {
+    [(SGAudioQualityBadge *)objc_getAssociatedObject(unit, &kBadgeKey) setInk:ink fill:fill plain:!plusL];
+}
+
+CGFloat SGAudioQualityStandardInk(void) {
+    return kRedesignInkLight;
+}
+
+CGFloat SGAudioQualityStandardFill(void) {
+    return kRedesignFillLight;
 }
 
 UIView *SGAudioQualityShownBadge(UIView *unit) {

@@ -29,7 +29,7 @@ body:
     id: spotify-version
     attributes:
       label: Spotify 버전 / Spotify version
-      description: 모드 설정 → 모드 → Spotify. 지원 버전은 9.1.78, 9.1.88, 9.1.90, 9.2.0이며 다른 버전은 동작이 깨질 수 있습니다. / Mod Settings → Mod → Spotify. Supported versions are 9.1.78, 9.1.88, 9.1.90 and 9.2.0; others may break.
+      description: 모드 설정 → 모드 → Spotify. 지원 버전은 9.1.90과 9.2.0(배포 기준 버전)입니다. / Mod Settings → Mod → Spotify. Supported versions are 9.1.90 and 9.2.0 (release base).
       placeholder: "9.2.0"
     validations:
       required: true

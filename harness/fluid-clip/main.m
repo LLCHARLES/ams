@@ -98,12 +98,19 @@ int main(int argc, char **argv) {
         CGImageRef backdrop = SGLyricsBackgroundCreate(cover, size,
             (SGLyricsBackgroundStyle){SGLyricsBackgroundCover, .45, 20, 0x18181B});
         NSURL *url = [out URLByAppendingPathComponent:@"fluid.mp4"];
+        // A previous run's clip would make the first write collide; only the second write is meant to.
+        [NSFileManager.defaultManager removeItemAtURL:url error:nil];
         printf("fluid.mp4\n");
         CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
         BOOL written = SGFluidClipWrite(url, backdrop, size);
         check(written, [NSString stringWithFormat:@"written in %.0f ms", (CFAbsoluteTimeGetCurrent() - start) * 1000]);
         check(!SGFluidClipWrite([out URLByAppendingPathComponent:@"none.mp4"], NULL, size), @"no cover, no clip");
         if (!written) return 1;
+        NSData *completed = [NSData dataWithContentsOfURL:url];
+        check(!SGFluidClipWrite(url, backdrop, SGLyricsClipSize(192)) &&
+              [[NSData dataWithContentsOfURL:url] isEqual:completed] &&
+              ![NSFileManager.defaultManager fileExistsAtPath:[url URLByAppendingPathExtension:@"partial"].path],
+              @"failed fallback publish preserves the existing clip and removes its partial");
         NSNumber *bytes = nil;
         [url getResourceValue:&bytes forKey:NSURLFileSizeKey error:nil];
         printf("  %.0f KB\n", bytes.doubleValue / 1024);

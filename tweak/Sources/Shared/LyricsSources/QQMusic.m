@@ -166,7 +166,7 @@ static void lyricsFor(SGLyricsRequestContext *context, NSNumber *song, BOOL qrc,
             return result;
         }, ^(SGLyricsResult *result) {
             if (!result && qrc) { lyricsFor(context, song, NO, done); return; }
-            SGLog(@"qqmusic: song %@ gave %lu timed lines", song, (unsigned long)result.karaokeLines.count);
+            SGLog(@"qqmusic: %lu timed lines", (unsigned long)result.karaokeLines.count);
             done(result);
         });
 }
@@ -190,7 +190,7 @@ SGLyricsAsk SGQQMusicAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *
         return songFor(found, title, artist, seconds);
     }, ^(NSNumber *song) {
         if (!song) {
-            SGLog(@"qqmusic: no recording of %@ by %@ near %lds", query.title, lead, (long)query.seconds);
+            SGLog(@"qqmusic: no matching recording");
             done(nil);
             return;
         }

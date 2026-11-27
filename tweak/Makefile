@@ -51,30 +51,29 @@ Sources/Shared/AudioEffects/SGDSPLiveprog.m_CFLAGS := -isystem $(SG_AUDIO)/wdl/e
 
 ifeq ($(WIREGUARD),1)
 spotifyglass_CFLAGS += -DSG_WIREGUARD=1
-spotifyglass_OBJ_FILES += ../WireGuard/build/libsgwg.a
 spotifyglass_FRAMEWORKS += Network Security CoreFoundation
-spotifyglass_LIBRARIES += resolv
 spotifyglass.all.tweak.variables: sg-wireguard
 .PHONY: sg-wireguard
 sg-wireguard:
 	@bash ../WireGuard/build-ios.sh
 
 after-stage::
+	@cp ../WireGuard/build/libsgwg.dylib "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/MobileSubstrate/DynamicLibraries/"
 	@mkdir -p "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Retrine.bundle"
 	@cp ../WireGuard/THIRD_PARTY_LICENSES.txt "$(THEOS_STAGING_DIR)$(THEOS_PACKAGE_INSTALL_PREFIX)/Library/Application Support/Retrine.bundle/WireGuard-THIRD_PARTY_LICENSES.txt"
 endif
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-# Theos caches objects by flags but does not relink when a source list shrinks.
-# Make the mode a link-only prerequisite, excluded from the linker's $^ inputs.
+# Theos caches objects by flags but does not always relink when switching back to
+# already-built objects. Both the driver and WireGuard must match the requested mode.
 # Cached objects are reused; the output path remains the one quick.sh consumes.
 ifeq ($(THEOS_CURRENT_INSTANCE),spotifyglass)
-.PHONY: sg-wireguard-mode
-$(THEOS_OBJ_DIR)/.wireguard-mode: sg-wireguard-mode
+.PHONY: sg-link-mode
+$(THEOS_OBJ_DIR)/.link-mode: sg-link-mode
 	@mkdir -p "$(THEOS_OBJ_DIR)"
-	@printf '%s\n' "$(WIREGUARD)" | cmp -s - "$@" || printf '%s\n' "$(WIREGUARD)" > "$@"
-$(THEOS_OBJ_DIR)/spotifyglass.dylib $(THEOS_OBJ_DIR)/spotifyglass.dylib.$(_THEOS_OUT_FILE_TAG).unsigned: private .EXTRA_PREREQS := $(THEOS_OBJ_DIR)/.wireguard-mode
+	@printf '%s\n' "$(WIREGUARD):$(SG_DRIVER)" | cmp -s - "$@" || printf '%s\n' "$(WIREGUARD):$(SG_DRIVER)" > "$@"
+$(THEOS_OBJ_DIR)/spotifyglass.dylib $(THEOS_OBJ_DIR)/spotifyglass.dylib.$(_THEOS_OUT_FILE_TAG).unsigned: private .EXTRA_PREREQS := $(THEOS_OBJ_DIR)/.link-mode
 endif
 
 # The library is brought up to date before the tweak's instance builds, so the link finds it current.

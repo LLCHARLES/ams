@@ -53,18 +53,21 @@ void SAPExportSupportLog(NSDictionary *native,void (^completion)(NSURL *,NSError
                 report[@"diagnostic_trace"]=SAPTraceExport();
                 NSURL *summary=[SAPDocuments() URLByAppendingPathComponent:@"PixieSupportLog.json"];
                 NSMutableArray *files=[NSMutableArray array];
+                NSString *(*redactor)(NSString *,NSDictionary *)=dlsym(RTLD_DEFAULT,"SGRedactDiagnostics");
+                NSDictionary *preferences=NSUserDefaults.standardUserDefaults.dictionaryRepresentation;
+                NSString *(^redact)(NSString *)=^NSString *(NSString *text){return redactor?redactor(text,preferences):nil;};
                 for(NSString *name in @[@"SpotifyAudioProbeJournal.log",@"SpotifyAudioProbeJournal.1.log",@"PixieActions.log",@"PixieActions.1.log"]) {
                     NSURL *url=[SAPDocuments() URLByAppendingPathComponent:name];
-                    [files addObject:SAPSupportLogReadFile(url)];
+                    [files addObject:SAPSupportLogReadFile(url,redact)];
                 }
                 NSURL *(*retrineReport)(void)=dlsym(RTLD_DEFAULT,"SGWriteDiagnosticsFile");
                 if(retrineReport) {
                     NSURL *url=retrineReport();
-                    if([url isKindOfClass:NSURL.class])[files addObject:SAPSupportLogReadFile(url)];
+                    if([url isKindOfClass:NSURL.class])[files addObject:SAPSupportLogReadFile(url,redact)];
                     else [files addObject:@{@"name":@"retrine-diagnostics.txt",@"read_status":@"unavailable",@"error":@"Retrine did not produce a diagnostics file"}];
                 }else [files addObject:@{@"name":@"retrine-diagnostics.txt",@"read_status":@"unavailable",@"error":@"Retrine diagnostics exporter is not loaded"}];
                 NSURL *eeveeLog=[NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:@"eeveespotify_debug.log"]];
-                [files addObject:SAPSupportLogReadFile(eeveeLog)];
+                [files addObject:SAPSupportLogReadFile(eeveeLog,redact)];
                 NSError *error=nil;
                 BOOL saved=SAPSupportLogWrite(summary,report,journal,SAPJournalSummaryForReport(journal),files,&error);
                 dispatch_async(dispatch_get_main_queue(),^{if(completion)completion(saved?summary:nil,error);});

@@ -219,6 +219,7 @@ NSArray<NSString *> *SGAppFontFamilies(void) {
         }
     }
     sg_made = [NSCache new];
+    sg_made.countLimit = 256;
     %init;
     if (sg_font >= SGAppFontRounded) %init(Designs);
     SGLog(@"fonts: %@ in place of Spotify's", sg_family ?: SGAppFontNames()[sg_font]);

@@ -6,10 +6,12 @@
 #import "Shared/LiveActivity/LiveActivity.h"
 #import "Shared/LiveActivity/SGLiveActivityPreview.h"
 #import "../timer-lifecycle.h"
+#import "../reduce-motion-fixture.h"
 
 extern BOOL HarnessActivityEnabled;
 
 static void previewBackgroundChecks(UIWindow *window) {
+    harnessMotion = allowMotion;
     SGHarnessBeginTimerCapture();
     SGLiveActivityPreview *preview = [SGLiveActivityPreview new];
     [window addSubview:preview];
@@ -65,7 +67,11 @@ static SGModRow *row(SGModPage *page, NSString *title) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [page loadViewIfNeeded];
         [page viewWillAppear:NO];
-        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 7);
+        // The install warning and enable switch are mutually exclusive. This
+        // standalone harness has no bundled widget and exercises the warning path.
+        HARNESS_CHECK(row(page, @"Missing from this install").visible());
+        HARNESS_CHECK(!row(page, @"Live Activity").visible());
+        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 6);
         row(page, @"Live Activity").changed(YES);
         HARNESS_CHECK(HarnessActivityEnabled);
         row(page, @"Live Activity").changed(NO);
@@ -82,15 +88,15 @@ static SGModRow *row(SGModPage *page, NSString *title) {
         [choices tableView:choices.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:1 inSection:0]];
         [page viewWillAppear:NO];
         HARNESS_CHECK([row(page, @"Shows").value() isEqualToString:@"Queue"]);
-        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 3);
+        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 2);
         HARNESS_CHECK([page.tableView numberOfRowsInSection:1] == 3);
         [choices tableView:choices.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:2 inSection:0]];
         [page viewWillAppear:NO];
         HARNESS_CHECK([row(page, @"Shows").value() isEqualToString:@"Control menu"]);
-        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 3);
+        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 2);
         [choices tableView:choices.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]];
         [page viewWillAppear:NO];
-        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 7);
+        HARNESS_CHECK([page.tableView numberOfRowsInSection:0] == 6);
         HARNESS_CHECK([row(page, @"Without lyrics").value() isEqualToString:@"Track"]);
         puts("PASS Live Activity callbacks and conditional rows");
         fflush(stdout);

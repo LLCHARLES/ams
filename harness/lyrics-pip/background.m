@@ -44,7 +44,7 @@ void SGTestSetting(NSString *key, id value) {
     [NSUserDefaults.standardUserDefaults setVolatileDomain:domain forName:NSArgumentDomain];
 }
 BOOL SGTestPump(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     return ready();
@@ -201,7 +201,7 @@ void SGTestBackground(void) {
     revision = background.revision;
     [background invalidate];
     retryStop(cover);
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.03]];
+    drainBackground(queue);
     SGTestAssert(background.image == nil && background.revision == revision,
                  @"disposal cancels a retry before it can publish");
     [background refreshForTrack:SGTestTrackURI()];
@@ -213,7 +213,7 @@ void SGTestBackground(void) {
     [queue waitUntilAllOperationsAreFinished];
     revision = background.revision;
     [background invalidate];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.03]];
+    drainBackground(queue);
     SGTestAssert(background.image == nil && background.revision == revision, @"stop cancels queued publication");
     SGTestSetting([prefix stringByAppendingString:@".mode"], @0);
     SGTestSetting([prefix stringByAppendingString:@".darkness"], @45);

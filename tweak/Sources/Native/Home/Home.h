@@ -28,4 +28,6 @@ NSInteger SGHomeChoiceDefault(SGHomeChoice choice);
 NSInteger SGHomeChoiceValue(SGHomeChoice choice);
 
 UIViewController *SGHomeSettingsPage(void);
+@class SGModSection;
+SGModSection *SGNativeLibrarySection(void);
 UIViewController *SGHomeGradientPage(void);

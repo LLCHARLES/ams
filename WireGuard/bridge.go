@@ -7,16 +7,21 @@ package main
 static inline void reportEngineState(uintptr_t callback, int state) {
 	if (callback) ((void (*)(int))callback)(state);
 }
+static inline int isAdmitted(uintptr_t callback) {
+	return callback && ((int (*)(void))callback)();
+}
 */
 import "C"
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 )
@@ -27,10 +32,11 @@ import (
 // SGWGInspect, which returns the non-secret profile summary for the UI).
 
 var (
-	bridgeMu      sync.Mutex
-	current       *Engine
-	lastError     string
-	stateCallback atomic.Uintptr
+	bridgeMu          sync.Mutex
+	current           *Engine
+	lastError         string
+	stateCallback     atomic.Uintptr
+	admissionCallback atomic.Uintptr
 )
 
 const (
@@ -41,8 +47,9 @@ const (
 )
 
 //export SGWGSetStateCallback
-func SGWGSetStateCallback(callback C.uintptr_t) {
+func SGWGSetStateCallback(callback, admitted C.uintptr_t) {
 	stateCallback.Store(uintptr(callback))
+	admissionCallback.Store(uintptr(admitted))
 }
 
 func cString(v any) *C.char {
@@ -65,53 +72,99 @@ func SGWGInspect(text *C.char) *C.char {
 	return cString(summary)
 }
 
-// SGWGStart starts the engine once per process. listenerFD is a listening
-// TCP socket on 127.0.0.1 created synchronously by Objective-C (so the port is
-// known before the Go runtime is ready); if it is negative the engine listens
-// on 127.0.0.1:port itself. Returns the local port, or -1 on failure.
-//
+type reservedSocket struct {
+	file     *os.File
+	listener net.Listener
+}
+
+// Called once after bootstrap, then only by the single repair worker.
+func (s *reservedSocket) listen() (net.Listener, error) {
+	fd := int(s.file.Fd())
+	if s.listener == nil {
+		// The ObjC reservation shares this socket: closing a dup cannot
+		// undo listen. Allocate the Go descriptor before enabling the port.
+		l, err := net.FileListener(s.file)
+		if err != nil {
+			return nil, err
+		}
+		if err := syscall.Listen(fd, maxUnauthenticatedClients); err != nil {
+			l.Close()
+			return nil, err
+		}
+		s.listener = l
+		return l, nil
+	}
+	// Reuse the Go listener and reject connections queued while its accept
+	// loop was unavailable, without waiting for any new connection.
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		return nil, err
+	}
+	if err := drainBacklog(fd, syscall.Accept); err != nil {
+		return nil, err
+	}
+	return s.listener, nil
+}
+
+var errBacklogBusy = errors.New("local listener backlog still draining")
+
+func drainBacklog(fd int, accept func(int) (int, syscall.Sockaddr, error)) error {
+	// A producer can continuously refill the kernel queue. Yield to repair's
+	// cancellation/backoff after one backlog, without declaring it empty.
+	for range maxUnauthenticatedClients {
+		client, _, err := accept(fd)
+		switch err {
+		case nil:
+			syscall.Close(client)
+		case syscall.EINTR, syscall.ECONNABORTED:
+			continue
+		case syscall.EAGAIN:
+			return nil
+		default:
+			return err
+		}
+	}
+	return errBacklogBusy
+}
+
 //export SGWGStart
-func SGWGStart(text, user, pass *C.char, listenerFD C.int, port C.int) C.int {
+func SGWGStart(text, user, pass *C.char, listenerFD C.int) C.enum_SGWGStartResult {
+	file := os.NewFile(uintptr(listenerFD), "local-proxy")
+	p, err := ParseProfile(C.GoString(text))
+	var e *Engine
+	if err == nil {
+		reservation := &reservedSocket{file: file}
+		e, err = StartEngine(p, C.GoString(user), C.GoString(pass), EngineOptions{
+			Listen:       reservation.listen,
+			Admitted:     func() bool { return C.isAdmitted(C.uintptr_t(admissionCallback.Load())) != 0 },
+			StateChanged: func(state int) { C.reportEngineState(C.uintptr_t(stateCallback.Load()), C.int(state)) },
+		})
+	}
 	bridgeMu.Lock()
 	defer bridgeMu.Unlock()
-	var listener net.Listener
-	if listenerFD >= 0 {
-		file := os.NewFile(uintptr(listenerFD), "ytmu-wireguard-local-proxy")
-		l, err := net.FileListener(file)
+	if err != nil {
 		file.Close()
-		if err != nil {
-			lastError = "local proxy descriptor initialization failed"
-			return -1
-		}
-		listener = l
-	}
-	if current != nil {
-		if listener != nil {
-			listener.Close()
-		}
-		return C.int(current.Port())
-	}
-	p, err := ParseProfile(C.GoString(text))
-	if err != nil {
-		if listener != nil {
-			listener.Close()
-		}
 		lastError = err.Error()
-		return -1
-	}
-	e, err := StartEngine(p, C.GoString(user), C.GoString(pass), EngineOptions{
-		Listener: listener, Port: int(port),
-		StateChanged: func(state int) { C.reportEngineState(C.uintptr_t(stateCallback.Load()), C.int(state)) },
-	})
-	if err != nil {
-		if listener != nil {
-			listener.Close()
+		switch err {
+		case errEndpointDNS, errNoSuitableEP, errWGUp, errListenerTemporary:
+			return C.SGWGStartNetworkUnavailable
+		default:
+			return C.SGWGStartRefused
 		}
-		lastError = err.Error()
-		return -1
 	}
+	e.anchor = file
 	current, lastError = e, ""
-	return C.int(e.Port())
+	return C.SGWGStarted
+}
+
+//export SGWGStop
+func SGWGStop() {
+	bridgeMu.Lock()
+	e := current
+	current = nil
+	bridgeMu.Unlock()
+	if e != nil {
+		e.Close()
+	}
 }
 
 //export SGWGStatus

@@ -432,6 +432,11 @@ enum { SGReportSectionText, SGReportSectionActions, SGReportSectionList, SGRepor
     self.tableView.keyboardDismissMode = UIScrollViewKeyboardDismissModeInteractive;
 }
 
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    SGInsetForBars(self.tableView);
+}
+
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self reloadList];

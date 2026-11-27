@@ -100,6 +100,7 @@ static void forgetOutputs(SGRProgressClock *c) {
 
 static BOOL visible(UIView *view, BOOL *sticky) {
     UIWindow *window = view.window;
+    if (SGRPlayerLandscapeCovers(window)) return NO;
     BOOL mini = NO, player = NO, hidden = NO;
     for (UIView *v = view; v; v = v.superview) {
         NSString *name = v.accessibilityIdentifier;
@@ -112,20 +113,21 @@ static BOOL visible(UIView *view, BOOL *sticky) {
         hidden |= v.hidden || v.alpha == 0;
     }
     if (!window) return NO;
-    if (transitioning && (player || mini)) return YES;
+    // In the interactive compact morph the player rail is live; the mini bar is a snapshot.
+    if (transitioning && (player || mini)) return player || !SGRPlayerInteractiveMorph();
     if (player) {
         // The animator can set its final model alpha before the first frame of a held close.
         // Only the completed portrait lyrics fade authorizes stopping these controls.
         return !controlsFaded || !SGRPlayerLyricsOpen() || CGRectIsNull(SGRSettledPlayerRect(window)) || SGRPlayerTwoColumns() ||
-            window.bounds.size.width > window.bounds.size.height ||
-            [window.windowScene.keyWindow.rootViewController isKindOfClass:NSClassFromString(@"SGRLandscapeLyricsController")] || !hidden;
+            window.bounds.size.width > window.bounds.size.height || !hidden;
     }
     if (!mini && hidden) return NO;
     CGRect cover = SGRSettledPlayerRect(window);
     if (CGRectIsNull(cover)) return YES;
-    // The mini bar is often already hidden. Test actual coverage independently of model alpha.
-    CGRect rect = mini && hidden ? CGRectIntersection(window.bounds, [view convertRect:view.bounds toView:window])
-                                 : SGRVisibleRectInWindow(view);
+    // A settled player and a hidden mini rail need no updates, even if the covered
+    // window still reports the field's last transformed rect from the opening morph.
+    if (mini && hidden) return NO;
+    CGRect rect = SGRVisibleRectInWindow(view);
     return CGRectIsEmpty(rect) || !CGRectContainsRect(cover, rect);
 }
 

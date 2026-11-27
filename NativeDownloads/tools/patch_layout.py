@@ -9,10 +9,14 @@ def text_tail_padding(data):
     for _ in range(struct.unpack_from("<I", data, 16)[0]):
         command, length = struct.unpack_from("<II", data, cursor)
         if command == 0x19 and data[cursor+8:cursor+24].split(b"\0")[0] == b"__TEXT":
-            fileoff, filesize = struct.unpack_from("<QQ", data, cursor+40)
+            vmsize, fileoff, filesize = struct.unpack_from("<QQQ", data, cursor+32)
             count = struct.unpack_from("<I", data, cursor+64)[0]
             if length < 72 or 72 + count * 80 > length or fileoff + filesize > len(data):
                 raise ValueError("Invalid executable text section table")
+            # Padding counts only where the file's bytes are also mapped: a segment that maps less than it
+            # stores would leave a cave in its file tail outside executable memory.
+            if vmsize < filesize:
+                raise ValueError("Executable text segment maps less than it stores")
             section_end = fileoff
             for index in range(count):
                 section = cursor + 72 + index * 80

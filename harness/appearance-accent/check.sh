@@ -54,7 +54,7 @@ cat > "$NAV/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${ACCENT_HOOK:-$SRC/Redesigned/Kit/SGRAccent.x}" > "$OUT/SGRAccent.m"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$SRC/Redesigned/Kit" \
     "$HERE/check.m" "${CONTEXT:-$SRC/Redesigned/Kit/SGRAccentContext.m}" "$OUT/SGRAccent.m" "$SRC/Core/SGPrefs.m" \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework Foundation -o "$OUT/Check.app/Contents/MacOS/check"
@@ -65,7 +65,7 @@ case "${1:-all}" in
     *) "$CHECK/Contents/MacOS/check"; "$CHECK/Contents/MacOS/check" stock ;;
 esac
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${PLAYER_ACCENT:-$SRC/Redesigned/Player/PlayerCoverAccent.x}" > "$OUT/PlayerCoverAccent.m"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$SRC/Redesigned/Kit" -I"$SRC/Redesigned/Player" \
     "$HERE/player-check.m" "$SRC/Redesigned/Kit/SGRAccentContext.m" "$OUT/SGRAccent.m" "$OUT/PlayerCoverAccent.m" \
     "$SRC/Redesigned/Kit/SGRTokens.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGLog.m" \
@@ -78,7 +78,7 @@ for automatic in 0 1; do
         "$PLAYER/Contents/MacOS/player-check" -spotifyglass.redesign.accent.auto "$automatic" -spotifyglass.redesign.player.followsCover "$follow"
     done
 done
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$SRC/Redesigned/Kit" \
     "$HERE/navigation-check.m" "$SRC/Redesigned/Kit/SGRAccentContext.m" "$OUT/SGRAccent.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGTopController.m" \
     -framework UIKit -framework QuartzCore -framework CoreGraphics -framework Foundation -o "$OUT/Navigation.app/Contents/MacOS/navigation-check"

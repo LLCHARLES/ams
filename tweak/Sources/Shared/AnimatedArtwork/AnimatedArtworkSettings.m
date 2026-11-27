@@ -39,13 +39,6 @@ NSArray *SGLockScreenMotionRows(void) {
         };
         SGModRow *translation = SGOptionRow(SGL(@"settings.lockscreen.translations.title", @"Translations"), SGL(@"settings.lockscreen.translations.subtitle", @"Under the line, when the lyrics have one or automatic translation makes one"), SGKeyLockScreenTranslation);
         translation.visible = style.visible;
-        SGModRow *lowData = SGOptionRow(SGL(@"settings.lockscreen.low_data.title", @"Download in Low Data Mode"), SGL(@"settings.lockscreen.low_data.subtitle", @"Moving artwork, up to about 7 MB a song. Applies to animated artwork throughout Retrine."), SGKeyMotionLowData);
-        lowData.visible = ^BOOL {
-            SGLockArtwork artwork = SGLockScreenArtwork();
-            return artwork == SGLockArtworkMotion || artwork == SGLockArtworkEverySong || artwork == SGLockArtworkMotionLyrics;
-        };
-        SGModRow *sources = SGMotionSourcesRow();
-        sources.visible = lowData.visible;
         SGModRow *star = SGOptionRow(SGL(@"settings.lockscreen.star_switch.title", @"Switch with the star"), SGL(@"settings.lockscreen.star_switch.subtitle", @"The lock screen widget's star swaps the moving artwork for the lyrics "
                                                              @"and back. It takes the place of Spotify's like and dislike buttons"),
                                      SGKeyLockScreenStar);
@@ -67,8 +60,6 @@ NSArray *SGLockScreenMotionRows(void) {
             dim,
             translation,
             star,
-            sources,
-            lowData,
         ] mutableCopy];
         NSArray<SGModRow *> *background = SGLyricsBackgroundRows(@"spotifyglass.lockscreen.background");
         background.firstObject.subtitle = SGL(@"settings.background.mode.subtitle", @"Used when moving artwork is unavailable.");
@@ -80,10 +71,9 @@ NSArray *SGLockScreenMotionRows(void) {
             };
         }
         [rows insertObjects:background atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(3, background.count)]];
-        [rows addObject:SGArtworkCacheRow()];
         return rows;
     }
-    return @[SGLockScreenArtworkNeedsRow(), SGArtworkCacheRow()];
+    return @[SGLockScreenArtworkNeedsRow()];
 }
 
 #pragma mark - downloaded covers and artist photos
@@ -130,6 +120,7 @@ static void confirmClearCache(void) {
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.artwork_clear.alert.action", @"Clear") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { clearCache(); }]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 

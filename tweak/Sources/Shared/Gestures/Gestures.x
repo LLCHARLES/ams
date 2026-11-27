@@ -7,8 +7,10 @@
 #import "Core/SGCore.h"
 #import "Gestures.h"
 #import "Headers/SPTNowPlayingPlaybackController.h"
+#import "Shared/WireGuard/SGWGABI.h"
 
 static __weak SPTNowPlayingPlaybackControllerImplementation *sg_player;
+static BOOL sg_gestureAPI;
 static void (^sg_observer)(SGGestureAction action);
 
 void SGGestureSetObserver(void (^observer)(SGGestureAction action)) {
@@ -97,6 +99,15 @@ static void yieldSingleTaps(UIView *host, UITapGestureRecognizer *tap) {
 
 static char kTapKey, kSeenKey;
 
+BOOL SGGestureHandlesTap(UIView *cover) {
+    if (!sg_player || !SGFlag(SGKeyGestures, NO)) return NO;
+    for (UIView *host = cover; host; host = host.superview) {
+        UITapGestureRecognizer *tap = objc_getAssociatedObject(host, &kTapKey);
+        if (tap.view == host && tap.enabled) return YES;
+    }
+    return NO;
+}
+
 // Spotify adds its own recognizers as the player's controllers load, which is not ordered against
 // this hook: the count of what stands above the artwork is watched so a later one still yields.
 static NSUInteger tapsAbove(UIView *host) {
@@ -106,9 +117,9 @@ static NSUInteger tapsAbove(UIView *host) {
 }
 
 void SGGestureAttach(UIView *host) {
-    if (!host || !SGFlag(SGKeyGestures, NO)) return;
+    if (!host || !sg_gestureAPI || !SGFlag(SGKeyGestures, NO)) return;
     UITapGestureRecognizer *tap = objc_getAssociatedObject(host, &kTapKey);
-    if (!tap) {
+    if (tap.view != host) {
         tap = [[UITapGestureRecognizer alloc] initWithTarget:target() action:@selector(doubleTapped:)];
         tap.numberOfTapsRequired = 2;
         [host addGestureRecognizer:tap];
@@ -126,7 +137,7 @@ void SGGestureAttach(UIView *host) {
 %hook SPTNowPlayingPlaybackControllerImplementation
 - (id)initWithPlayer:(id)player testManager:(id)manager inStreamClient:(id)client {
     id controller = %orig;
-    sg_player = controller;
+    sg_player = [controller isKindOfClass:NSClassFromString(@"SPTNowPlayingPlaybackControllerImplementation")] ? controller : nil;
     return controller;
 }
 %end
@@ -135,6 +146,20 @@ void SGGestureAttach(UIView *host) {
 // the half of a double tap that misses, so while the zones are on it would open on the way to every
 // gesture; the tap goes back to Spotify with the switch.
 %ctor {
+    Class cls = NSClassFromString(@"SPTNowPlayingPlaybackControllerImplementation");
+    // Validate the capture hook as well: Logos can otherwise install an absent method.
+    BOOL ok = SGWGMethodMatches(class_getInstanceMethod(cls, @selector(initWithPlayer:testManager:inStreamClient:)), "@", @[@"@", @"@", @"@"]);
+    for (NSString *getter in @[@"seekingAllowed", @"isPaused", @"disallowResuming", @"disallowPausing", @"canSkipNext", @"isShuffling"])
+        ok &= SGWGMethodMatches(class_getInstanceMethod(cls, NSSelectorFromString(getter)), @encode(BOOL), @[]);
+    for (NSString *setter in @[@"setPaused:", @"skipToNextWhileDragging:", @"skipToPreviousWhileDragging:", @"setGlobalShuffleMode:"])
+        ok &= SGWGMethodMatches(class_getInstanceMethod(cls, NSSelectorFromString(setter)), "v", @[@(@encode(BOOL))]);
+    for (NSString *seek in @[@"seekBackwardBySeconds:", @"seekForwardBySeconds:"])
+        ok &= SGWGMethodMatches(class_getInstanceMethod(cls, NSSelectorFromString(seek)), "v", @[@"d"]);
+    if (!ok || !SGWGMethodMatches(class_getInstanceMethod(cls, @selector(toggleRepeatMode)), "v", @[])) {
+        SGLog(@"gestures: playback controller API unavailable");
+        return;
+    }
+    sg_gestureAPI = YES;
     %init;
     SGRequireClasses(@[@"SPTNowPlayingPlaybackControllerImplementation"]);
 }

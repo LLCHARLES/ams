@@ -10,9 +10,14 @@
 static NSString *flushFailureDirectory, *flushFailureTarget;
 static NSDictionary *flushFailureContents;
 static NSUInteger largestAliasLookup;
-BOOL SGLyricsTestProtectedDataAvailable(void) { return NSThread.isMainThread; }
+static NSUInteger flushCount;
+static BOOL launched;
+BOOL SGLyricsTestProtectedDataAvailable(void) {
+    return NSThread.isMainThread && (!getenv("SG_TEST_PRELAUNCH") || launched);
+}
 void SGLyricsTestAliasLookupSize(NSUInteger count) { largestAliasLookup = MAX(largestAliasLookup, count); }
 int SGLyricsTestFsync(int fd) {
+    flushCount++;
     char path[PATH_MAX], actual[PATH_MAX], expected[PATH_MAX];
     if (flushFailureDirectory) {
         CHECK(fcntl(fd, F_GETPATH, path) == 0);
@@ -43,7 +48,13 @@ static void fixtureJSON(NSURL *file, id value) {
     CHECK([NSFileManager.defaultManager createDirectoryAtURL:file.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil]);
     CHECK([[NSJSONSerialization dataWithJSONObject:value options:0 error:nil] writeToURL:file atomically:YES]);
 }
-static void clearFixture(NSURL *root) { CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]); }
+static void removeFixture(NSURL *root, const char *caller) {
+    NSError *error = nil;
+    BOOL removed = [NSFileManager.defaultManager removeItemAtURL:root error:&error];
+    if (!removed) fprintf(stderr, "%s: removing %s: %s\n", caller, root.fileSystemRepresentation, error.description.UTF8String);
+    CHECK(removed);
+}
+#define clearFixture(root) removeFixture(root, __func__)
 static NSUInteger fixtureCount(SGTranslationFiles *store) { return [[store summary:nil][@"count"] unsignedIntegerValue]; }
 static NSArray *fixtureRecords(SGTranslationFiles *store) {
     NSMutableArray *records = [NSMutableArray array];
@@ -178,6 +189,13 @@ static void checkTransferMerge(void) {
 static void checkTransferRejection(void) {
     NSError *error = nil;
     CHECK(!SGTranslationReadJSON([@"{\"x\":1,\"\\u0078\":2}" dataUsingEncoding:NSUTF8StringEncoding], &error) && error);
+    for (NSString *bad in @[@"\\q", @"\\u12xz", @"\\uD800", @"\\uDFFF"]) {
+        NSString *json = [NSString stringWithFormat:@"{\"value\":\"%@\"}", bad];
+        error = nil;
+        CHECK(!SGTranslationReadJSON([json dataUsingEncoding:NSUTF8StringEncoding], &error) &&
+              [error.localizedDescription isEqualToString:@"Invalid JSON or duplicate keys."]);
+    }
+    CHECK([SGTranslationReadJSON([@"{\"value\":\"\\uD83D\\uDE03\"}" dataUsingEncoding:NSUTF8StringEncoding], nil)[@"value"] isEqual:@"😃"]);
     CHECK(!SGTranslationRecordKeyValid(@"../escape.json"));
     CHECK(!SGTranslationRecordKeyValid(@"a\\b.json"));
     CHECK(!SGTranslationEnvelopeValid(@{@"type":@"vitrine.saved-record", @"version":@YES, @"namespace":@"AI", @"key":@"a.json", @"lines":@{}, @"recovery":@NO}));
@@ -189,6 +207,9 @@ static void checkTransferRejection(void) {
     NSArray *files = [SGTranslationTransfer exportRecords:nil sessionRecords:@{} store:store error:&error];
     CHECK(files && !error);
     NSMutableData *damaged = [[NSData dataWithContentsOfURL:files.firstObject] mutableCopy];
+    NSURL *alias = [target URLByAppendingPathComponent:@"alias.zip"];
+    CHECK([NSFileManager.defaultManager createSymbolicLinkAtURL:alias withDestinationURL:files.firstObject error:nil]);
+    CHECK(![SGTranslationTransfer stageURL:alias store:destination error:nil]);
     // Corrupt the later manifest payload, leaving ZIP structure intact.
     NSData *needle = [@"vitrine.saved-archive" dataUsingEncoding:NSUTF8StringEncoding];
     NSRange range = [damaged rangeOfData:needle options:0 range:NSMakeRange(0, damaged.length)];
@@ -620,7 +641,7 @@ static void checkAsyncTranslationDeletion(void) {
         CHECK(NSThread.isMainThread && heartbeat && !error); finished = YES;
     });
     CHECK(!SGLyricsTranslationIsCurrent(@"async-delete", @"ko", token));
-    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(storeEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     dispatch_async(dispatch_get_main_queue(), ^{ heartbeat = YES; dispatch_semaphore_signal(storeRelease); });
     waitFor(^BOOL { return finished; });
     SGLyricsSyncSavedTranslation(@"async-delete", @"ko", lines);
@@ -640,10 +661,107 @@ static void checkPreviewSurvivesUnlock(void) {
     });
     waitFor(^BOOL { return imported; });
     NSArray<SGKaraokeLine *> *lines = aiLines(@[@"line"]);
+    SGLyricsSavedAI(@"notes", @"barrier", @"ko"); // Drain import's queued summary before measuring the lookup.
+    NSUInteger before = flushCount;
     SGLyricsSyncSavedTranslation(@"unlock-preview", @"ko", lines);
+    CHECK(flushCount - before == 4);
     CHECK([lines[0].translation isEqual:@"imported"]);
+    before = flushCount;
+    SGLyricsSyncSavedTranslation(@"missing-preview", @"ko", lines);
+    CHECK(flushCount - before == 4 && !lines[0].translation);
     clearFixture(root);
     SGLyricsDeleteSavedTranslations();
+}
+// An individual delete leaves files in the pre-rename cache. APFS accepts
+// either spelling, but a cold lookup must use the enumerated tombstone.
+static void checkColdDeletedAlias(void) {
+    NSURL *root = storageFixture();
+    NSURL *active = [root URLByAppendingPathComponent:@"Support"];
+    NSURL *cache = [root URLByAppendingPathComponent:@"Retrine"];
+    NSURL *legacy = [root URLByAppendingPathComponent:@"Vitrine/Translations/caf\u00e9.ko.json"];
+    fixtureJSON(legacy, @{@"line":@"deleted"});
+    SGTranslationFiles *store = [[SGTranslationFiles alloc] initWithRoot:active renamedCache:cache];
+    CHECK([store migrate:nil]);
+    NSArray *records = fixtureRecords(store);
+    CHECK(records.count == 1 && [store removeRecords:records all:NO error:nil]);
+    NSString *key = records.firstObject[@"key"];
+    NSString *alias = key.decomposedStringWithCanonicalMapping;
+    if ([key compare:alias options:NSLiteralSearch] == NSOrderedSame) alias = key.precomposedStringWithCanonicalMapping;
+    CHECK([key compare:alias options:NSLiteralSearch] != NSOrderedSame);
+    CHECK([NSFileManager.defaultManager fileExistsAtPath:[legacy.URLByDeletingLastPathComponent URLByAppendingPathComponent:alias].path]);
+    store = [[SGTranslationFiles alloc] initWithRoot:active renamedCache:cache];
+    CHECK([store migrateSpace:@"Translations" key:alias error:nil]);
+    CHECK(![store read:@"Translations" key:alias error:nil]);
+    // On a case-insensitive volume this spelling also opens the very same file.
+    NSString *caseAlias = [alias stringByReplacingOccurrencesOfString:@"caf" withString:@"Caf"];
+    if ([NSFileManager.defaultManager fileExistsAtPath:[legacy.URLByDeletingLastPathComponent URLByAppendingPathComponent:caseAlias].path]) {
+        CHECK([store migrateSpace:@"Translations" key:caseAlias error:nil]);
+        CHECK(![store read:@"Translations" key:caseAlias error:nil]);
+    }
+    clearFixture(root);
+}
+
+// SGSavedRecords delivers its callback before it enqueues refreshSummary on the
+// serial store queue. Let the listing finish enqueueing, then let the summary
+// finish prepare: (which can recreate TranslationState). Empty-key reads are
+// synchronous queue barriers that do not open or create anything on disk.
+static void drainListingBeforeFixtureChange(void) {
+    SGLyricsSavedAI(@"notes", @"", @"ko");
+    SGLyricsSavedAI(@"notes", @"", @"ko");
+}
+
+static void checkColdReadFailure(void) {
+    NSURL *root = SGLyricsTestCacheRoot();
+    fixtureJSON([root URLByAppendingPathComponent:@"Legacy/Translations/broken.ko.json"], @[@"invalid legacy map"]);
+    NSArray<SGKaraokeLine *> *lines = aiLines(@[@"line"]);
+    lines[0].translationMade = YES;
+    lines[0].translation = @"on screen";
+    __block BOOL finished = NO;
+    SGLyricsLoadTranslation(@"broken", @"ko", lines, ^BOOL { return YES; }, ^{ finished = YES; });
+    waitFor(^BOOL { return finished; });
+    CHECK(lines[0].translationMade && [lines[0].translation isEqual:@"on screen"]);
+    // The full maintenance scheduled behind the read must finish before teardown.
+    finished = NO;
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *stats, NSString *warning) {
+        CHECK(warning.length); finished = YES;
+    });
+    waitFor(^BOOL { return finished; });
+    drainListingBeforeFixtureChange();
+    clearFixture(root);
+}
+
+// The first delivery includes same-key legacy lines even while migration of the
+// rest of the library is held. Listing afterwards must see the whole library.
+static void checkFirstRecordRead(void) {
+    NSURL *root = SGLyricsTestCacheRoot();
+    fixtureJSON([root URLByAppendingPathComponent:@"Translations/first.ko.json"], @{@"a":@"primary"});
+    fixtureJSON([root URLByAppendingPathComponent:@"Legacy/Translations/first.ko.json"], @{@"a":@"conflict", @"b":@"legacy"});
+    fixtureJSON([root URLByAppendingPathComponent:@"Legacy/Translations/other.ko.json"], @{@"c":@"other"});
+    dispatch_semaphore_t delivered = dispatch_semaphore_create(0);
+    Method method = class_getInstanceMethod(SGTranslationFiles.class, @selector(migrate:));
+    IMP original = method_getImplementation(method);
+    IMP gated = imp_implementationWithBlock(^BOOL(SGTranslationFiles *store, NSError **error) {
+        CHECK(!dispatch_semaphore_wait(delivered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)));
+        return ((BOOL (*)(id, SEL, NSError **))original)(store, @selector(migrate:), error);
+    });
+    method_setImplementation(method, gated);
+    NSArray<SGKaraokeLine *> *lines = aiLines(@[@"a", @"b"]);
+    __block BOOL loaded = NO, listed = NO;
+    SGLyricsLoadTranslation(@"first", @"ko", lines, ^BOOL { return YES; }, ^{
+        CHECK([lines[0].translation isEqual:@"primary"] && [lines[1].translation isEqual:@"legacy"]);
+        dispatch_semaphore_signal(delivered);
+        loaded = YES;
+    });
+    waitFor(^BOOL { return loaded; });
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *stats, NSString *warning) {
+        CHECK(!warning && records.count == 3); // first, its recovery, and other
+        listed = YES;
+    });
+    waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
+    method_setImplementation(method, original);
+    imp_removeBlock(gated);
+    clearFixture(root);
 }
 // Runs in its own process before anything opens the store: a failed startup pass leaves abandoned
 // import stages, and the next maintenance chance must still reclaim them.
@@ -653,6 +771,7 @@ static void checkStartupReclaimRetry(void) {
     __block BOOL listed = NO;
     SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(warning.length); listed = YES; });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]);
     NSURL *abandoned = [[root URLByAppendingPathComponent:@"TranslationImports"] URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
     CHECK([NSFileManager.defaultManager createDirectoryAtURL:abandoned withIntermediateDirectories:YES attributes:nil error:nil]);
@@ -660,8 +779,54 @@ static void checkStartupReclaimRetry(void) {
     listed = NO;
     SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(!warning); listed = YES; });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     CHECK(![NSFileManager.defaultManager fileExistsAtPath:abandoned.path]);
     clearFixture(root);
+}
+static void checkStartupUnlock(void) {
+    // Only substitute the OS base directory. SGDataRoot still inspects, renames and caches it.
+    NSURL *base = storageFixture();
+    Method directories = class_getInstanceMethod(NSFileManager.defaultManager.class, @selector(URLsForDirectory:inDomains:));
+    IMP original = method_getImplementation(directories);
+    IMP isolated = imp_implementationWithBlock(^NSArray *(NSFileManager *fm, NSSearchPathDirectory directory, NSSearchPathDomainMask domain) {
+        if (directory == NSApplicationSupportDirectory) return @[base];
+        return ((NSArray *(*)(id, SEL, NSSearchPathDirectory, NSSearchPathDomainMask))original)(fm, @selector(URLsForDirectory:inDomains:), directory, domain);
+    });
+    method_setImplementation(directories, isolated);
+    NSURL *root = [base URLByAppendingPathComponent:@"Retrine"];
+    NSURL *legacy = [base URLByAppendingPathComponent:@"Vitrine/Legacy/Translations/early.ko.json"];
+    fixtureJSON(legacy, @{@"line":@"migrated"});
+    NSString *orphan = [@"TranslationImports" stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    CHECK([NSFileManager.defaultManager createDirectoryAtURL:[[base URLByAppendingPathComponent:@"Vitrine"] URLByAppendingPathComponent:orphan]
+        withIntermediateDirectories:YES attributes:nil error:nil]);
+    __block BOOL listed = NO;
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) {
+        CHECK(warning.length && !records.count); listed = YES;
+    });
+    waitFor(^BOOL { return listed; });
+    CHECK([NSFileManager.defaultManager fileExistsAtPath:legacy.path]);
+    CHECK(![NSFileManager.defaultManager fileExistsAtPath:root.path]);
+    launched = !getenv("SG_TEST_LOCKED_LAUNCH");
+    [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidFinishLaunchingNotification object:nil];
+    if (!launched) {
+        listed = NO;
+        SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) {
+            CHECK(warning.length && !records.count); listed = YES;
+        });
+        waitFor(^BOOL { return listed; });
+        CHECK([NSFileManager.defaultManager fileExistsAtPath:legacy.path]);
+        [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationProtectedDataDidBecomeAvailable object:nil];
+    }
+    listed = NO;
+    SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) {
+        CHECK(!warning && records.count == 1); listed = YES;
+    });
+    waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
+    method_setImplementation(directories, original);
+    CHECK(![NSFileManager.defaultManager fileExistsAtPath:[root URLByAppendingPathComponent:orphan].path]);
+    imp_removeBlock(isolated);
+    clearFixture(base);
 }
 static void checkMigrationWarningPersists(void) {
     SGLyricsDeleteSavedTranslations();

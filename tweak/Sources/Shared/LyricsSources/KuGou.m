@@ -16,8 +16,8 @@ static const NSUInteger kMostBytes = 1 << 20;
 static const uint8_t kKey[16] = {64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105};
 
 NSArray<SGKaraokeLine *> *SGKuGouLines(NSString *content) {
-    NSData *packed = [content isKindOfClass:NSString.class]
-        ? [[NSData alloc] initWithBase64EncodedString:content options:NSDataBase64DecodingIgnoreUnknownCharacters] : nil;
+    if (![content isKindOfClass:NSString.class] || content.length > 4 * ((kMostBytes + 2) / 3)) return nil;
+    NSData *packed = [[NSData alloc] initWithBase64EncodedString:content options:NSDataBase64DecodingIgnoreUnknownCharacters];
     if (packed.length <= 4 || packed.length > kMostBytes || memcmp(packed.bytes, "krc1", 4) != 0) return nil;
     NSMutableData *zipped = [[packed subdataWithRange:NSMakeRange(4, packed.length - 4)] mutableCopy];
     uint8_t *bytes = zipped.mutableBytes;
@@ -35,9 +35,10 @@ static NSString *stringIn(id value) {
     return [value isKindOfClass:NSString.class] ? value : [value isKindOfClass:NSNumber.class] ? [value stringValue] : nil;
 }
 
-static NSInteger msIn(NSDictionary *candidate) {
-    id duration = candidate[@"duration"];
-    return [duration respondsToSelector:@selector(integerValue)] ? [duration integerValue] : 0;
+static double msIn(NSDictionary *candidate) {
+    if (!candidate[@"duration"]) return 0;   // unknown, not a malformed supplied duration
+    double duration;
+    return SGLyricsNumber(candidate[@"duration"], &duration) ? duration : -1;
 }
 
 static NSDictionary<NSString *, NSString *> *headers(void) {
@@ -62,7 +63,7 @@ static void tryLyrics(SGLyricsRequestContext *context, NSArray *candidates, NSUI
         return lines;
     }, ^(NSArray<SGKaraokeLine *> *lines) {
         if (lines) {
-            SGLog(@"kugou: lyrics %@ have %lu word timed lines", stringIn(candidate[@"id"]), (unsigned long)lines.count);
+            SGLog(@"kugou: %lu word timed lines", (unsigned long)lines.count);
             done(lines);
         } else {
             tryLyrics(context, candidates, index + 1, done);
@@ -77,7 +78,8 @@ SGLyricsAsk SGKuGouAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *re
         done(nil);
         return;
     }
-    NSInteger ms = query.seconds * 1000;
+    NSInteger ms = SGLyricsSecondsToMs(@(query.seconds));
+    if (ms < 0) { done(nil); return; }
     NSMutableDictionary<NSString *, NSString *> *search = [@{@"ver": @"1", @"man": @"yes", @"client": @"mobi", @"hash": @"",
         @"album_audio_id": @"", @"keyword": [NSString stringWithFormat:@"%@ - %@", lead, query.title]} mutableCopy];
     if (ms > 0) search[@"duration"] = @(ms).stringValue;
@@ -94,15 +96,16 @@ SGLyricsAsk SGKuGouAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *re
             if ([candidate[@"product_from"] isEqual:@"ugc"]) continue;
             if (![SGLyricsMatchKey(candidate[@"song"]) isEqualToString:title]) continue;
             if (!SGLyricsSameArtist(candidate[@"singer"], lead)) continue;
-            if (ms > 0 && msIn(candidate) > 0 && labs(msIn(candidate) - ms) > kLengthSlackMs) continue;
+            double duration = msIn(candidate);
+            if (duration < 0 || (ms > 0 && duration > 0 && fabs(duration - ms) > kLengthSlackMs)) continue;
             [fitting addObject:candidate];
         }
         [fitting sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-            return [@(labs(msIn(a) - ms)) compare:@(labs(msIn(b) - ms))];
+            return [@(fabs(msIn(a) - ms)) compare:@(fabs(msIn(b) - ms))];
         }];
         return [fitting copy];
     }, ^(NSArray *fitting) {
-        if (!fitting.count) SGLog(@"kugou: no recording of %@ by %@ near %lds", query.title, lead, (long)query.seconds);
+        if (!fitting.count) SGLog(@"kugou: no matching recording");
         tryLyrics(query.requestContext, fitting, 0, ^(NSArray<SGKaraokeLine *> *lines) {
             if (!lines.count) {
                 done(nil);

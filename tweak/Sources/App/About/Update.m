@@ -66,6 +66,13 @@ static NSString *stringOr(id value, NSString *fallback) {
     return [value isKindOfClass:NSString.class] ? value : fallback;
 }
 
+static NSString *githubLink(id value) {
+    if (![value isKindOfClass:NSString.class]) return nil;
+    NSURL *url = [NSURL URLWithString:value];
+    return [url.scheme.lowercaseString isEqual:@"https"] && [url.host.lowercaseString isEqual:@"github.com"] &&
+        !url.user && !url.password && (!url.port || [url.port isEqual:@443]) ? url.absoluteString : nil;
+}
+
 BOOL SGBuildIsBeta(void) {
     return strchr(SG_VERSION, '-') != NULL;
 }
@@ -105,7 +112,7 @@ static NSString *takeCommitURL(NSString **line) {
     NSTextCheckingResult *match = [trailer firstMatchInString:text options:0 range:NSMakeRange(0, text.length)];
     if (!match) return nil;
     *line = [text substringToIndex:match.range.location];
-    return [text substringWithRange:[match rangeAtIndex:1]];
+    return githubLink([text substringWithRange:[match rangeAtIndex:1]]);
 }
 
 // A release body into its lines: "### Features" names what follows, "* …" is a line of it, and a
@@ -169,7 +176,7 @@ NSArray<SGUpdateRelease *> *SGUpdateReleases(void) {
         release.version = version;
         release.prerelease = prerelease;
         release.date = stringOr(entry[@"date"], @"");
-        release.url = stringOr(entry[@"url"], nil);
+        release.url = githubLink(entry[@"url"]);
         release.changes = SGUpdateChangesIn(stringOr(entry[@"notes"], @""));
         [releases addObject:release];
     }
@@ -232,12 +239,13 @@ NSArray<NSDictionary *> *SGUpdateReleasesFrom(NSData *data) {
             @"version": [tag hasPrefix:@"v"] ? [tag substringFromIndex:1] : tag,
             @"notes": stringOr(release[@"body"], @""),
             @"date": stringOr(release[@"published_at"], @""),
-            @"url": stringOr(release[@"html_url"], @""),
+            @"url": githubLink(release[@"html_url"]) ?: @"",
             @"prerelease": @(prerelease),
         }];
     }
-    [entries sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
-        return SGVersionIsNewer(a[@"version"], b[@"version"]) ? NSOrderedAscending : NSOrderedDescending;
+    [entries sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        if (SGVersionIsNewer(a[@"version"], b[@"version"])) return NSOrderedAscending;
+        return SGVersionIsNewer(b[@"version"], a[@"version"]) ? NSOrderedDescending : NSOrderedSame;
     }];
     return entries.count > kKept ? [entries subarrayWithRange:NSMakeRange(0, kKept)] : entries;
 }
@@ -264,12 +272,13 @@ static void ask(NSString *url, NSData *body, void (^done)(NSArray<NSDictionary *
     [session finishTasksAndInvalidate];
 }
 
-void SGCheckForUpdate(BOOL force) {
+BOOL SGCheckForUpdate(BOOL force) {
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     NSTimeInterval last = [store doubleForKey:kChecked];
-    if (!SGUpdateURL || sg_running) return;
+    if (sg_running) return YES;
+    if (!SGUpdateURL) return NO;
     if (!force && last > 0 && NSDate.date.timeIntervalSince1970 - last < kInterval &&
-        [[store stringForKey:kCheckedBuild] isEqualToString:@(SG_VERSION)]) return;
+        [[store stringForKey:kCheckedBuild] isEqualToString:@(SG_VERSION)]) return NO;
 
     // Consume the build-change bypass even if this request fails. kChecked still dates the last success.
     [store setObject:@(SG_VERSION) forKey:kCheckedBuild];
@@ -293,4 +302,5 @@ void SGCheckForUpdate(BOOL force) {
         });
     };
     ask(SGUpdateURL, nil, finish);
+    return YES;
 }

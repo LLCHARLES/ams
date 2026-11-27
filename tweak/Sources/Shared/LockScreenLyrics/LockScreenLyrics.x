@@ -8,8 +8,6 @@
 #import "Core/SGCore.h"
 #import "LockScreenLyrics.h"
 #import "Shared/Lyrics/Lyrics.h"
-#import "Shared/LyricsSources/LyricsSources.h"
-#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SpeedPitch.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
@@ -93,24 +91,7 @@ static NSInteger nextBoundary(NSArray<SGKaraokeLine *> *lines, NSInteger index, 
     return boundary == NSIntegerMax ? -1 : boundary - position;
 }
 
-// Both lock-screen readers wait for the lookup's completion, including the first
-// usable Spotify headers if playback began before any request carried them.
-NSTimeInterval SGLockLyricsRequestMissing(NSString *track) {
-    if (!track) return -1;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        __block BOOL deferred = NO;
-        SGSpclientHeaders(^(NSDictionary *headers) {
-            if (deferred && (sg_lock || SGLockArtworkShowsLyrics(SGLockScreenArtwork())))
-                SGKaraokeRequestLyrics(SGKaraokePlayingTrack());
-        });
-        deferred = YES;
-    });
-    SGKaraokeRequestLyrics(track);
-    // After a 401, a replacement authorization is captured silently. No callback
-    // is available for *renewed* headers; retain the prior retry latency on failure.
-    return !SGKaraokeLooking(track) && SGLyricsLoadFailed(track) ? 0.25 : -1;
-}
+extern NSNotificationName const SGKaraokeLookupReadyNotification;
 
 static NSString *textOf(NSArray<SGKaraokeWord *> *words) {
     SGKaraokeLine *line = [SGKaraokeLine new];
@@ -194,7 +175,7 @@ static NSString *lineFor(NSDictionary *info, double elapsed, NSTimeInterval *wai
     NSString *trackID = SGKaraokePlayingTrack();
     NSArray<SGKaraokeLine *> *lines = SGKaraokeLinesForTrack(trackID);
     if (!lines) {
-        *wait = SGLockLyricsRequestMissing(trackID);
+        SGKaraokeRequestLyrics(trackID);
         return nil;
     }
     // Plain text has no line being sung to show.
@@ -429,7 +410,7 @@ static void lookNow(void) {
     }];
     }
     // Lines kept for a track, or replaced by better timed ones, can change the line at once.
-    for (NSNotificationName name in @[SGKaraokeLinesKeptNotification, SGLyricsReadingsDidChangeNotification,
+    for (NSNotificationName name in @[SGKaraokeLookupReadyNotification, SGKaraokeLinesKeptNotification, SGLyricsReadingsDidChangeNotification,
                                       SGLyricsLanguageDidChangeNotification, SGLyricsOffsetsDidChangeNotification]) {
     [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
         if (!note.object || [note.object isEqual:SGKaraokePlayingTrack()]) tick(NO);

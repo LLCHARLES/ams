@@ -8,7 +8,7 @@ import argparse
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("areas", nargs="+", choices=["player", "system-menu", "album"])
-parser.add_argument("--player-scenario", choices=["background", "automix"], default="background")
+parser.add_argument("--player-scenario", choices=["background", "automix", "renderer"], default="background")
 parser.add_argument("--menu-scenarios", nargs="+", choices=["background", "rows", "loading", "quick", "quicklate"], default=["background"])
 args = parser.parse_args()
 

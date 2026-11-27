@@ -7,16 +7,31 @@
 NSNotificationName const SGTranslatedTitleDidChangeNotification = @"spotifyglass.translatedTitleDidChange";
 NSNotificationName const SGTitleTranslationSettingsDidChangeNotification = @"spotifyglass.titleTranslationSettingsDidChange";
 
-static BOOL contains(NSString *text, NSString *pattern) {
-    return [text rangeOfString:pattern options:NSRegularExpressionSearch].location != NSNotFound;
+static NSRegularExpression *expression(NSString *scripts) {
+    static NSDictionary *expressions;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary *compiled = [NSMutableDictionary dictionary];
+        for (NSString *name in @[@"L", @"Latin", @"Hangul", @"Hiragana|Katakana|Han", @"Hiragana|Katakana",
+                                 @"Han", @"Cyrillic", @"Greek", @"Arabic", @"Hebrew", @"Thai", @"Devanagari"]) {
+            NSString *parts = [name stringByReplacingOccurrencesOfString:@"|" withString:@"}|\\p{"];
+            compiled[name] = [NSRegularExpression regularExpressionWithPattern:[NSString stringWithFormat:@"\\p{%@}", parts]
+                                                                        options:0 error:nil];
+        }
+        expressions = [compiled copy];
+    });
+    return expressions[scripts];
+}
+static BOOL contains(NSString *text, NSString *scripts) {
+    return [expression(scripts) rangeOfFirstMatchInString:text options:0 range:NSMakeRange(0, text.length)].location != NSNotFound;
 }
 BOOL SGLyricsTitleLatinArtist(NSString *artist) {
-    if (![artist isKindOfClass:NSString.class] || artist.length > 64000 || !contains(artist, @"\\p{Latin}")) return NO;
-    NSString *other = [artist stringByReplacingOccurrencesOfString:@"\\p{Latin}" withString:@"" options:NSRegularExpressionSearch range:NSMakeRange(0, artist.length)];
-    return !contains(other, @"\\p{L}");
+    if (![artist isKindOfClass:NSString.class] || artist.length > 64000 || !contains(artist, @"Latin")) return NO;
+    NSString *other = [expression(@"Latin") stringByReplacingMatchesInString:artist options:0 range:NSMakeRange(0, artist.length) withTemplate:@""];
+    return !contains(other, @"L");
 }
 BOOL SGLyricsTitleNeedsTranslation(NSString *title, NSString *languageTag) {
-    if (![title isKindOfClass:NSString.class] || !title.length || title.length > 64000 || !SGGoogleTargetLanguage(languageTag) || !contains(title, @"\\p{L}")) return NO;
+    if (![title isKindOfClass:NSString.class] || !title.length || title.length > 64000 || !SGGoogleTargetLanguage(languageTag) || !contains(title, @"L")) return NO;
     NSString *target = [[[languageTag stringByReplacingOccurrencesOfString:@"_" withString:@"-"] componentsSeparatedByString:@"-"] firstObject].lowercaseString;
     if ([target isEqual:@"iw"]) target = @"he";
     // Short titles give uncertain language guesses. A different writing system still supplies evidence;
@@ -26,18 +41,18 @@ BOOL SGLyricsTitleNeedsTranslation(NSString *title, NSString *languageTag) {
         @"th": @"Thai", @"hi": @"Devanagari"};
     NSString *script = scripts[target];
     if (!script && [@[@"en", @"fr", @"de", @"es", @"it", @"pt", @"nl", @"sv", @"da", @"no", @"nb", @"fi", @"pl", @"cs", @"vi", @"id", @"tr", @"ro"] containsObject:target]) script = @"Latin";
-    if (script) {
-        NSMutableArray *patterns = [NSMutableArray array];
-        for (NSString *part in [script componentsSeparatedByString:@"|"]) [patterns addObject:[NSString stringWithFormat:@"\\p{%@}", part]];
-        if (!contains(title, [patterns componentsJoinedByString:@"|"])) return YES;
-    }
-    NLLanguageRecognizer *recognizer = [NLLanguageRecognizer new];
+    if (script && !contains(title, script)) return YES;
+    NSMutableDictionary *thread = NSThread.currentThread.threadDictionary;
+    NSString *key = @"spotifyglass.titleLanguageRecognizer";
+    NLLanguageRecognizer *recognizer = thread[key];
+    if (!recognizer) thread[key] = recognizer = [NLLanguageRecognizer new];
+    [recognizer reset];
     [recognizer processString:title];
     NSDictionary *hypotheses = [recognizer languageHypothesesWithMaximum:1];
     NSString *found = hypotheses.allKeys.firstObject;
     if (!found || [found isEqual:@"und"] || [hypotheses[found] doubleValue] < 0.8) return NO;
     NSString *source = [[found componentsSeparatedByString:@"-"] firstObject];
-    if ([target isEqual:@"ja"] && [source isEqual:@"zh"] && !contains(title, @"\\p{Hiragana}|\\p{Katakana}")) return NO;
+    if ([target isEqual:@"ja"] && [source isEqual:@"zh"] && !contains(title, @"Hiragana|Katakana")) return NO;
     return ![source isEqual:target];
 }
 

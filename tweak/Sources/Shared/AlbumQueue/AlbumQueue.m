@@ -1,5 +1,6 @@
 #import "Core/SGCore.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsSources/SGBoundedRequest.h"
 #import "Shared/Player/PlayerState.h"
 #import "Headers/SPTPlayer.h"
 #import "AlbumQueue.h"
@@ -68,9 +69,9 @@ void SGAlbumQueueAdd(NSString *uri, void (^done)(NSUInteger, NSString *)) {
         http.timeoutInterval = 15;
         http.allHTTPHeaderFields = headers;
         [http setValue:@"application/json" forHTTPHeaderField:@"Accept"];
-        [[NSURLSession.sharedSession dataTaskWithRequest:http completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        [SGBoundedRequestTask(http, 0, ^(NSData *data, NSURLResponse *response, NSError *error) {
             NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
-            id context = status == 200 && data.length > 0 && data.length <= 2 * 1024 * 1024 ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+            id context = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
             NSString *reason;
             NSArray *uris = SGAlbumQueueTrackURIs(context, uri, &reason);
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -105,6 +106,6 @@ void SGAlbumQueueAdd(NSString *uri, void (^done)(NSUInteger, NSString *)) {
                     [request finish:0 error:@"Spotify could not add the album to the queue."];
                 } on:dispatch_get_main_queue()];
             });
-        }] resume];
+        }) resume];
     });
 }

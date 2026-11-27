@@ -177,7 +177,9 @@ static opcodeRec *primary(Parser *p, int *assignable) {
 
 /* rvalue '[' ']' and rvalue '[' expression ']', which are assignable. */
 static opcodeRec *subscripts(Parser *p, opcodeRec *value, int *assignable) {
+    int links = 0;
     while (!p->failed && p->token == '[') {
+        if (++links > kMaxDepth) return fail(p, &p->location);
         advance(p);
         opcodeRec *index = NULL;
         if (p->token != ']') {
@@ -255,12 +257,14 @@ static opcodeRec *unary(Parser *p) {
 /* A left-associative level of binary operators over the next level down. */
 static opcodeRec *binary(Parser *p, opcodeRec *(*operand)(Parser *), const Operator *operators, int count) {
     opcodeRec *left = operand(p);
+    int links = 0;
     while (!p->failed) {
         int function = -1;
         for (int i = 0; i < count; i++) {
             if (operators[i].token == p->token) function = operators[i].function;
         }
         if (function < 0) break;
+        if (++links > kMaxDepth) return fail(p, &p->location);
         advance(p);
         opcodeRec *right = operand(p);
         if (p->failed) return NULL;

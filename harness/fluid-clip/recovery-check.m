@@ -54,6 +54,7 @@ static BOOL clipWanted(void) {
     return SGRPlayerBackground() == SGRPlayerBackgroundAnimated && !videoShowing() && motionAllowed();
 }
 static void SGRPlayerVisualiserUpdate(void) {}
+static void SGRPlayerHoldField(void) {}
 
 static NSString *sg_track, *sg_shown, *sg_noClip;
 static NSUInteger sg_begun;

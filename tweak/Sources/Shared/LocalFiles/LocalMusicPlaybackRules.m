@@ -1,7 +1,9 @@
 #import "LocalMusicPlayback.h"
 #import "Core/SGLocalize.h"
 
-BOOL SGLocalMusicSupportsVersion(NSString *version) { return [version isEqual:@"9.1.90"]; }
+BOOL SGLocalMusicSupportsVersion(NSString *version) {
+    return [version isEqual:@"9.1.90"] || [version isEqual:@"9.2.0"];
+}
 
 BOOL SGLocalMusicObservationContract(Class stateClass, Class trackClass) {
     for (NSString *name in @[@"track", @"isPlaying", @"isLoading", @"position", @"playbackId"])

@@ -64,8 +64,19 @@ static BOOL sentMethod(NSString *method) {
     return NO;
 }
 
+@interface NSObject (SPTLogFixture)
+- (void)log:(id)log wroteLine:(const char *)line fromModule:(const char *)module file:(const char *)file line:(NSInteger)n threadId:(NSUInteger)thread at:(id)date logLevel:(int)level isBreadcrumb:(BOOL)crumb;
+@end
 int main(void) {
     @autoreleasepool {
+    SAPDiagnosticsSetEnabled(false);SAPNativeDownloadCompletionSetActive(YES);
+    NSMutableArray *completed=NSMutableArray.array;
+    id listener=[NSNotificationCenter.defaultCenter addObserverForName:@"SAPOfflineTrackDownloaded" object:nil queue:nil usingBlock:^(NSNotification *n){[completed addObject:n.object];}];
+    id observer=[NSClassFromString(@"SAPNativeOfflineErrorObserver") new];
+    for(NSString *line in @[@"Track spotify:track:aaaaaaaaaaaaaaaaaaaaaa: Got key",@"Track spotify:track:aaaaaaaaaaaaaaaaaaaaaa downloaded!",@"Track spotify:track:aaaaaaaaaaaaaaaaaaaaaa downloaded"])
+        [observer log:nil wroteLine:line.UTF8String fromModule:NULL file:NULL line:0 threadId:0 at:nil logLevel:0 isBreadcrumb:NO];
+    assert([completed isEqual:@[trackA]]);
+    SAPNativeDownloadCompletionSetActive(NO);[NSNotificationCenter.defaultCenter removeObserver:listener];
     SAPDiagnosticsSetEnabled(true);
 
         sent = [NSMutableArray array]; streams = [NSMutableArray array];reads=[NSMutableArray array];

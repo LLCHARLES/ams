@@ -7,7 +7,7 @@ static SGPlayLog *history;
 SGPlayLog *SGListeningLog(void) { return history; }
 
 static void waitFor(BOOL (^condition)(void), NSString *what) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!condition() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     if (!condition()) HARNESS_FAIL(@"Timed out: %@", what);

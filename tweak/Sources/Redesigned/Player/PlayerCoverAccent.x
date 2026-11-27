@@ -209,7 +209,7 @@ void SGRPlayerSetCoverAccent(UIColor *cover) {
 - (void)layoutSubviews {
     %orig;
     UIView *stack = sg_stack;
-    if (stack && (sg_cover >= 0 || objc_getAssociatedObject(self, &kTintedKey)) && [(UIView *)self isDescendantOfView:stack]) {
+    if (stack && sg_cover >= 0 && [(UIView *)self isDescendantOfView:stack]) {
         SGRPlayerPaintCover((UIView *)self);
     }
 }

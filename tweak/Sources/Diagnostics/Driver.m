@@ -23,6 +23,7 @@
 #import "Core/SGCore.h"
 #import "Core/SGTopController.h"
 #import "Diagnostics.h"
+#import "SGDriverAuth.h"
 #import "SGDriverCommand.h"
 #import "Headers/SPTPlayer.h"
 #import <dlfcn.h>
@@ -520,8 +521,9 @@ static NSArray<UIView *> *tabItems(NSMutableArray<NSString *> *titles) {
                 SGForEachView(bar, ^(UIView *v) {
                     if ([v isKindOfClass:UIControl.class] && [NSStringFromClass(v.class) containsString:@"TabButton"] && isShown(v)) [buttons addObject:v];
                 });
-                [buttons sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
-                    return CGRectGetMinX(screenFrame(a)) < CGRectGetMinX(screenFrame(b)) ? NSOrderedAscending : NSOrderedDescending;
+                [buttons sortWithOptions:NSSortStable usingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+                    CGFloat x = CGRectGetMinX(screenFrame(a)), y = CGRectGetMinX(screenFrame(b));
+                    return x < y ? NSOrderedAscending : x > y ? NSOrderedDescending : NSOrderedSame;
                 }];
                 // The glass bar stacks two buttons on each tab: one a tab, by where it sits.
                 for (UIView *button in buttons) {
@@ -883,11 +885,17 @@ static NSDictionary<NSString *, SGCommand> *commands(void) {
             @"pref" : ^NSDictionary *(NSDictionary *p) {
                 NSString *key = p[@"key"];
                 if (![key hasPrefix:@"spotifyglass."]) fail(@"pref takes --key spotifyglass.<name>");
+                // USB discovery is the only private read (serve rejects it on the tailnet).
+                if ((SGPrivatePreferenceKey(key) || [key isEqual:@"spotifyglass.wireguard"] ||
+                     [key isEqual:SGKeyLyricsOpenAIBaseURL] || [key isEqual:SGKeySponsorBlockServer]) &&
+                    !([key isEqual:SGKeyDriverToken] && !p[@"remove"] && !p[@"text"] && !p[@"value"]))
+                    fail(@"private preference");
                 NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
                 if (p[@"remove"]) [store removeObjectForKey:key];
                 else if (p[@"text"]) [store setObject:p[@"text"] forKey:key];
                 else if (p[@"value"]) [store setInteger:[p[@"value"] integerValue] forKey:key];
-                return @{@"key" : key, @"now" : [store objectForKey:key] ?: [NSNull null],
+                id value = [key isEqual:SGKeyDriverToken] ? SGDriverToken() : [store objectForKey:key];
+                return @{@"key" : key, @"now" : value ?: [NSNull null],
                          @"private" : @(SGPrivatePreferenceKey(key))};
             },
             @"settings.open" : ^NSDictionary *(NSDictionary *p) {

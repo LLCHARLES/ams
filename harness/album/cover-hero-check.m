@@ -17,12 +17,19 @@
 // Logs PASS or FAIL lines and exits 1 on the first failure (../harness-fail.h).
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
+#import <CommonCrypto/CommonDigest.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "cover-seams.h"
 #import "Redesigned/Kit/SGRField.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
+#import "Redesigned/Kit/SGRTokens.h"
 #import "../harness-fail.h"
 #import "cover-fixtures.h"
+
+// All catalog answers and downloaded files belong to this run, not the Mac's Retrine cache.
+NSURL *SGDataRoot(NSSearchPathDirectory directory) {
+    return [NSURL fileURLWithPath:NSProcessInfo.processInfo.environment[@"SGR_COVER_ROOT"] isDirectory:YES];
+}
 #if __has_include("Redesigned/Kit/SGRCoverRead.h")
 #import "Redesigned/Kit/SGRCoverRead.h"
 #endif
@@ -43,15 +50,7 @@ static const CGFloat kWidth = 402, kHeroHeight = 430;
 - (void)playMotionForArtist:(NSString *)artist album:(NSString *)album;
 @end
 
-static void spin(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
-}
-
-static BOOL waitUntil(NSTimeInterval seconds, BOOL (^done)(void)) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    while (!done() && [limit timeIntervalSinceNow] > 0) spin(0.02);
-    return done();
-}
+#import "../harness-wait.h"
 
 typedef struct {
     UIView *page, *hero;
@@ -201,7 +200,7 @@ static SGRCoverReading *readingOf(UIImage *cover) {
     SGRCoverRead(cover, ^(SGRCoverReading *reading) {
         if (reading.final) final = reading;
     });
-    HARNESS_CHECK(waitUntil(30, ^BOOL { return final != nil; }));
+    HARNESS_AWAIT(final != nil);
     return final;
 }
 
@@ -217,24 +216,59 @@ static SGRCoverReading *redReading;
 static NSMutableArray *headerRequests, *rowRequests;
 static void (^headerResult)(NSURL *);
 static void (^rowResult)(NSURL *);
-static void (^identifierResult)(NSURL *);
-static NSString *const fixtureURI = @"spotify:album:FixtureAlbum";
-static NSMutableArray<NSURL *> *shownClips;
+#if !SGR_COVER_BASELINE
+static void (^identifierResult)(NSURL *, SGMotionIdentifierOutcome);
+static BOOL holdPageIdentifiers;
+#endif
+static NSURL *stillEditionFile;
+static NSString *const fixtureURI = @"spotify:album:0000000000000000000021";
 
 @interface SGAlbumQueuePage : NSObject @end
 @implementation SGAlbumQueuePage
 + (NSString *)albumURI:(UIViewController *)controller { return controller.restorationIdentifier; }
 @end
 
-void SGRAlbumTestIdentifierCover(NSString *uri, NSString *album, CGFloat pixels, void (^done)(NSURL *)) {
+void SGRAlbumTestStillEditionCover(NSString *uri, NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *)) {
+    HARNESS_CHECK([uri isEqual:fixtureURI] && [artist isEqual:@"Artist"] && [album isEqual:@"Fixture Album"]);
+    done(stillEditionFile);
+}
+
+#if !SGR_COVER_BASELINE
+void SGRAlbumTestIdentifierCover(NSString *uri, NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *, SGMotionIdentifierOutcome)) {
     HARNESS_CHECK([uri isEqual:fixtureURI] && [album isEqual:@"Fixture Album"]);
+    if (!holdPageIdentifiers && [NSProcessInfo.processInfo.arguments containsObject:@"motion-verified"]) {
+        SGMotionPageIdentifierCover(uri, artist, album, pixels, done);
+        return;
+    }
     identifierResult = [done copy];
 }
+#endif
 
 @interface CoverReadyPlayerLayer : AVPlayerLayer @end
 @implementation CoverReadyPlayerLayer
 - (BOOL)isReadyForDisplay { return YES; }
 @end
+
+#if __has_include("Redesigned/Kit/SGRHeaderClip.h")
+#import "Redesigned/Kit/SGRHeaderClip.h"
+// This headless check owns adaptive colour delivery, not AVFoundation or a
+// window. Deliver the clip's appearance event as if its first frame landed.
+@interface CoverReadyClip : SGRHeaderClip
+@property (nonatomic, copy) void (^ready)(BOOL, BOOL);
+@end
+@implementation CoverReadyClip
+- (instancetype)initWithFile:(NSURL *)file appearance:(void (^)(BOOL, BOOL))appearance {
+    if ((self = [super initWithFile:file appearance:appearance])) self.ready = appearance;
+    return self;
+}
+- (void)updateVisible:(BOOL)visible active:(BOOL)active mayPlay:(BOOL)mayPlay {
+    if (self.layer.opacity == 1) return;
+    self.layer.opacity = 1;
+    self.ready(YES, YES);
+}
+@end
+Class SGRAlbumTestClipClass(void) { return stillTest() ? CoverReadyClip.class : SGRHeaderClip.class; }
+#endif
 
 AVPlayerLayer *SGRAlbumTestPlayerLayer(AVPlayer *player) {
     if (!stillTest()) return [AVPlayerLayer playerLayerWithPlayer:player];
@@ -251,10 +285,16 @@ void SGRAlbumTestAlbumCover(NSString *artist, NSString *album, CGFloat pixels, v
 }
 
 static NSUInteger rowSearches;
-void SGRAlbumTestPageCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *, BOOL)) {
+void SGRAlbumTestPageCover(NSString *artist, NSString *album, NSString *uri, CGFloat pixels, void (^done)(NSURL *, BOOL)) {
+#if !SGR_COVER_BASELINE
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"motion-verified"]) {
+        SGMotionPageAlbumCover(artist, album, uri, pixels, done);
+        return;
+    }
+#endif
     SGRAlbumTestAlbumCover(artist, album, pixels, ^(NSURL *file) { done(file, file != nil || [album isEqual:@"Known Still"]); });
 }
-void SGRAlbumTestRowMatcher(NSString *albumArtist, NSString *album, CGFloat pixels, void (^ready)(BOOL (^)(NSString *, NSString *)), void (^done)(NSURL *)) {
+void SGRAlbumTestRowMatcher(NSString *albumArtist, NSString *album, NSString *uri, CGFloat pixels, void (^ready)(BOOL (^)(NSString *, NSString *)), void (^done)(NSURL *)) {
     HARNESS_CHECK(rowRequests);
     rowSearches++;
     ready(^BOOL(NSString *artist, NSString *song) {
@@ -304,35 +344,77 @@ static UICollectionViewCell *mountTrack(Page p, MotionRows *rows) {
     return cell;
 }
 
-static void checkMotionIdentifiers(BOOL rowMatches, BOOL rowFirst) {
+#if !SGR_COVER_BASELINE
+static void checkVerifiedEdition(void) {
+    NSURL *folder = [SGDataRoot(NSCachesDirectory) URLByAppendingPathComponent:@"Motion"];
+    HARNESS_CHECK([NSFileManager.defaultManager createDirectoryAtURL:folder withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSString *address = @"https://fixture.invalid/edition-b.mp4";
+    NSDictionary *answers = @{[@"album\nverified4\n" stringByAppendingString:fixtureURI]: @{@"url":address, @"at":NSDate.date},
+                              @"album\n5\nartist\nfixture album": @{@"url":@"", @"identified":@YES, @"at":NSDate.date}};
+    HARNESS_CHECK([answers writeToURL:[folder URLByAppendingPathComponent:@"album answers.plist"] atomically:YES]);
+    unsigned char digest[CC_SHA1_DIGEST_LENGTH];
+    NSData *bytes = [address dataUsingEncoding:NSUTF8StringEncoding];
+    CC_SHA1(bytes.bytes, (CC_LONG)bytes.length, digest);
+    NSMutableString *name = [NSMutableString string];
+    for (size_t i = 0; i < sizeof digest; i++) [name appendFormat:@"%02x", digest[i]];
+    NSURL *local = [folder URLByAppendingPathComponent:[name stringByAppendingPathExtension:@"mp4"]];
+    HARNESS_CHECK([bytes writeToURL:local atomically:YES]);
+    Page waiting = makePage(solidDarkCover());
+    __attribute__((objc_precise_lifetime)) UIViewController *first = [UIViewController new];
+    first.restorationIdentifier = fixtureURI;
+    first.view = waiting.page;
+    holdPageIdentifiers = YES;
+    [waiting.hero playMotionForArtist:@"Artist" album:@"Fixture Album"];
+    HARNESS_CHECK(identifierResult);
+    holdPageIdentifiers = NO;
+    Page p = makePage(solidDarkCover());
+    __attribute__((objc_precise_lifetime)) UIViewController *owner = [UIViewController new];
+    owner.restorationIdentifier = fixtureURI;
+    owner.view = p.page;
+    [p.hero playMotionForArtist:@"Artist" album:@"Fixture Album"];
+    HARNESS_AWAIT([[p.hero valueForKeyPath:@"clip.file"] isEqual:local]);
+    // Even a delayed miss from the first page cannot replace the now-known URI with a title.
+    identifierResult(nil, SGMotionIdentifierMiss);
+    HARNESS_AWAIT([[waiting.hero valueForKeyPath:@"clip.file"] isEqual:local]);
+    puts("album motion: both the direct lookup and the delayed title fallback open verified edition B");
+}
+
+static void checkMotionIdentifiers(SGMotionIdentifierOutcome outcome, BOOL moves) {
     headerRequests = [NSMutableArray array]; rowRequests = [NSMutableArray array];
-    shownClips = [NSMutableArray array];
-    identifierResult = nil; rowResult = nil;
+    identifierResult = nil; rowResult = nil; headerResult = nil;
     Page p = makePage(solidDarkCover());
     __attribute__((objc_precise_lifetime)) UIViewController *owner = [UIViewController new];
     owner.restorationIdentifier = fixtureURI;
     owner.view = p.page;
     __attribute__((objc_precise_lifetime)) MotionRows *rows = [MotionRows new];
     UICollectionViewCell *cell = mountTrack(p, rows);
-    NSString *credit = rowMatches ? @"IU" : @"현지화된 이름";
+    NSString *credit = moves ? @"IU" : @"현지화된 이름";
     UIView *row = cell.contentView.subviews.firstObject.subviews.firstObject;
     ((UILabel *)row.subviews.lastObject.subviews.firstObject).text = credit;
     [p.hero playMotionForArtist:@"Artist" album:@"Fixture Album"];
+    // The identifiers are asked first; naming no release, they leave the album to the title and the rows.
+    if (!identifierResult) HARNESS_FAIL(@"No identifier lookup before the title search");
+    void (^firstIdentifiers)(NSURL *, SGMotionIdentifierOutcome) = identifierResult;
+    identifierResult = nil;
+    HARNESS_CHECK(!headerResult);
+    NSURL *clip = [NSURL fileURLWithPath:@"/fixture-identifiers.mov"];
+    stillEditionFile = moves ? clip : nil;
+    firstIdentifiers(outcome == SGMotionIdentifierClip ? clip : nil, outcome);
+    if (outcome != SGMotionIdentifierMiss) {
+        NSURL *selected = [p.hero valueForKeyPath:@"clip.file"];
+        HARNESS_CHECK(!headerResult && (moves ? [clip isEqual:selected] : !selected));
+        NSLog(@"[harness] PASS identifier outcome %ld, motion %d", (long)outcome, moves);
+        return;
+    }
     HARNESS_CHECK(headerResult);
     headerResult(nil);
     [cell layoutSubviews]; [cell layoutIfNeeded];
-    HARNESS_CHECK([rowRequests.lastObject[0] isEqual:credit] && (rowResult != nil) == rowMatches);
-    if (!identifierResult) HARNESS_FAIL(@"No identifier lookup alongside the candidate row matcher");
-    NSURL *idClip = [NSURL fileURLWithPath:@"/fixture-identifiers.mov"];
-    NSURL *rowClip = [NSURL fileURLWithPath:@"/fixture-row.mov"];
-    if (rowFirst) rowResult(rowClip);
-    identifierResult(idClip);
-    if (rowMatches && !rowFirst) rowResult(rowClip);
-    HARNESS_CHECK([p.hero valueForKey:@"player"]);
-    HARNESS_CHECK([shownClips isEqual:@[rowFirst ? rowClip : idClip]]);
-    NSLog(@"[harness] PASS motion: %@ shown once (%@)", shownClips.firstObject.lastPathComponent,
-          rowMatches ? @"both sources replied" : @"no row matched");
+    HARNESS_CHECK([rowRequests.lastObject[0] isEqual:credit] && (rowResult != nil) == moves);
+    if (moves) rowResult(clip);
+    NSURL *selected = [p.hero valueForKeyPath:@"clip.file"];
+    HARNESS_CHECK(moves ? [clip isEqual:selected] : !selected);
 }
+#endif
 
 static void checkMotionRow(void) {
     headerRequests = [NSMutableArray array]; rowRequests = [NSMutableArray array];
@@ -351,7 +433,7 @@ static void checkMotionRow(void) {
     HARNESS_CHECK(([rowRequests isEqual:@[@[@"Don Toliver, Doja Cat", f1, @"Lose My Mind (feat. Doja Cat)"]]]));
     rowResult(file);
     [p.hero playMotionForArtist:f1 album:f1]; [cell layoutSubviews];
-    HARNESS_CHECK([p.hero valueForKey:@"player"] && rowRequests.count == 1);
+    HARNESS_CHECK([[p.hero valueForKeyPath:@"clip.file"] isEqual:file] && rowRequests.count == 1);
     // A separate page whose list (including its one and only cell) settled before the header.
     Page first = makePage(solidDarkCover());
     cell = mountTrack(first, rows);
@@ -368,7 +450,7 @@ static void checkMotionRow(void) {
         [cell layoutSubviews];
         HARNESS_CHECK(rowRequests.count == 1);
     } completion:^(BOOL finished) { committed = YES; }];
-    HARNESS_CHECK(waitUntil(2, ^BOOL { return committed; }));
+    HARNESS_AWAIT(committed);
     [cell layoutSubviews]; [cell layoutIfNeeded];
     HARNESS_CHECK([rowRequests.lastObject[0] isEqual:@"현지화된 이름"]);
     creditLabel.text = @"Ed Sheeran";
@@ -378,7 +460,7 @@ static void checkMotionRow(void) {
     HARNESS_CHECK(rowSearches == 2); // one for each missed header, not one per row
     [first.hero playMotionForArtist:@"Singer" album:@"Last"]; headerResult(nil);
     rowResult(file); // the F1 reply is now stale
-    HARNESS_CHECK(![first.hero valueForKey:@"player"]);
+    HARNESS_CHECK(![first.hero valueForKeyPath:@"clip.file"]);
 
     Page hits = makePage(solidDarkCover());
     cell = mountTrack(hits, rows);
@@ -388,20 +470,20 @@ static void checkMotionRow(void) {
     [hits.hero playMotionForArtist:@"B" album:@"Greatest Hits"]; headerResult(nil);
     [cell layoutSubviews]; [cell layoutIfNeeded];
     if (rowSearches != searches) rowResult(file); // the outgoing row would select A
-    HARNESS_CHECK(![hits.hero valueForKey:@"player"] && rowSearches == searches);
+    HARNESS_CHECK(![hits.hero valueForKeyPath:@"clip.file"] && rowSearches == searches);
 
     Page moved = makePage(solidDarkCover());
     [moved.page addSubview:cell.superview.superview]; // a new header with the outgoing track collection
     [moved.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
     [cell layoutSubviews]; [cell layoutIfNeeded];
-    HARNESS_CHECK(rowSearches == searches && ![moved.hero valueForKey:@"player"]);
+    HARNESS_CHECK(rowSearches == searches && ![moved.hero valueForKeyPath:@"clip.file"]);
 
     Page listFirst = makePage(solidDarkCover());
     cell = mountTrack(listFirst, rows);
     [cell layoutSubviews];
     [listFirst.hero playMotionForArtist:f1 album:f1]; headerResult(nil);
     [cell layoutSubviews]; [cell layoutIfNeeded]; rowResult(file);
-    HARNESS_CHECK([listFirst.hero valueForKey:@"player"]);
+    HARNESS_CHECK([[listFirst.hero valueForKeyPath:@"clip.file"] isEqual:file]);
 
     Page limit = makePage(solidDarkCover());
     cell = mountTrack(limit, rows);
@@ -413,19 +495,18 @@ static void checkMotionRow(void) {
         [cell layoutSubviews]; [cell layoutIfNeeded]; [cell layoutSubviews];
     }
     creditLabel.text = @"Ed Sheeran"; [cell layoutSubviews]; [cell layoutIfNeeded];
-    HARNESS_CHECK(rowRequests.count == before + 8 && ![limit.hero valueForKey:@"player"]);
+    HARNESS_CHECK(rowRequests.count == before + 8 && ![limit.hero valueForKeyPath:@"clip.file"]);
     searches = rowSearches;
     Page still = makePage(solidDarkCover());
     [still.hero playMotionForArtist:@"Artist" album:@"Known Still"]; headerResult(nil);
     cell = mountTrack(still, rows);
     [cell layoutSubviews]; [cell layoutIfNeeded];
-    HARNESS_CHECK(![still.hero valueForKey:@"player"] && rowSearches == searches);
+    HARNESS_CHECK(![still.hero valueForKeyPath:@"clip.file"] && rowSearches == searches);
     puts("album motion: header hit, one owned row after miss, both arrival orders and stale reply passed");
 }
 
 void SGRAlbumTestPoster(NSURL *file, void (^done)(UIImage *)) {
     // Each real showMotion: asks for its clip's poster when adaptive cover is on.
-    if (shownClips) { [shownClips addObject:file]; return; }
     if (!stillTest()) { SGMotionPoster(file, done); return; }
     [posters addObject:[done copy]];
 }
@@ -455,7 +536,8 @@ BOOL SGRAlbumTestStillRead(UIImage *image, void (^done)(SGRCoverReading *)) {
 }
 @end
 
-NSCache *SGRAlbumTestRenderCache(void) { return [CoverReusedAddressCache new]; }
+static NSCache *installedCache;
+NSCache *SGRAlbumTestRenderCache(void) { return installedCache = [CoverReusedAddressCache new]; }
 
 static BOOL fieldIsBlue(Page p) {
     CGFloat r, g, b, a;
@@ -471,18 +553,15 @@ static BOOL fieldIsRed(Page p) {
 
 static void startAlbumA(Page p) {
     [p.hero playMotionForArtist:@"Fixture" album:@"A"];
-    HARNESS_CHECK(waitUntil(5, ^BOOL {
-        UIView *content = [p.hero valueForKey:@"content"];
-        for (CALayer *layer in content.layer.sublayers)
-            if ([layer isKindOfClass:AVPlayerLayer.class] && layer.opacity == 1) return YES;
-        return NO;
+    HARNESS_CHECK(HarnessRunUntil(^BOOL {
+        return ((CALayer *)[p.hero valueForKeyPath:@"clip.layer"]).opacity == 1;
     }));
 }
 
 static void startAlbumB(Page p) {
     p.source.image = flatSleeve(0.10, 0.20, 0.85, 0.6);
     [p.hero playMotionForArtist:@"Fixture" album:@"B"];
-    if (!waitUntil(5, ^BOOL { return fieldIsBlue(p); }))
+    if (!HarnessRunUntil(^BOOL { return fieldIsBlue(p); }))
         HARNESS_FAIL(@"still ownership: B without a clip did not receive its blue cover colour");
 }
 
@@ -504,7 +583,7 @@ static void checkStillOwnership(void) {
     startAlbumA(p);
     void (^poster)(UIImage *) = takeReply(posters);
     poster(redPoster);
-    HARNESS_CHECK(waitUntil(5, ^BOOL { return fieldIsRed(p); }));
+    HARNESS_AWAIT(fieldIsRed(p));
     startAlbumB(p);
 
     // Each async boundary, first A -> B (no clip), then A -> B -> A with the very same URL object.
@@ -535,7 +614,7 @@ static void checkStillOwnership(void) {
                 holdStillReading = NO;
                 void (^current)(UIImage *) = takeReply(posters);
                 current(redPoster);
-                HARNESS_CHECK(waitUntil(5, ^BOOL { return fieldIsRed(p); }));
+                HARNESS_AWAIT(fieldIsRed(p));
             }
         }
     }
@@ -555,13 +634,13 @@ static void checkRenderCacheReuse(void) {
         expired = first;
         p = makePage(first);
         (void)readingOf(first);
-        HARNESS_CHECK(waitUntil(10, ^BOOL { return renderOf(p.hero).contents != nil; }));
+        HARNESS_AWAIT(renderOf(p.hero).contents != nil);
         // Same dimensions, page colour and geometry, different pixels at the sharp boundary.
         HARNESS_CHECK([readingOf(first).pageColor isEqual:readingOf(second).pageColor]);
         p.source.image = second;
     }
     (void)readingOf(second);
-    HARNESS_CHECK(waitUntil(10, ^BOOL { return !expired && renderOf(p.hero).contents != nil; }));
+    HARNESS_AWAIT(!expired && renderOf(p.hero).contents != nil);
     NSData *drawn = pixelsOfImage((__bridge CGImageRef)renderOf(p.hero).contents);
     const uint8_t *corner = drawn.bytes;
     // The mirrored fixture starts blue (0.15, 0.20, 0.85), not the expired fixture's magenta.
@@ -576,11 +655,13 @@ static void checkCover(NSString *name, UIImage *cover, CGFloat sharpFrom, CGFloa
     SGRCoverReading *reading = readingOf(cover);
     // The field asked for the read colour; what it paints for it is measured off the page below.
     UIColor *page = reading.pageColor;
-    if (!waitUntil(30, ^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:page]; }))
+    if (!HarnessRunUntil(^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:page]; }))
         HARNESS_FAIL(@"%@: no picture drawn (%@) or the field not given the read colour (%@, read %@)", name,
                      renderOf(p.hero).contents ? @"drawn" : @"none", fieldOf(p).overrideColor, page);
     // The last of the pixel reading's and the final reading's pictures.
-    spin(1);
+    HARNESS_AWAIT([(SGRCoverReading *)[p.hero valueForKey:@"coverReading"] final] &&
+        [[installedCache objectForKey:[p.hero valueForKey:@"renderKey"]] valueForKey:@"image"] != nil &&
+        renderOf(p.hero).contents == (__bridge id)[(UIImage *)[[installedCache objectForKey:[p.hero valueForKey:@"renderKey"]] valueForKey:@"image"] CGImage]);
     CALayer *render = renderOf(p.hero);
     CGImageRef drawn = (__bridge CGImageRef)render.contents;
     size_t wide = CGImageGetWidth(drawn);
@@ -764,7 +845,7 @@ int main(int argc, char *argv[]) {
             HARNESS_CHECK(argc > 2);
             Page p = makePage(colourfulCover());
             // The field's palette, and nothing else, landing.
-            spin(1.5);
+            HARNESS_AWAIT(![fieldColorOf(p) isEqual:SGRNeutralField()]);
             HARNESS_CHECK(!renderOf(p.hero));
             size_t wide = (size_t)(kWidth * 2), high = (size_t)(kHeroHeight * 2);
             NSMutableData *hero = pixels(wide, high, 2, ^(CGContextRef c) { [p.hero.layer renderInContext:c]; });
@@ -780,12 +861,18 @@ int main(int argc, char *argv[]) {
 #if __has_include("Redesigned/Kit/SGRCoverRead.h")
         if ([mode isEqualToString:@"still-swap"]) { checkStillOwnership(); return 0; }
         if ([mode isEqualToString:@"motion-row"]) { checkMotionRow(); return 0; }
+#if !SGR_COVER_BASELINE
+        if ([mode isEqual:@"motion-verified"]) { checkVerifiedEdition(); return 0; }
         if ([mode isEqual:@"motion-identifiers"]) {
-            checkMotionIdentifiers(NO, NO);
-            checkMotionIdentifiers(YES, YES);
-            checkMotionIdentifiers(YES, NO);
+            checkMotionIdentifiers(SGMotionIdentifierMiss, NO);
+            checkMotionIdentifiers(SGMotionIdentifierMiss, YES);
+            checkMotionIdentifiers(SGMotionIdentifierClip, YES);
+            checkMotionIdentifiers(SGMotionIdentifierUnavailable, NO);
+            checkMotionIdentifiers(SGMotionIdentifierStill, NO);
+            checkMotionIdentifiers(SGMotionIdentifierStill, YES);
             return 0;
         }
+#endif
         if ([mode isEqualToString:@"cache-reuse"]) { checkRenderCacheReuse(); return 0; }
         if ([mode isEqualToString:@"on"]) {
             // Sharp from and to, as shares of the cover's side: any picture that is not solid between 60% and 90%; a
@@ -818,10 +905,9 @@ int main(int argc, char *argv[]) {
             // Replaced before its read is back: the album changed.
             p.source.image = second;
             UIColor *secondColor = readingOf(second).pageColor;
-            HARNESS_CHECK(waitUntil(30, ^BOOL { return renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:secondColor]; }));
+            HARNESS_AWAIT(renderOf(p.hero).contents && [fieldOf(p).overrideColor isEqual:secondColor]);
             // Every read of the first cover back by now, pixel and final.
             UIColor *firstColor = readingOf(first).pageColor;
-            spin(1);
             for (UIColor *color in shown) {
                 if ([color isEqual:firstColor]) HARNESS_FAIL(@"the replaced cover's colour %@ reached the page", firstColor);
             }

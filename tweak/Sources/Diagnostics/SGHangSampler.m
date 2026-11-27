@@ -19,6 +19,7 @@ static atomic_int sg_watches;
 static atomic_uint_fast64_t sg_pending;   // mach time of the ping not answered yet, 0 when none
 static atomic_bool sg_running;
 static NSString *sg_reason;
+static pthread_mutex_t sg_reasonLock = PTHREAD_MUTEX_INITIALIZER;
 
 static double seconds(uint64_t mach) {
     static mach_timebase_info_data_t base;
@@ -66,7 +67,7 @@ static NSString *describe(uintptr_t address) {
     if (info.dli_sname && strcmp(info.dli_sname, "<redacted>") != 0) {
         return [NSString stringWithFormat:@"%@ %s+%lu", image, info.dli_sname, (unsigned long)(address - (uintptr_t)info.dli_saddr)];
     }
-    return [NSString stringWithFormat:@"%@ +0x%lx", image, (unsigned long)(address - (uintptr_t)info.dli_saddr)];
+    return [NSString stringWithFormat:@"%@ +0x%lx", image, (unsigned long)(address - (uintptr_t)info.dli_fbase)];
 }
 
 static void logSample(uintptr_t frames[kMaxFrames], int count, double stalled, int index, NSString *reason) {
@@ -99,7 +100,14 @@ static void *watch(void *unused) {
                     int count = walk(frames);
                     samples++;
                     lastSample = stalled;
-                    if (count) logSample(frames, count, stalled, samples, sg_reason);
+                    if (count) {
+                        @autoreleasepool {
+                            pthread_mutex_lock(&sg_reasonLock);
+                            NSString *reason = sg_reason;
+                            pthread_mutex_unlock(&sg_reasonLock);
+                            logSample(frames, count, stalled, samples, reason);
+                        }
+                    }
                 }
             }
         }
@@ -121,7 +129,9 @@ void SGHangSamplerStart(NSString *reason, NSTimeInterval duration) {
         sg_stackHigh = (uintptr_t)pthread_get_stackaddr_np(main);
         sg_stackLow = sg_stackHigh - pthread_get_stacksize_np(main);
     }
+    pthread_mutex_lock(&sg_reasonLock);
     sg_reason = [reason copy];
+    pthread_mutex_unlock(&sg_reasonLock);
     atomic_fetch_add(&sg_watches, 1);
     if (!atomic_exchange(&sg_running, true)) {
         pthread_t thread;

@@ -15,6 +15,8 @@
 #import "SGDSPEffects.h"
 #import "SGDSPFilters.h"
 
+extern bool SGDSPLiveprogTripped(const SGDSPLiveprog *liveprog);
+
 _Static_assert(kSGDSPEngineBlock == kSGDSPConvolverBlock && kSGDSPEngineBlock == kSGDSPEffectMaxFrames, "one block size throughout");
 
 // The FIFO the processed blocks wait in: a power of two holding the primed block, the one being handed out
@@ -83,6 +85,7 @@ struct SGDSPEngine {
     atomic_uint_fast64_t blocks, dry, faults;
     atomic_uint_fast64_t averageBits, peakNanos;
     atomic_bool liveprogTripped;
+    atomic_bool collectPending;  // a fade finished with an old state, or the VM newly tripped
     unsigned liveprogOverBudget;
     bool liveprogTailPending;
     float liveprogTailLeft, liveprogTailRight;
@@ -189,6 +192,7 @@ static void dropAll(SGDSPEngine *engine, double rate) {
     engine->rate = rate;
     storeDouble(&engine->rateBits, rate);
     engine->configuredOutput.release = (float)exp(-1000 / (engine->releaseMS * rate));
+    atomic_store_explicit(&engine->collectPending, false, memory_order_relaxed);
     engine->resetOutput = true;
     endConfig(engine);
     for (int s = 0; s < SlotCount; s++) {
@@ -218,9 +222,12 @@ void SGDSPEngineReset(SGDSPEngine *engine) {
 }
 
 void SGDSPEngineCollect(SGDSPEngine *engine) {
+    if (!atomic_load_explicit(&engine->collectPending, memory_order_acquire)) return;
     void *done[SlotCount] = {0};
     void *tripped = NULL;
     beginConfig(engine);
+    // Only an admitted render can set this. A later fade or trip will request the next collection.
+    atomic_store_explicit(&engine->collectPending, false, memory_order_relaxed);
     for (int s = 0; s < SlotCount; s++) {
         Effect *effect = &engine->effects[s];
         if (s == SlotLiveprog && atomic_load_explicit(&engine->liveprogTripped, memory_order_relaxed)) {
@@ -268,7 +275,10 @@ static void crossfade(SGDSPEngine *engine, Slot slot, float *left, float *right,
         left[i] = engine->fromLeft[i] + (left[i] - engine->fromLeft[i]) * sg_ramp[i];
         right[i] = engine->fromRight[i] + (right[i] - engine->fromRight[i]) * sg_ramp[i];
     }
-    if (!heldTail) effect->fade = false;
+    if (!heldTail) {
+        effect->fade = false;
+        if (effect->leaving) atomic_store_explicit(&engine->collectPending, true, memory_order_release);
+    }
 }
 
 // The gain, moving to a new one over the block, then a limiter with no lookahead: it clamps a peak the
@@ -303,11 +313,15 @@ static bool process(SGDSPEngine *engine, float *left, float *right) {
                 engine->liveprogTailLeft = left[kSGDSPEngineBlock - 1];
                 engine->liveprogTailRight = right[kSGDSPEngineBlock - 1];
             }
-            if (nanos > durationNanos || engine->liveprogOverBudget >= kLiveprogConsecutiveBlocks) {
+            if (nanos > durationNanos || engine->liveprogOverBudget >= kLiveprogConsecutiveBlocks ||
+                SGDSPLiveprogTripped(effect->state) || SGDSPLiveprogTripped(effect->leaving)) {
                 engine->liveprogTailPending = true;
                 atomic_store_explicit(&engine->liveprogTripped, true, memory_order_release);
+                atomic_store_explicit(&engine->collectPending, true, memory_order_release);
                 atomic_store_explicit(&sg_liveprogQuarantined, true, memory_order_release);
             }
+            // Let runBlock silence and count the fault, before it enters a stateful effect.
+            if (!allFinite(left, right)) return true;
         }
         active = true;
     }
@@ -628,6 +642,7 @@ typedef struct {
     double rate;
     uint64_t started;
     bool expired;
+    bool slow;
     SGDSPLiveprog *result;
     char error[300];
 } LiveprogLoad;
@@ -681,7 +696,7 @@ bool SGDSPEngineSetLiveprog(SGDSPEngine *engine, bool on, const char *script, ch
     dispatch_semaphore_t finished = dispatch_semaphore_create(0);
     dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, kLiveprogStartSeconds * NSEC_PER_SEC);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        job->result = SGDSPLiveprogCreate(job->script, job->rate, job->error, sizeof job->error);
+        job->result = SGDSPLiveprogCreate(job->script, job->rate, &job->slow, job->error, sizeof job->error);
         free(job->script);
         // The waiting thread may itself be descheduled at its deadline. A late
         // worker must not publish its VM just because it won that wake-up race.
@@ -704,7 +719,8 @@ bool SGDSPEngineSetLiveprog(SGDSPEngine *engine, bool on, const char *script, ch
         }
     }
     SGDSPLiveprog *liveprog = job->result;
-    if (job->expired) {
+    // Running out of startup work is the same refusal as the deadline: the previous script stays.
+    if (job->expired || job->slow) {
         SGDSPLiveprogFree(liveprog);
         free(job);
         copyError(error, errorSize, kLiveprogStartError);

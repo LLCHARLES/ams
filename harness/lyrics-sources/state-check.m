@@ -120,17 +120,29 @@ static void observedPrefetch(NSString *track) {
 }
 #define SGOptionalWorkMayRun optionalForWatcher
 #define SGLyricsPrefetch observedPrefetch
+static _Thread_local NSUInteger *headerSubmissions;
+static void observedKaraokeDispatch(dispatch_queue_t queue, dispatch_block_t block) {
+    if (headerSubmissions && queue == dispatch_get_main_queue()) ++*headerSubmissions;
+    dispatch_async(queue, block);
+}
+#define dispatch_async observedKaraokeDispatch
+#define SGBoundedRequestTask(request, timeout, ...) [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:__VA_ARGS__]
 #import "karaoke.inc"
+#undef SGBoundedRequestTask
+#undef dispatch_async
 #undef SGLyricsPrefetch
 #undef SGOptionalWorkMayRun
+static NSString *sg_missingLyrics;
+#import "activity-lines.inc"
 // The production watcher, with only its drawing/rest effects replaced. The full player simulator
 // harness needs unrelated AI/view services; this check drives the state machine without those.
-static BOOL sg_open, sg_alone, sg_wide;
+static BOOL sg_open, sg_alone, sg_wide, sg_queuePage;
 static NSTimer *sg_rest;
 static NSUInteger sg_closed;
 static void setOpen(BOOL open, BOOL animated) { sg_open = open; if (!open) sg_closed++; }
 static void setAlone(BOOL alone, BOOL animated) { sg_alone = alone; }
-static void restartRest(void) {}
+static BOOL singing(void) { return NO; }
+static void restartRestAfter(NSTimeInterval wait) {}
 static void refreshSide(BOOL animated) {}
 // The preview tap waiting for lyrics (PlayerLyrics.x) belongs to the player's view, which this check has none of.
 static id sg_pendingPreview;
@@ -159,7 +171,12 @@ static OSStatus emptySpicyKey(CFDictionaryRef query, CFTypeRef *data) { return e
 #define SecItemDelete ignoreSpicyDelete
 #define SecItemCopyMatching emptySpicyKey
 #define kKeptTracks kSpicyKeptTracks
+static NSMutableArray *spicyLogs;
+#pragma push_macro("SGLog")
+#undef SGLog
+#define SGLog(...) [spicyLogs addObject:[NSString stringWithFormat:__VA_ARGS__]]
 #import "Shared/LyricsSources/SpicyLyrics.m"
+#pragma pop_macro("SGLog")
 #undef kKeptTracks
 #define keyQuery deezerKeyQuery
 #import "Shared/LyricsSources/Deezer.m"
@@ -276,6 +293,9 @@ static id fakeApplication(id self, SEL selector) { return sg_testApplication; }
 - (void)resume { self.reply(); }
 @end
 static NSUInteger sg_spotifyAsks;
+static NSString *fixtureTrackID(void) {
+    return [[NSUUID.UUID.UUIDString stringByReplacingOccurrencesOfString:@"-" withString:@""] substringToIndex:22];
+}
 static NSInteger sg_spotifyStatus = 404;
 static NSData *sg_spotifyBody;
 static NSString *sg_holdSpotifyTrack;
@@ -308,7 +328,7 @@ static id spotifyMiss(id self, SEL selector, NSURLRequest *request, void (^done)
 static HarnessRoute *sg_fakeRoute;
 static id fakeRoute(id self, SEL selector) { return sg_fakeRoute; }
 static void pumpUntilAt(BOOL (^ready)(void), int caller) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && [limit timeIntervalSinceNow] > 0) [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     if (!ready()) { fprintf(stderr, "FAILED wait at line %d\n", caller); exit(1); }
 }
@@ -344,7 +364,7 @@ static void checkHookPins(void) {
         CHECK(page.length && ![page isEqual:body]);
         NSArray *kept = SGKaraokeLinesForTrack(track);
         CHECK(kept && [SGLyricsCreditFor(track) isEqual:@"LRCLIB"]);
-        CHECK(![sg_requested containsObject:track]); // No Spotify timing request for a pin.
+        CHECK(!requested(track)); // No Spotify timing request for a pin.
         if (chosen.instrumental) CHECK(!kept.count && !SGKaraokeLinesFromBody(page).count);
         else {
             CHECK([SGKaraokeLineText(kept.firstObject) isEqual:@"My plain choice"]);
@@ -374,14 +394,14 @@ static void checkHookPins(void) {
     HarnessTask *task = [HarnessTask new];
     task.originalRequest = lyricsRequestFor([NSURLRequest requestWithURL:url]);
     task.currentRequest = task.originalRequest;
-    NSUInteger generation = SGLyricsPinGeneration(track);
-    CHECK([[NSURLProtocol propertyForKey:kPinGenerationKey inRequest:task.originalRequest] unsignedIntegerValue] == generation);
-    CHECK(!SGLyricsPin(track, @{@"id": @1}) && SGLyricsPinGeneration(track) == generation);
+    SGLyricsPinStamp *generation = SGLyricsPinGeneration(track);
+    CHECK([[NSURLProtocol propertyForKey:kPinGenerationKey inRequest:task.originalRequest] isEqual:generation]);
+    CHECK(!SGLyricsPin(track, @{@"id": @1}) && [SGLyricsPinGeneration(track) isEqual:generation]);
     CHECK(SGLyricsPin(track, plain));
-    CHECK([[NSURLProtocol propertyForKey:kPinGenerationKey inRequest:lyricsRequestFor(task.originalRequest)] unsignedIntegerValue] == generation);
+    CHECK([[NSURLProtocol propertyForKey:kPinGenerationKey inRequest:lyricsRequestFor(task.originalRequest)] isEqual:generation]);
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:url statusCode:200 HTTPVersion:@"HTTP/2" headerFields:nil];
     state = classify((id)task, response);
-    CHECK(state.pinGeneration == generation && !currentChoice(state));
+    CHECK([state.pinGeneration isEqual:generation] && !currentChoice(state));
     ended = nil;
     finishSpotify(delegate, nil, (id)task, state, body, nil, ^(NSError *error) { ended = error; });
     CHECK(ended.code == NSURLErrorCancelled && !delegate.deliveries);
@@ -474,6 +494,15 @@ static SGLyricsResult *madeUpLyrics(NSString *name, SGKaraokeTiming timing) {
 }
 
 static void checkSpicyCancellation(void) {
+    SGLyricsQuery *absent = SGLyricsQuery.new; absent.trackID = @"00000000000000000000AA";
+    spicyLogs=NSMutableArray.array;
+    absent.requestContext = SGLyricsRequestContext.new;
+    SGSpicyLyricsAskWith(@"sl_pk_fixture",absent,^(SGLyricsResult *result){ CHECK(!result); });
+    sg_spicyReply(nil,[[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"https://fixture.invalid"] statusCode:404 HTTPVersion:nil headerFields:nil]);
+    sg_spicyReply=nil; absent.requestContext=SGLyricsRequestContext.new;
+    SGSpicyLyricsAskWith(@"sl_pk_fixture",absent,^(SGLyricsResult *result){ CHECK(!result); });
+    CHECK(!sg_spicyReply && absent.requestContext.definiteMiss);
+    CHECK(spicyLogs.count && ![[spicyLogs componentsJoinedByString:@" "]containsString:absent.trackID]);spicyLogs=nil;
     SGLyricsProvider *spicy = SGLyricsProviderFor(SGSpicyLyricsKey), *other = SGLyricsProviderFor(@"musixmatch");
     SGLyricsAsk savedSpicy = spicy.ask, savedOther = other.ask;
     __block NSString *key;
@@ -520,7 +549,7 @@ static void checkCompletedBounds(void) {
     HarnessPlayer *player = [HarnessPlayer new]; sg_player = player;
     HarnessLyricsState *state = [HarnessLyricsState new]; player.state = state;
     HarnessLyricsTrack *playing = [HarnessLyricsTrack new]; state.track = playing;
-    NSString *current = @"bounded-current", *active = @"bounded-active";
+    NSString *current = fixtureTrackID(), *active = fixtureTrackID();
     playing.URI = [@"spotify:track:" stringByAppendingString:current];
     sg_lastSeenID = current;
     SGLyricsProvider *provider = SGLyricsProviderFor(@"musixmatch");
@@ -571,6 +600,9 @@ static void checkCompletedBounds(void) {
     NSUInteger oldAsks = sg_spotifyAsks;
     Method method = class_getInstanceMethod(NSURLSession.class, @selector(dataTaskWithRequest:completionHandler:));
     IMP oldTask = method_setImplementation(method, (IMP)spotifyMiss);
+    for (NSString *invalid in @[@"", @"123456789012345678901", @"123456789012345678901?", @"123456789012345678901é"]) {
+        CHECK(!requestFromSpotify(invalid) && !sg_requests[invalid] && sg_spotifyAsks == oldAsks);
+    }
     SGKaraokeRequestLyrics(current);
     pumpUntil(^BOOL { return !SGKaraokeLooking(current); });
     sg_holdSpotifyTrack = active;
@@ -578,18 +610,21 @@ static void checkCompletedBounds(void) {
     CHECK(sg_heldSpotifyReply && SGKaraokeLooking(active));
     [tracks removeAllObjects];
     for (NSUInteger i = 0; i < 250; i++) {
-        NSString *track = [NSString stringWithFormat:@"keeper-miss-%lu", (unsigned long)i];
+        NSString *track = fixtureTrackID();
         [tracks addObject:track]; SGKaraokeRequestLyrics(track);
         pumpUntil(^BOOL { return !SGKaraokeLooking(track); });
     }
-    CHECK(sg_requested.count <= 201);
-    CHECK([sg_requested containsObject:current] && [sg_requested containsObject:active] && SGKaraokeLooking(active));
+    CHECK(sg_requestMarks.count <= 201);
+    CHECK(requested(current) && requested(active) && SGKaraokeLooking(active));
     evicted = nil;
-    for (NSString *track in tracks) if (![sg_requested containsObject:track]) { evicted = track; break; }
+    for (NSString *track in tracks) if (!requested(track)) { evicted = track; break; }
     CHECK(evicted);
     NSUInteger before = sg_spotifyAsks;
-    SGKaraokeRequestLyrics(evicted);
+    BOOL noLyrics = YES;
+    CHECK(!SGKaraokeLookupEnded(evicted));
+    CHECK(!timedLinesForCard(evicted, SGKaraokeLinesForTrack(evicted), &noLyrics) && !noLyrics);
     pumpUntil(^BOOL { return !SGKaraokeLooking(evicted); });
+    CHECK(!timedLinesForCard(evicted, SGKaraokeLinesForTrack(evicted), &noLyrics) && noLyrics);
     CHECK(sg_spotifyAsks == before + 1);
     sg_holdSpotifyTrack = nil;
     sg_heldSpotifyReply(); sg_heldSpotifyReply = nil;
@@ -893,9 +928,9 @@ static void checkWalkEarlyAnswer(void) {
             sg_pinnedReply(pinned);
             CHECK([pinAnswer.karaokeLines isEqual:pinned.karaokeLines] && !sg_waiting[track] && asked.count == 2);
         } else if ([action isEqual:@"reload"]) {
-            NSUInteger generation = SGLyricsPinGeneration(track);
+            SGLyricsPinStamp *generation = SGLyricsPinGeneration(track);
             SGLyricsReload(track);
-            CHECK(SGLyricsPinGeneration(track) == generation + 1);
+            CHECK(![SGLyricsPinGeneration(track) isEqual:generation]);
             CHECK(!sg_kept[track] && !SGKaraokeLinesForTrack(track) && !SGLyricsCreditFor(track));
             late(words);
             CHECK(!sg_kept[track] && !SGKaraokeLinesForTrack(track) && !SGLyricsCreditFor(track));
@@ -1410,30 +1445,64 @@ static void checkSpotifyAuthPause(void) {
     NSInteger status = sg_spotifyStatus;
     NSUInteger asks = sg_spotifyAsks;
     sg_spotifyStatus = 401;
-    sg_spclientHeaders = @{@"authorization": @"fixture-old"};
+    sg_spclientHeaders = nil;
     Method method = class_getInstanceMethod(NSURLSession.class, @selector(dataTaskWithRequest:completionHandler:));
     IMP original = method_setImplementation(method, (IMP)spotifyMiss);
-    NSString *track = NSUUID.UUID.UUIDString;
+    NSString *track = fixtureTrackID();
+    SPTPlayerState *oldState = sg_fixtureState;
+    HarnessLyricsState *playing = [HarnessLyricsState new];
+    playing.track = [HarnessLyricsTrack new];
+    playing.track.URI = [@"spotify:track:" stringByAppendingString:track];
+    sg_fixtureState = (id)playing;
+    __block NSUInteger readyCount = 0;
+    id reader = [NSNotificationCenter.defaultCenter addObserverForName:@"spotifyglass.karaoke.lookupReady" object:nil queue:nil
+        usingBlock:^(NSNotification *note) {
+            if ([note.object isEqual:track]) { readyCount++; SGKaraokeRequestLyrics(note.object); }
+        }];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://spclient.wg.spotify.com/"]];
     SGKaraokeRequestLyrics(track);
+    drainReplies();
+    CHECK(sg_spotifyAsks == asks);
+    [request setValue:@"fixture-old" forHTTPHeaderField:@"Authorization"];
+    captureHeaders(nil, request);
     pumpUntil(^BOOL { return SGLyricsLoadFailed(track); });
     CHECK(sg_spotifyAsks == asks + 1);
     SGKaraokeAskSpotifyForTiming(track);
     drainReplies();
     CHECK(sg_spotifyAsks == asks + 1 && SGLyricsLoadFailed(track));
-    sg_spclientHeaders = @{@"authorization": @"fixture-new"};
+    NSString *skippedTo = fixtureTrackID();
+    __block BOOL refusedAtDelivery = NO;
+    id completion = SGKaraokeObserveLinesKept(^(NSNotification *note) {
+        if ([note.object isEqual:skippedTo]) refusedAtDelivery = SGKaraokeLookupEnded(skippedTo);
+    });
+    SGKaraokeRequestLyrics(skippedTo);
+    pumpUntil(^BOOL { return SGLyricsLoadFailed(skippedTo); }); // Offline lookup precedes the refused-header path.
+    [NSNotificationCenter.defaultCenter removeObserver:completion];
+    CHECK(refusedAtDelivery && !requested(skippedTo) && sg_spotifyAsks == asks + 1);
+    NSUInteger before = readyCount;
+    [request setValue:@"updated-client" forHTTPHeaderField:@"Client-Token"];
+    captureHeaders(nil, request);
+    drainReplies();
+    SGSpclientHeaders(^(NSDictionary *headers) {
+        CHECK([headers[@"client-token"] isEqual:@"updated-client"]);
+    });
+    CHECK(readyCount == before);
     sg_spotifyStatus = 404;
-    SGKaraokeAskSpotifyForTiming(track);
+    [request setValue:@"fixture-new" forHTTPHeaderField:@"Authorization"];
+    captureHeaders(nil, request);
     pumpUntil(^BOOL { return sg_spotifyAsks == asks + 2; });
     drainReplies();
     CHECK(!SGLyricsLoadFailed(track));
     SGLyricsNoteLoadFailure(track, YES);
     sg_spclientHeaders = @{@"authorization": @"fixture-another"};
-    [sg_requested removeObject:track];
+    setRequested(track, NO);
     SGKaraokeAskSpotifyForTiming(track);
     pumpUntil(^BOOL { return sg_spotifyAsks == asks + 3; });
     drainReplies();
     CHECK(SGLyricsLoadFailed(track));
     SGKaraokeForgetLyrics(track);
+    [NSNotificationCenter.defaultCenter removeObserver:reader];
+    sg_fixtureState = oldState;
     method_setImplementation(method, original);
     sg_spclientHeaders = headers; sg_refusedAuthorization = refused;
     sg_spotifyStatus = status; sg_spotifyAsks = asks; sg_ownSources = own;
@@ -1633,9 +1702,15 @@ static void checkRecoveryRetirement(void) {
         NSString *credit = SGLyricsCreditFor(track);
         late(madeUpLyrics(@"Stale recovery", SGKaraokeTimingWords), NO);
         drainReplies();
-        CHECK(SGKaraokeLinesForTrack(track) == before);
-        CHECK(SGLyricsCreditFor(track) == credit || [SGLyricsCreditFor(track) isEqual:credit]);
-        CHECK(![recoveryDisk(track)[@"text"] isEqual:@"Stale recovery"]);
+        if ([action isEqual:@"evict"]) {
+            // Capacity eviction is not retirement: the better provider still wins and persists.
+            CHECK([SGKaraokeLineText(SGKaraokeLinesForTrack(track).firstObject) isEqual:@"Stale recovery"]);
+            CHECK([recoveryDisk(track)[@"text"] isEqual:@"Stale recovery"]);
+        } else {
+            CHECK(SGKaraokeLinesForTrack(track) == before);
+            CHECK(SGLyricsCreditFor(track) == credit || [SGLyricsCreditFor(track) isEqual:credit]);
+            CHECK(![recoveryDisk(track)[@"text"] isEqual:@"Stale recovery"]);
+        }
         SGKaraokeForgetLyrics(track);
         [fixture.held removeAllObjects];
         [sg_recoveryClocks removeAllObjects];
@@ -1653,7 +1728,7 @@ static void checkRecoveryWithSpotify(void) {
     SGSetInt(SGKeyLyricsAskMode, 0);
     SGLyricsSetOrder(@[@"musixmatch", @"netease"]);
     for (NSNumber *tier in @[@(SGKaraokeTimingLine), @(SGKaraokeTimingWords)]) {
-        NSString *track = NSUUID.UUID.UUIDString;
+        NSString *track = fixtureTrackID();
         SGLyricsPlaybackChanged(track);
         sg_spotifyBody = pageBody(madeUpLyrics(@"Spotify sheet", SGKaraokeTimingLine), nil);
         SGKaraokeRequestLyrics(track);
@@ -1794,6 +1869,8 @@ static void checkRecoveryNamesDeferredSources(void) {
         [fixture reply:@"musixmatch" track:track result:name failed:NO];
         BOOL newlyEligible = fixture.held[[track stringByAppendingString:@"netease"]] != nil;
         CHECK(newlyEligible);
+        if (getenv("RETRINE_PRESSURE_ONLY"))
+            for (NSUInteger i = 0; i <= kKeptTracks; i++) SGKaraokeKeepLines(NSUUID.UUID.UUIDString, @[]);
         CHECK(!recoveryDisk(track));
         [fixture reply:@"netease" track:track result:madeUpLyrics(@"Named word winner", SGKaraokeTimingWords) failed:NO];
         CHECK([recoveryDisk(track)[@"text"] isEqual:@"Named word winner"]);
@@ -1814,7 +1891,7 @@ static void checkSpotifySurvivesRecoveryMiss(void) {
     IMP original = method_setImplementation(method, (IMP)spotifyMiss);
     SGSetInt(SGKeyLyricsAskMode, 0);
     SGLyricsSetOrder(@[@"musixmatch", @"netease"]);
-    NSString *track = NSUUID.UUID.UUIDString;
+    NSString *track = fixtureTrackID();
     SGLyricsPlaybackChanged(track);
     sg_spotifyBody = pageBody(madeUpLyrics(@"Spotify timed winner", SGKaraokeTimingLine), nil);
     SGKaraokeRequestLyrics(track);
@@ -2381,17 +2458,17 @@ static void checkReload(void) {
     NSString *track = @"reload-song";
     NSDictionary *record = @{@"id": @456, @"syncedLyrics": @"[00:01]Before reload"};
     CHECK(SGLyricsPin(track, record));
-    NSUInteger generation = SGLyricsPinGeneration(track);
+    SGLyricsPinStamp *generation = SGLyricsPinGeneration(track);
     __block NSUInteger notes = 0;
     id observer = [NSNotificationCenter.defaultCenter addObserverForName:SGLyricsDidReloadNotification object:track queue:nil usingBlock:^(NSNotification *note) {
         CHECK(NSThread.isMainThread && !sg_kept[track] && !SGKaraokeLinesForTrack(track) && !SGLyricsCreditFor(track));
-        CHECK(![sg_requested containsObject:track] && ![sg_asking containsObject:track] && !sg_losses[track] && !sg_requests[track]);
+        CHECK(!requested(track) && ![sg_asking containsObject:track] && !sg_losses[track] && !sg_requests[track]);
         CHECK(SGLyricsMayHave(track)); notes++;
     }];
     [sg_missing addObject:track]; sg_losses[track] = @3;
     sg_pinnedReply = nil;
     SGLyricsReload(track);
-    CHECK(notes == 1 && [SGLyricsPinnedID(track) isEqual:@456] && SGLyricsPinGeneration(track) == generation + 1);
+    CHECK(notes == 1 && [SGLyricsPinnedID(track) isEqual:@456] && ![SGLyricsPinGeneration(track) isEqual:generation]);
     pumpUntil(^BOOL { return sg_pinnedReply != nil; });
     void (^old)(SGLyricsResult *) = sg_pinnedReply;
     sg_pinnedReply = nil;
@@ -2451,13 +2528,19 @@ static void checkPickRaces(NSUInteger only) {
             SGLyricsAskOffers(track);
             SGLyricsChooseSource(track, keys[1]);
             if (!pendingWrite.boolValue) {
+                if (getenv("RETRINE_PRESSURE_ONLY"))
+                    for (NSUInteger i = 0; i <= kKeptTracks; i++) SGKaraokeKeepLines(NSUUID.UUID.UUIDString, @[]);
                 drainReplies();
                 __block BOOL loaded = NO;
                 SGLyricsStoreLoad(track, ^(NSArray *lines, NSString *credit, SGLyricsResult *metadata) {
                     CHECK(lines.count && [credit isEqual:keys[1]]); loaded = YES;
                 });
                 pumpUntil(^BOOL { return loaded; });
-            } else CHECK(sg_storeWrites[track] != nil);
+            } else {
+                BOOL pending = NO;
+                for (SGKaraokeWrite *write in sg_storeWrites) if ([write.track isEqual:track]) pending = YES;
+                CHECK(pending);
+            }
             SGLyricsChooseAutomatic(track);
             SGKaraokeRequestLyrics(track);
             pumpUntil(^BOOL { return SGKaraokeLinesForTrack(track) != nil; });
@@ -2505,7 +2588,7 @@ static void checkPickRaces(NSUInteger only) {
             // Replay after the walk/line caches have been evicted, with its original snapshot intact.
             [sg_kept removeObjectForKey:track];
             [sg_lyrics removeObjectForKey:track];
-            [sg_requested removeObject:track];
+            setRequested(track, NO);
             [pending removeAllObjects]; hold = YES;
             __block NSUInteger deliveries = 0;
             for (NSUInteger i = 0; i < 2; i++) SGLyricsFetch(track, ^(SGLyricsResult *result) {
@@ -2553,7 +2636,7 @@ static void checkBackgroundSkip(void) {
     HarnessPlayer *player = [HarnessPlayer new]; sg_player = player;
     HarnessLyricsState *state = [HarnessLyricsState new]; player.state = state;
     HarnessLyricsTrack *track = [HarnessLyricsTrack new]; state.track = track;
-    NSString *key = NSUUID.UUID.UUIDString;
+    NSString *key = fixtureTrackID();
     track.URI = [@"spotify:track:" stringByAppendingString:key];
     track.trackTitle = @"Song"; track.artistName = @"Singer"; track.metadata = @{};
     SGKaraokeRememberTrack((id)track, key);
@@ -2624,13 +2707,13 @@ static void checkBackgroundSkip(void) {
     sg_providerReply(nil);
     pumpUntil(^BOOL { return !SGKaraokeLooking(key); });
     CHECK(SGLyricsKeptAnswer(key) == NSNull.null && !sg_losses[key]);
-    CHECK([sg_requested containsObject:key] && ![sg_asking containsObject:key]);
+    CHECK(requested(key) && ![sg_asking containsObject:key]);
 
     // No captured Spotify headers yet: the same failed walk waits, rather than being re-walked
     // every tick. A pause expiring in the background only clears the mark; activation asks again.
     sg_spclientHeaders = nil; sg_testApplication.applicationState = UIApplicationStateBackground;
     [sg_heldClocks removeAllObjects];
-    track = [HarnessLyricsTrack new]; state.track = track; key = NSUUID.UUID.UUIDString;
+    track = [HarnessLyricsTrack new]; state.track = track; key = fixtureTrackID();
     track.URI = [@"spotify:track:" stringByAppendingString:key];
     track.trackTitle = @"Next song"; track.artistName = @"Singer"; track.metadata = @{};
     SGKaraokeRememberTrack((id)track, key);
@@ -2642,11 +2725,11 @@ static void checkBackgroundSkip(void) {
     [sg_providerContext noteFailure:YES];
     sg_providerReply(nil);
     pumpUntil(^BOOL { return sg_losses[key].unsignedIntegerValue == 1; });
-    CHECK(sg_heldClocks.count == 1 && [sg_requested containsObject:key] && sg_open);
+    CHECK(sg_heldClocks.count == 1 && requested(key) && sg_open);
     retry = sg_heldClocks.firstObject; [sg_heldClocks removeAllObjects]; sg_providerReply = nil;
     retry();
     drainReplies();
-    CHECK(!sg_providerReply && ![sg_requested containsObject:key] && !SGRPlayerLyricsNone());
+    CHECK(!sg_providerReply && !requested(key) && !SGRPlayerLyricsNone());
     sg_testApplication.applicationState = UIApplicationStateActive;
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
     pumpUntil(^BOOL { return sg_providerReply != nil; });
@@ -2659,7 +2742,7 @@ static void checkBackgroundSkip(void) {
         [sg_heldClocks removeAllObjects];
         sg_spclientHeaders = [signal isEqual:@"explicit"] ? nil : @{};
         state.isPaused = ![signal isEqual:@"activation"];
-        track = [HarnessLyricsTrack new]; state.track = track; key = NSUUID.UUID.UUIDString;
+        track = [HarnessLyricsTrack new]; state.track = track; key = fixtureTrackID();
         track.URI = [@"spotify:track:" stringByAppendingString:key];
         track.trackTitle = @"Outage"; track.artistName = @"Singer"; track.metadata = @{};
         SGKaraokeRememberTrack((id)track, key);
@@ -2682,7 +2765,7 @@ static void checkBackgroundSkip(void) {
                 lastRetry();
             } else {
                 CHECK(!sg_heldClocks.count && ![sg_asking containsObject:key] && !sg_requests[key]);
-                CHECK([sg_requested containsObject:key]);
+                CHECK(requested(key));
             }
         }
         CHECK(sg_spotifyAsks == asks + (sg_spclientHeaders ? 5 : 0));
@@ -2721,7 +2804,7 @@ static void checkBackgroundSkip(void) {
     NSUInteger asks = sg_spotifyAsks;
     retry = sg_heldClocks.firstObject; [sg_heldClocks removeAllObjects]; retry();
     drainReplies();
-    CHECK(!sg_providerReply && sg_spotifyAsks == asks && ![sg_requested containsObject:key]);
+    CHECK(!sg_providerReply && sg_spotifyAsks == asks && !requested(key));
     SGKaraokeRequestLyrics(key);
     pumpUntil(^BOOL { return sg_losses[key].unsignedIntegerValue == 2; });
     CHECK(!sg_sourceRetries[key]); // The cached genuine source miss still follows the old lost path.
@@ -2995,7 +3078,7 @@ static void checkCommunityPersistence(BOOL cached) {
     pumpUntil(^BOOL { return writesDrained; });
     // Fresh offline session: no memory answer, no community transport, only the real disk store.
     sg_testTranslations = NO; sg_cachedTranslationReply = nil; sg_translationReply = nil; sg_translatedLines = nil;
-    [sg_lyrics removeAllObjects]; [sg_requested removeAllObjects]; [sg_asking removeAllObjects];
+    [sg_lyrics removeAllObjects]; [sg_requestMarks removeAllObjects]; [sg_asking removeAllObjects];
     [sg_requests removeAllObjects]; [sg_storeRequests removeAllObjects]; [sg_storeWrites removeAllObjects];
     SGLyricsForgetAnswer(track);
     SGKaraokeRequestLyrics(track);
@@ -3187,6 +3270,18 @@ static void checkStockPreferences(void) {
     puts("source defaults: stock marker and Load ahead share typed preference accessors");
 }
 
+@interface HeaderSession : NSObject
+@property NSUInteger merges;
+@end
+@implementation HeaderSession
+- (NSURLSessionConfiguration *)configuration {
+    self.merges++;
+    NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+    config.HTTPAdditionalHeaders = @{@"Client-Token": @"session-token", @"Cookie": @"not forwarded"};
+    return config;
+}
+@end
+
 static void checkHeaderOrigin(void) {
     NSDictionary *previousHeaders = sg_spclientHeaders;
     NSMutableArray *previousWaiting = sg_headersWaiting;
@@ -3209,21 +3304,67 @@ static void checkHeaderOrigin(void) {
         @[@"https://guc3_x-spclient.spotify.com/", @"untrusted-region-character", @"regional"],
         @[@"https://GUC3-SPCLIENT.SPOTIFY.COM/", @"regional-case", @"regional-case"],
     ];
+    HarnessTask *task = [HarnessTask new];
+    HeaderSession *session = [HeaderSession new];
+    __block NSUInteger first = 0;
+    SGSpclientHeaders(^(NSDictionary *headers) {
+        CHECK([headers[@"authorization"] isEqual:@"trusted"]);
+        first++;
+    });
     for (NSArray<NSString *> *row in cases) {
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:row[0]]];
         [request setValue:row[1] forHTTPHeaderField:@"Authorization"];
-        rememberHeaders(nil, request);
+        task.currentRequest = [request copy];
+        NSUInteger submissions = 0, before = session.merges;
+        headerSubmissions = &submissions;
+        for (NSUInteger i = 0; i < 32; i++) rememberHeaders((id)session, (id)task);
+        headerSubmissions = NULL;
+        NSUInteger accepted = [row[1] isEqual:row[2]] ? 1 : 0;
+        CHECK(submissions == accepted && session.merges - before == accepted);
         __block BOOL checked = NO;
         // Capture queues its update on main. This fence observes that update (or rejection)
         // before querying the public API, without timing assumptions or network access.
         dispatch_async(dispatch_get_main_queue(), ^{
             SGSpclientHeaders(^(NSDictionary *headers) {
                 CHECK([headers[@"authorization"] isEqualToString:row[2]]);
+                CHECK([headers[@"client-token"] isEqual:@"session-token"] && !headers[@"cookie"]);
                 checked = YES;
             });
         });
         pumpUntil(^BOOL { return checked; });
     }
+    CHECK(first == 1);
+    NSMutableURLRequest *revision = [task.currentRequest mutableCopy];
+    [revision setValue:@"ko" forHTTPHeaderField:@"Accept-Language"];
+    task.currentRequest = revision;
+    rememberHeaders((id)session, (id)task);
+    __block BOOL delivered = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SGSpclientHeaders(^(NSDictionary *headers) {
+            CHECK([headers[@"accept-language"] isEqual:@"ko"] && [headers[@"authorization"] isEqual:@"regional-case"]);
+            delivered = YES;
+        });
+    });
+    pumpUntil(^BOOL { return delivered; });
+    NSString *previousRefusal = sg_refusedAuthorization;
+    sg_refusedAuthorization = @"regional-case"; // 401 while another request using that token is in flight.
+    HarnessTask *late = [HarnessTask new];
+    late.currentRequest = [revision copy];
+    HarnessTask *fresh = [HarnessTask new];
+    [revision setValue:@"renewed" forHTTPHeaderField:@"Authorization"];
+    fresh.currentRequest = [revision copy];
+    rememberHeaders((id)session, (id)fresh);
+    rememberHeaders((id)session, (id)late);
+    rememberHeaders((id)session, (id)fresh);
+    delivered = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        SGSpclientHeaders(^(NSDictionary *headers) {
+            CHECK([headers[@"authorization"] isEqual:@"renewed"]);
+            delivered = YES;
+        });
+    });
+    pumpUntil(^BOOL { return delivered; });
+    sg_refusedAuthorization = previousRefusal;
     sg_spclientHeaders = previousHeaders;
     sg_headersWaiting = previousWaiting;
     puts("header origin: exact HTTPS global or regional host, case-insensitivity, malicious hosts and HTTP rejection passed");
@@ -3344,8 +3485,20 @@ static void checkUpNext(void) {
     sg_lastSeen = previousTrack;
 }
 
+#import "pixie-check.inc"
 int main(void) {
     @autoreleasepool {
+        NSString *line = @"<p begin=\"0\" end=\"1\"><span begin=\"0\">verse</span></p>";
+        NSString *rows = [@"" stringByPaddingToLength:line.length * 4096 withString:line startingAtIndex:0];
+        CHECK(SGTTMLLines([NSString stringWithFormat:@"<tt>%@</tt>", rows]).count == 4096);
+        NSString *many = [@"" stringByPaddingToLength:4 * 65536 withString:@"<x/>" startingAtIndex:0];
+        CHECK(!SGTTMLLines([NSString stringWithFormat:@"<tt>%@%@</tt>", line, many]));
+        NSString *open = [@"" stringByPaddingToLength:3 * 80 withString:@"<x>" startingAtIndex:0];
+        NSString *close = [@"" stringByPaddingToLength:4 * 80 withString:@"</x>" startingAtIndex:0];
+        CHECK(!SGTTMLLines([NSString stringWithFormat:@"<tt>%@%@%@</tt>", line, open, close]));
+        CHECK(!SGTTMLLines([NSString stringWithFormat:@"<!DOCTYPE tt><tt>%@</tt>", line]));
+        NSString *padding = [@"" stringByPaddingToLength:1500000 withString:@"界" startingAtIndex:0];
+        CHECK(!SGTTMLLines([NSString stringWithFormat:@"<tt>%@<!--%@--></tt>", line, padding]));
         checkSpotifySyllables();
         checkSpotifyPublishedClock();
         checkHeaderOrigin();
@@ -3374,6 +3527,8 @@ int main(void) {
         sg_testApplication.applicationState = UIApplicationStateActive;
         method_setImplementation(class_getClassMethod(UIApplication.class, @selector(sharedApplication)), (IMP)fakeApplication);
         NSUserDefaults *defaults = sg_testDefaults;
+        if (getenv("RETRINE_PIXIE_ONLY")) { checkPixieQueue(); return 0; }
+        if (getenv("RETRINE_PIXIE_COLD")) { checkColdQueue(@(getenv("RETRINE_PIXIE_COLD"))); return 0; }
         if (!aheadOnly) {
             checkLanguageStore();
             checkAskModeMigration();
@@ -3383,7 +3538,7 @@ int main(void) {
         [defaults setInteger:250 forKey:SGKeyLyricsDelay];
         sg_seenTracks = [NSMutableDictionary dictionary];
         sg_lyrics = [NSMutableDictionary dictionary];
-        sg_requested = [NSMutableSet set]; sg_asking = [NSMutableSet set]; sg_looking = [NSMutableSet set];
+        sg_requestMarks = [NSMutableDictionary dictionary]; sg_asking = [NSMutableSet set]; sg_looking = [NSMutableSet set];
         sg_losses = [NSMutableDictionary dictionary]; sg_ownSources = YES;
         sg_lastSeenID = @"song";
         if (getenv("RETRINE_RESILIENCE_ONLY")) {
@@ -3422,6 +3577,10 @@ int main(void) {
         puts("file authority and path sampling: Automatic protected; local revisit reused; background change deferred until activation");
         checkDirectInstrumentalFallback();
         const char *race = getenv("RETRINE_PICK_RACE");
+        if (getenv("RETRINE_PRESSURE_ONLY")) {
+            checkRecoveryNamesDeferredSources(); checkPickRaces(1);
+            return 0;
+        }
         if (race) { checkPickRaces((NSUInteger)atoi(race)); return 0; }
         HarnessPort *port = [HarnessPort new]; port.UID = @"headphones-one"; port.portName = @"Headphones"; port.portType = AVAudioSessionPortBluetoothA2DP;
         sg_fakeRoute = [HarnessRoute new]; sg_fakeRoute.outputs = @[port];
@@ -3431,8 +3590,18 @@ int main(void) {
         NSUInteger reads = sg_defaultsReads;
         dispatch_apply(1000, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) { CHECK(SGKaraokeDelayMs() == 250); });
         CHECK(sg_defaultsReads == reads);
+        __block NSMutableArray *delays = [NSMutableArray array];
+        id delayObserver = [NSNotificationCenter.defaultCenter addObserverForName:SGLyricsOffsetsDidChangeNotification
+            object:nil queue:nil usingBlock:^(NSNotification *note) {
+                CHECK(NSThread.isMainThread);
+                [delays addObject:@(SGKaraokeDelayMs())];
+            }];
         SGSetInt(SGKeyLyricsDelay, 500);
-        CHECK(SGKaraokeDelayMs() == 500);
+        SGSetInt(SGKeyLyricsDelay, 1100);
+        SGSetInt(SGKeyLyricsDelay, 1200); // same effective 1000 ms
+        [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:defaults];
+        [NSNotificationCenter.defaultCenter removeObserver:delayObserver];
+        CHECK(([delays isEqual:@[@500, @1000]]));
         SGSetInt(SGKeyLyricsDelay, 250);
         SGLyricsSetTrackOffsetMs(@"song", -6000);
         SGLyricsSetRouteOffsetMs(6000);

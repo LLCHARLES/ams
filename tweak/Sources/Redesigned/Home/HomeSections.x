@@ -27,6 +27,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "Core/SGCore.h"
+#import "Shared/WireGuard/SGWGABI.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Home.h"
 
@@ -51,7 +52,8 @@ static BOOL modelDrops(UICollectionViewCompositionalLayout *layout, NSInteger se
 // (cells then classify themselves) instead of an unrecognized selector in every diffable list of the app.
 static id sendIfAnswered(id object, NSString *name) {
     SEL selector = NSSelectorFromString(name);
-    return [object respondsToSelector:selector] ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
+    Method method = class_getInstanceMethod(object_getClass(object), selector);
+    return SGWGMethodMatches(method, "@", @[]) ? ((id (*)(id, SEL))objc_msgSend)(object, selector) : nil;
 }
 
 static UICollectionView *homeListOf(id source) {

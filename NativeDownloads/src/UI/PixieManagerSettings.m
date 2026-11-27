@@ -1,5 +1,6 @@
 #import "Localization.h"
 #import "NativeAdmission.h"
+#import "TargetProfile.h"
 #import "DownloadCompatibility.h"
 #import "OfflineDevices.h"
 #import "TrackExport.h"
@@ -15,6 +16,7 @@
 #import "TrackJournal.h"
 #import "TrackDownload.h"
 #import "GitHubIcon.h"
+#import "PixiePageNavigation.h"
 #import "PixiePageController.h"
 #include <math.h>
 
@@ -445,14 +447,14 @@ static UITableViewCell *SAPPlainSettingsCell(NSString *label,NSString *value) {
 - (NSString *)tableView:(UITableView *)table titleForFooterInSection:(NSInteger)section {
     if(section==0) {
         NSDictionary *startup=self.snapshot[@"jailbreak_bootstrap"];
-        if(startup&&![startup[@"native_patches_ready"]boolValue])return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.init_failed",@"Pixie could not initialize downloads (%@). Supported Spotify: 9.1.90. Detected: %@. Menu and logs remain available."),startup[@"reason"],startup[@"detected_spotify_version"]];
+        if(startup&&![startup[@"native_patches_ready"]boolValue])return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.init_failed",@"Pixie could not initialize downloads (%@). Supported Spotify: %@. Detected: %@. Menu and logs remain available."),startup[@"reason"],@SAP_SPOTIFY_VERSION,startup[@"detected_spotify_version"]];
         return SAPL(@"settings.pixie.footer.download_export",@"Downloads stay in Spotify. Audio export creates files you can save to Files or share.");
     }
     if(section==1) {
         NSDictionary *mode=self.snapshot[@"key_request_mode"];
         return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.troubleshooting",@"%@\n\nOnly change settings in this menu if downloads are not working."),mode[@"detail"]?:@""];
     }
-    if(section==4)return @"Spotify 9.1.90 · Vitrine-Pixie v1.4.";
+    if(section==4)return [NSString stringWithFormat:SAPL(@"settings.pixie.footer.version",@"Spotify %@ · Vitrine-Pixie v1.4."),[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"—"];
     if(section==2)return SAPL(@"settings.pixie.footer.export",@"Export downloaded Spotify audio to external apps or Files from Pixie or Spotify’s Share as file option. Choose a destination in the share sheet. The selected format applies to future exports.");
     if(section==3)return SAPL(@"settings.pixie.footer.diagnostics",@"Enable Diagnostics for detailed passive events.");
     return nil;
@@ -555,7 +557,7 @@ static UITableViewCell *SAPPlainSettingsCell(NSString *label,NSString *value) {
     if(index.section==3 && index.row==3){[SAPSettingsActions perform:SAPSettingsResetJournal];return;}
     if(index.section==1) {
         if(self.checkingCompatibility)return;
-        if(index.row==2){[self.navigationController pushViewController:[SAPOfflineDevicesSettings new] animated:YES];return;}
+        if(index.row==2){SAPShowPixiePage(self,[SAPOfflineDevicesSettings new]);return;}
         if(index.row==1) {
             self.checkingCompatibility=YES;[self.tableView reloadData];
             [SAPSettingsActions refreshDownloadCompatibility:^(NSDictionary *result){
@@ -580,7 +582,7 @@ static UITableViewCell *SAPPlainSettingsCell(NSString *label,NSString *value) {
     }
     if(index.section==3 && index.row==1) {
         SAPDetailsSettings *page=[SAPDetailsSettings new];
-        [self.navigationController pushViewController:page animated:YES];return;
+        SAPShowPixiePage(self,page);return;
     }
     SAPSettingsAction action;
     if(index.section==0) {
@@ -628,7 +630,7 @@ static UITableViewCell *SAPPlainSettingsCell(NSString *label,NSString *value) {
 }
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)index {
     [table deselectRowAtIndexPath:index animated:YES];
-    if(index.row==0)[self.settingsHost.navigationController pushViewController:[SAPDownloadsSettings new] animated:YES];
+    if(index.row==0)SAPShowPixiePage(self.settingsHost,[SAPDownloadsSettings new]);
 }
 @end
 
@@ -711,16 +713,33 @@ static void SAPSettingsLayout(id self,SEL selector) {originalSettingsLayout(self
 static void *SAPModPageInit(void *self,SEL selector,NSString *title,NSString *intro,NSArray *sections,NSString *footer) {
     if([title isEqualToString:@"Retrine"] || [title isEqualToString:@"Vitrine"]) {
         id (*pageRow)(NSString *,UIViewController *(^)(void))=dlsym(RTLD_DEFAULT,"SGPageRow");
-        id (*actionRow)(NSString *,NSString *,void (^)(void))=dlsym(RTLD_DEFAULT,"SGActionRow");
+        id (*identify)(id,NSString *)=dlsym(RTLD_DEFAULT,"SGSearchIdentified");
+        id (*keywords)(id,NSString *)=dlsym(RTLD_DEFAULT,"SGSearchKeywords");
         id (*withTile)(id,NSString *,UIColor *)=dlsym(RTLD_DEFAULT,"SGWithTile");
         id (*section)(NSString *,NSArray *)=dlsym(RTLD_DEFAULT,"SGSection");
-        if(pageRow && actionRow && withTile && section) {
-            id row=pageRow(SAPL(@"settings.pixie.manager.title",@"Pixie Download Manager"),^UIViewController *{return [SAPDownloadsSettings new];});
+        if(pageRow && withTile && section) {
+            id row=pageRow(SAPL(@"settings.pixie.downloads.title",@"Pixie downloads"),^UIViewController *{return [SAPDownloadsSettings new];});
             row=withTile(row,@"arrow.down.circle.fill",UIColor.systemGreenColor);
-            id log=actionRow(SAPL(@"settings.pixie.entry.send_log.title",@"Send log"),SAPL(@"settings.pixie.vitrine.send_log.subtitle",@"Report, actions, download history and Retrine diagnostics"),^{[SAPSettingsActions perform:SAPSettingsSendLog];});
-            log=withTile(log,@"square.and.arrow.up",UIColor.systemTealColor);
-            id group=section(nil,@[row,log]);
-            if(group){sections=[sections arrayByAddingObject:group];SAP_TRACE("ui","pixie_rows_added_to_retrine",0,@{@"added_rows":@2,@"root_title":title});}
+            if(identify)identify(row,@"page.pixie");
+            if(keywords)keywords(row,SAPL(@"settings.pixie.downloads.keywords",@"downloads offline files diagnostics send log"));
+            // Find Privacy by its stable page ID, not its translated heading or the number of warning cards.
+            BOOL placed=NO;
+            for(id group in sections) {
+                if(![group respondsToSelector:@selector(rows)] || ![group respondsToSelector:@selector(setRows:)])continue;
+                NSArray *rows=[group valueForKey:@"rows"];
+                for(id entry in rows) {
+                    if(![entry respondsToSelector:@selector(searchIdentifier)] || ![[entry valueForKey:@"searchIdentifier"] isEqual:@"page.ads"])continue;
+                    [group setValue:[rows arrayByAddingObject:row] forKey:@"rows"];
+                    placed=YES;break;
+                }
+                if(placed)break;
+            }
+            if(!placed) {
+                NSMutableArray *groups=[sections mutableCopy] ?: [NSMutableArray array];
+                [groups insertObject:section(nil,@[row]) atIndex:groups.count ? groups.count-1 : 0];
+                sections=groups;
+            }
+            SAP_TRACE("ui","pixie_rows_added_to_retrine",0,@{@"added_rows":@1,@"root_title":title});
         }else {
             settingsInstallStatus=@"retrine_row_factories_unavailable";
         }

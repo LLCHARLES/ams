@@ -4,6 +4,7 @@
 #import <UIKit/UIKit.h>
 #import <Security/Security.h>
 #import <objc/runtime.h>
+#import "Core/SGDataRoot.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Shared/LyricsTranslation/AIServicesInternal.h"
@@ -17,10 +18,11 @@ void SGLyricsTestStoreEnumeration(void) {
     if (NSThread.isMainThread) mainStoreEnumerations++;
 }
 NSURL *SGLyricsTestCacheRoot(void) {
+    if (getenv("SG_TEST_PRELAUNCH")) return SGDataRoot(NSApplicationSupportDirectory);
     if (!NSThread.isMainThread && holdStore) {
         holdStore = NO;
         dispatch_semaphore_signal(storeEntered);
-        if (dispatch_semaphore_wait(storeRelease, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(storeRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
             fprintf(stderr, "FAIL: main blocked behind the translation store queue\n");
             exit(1);
         }
@@ -86,6 +88,12 @@ OSStatus SGLyricsTestKey(CFDictionaryRef query, CFTypeRef *result) {
     if (![testKeys containsObject:service]) return errSecItemNotFound;
     NSData *data = [@"offline-test-key" dataUsingEncoding:NSUTF8StringEncoding];
     if ([service isEqual:@"Vitrine.OpenAI"]) {
+        if ([item[(__bridge id)kSecReturnAttributes] boolValue]) {
+            NSMutableArray *items = [NSMutableArray array];
+            for (NSString *account in openAIKeys) [items addObject:@{(__bridge id)kSecAttrAccount:account}];
+            if (result) *result = CFBridgingRetain(items);
+            return errSecSuccess;
+        }
         data = openAIKeys[item[(__bridge id)kSecAttrAccount]];
         if (!data) return errSecItemNotFound;
     }
@@ -106,7 +114,20 @@ OSStatus SGLyricsTestKeyAdd(CFDictionaryRef query, CFTypeRef *result) {
 OSStatus SGLyricsTestKeyUpdate(CFDictionaryRef query, CFDictionaryRef attributes) {
     NSString *account = ((__bridge NSDictionary *)query)[(__bridge id)kSecAttrAccount];
     if (keyWriteFailure) return keyWriteFailure;
+    NSString *service = ((__bridge NSDictionary *)query)[(__bridge id)kSecAttrService];
+    if (![service isEqual:@"Vitrine.OpenAI"]) {
+        if (![testKeys containsObject:service]) return errSecItemNotFound;
+        lastStoredCredential = ((__bridge NSDictionary *)attributes)[(__bridge id)kSecValueData];
+        return errSecSuccess;
+    }
     if (!openAIKeys[account]) return errSecItemNotFound;
+    NSString *renamed = ((__bridge NSDictionary *)attributes)[(__bridge id)kSecAttrAccount];
+    if (renamed) {
+        if (openAIKeys[renamed]) return errSecDuplicateItem;
+        openAIKeys[renamed] = openAIKeys[account];
+        [openAIKeys removeObjectForKey:account];
+        return errSecSuccess;
+    }
     openAIKeys[account] = ((__bridge NSDictionary *)attributes)[(__bridge id)kSecValueData];
     return errSecSuccess;
 }
@@ -157,7 +178,9 @@ static UIAlertController *keyPrompt;
 @end
 static UIViewController *testPresenter;
 UIViewController *SGTopController(void) { return testPresenter; }
-UIViewController *SGSavedTranslationsPage(void) { return nil; }
+UIViewController *SGSavedTranslationsPage(void) {
+    UIViewController *library = [UIViewController new]; library.title = @"Saved library fixture"; return library;
+}
 void SGShowPage(UIViewController *owner, UIViewController *page) {}
 
 #define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "FAILED line %d: %s\n", __LINE__, #cond); exit(1); } } while (0)
@@ -297,7 +320,7 @@ static void routeEphemeralSessionsToDeepL(BOOL on) {
     realEphemeralConfiguration = method_getImplementation(method);
     IMP routed = imp_implementationWithBlock(^NSURLSessionConfiguration *(id receiver) {
         NSURLSessionConfiguration *config = ((NSURLSessionConfiguration *(*)(id, SEL))realEphemeralConfiguration)(receiver, @selector(ephemeralSessionConfiguration));
-        config.protocolClasses = @[SGDeepLProtocol.class];
+        config.protocolClasses = @[SGDeepLProtocol.class, SGGeminiTitleProtocol.class];
         return config;
     });
     method_setImplementation(method, routed);
@@ -603,6 +626,13 @@ static void checkProviders(void) {
 
 int main(int argc, const char **argv) {
     @autoreleasepool {
+        Method ephemeral = class_getClassMethod(NSURLSessionConfiguration.class, @selector(ephemeralSessionConfiguration));
+        IMP configuration = method_getImplementation(ephemeral);
+        method_setImplementation(ephemeral, imp_implementationWithBlock(^NSURLSessionConfiguration *(id cls) {
+            NSURLSessionConfiguration *config = ((id (*)(id, SEL))configuration)(cls, @selector(ephemeralSessionConfiguration));
+            config.protocolClasses = [@[SGGeminiTitleProtocol.class] arrayByAddingObjectsFromArray:config.protocolClasses];
+            return config;
+        }));
         if (argc > 1 && strcmp(argv[1], "--bing-live") == 0) {
             bingLive = bingEnabled = YES;
             NSString *problem;
@@ -620,6 +650,9 @@ int main(int argc, const char **argv) {
         if (argc > 1 && strcmp(argv[1], "--kept-only") == 0) { checkKeptTranslation(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--storage-only") == 0) { checkDurableStorage(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--startup-reclaim-only") == 0) { checkStartupReclaimRetry(); return 0; }
+        if (argc > 1 && strcmp(argv[1], "--first-read-only") == 0) { checkColdDeletedAlias(); checkFirstRecordRead(); return 0; }
+        if (argc > 1 && strcmp(argv[1], "--first-read-failure-only") == 0) { checkColdReadFailure(); return 0; }
+        if (argc > 1 && strcmp(argv[1], "--startup-unlock-only") == 0) { checkStartupUnlock(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--connection-only") == 0) { checkConnection(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--gemini-memo-only") == 0) { checkGeminiMemoBound(); return 0; }
         if (argc > 1 && strcmp(argv[1], "--gemini-guidance-only") == 0) { checkGeminiGuidance(); return 0; }

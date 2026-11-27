@@ -101,16 +101,18 @@ static SGRPagePreview *libraryPreview(NSString *title, NSString *menuName, NSStr
     return card;
 }
 
-UIViewController *SGRLibrarySettingsPage(void) {
+SGRPagePreview *SGRLibraryPreview(void) {
     NSString *title = SGL(@"settings.library.preview.title", @"Your Library");
     NSString *menuName = SGL(@"settings.library.preview.menu", @"Sort and view menu");
     NSString *chipsName = SGL(@"settings.library.preview.chips", @"Filter chips");
     NSString *sortName = SGL(@"settings.library.preview.sort_row", @"Sort order and view");
-    return SGRPagePreviewPage(SGL(@"settings.library.title", @"Library"), libraryPreview(title, menuName, chipsName, sortName), SGRestartNote, @[
-        SGNotedSection(nil, @[
-            SGOptionRow(SGL(@"settings.library.compact.title", @"Compact library"),
+    return libraryPreview(title, menuName, chipsName, sortName);
+}
+
+SGModSection *SGRLibrarySection(void) {
+    return SGNotedSection(SGL(@"settings.library.title", @"Library"), @[
+            SGWithNew(SGOptionRow(SGL(@"settings.library.compact.title", @"Compact library"),
                         SGL(@"settings.library.compact.subtitle", @"Hides the filter chips under the title. A menu beside it sorts, switches between list and grid, and clears a filter, through Spotify's own controls."),
-                        SGRKeyLibraryHideChips),
-        ], SGL(@"settings.library.compact.note", @"Folders keep their chips. Whenever the menu cannot reach Spotify's controls, the chips stay.")),
-    ]);
+                        SGRKeyLibraryHideChips), @"libraryPage"),
+        ], SGL(@"settings.library.compact.note", @"Folders keep their chips. Whenever the menu cannot reach Spotify's controls, the chips stay."));
 }

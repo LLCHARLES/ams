@@ -300,6 +300,8 @@ static void checkRelay(int family) {
     ssize_t got = recvfrom(receiver, buffer, sizeof buffer, 0, (struct sockaddr *)&relay, &relayLength);
     snprintf(what, sizeof what, "%s: the receiver gets the query", label);
     CHECK(got == (ssize_t)q.length && memcmp(buffer, q.bytes, q.length) == 0, what);
+    int second = boundSocket(family, 1, NULL);
+    SGConnectSendto(second, q.bytes, q.length, 0, to, to->sa_len);
 
     // Answered at once: the round, having sent all it had to, ends 0.7 s in.
     Packet wrong = reply(0x4321), good = reply(0x1234), fromStranger = reply(0x1234);
@@ -353,7 +355,7 @@ static void checkRelay(int family) {
     CHECK(got == (ssize_t)good.length - 1 && seenPort == otherPort, what);
 
     SGConnectSetReceiver(@"Kitchen", nil);
-    close(spotify); close(receiver); close(stranger); close(other);
+    close(spotify); close(second); close(receiver); close(stranger); close(other);
     usleep(1300000);
 }
 

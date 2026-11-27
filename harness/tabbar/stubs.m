@@ -10,7 +10,13 @@ __weak UIView *sgr_playlistRoot = nil;
 __weak UIView *sgr_albumRoot = nil;
 __weak UIView *sgr_artistRoot = nil;
 
+__weak UIView *sgHarnessLitTab = nil;
+NSUInteger sgHarnessTabBarRefreshes = 0;
+BOOL sgHarnessTabBarRefreshedOffMain = NO;
+
+#ifndef HARNESS_COMPOSED
 void SGRComposeTabBar(UIView *tabBar) {}
+NSArray<UIView *> *SGRComposedTabItems(UIView *tabBar) { return nil; }
 
 // With `split` among the launch words, Search is a split tab, which TabBar.x stands on a bar of its own;
 // with `split2`, Create is one too; with `splitcreate`, Create alone.
@@ -26,26 +32,31 @@ BOOL SGRTabIsApart(UIView *item) {
     }
     return NO;
 }
-// The tab of the mod's own whose page is up (Navbar.x), which the `lit` launch word sets by hand.
-__weak UIView *sgHarnessLitTab = nil;
+// The tab the `lit` launch word sets by hand.
 UIView *SGRNavbarLitTab(void) { return sgHarnessLitTab; }
 void SGRNavbarForgetTab(void) {
     if (sgHarnessLitTab) NSLog(@"[harness] the lit tab forgotten");
     sgHarnessLitTab = nil;
 }
-// How often a hold opened Mod Settings, for `symbols hold`.
-NSUInteger sgHarnessModSettingsOpens = 0;
-void SGOpenModSettings(UIView *source) { sgHarnessModSettingsOpens++; }
-
 // Navbar.x's lays out the bar SGRComposeTabBar last composed, and the stub above composes none, so it lays out
 // nothing here: what the Tab bar page changes reaches the bar only through TabBar.x's own path (`navsettings`). It
 // counts its calls and notes one off the main thread, for `symbols`' list read off it.
-NSUInteger sgHarnessTabBarRefreshes = 0;
-BOOL sgHarnessTabBarRefreshedOffMain = NO;
 void SGRRefreshTabBar(void) {
     if (!NSThread.isMainThread) sgHarnessTabBarRefreshedOffMain = YES;
     sgHarnessTabBarRefreshes++;
 }
+
+#endif
+
+// How often a hold opened Mod Settings, for `symbols hold`.
+NSUInteger sgHarnessModSettingsOpens = 0;
+void SGOpenModSettings(UIView *source) { sgHarnessModSettingsOpens++; }
+
+// The full player never covers the mini player in this harness.
+NSNotificationName const SGRPlayerVisibilityDidChangeNotification = @"SGRPlayerVisibilityDidChange";
+CGRect SGRSettledPlayerRect(UIWindow *window) { return CGRectNull; }
+BOOL SGRPlayerLandscapeCovers(UIWindow *window) { return NO; }
+void SGRObserveVisibility(UIView *view, dispatch_block_t changed) {}
 
 #import "../shared/placeholder-artwork.m"
 #include "../shared/bar-title-notifications.inc"

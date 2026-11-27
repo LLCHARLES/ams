@@ -59,6 +59,8 @@ CGRect SGRSettledPlayerRect(UIWindow *window) {
 
 static void visibilityChanged(void) {
     BOOL visible = SGRPlayerIsVisible();
+    BOOL sampling = visible && sg_appeared && UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
+    SGRBackdropInkSetSource(sampling ? sg_field : nil);
     UIWindow *window = sg_appeared && visible && !sg_followedMorph ? sg_field.window : nil;
     CGRect rect = window ? SGRVisibleRectInWindow(sg_field) : CGRectNull;
     if (visible == sg_wasVisible && window == sg_coveredWindow &&
@@ -123,11 +125,18 @@ NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
              SGL(@"settings.player.background.visualizer", @"Visualizer")];
 }
 
+BOOL SGRPlayerNoClipHoldEnabled(void) {
+    return SGHidden(SGRKeyPlayerHoldNoClip) && SGRPlayerBackground() == SGRPlayerBackgroundAnimated &&
+        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn();
+}
+
 // A paused song holds the colors still, the way it rests the cover (PlayerArtwork.x), and so does what lies over
 // the field: an animated artwork's clip, which covers it (PlayerMotion.x), or the Visualizer's hills, which are
 // the one thing moving.
 static BOOL fieldHeld(void) {
-    return SGPlayerState().isPaused || SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing();
+    return !SGRPlayerIsVisible() || SGRPlayerLandscapeCovers(sg_field.window) || SGPlayerState().isPaused ||
+        SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing() ||
+        (SGRPlayerNoClipHoldEnabled() && SGRPlayerTrackHasNoClip());
 }
 
 void SGRPlayerHoldField(void) {
@@ -350,8 +359,17 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
     if (!SGRedesignedUI()) return;
     %init;
     %init(SGRFieldMorphCoverage);
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        SGRBackdropInkSetSource(nil);
+    }];
+    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        visibilityChanged();
+    }];
     sg_coverWatcher = [SGRPlayerCoverWatcher new];
     SGAddPlayerStateObserver(sg_coverWatcher);
+    [NSNotificationCenter.defaultCenter addObserverForName:SGRPlayerVisibilityDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        SGRPlayerHoldField();
+    }];
     [NSNotificationCenter.defaultCenter addObserverForName:SGRNowPlayingArtworkDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
         showArtwork(sg_field, YES);
     }];

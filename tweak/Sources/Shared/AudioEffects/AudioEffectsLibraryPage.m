@@ -233,6 +233,7 @@ static UITableViewCell *tiledCell(UITableView *table, NSString *title, NSString 
     ++sg_libraryRequest[_kind];
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeData] asCopy:YES];
     picker.delegate = self;
+    SGPresentDark(picker);
     [self presentViewController:picker animated:YES completion:nil];
 }
 

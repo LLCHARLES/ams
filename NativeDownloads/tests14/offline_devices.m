@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import "OfflineDevices.h"
 #import "WireProto.h"
+#import "Diagnostics.h"
+#import "DiagnosticTrace.h"
 #include <assert.h>
 
 // An in-memory Spotify registry. NSURLProtocol intercepts every HTTP request;
@@ -126,7 +128,22 @@ static void enable(BOOL success) {
     SAPEnableOfflineOnCurrentDevice(^(NSDictionary *r,NSString *e){error=e;done=YES;});waitFor(^BOOL{return done;});
     assert(success?error==nil:error!=nil);
 }
+static void checkPrivateValues(NSArray<NSString *> *values) {
+    NSDictionary *trace=SAPTraceExport();
+    assert(events.count && [trace[@"events"] count] && values.count);
+    NSData *data=[NSJSONSerialization dataWithJSONObject:@[events,trace] options:0 error:NULL];
+    NSString *text=[[NSString alloc]initWithData:data encoding:NSUTF8StringEncoding];
+    assert(text.length);
+    for(NSString *value in values) {
+        assert(value.length);
+        if([text containsString:value]) {
+            fputs("FAIL: selected device identity value leaked in journal or trace\n",stderr);
+            exit(1);
+        }
+    }
+}
 int main(void) {@autoreleasepool {
+    SAPDiagnosticsSetEnabled(true);
     reset(1);
     retrineHeaderSnapshot=@{@"Authorization":@"Bearer TEST_ONLY_NOT_REAL",@"X-Private-Noise":@"do not forward"};
     retrineProviderCalls=0;
@@ -156,8 +173,12 @@ int main(void) {@autoreleasepool {
     reset(5);plan=preview(YES);
     NSMutableArray *ids=[NSMutableArray array];for(NSDictionary *d in plan[@"active_devices"])[ids addObject:d[@"cache_id"]];
     result=release(plan,ids,YES);assert(postCount==5 && freeSlots==5 && [result[@"released_cache_ids"]count]==5);
+    checkPrivateValues([ids arrayByAddingObjectsFromArray:[plan[@"active_devices"] valueForKey:@"selection_token"]]);
     NSData *audit=[NSJSONSerialization dataWithJSONObject:events options:0 error:nil];
     NSString *text=[[NSString alloc]initWithData:audit encoding:NSUTF8StringEncoding];
+    assert(events.count && ![text containsString:@"old-device"] && ![text containsString:@"old-cache"] &&
+           ![text containsString:@"current-device"] && ![text containsString:@"current-cache"] &&
+           ![text containsString:@"iPhone"] && ![text containsString:@"selection_token"]);
     assert(![text containsString:@"TEST_ONLY_NOT_REAL"] && ![text containsString:@"Authorization"]);
     puts("PASS: five real registry changes produce five verified free slots; credentials are absent from audit facts");
 
@@ -184,13 +205,17 @@ int main(void) {@autoreleasepool {
     reset(1);devices[0][@"name"]=@"Current iPhone";plan=preview(YES);
     assert(![plan[@"devices"][0][@"is_current_device"]boolValue]&&[plan[@"devices"][1][@"is_current_device"]boolValue]);
     __block BOOL done=NO;__block NSString *tokenError;
-    SAPDisableOfflineDevice(plan[@"id"],plan[@"devices"][0][@"selection_token"],^(NSDictionary *r,NSString *e){tokenError=e;done=YES;});waitFor(^BOOL{return done;});
+    NSString *picked=plan[@"devices"][0][@"selection_token"];
+    SAPDisableOfflineDevice(plan[@"id"],picked,^(NSDictionary *r,NSString *e){tokenError=e;done=YES;});waitFor(^BOOL{return done;});
     assert(!tokenError&&postCount==1);
+    checkPrivateValues(@[picked]);
     reset(2);devices[1][@"cache_id"]=devices[0][@"cache_id"];plan=preview(YES);
     release(plan,@[@"old-cache-0"],NO);assert(postCount==0);
     plan=preview(YES);done=NO;
-    SAPDisableOfflineDevice(plan[@"id"],plan[@"devices"][1][@"selection_token"],^(NSDictionary *r,NSString *e){tokenError=e;done=YES;});waitFor(^BOOL{return done;});
+    picked=plan[@"devices"][1][@"selection_token"];
+    SAPDisableOfflineDevice(plan[@"id"],picked,^(NSDictionary *r,NSString *e){tokenError=e;done=YES;});waitFor(^BOOL{return done;});
     assert(!tokenError&&postCount==1&&[devices[0][@"offline_enabled"]boolValue]&&![devices[1][@"offline_enabled"]boolValue]);
+    checkPrivateValues(@[picked]);
     reset(1);nativeMismatch=YES;plan=preview(NO);assert(plan&&![plan[@"actions_allowed"]boolValue]&&[plan[@"devices"]count]==2);
     assert(plan[@"native_snapshot"]&&plan[@"direct_snapshot"]);
     reset(1);localUnavailable=YES;plan=preview(NO);assert(![plan[@"actions_allowed"]boolValue]&&[plan[@"detail"]containsString:@"Play one track online on this device, then refresh."]);

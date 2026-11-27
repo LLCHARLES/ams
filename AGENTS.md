@@ -24,9 +24,10 @@ last three were the redesign's until they moved to `Shared/`, so their keys lost
 can be given. `SGRedesignAvailable()` (`Core/SGUIMode.h`) says whether this OS has it. Below 26 the
 redesign runs only after a warning that it is untested there (`SGKeyRedesignUntested`, stored by
 `SGSetRedesignedUI` in `App/Pages.m`), and a launch with it that hangs (issue #37) is followed by one in
-the native look with both switches off. The native look's floor is iOS 16.1, which is
-Spotify 9.1.78's own. Retrine is made for Spotify 9.1.78 and supports 9.1.88, 9.1.90 and 9.2.0, the release base. The install warning
-leaves all four alone. A new version goes in one of the two lists
+the native look with both switches off. All supported Spotify IPAs require iOS 16.1, the native look's
+floor. Retrine supports Spotify 9.1.90, 9.2.0 and 9.2.2; 9.2.0 is the release base (`SGSpotifyMadeFor`).
+Pixie admits all three; 9.2.2's profile (Eevee `8c08046`) was checked on a phone.
+Other versions get the generic install warning, not a launch block. A new version goes in one of the two lists
 in `App/Onboarding/Onboarding.h` (`SGSpotifySupportedVersions`, `SGSpotifyLikelyWorksVersions`), and the warning's text
 and About follow. The IPA build reads
 Spotify's flag table from the IPA it builds, and again when the version changes.
@@ -85,8 +86,10 @@ Rules:
 - Device log: `make log` (`[spotifyglass]` lines).
 - Text on the mod's own screens goes through `SGL(@"settings.<page>.<what>", @"English")` (`Core/SGLocalize.h`); add the
   Korean to `ko.lproj` and run `scripts/check-strings.py --sync` (docs/tweaks.md, Localization).
-- Releases: Release Please (`.github/workflows/release.yml`). Commit as `feat:` / `fix:` (they bump
-  `version.txt` and fill `CHANGELOG.md`; `chore:`, `refactor:` and `docs:` stay out). Merging its
+- Releases: Release Please (`.github/workflows/release.yml`). Commit as `fix:` or `perf:` (they bump
+  the patch version and fill `CHANGELOG.md`; `chore:`, `refactor:` and `docs:` stay out). `feat:` bumps
+  the minor version, so use it only when the user has decided on a minor release; new or removed
+  features otherwise go in as `fix:`. Merging its
   release PR tags `vX.Y.Z`; nothing is attached (the Mac compile of `main` runs in the private Retrine-CI
   repository). Never edit `version.txt` by hand.
 - Known traps: anything pushed onto Spotify's nav stack must conform to `SPTPageController`

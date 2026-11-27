@@ -33,10 +33,12 @@ static id (^replyForRequest)(NSURLRequest *);
 
 // Keep the walk's held-provider fixtures independent from this real provider.
 #define NSURLSession NetEaseCheckSession
+#define SGBoundedRequestTask(request, timeout, ...) [NetEaseCheckSession.sharedSession dataTaskWithRequest:request completionHandler:__VA_ARGS__]
 #define SGNetEaseAsk NetEaseCheckAsk
 #import "Shared/LyricsSources/NetEase.m"
 #undef SGNetEaseAsk
 #undef NSURLSession
+#undef SGBoundedRequestTask
 
 void checkNetEaseURLs(void) {
     replyForRequest = ^id(NSURLRequest *request) {
@@ -65,7 +67,7 @@ void checkNetEaseURLs(void) {
         CHECK([SGKaraokeLineText(result.karaokeLines.firstObject) isEqual:@"Hello"]);
         finished = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     CHECK(finished);

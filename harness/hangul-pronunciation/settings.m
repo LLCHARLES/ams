@@ -3,6 +3,11 @@
 #import "Core/SGPrefs.h"
 #import "Core/SGLocalize.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/Lyrics/PixieLyricsQueue.h"
+#import "Settings/SGPageStyle.h"
+
+NSDictionary<NSString *, NSNumber *> *SGPixieLyricsCounts(void) { return @{}; }
+UIViewController *SGTopController(void) { return nil; }
 
 @implementation SGModRow
 @end
@@ -57,20 +62,19 @@ int main(void) {
         SGModRow *toggle = SGLyricsRomanisedRow();
         check([toggle.key isEqual:@"spotifyglass.lyricsRomanised"] && !toggle.defaultOn,
             @"Showing pronunciation retains the existing off-by-default switch");
-        SGModRow *link = SGLyricsJapaneseReadingRow();
-        check([link.value() isEqual:@"Latin"], @"Alphabet defaults to Latin");
-        check([link.waitsOn isEqual:@"spotifyglass.lyricsRomanised"], @"Choices wait for pronunciation");
-        SGModPage *page = (SGModPage *)link.page();
-        SGModRow *alphabet = page.sections.firstObject.rows[0];
-        SGModRow *japanese = page.sections.firstObject.rows[1];
+        SGModRow *alphabet = SGLyricsAlphabetRow();
+        SGModRow *japanese = SGLyricsJapaneseReadingRow();
+        check([alphabet.value() isEqual:@"Latin"], @"Alphabet defaults to Latin");
+        check([alphabet.waitsOn isEqual:@"spotifyglass.lyricsRomanised"], @"Choices wait for pronunciation");
         check([alphabet.menu isEqual:@[@"Latin", @"Hangul"]], @"Alphabet offers Latin and Hangul");
+        check(!japanese.visible(), @"Japanese reading stays hidden while pronunciation is off");
         __block BOOL notified = NO;
         id observer = [NSNotificationCenter.defaultCenter addObserverForName:SGLyricsRomanisedDidChangeNotification
             object:nil queue:nil usingBlock:^(NSNotification *note) { notified = YES; }];
         alphabet.chosen(1);
-        check(notified && [link.value() isEqual:@"Hangul"] &&
+        check(notified && [alphabet.value() isEqual:@"Hangul"] &&
               [SGLyricsRomanised(@"きって", YES) isEqual:@"킷테"],
-            @"Picking Hangul immediately updates the reading and parent summary");
+            @"Picking Hangul immediately updates the reading and the menu");
         check(!SGFlag(SGKeyLyricsRomanised, YES), @"Choosing an alphabet never enables pronunciation");
         check(SGFlag(SGKeyLyricsJapaneseKana, NO), @"Hangul leaves the saved Japanese choice intact");
         notified = NO;

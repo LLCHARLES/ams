@@ -2,6 +2,50 @@
 //
 // Playback snapshots names on main and reads files on a serial worker. The native lyrics page also
 // reads off main, so links and the bounded cache of files read are protected across both readers.
+#import <Foundation/Foundation.h>
+#import <fcntl.h>
+#import <sys/stat.h>
+#import <unistd.h>
+
+// Also used by FontImport's defaults reader and Files picker.
+BOOL SGImportSafeFilename(NSString *name) {
+    return [name isKindOfClass:NSString.class] && name.length &&
+        [name rangeOfString:@"\0" options:NSLiteralSearch].location == NSNotFound &&
+        [name rangeOfString:@"/" options:NSLiteralSearch].location == NSNotFound &&
+        ![name isEqual:@"."] && ![name isEqual:@".."] && [name isEqual:name.lastPathComponent];
+}
+
+int SGOpenImportFile(int parent, const char *path, NSUInteger limit) {
+    if (!path) { errno = EINVAL; return -1; }
+    int fd = openat(parent, path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) return -1;
+    struct stat st;
+    int failure = fstat(fd, &st) ? errno : !S_ISREG(st.st_mode) ? EINVAL : (uint64_t)st.st_size > limit ? EFBIG : 0;
+    if (failure) { close(fd); errno = failure; return -1; }
+    return fd;
+}
+
+// Consume and close the checked descriptor, never reopening a picker's path. Check the actual
+// bytes too: another process can grow a document after fstat.
+NSData *SGReadImportFile(int fd, NSUInteger limit) {
+    if (fd < 0) return nil;
+    NSMutableData *data = [NSMutableData data];
+    uint8_t buffer[32768];
+    int failure = 0;
+    for (;;) {
+        ssize_t n = read(fd, buffer, MIN(sizeof buffer, limit - data.length + 1));
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) failure = errno;
+        if (n <= 0) break;
+        if ((NSUInteger)n > limit - data.length) { failure = EFBIG; break; }
+        [data appendBytes:buffer length:(NSUInteger)n];
+    }
+    close(fd);
+    if (failure) { errno = failure; return nil; }
+    return data;
+}
+
+#ifndef SG_IMPORT_IO_ONLY
 #import <os/lock.h>
 #import "Core/SGCore.h"
 #import "Core/SGDataRoot.h"
@@ -19,6 +63,8 @@ NSNotificationName const SGImportedLRCDidChangeNotification = @"spotifyglass.loc
 static NSString *const kCredit = @"Imported LRC";
 // A song's lyrics are a few kilobytes; anything near this is not one.
 static const NSUInteger kMostBytes = SGLyricsImportMaxBytes;
+// Old imports accepted UTF-16 input and kept UTF-8: one two-byte code unit can become three bytes.
+static const NSUInteger kStoredReadBytes = SGLyricsImportMaxBytes / 2 * 3;
 
 // The retired list, read and written in the defaults beside the links (SGKeyRetiredImportedLyrics).
 static NSString *const linkedIdentities = @"spotifyglass.localFiles.linkedLyricIdentities";
@@ -115,7 +161,7 @@ NSString *SGImportedLRCLinkedTo(NSString *uri) {
     NSString *bare = bareURI(uri);
     if (!bare) return nil;
     id name = allLinks()[bare];
-    return [name isKindOfClass:NSString.class] ? name : nil;
+    return SGImportSafeFilename(name) ? name : nil;
 }
 
 #pragma mark - reading a file
@@ -277,14 +323,27 @@ static SGImportedLyrics *sheetFrom(NSString *lrc) {
 // What a TTML document says in plain words, for one the reader could not make lines of: its elements go,
 // and what is left between them is its text.
 static NSString *tagless(NSString *xml) {
-    static NSRegularExpression *element, *comments;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        comments = [NSRegularExpression regularExpressionWithPattern:@"<!--.*?-->" options:NSRegularExpressionDotMatchesLineSeparators error:nil];
-        element = [NSRegularExpression regularExpressionWithPattern:@"<[^>]*>" options:0 error:nil];
-    });
-    NSString *text = [comments stringByReplacingMatchesInString:xml options:0 range:NSMakeRange(0, xml.length) withTemplate:@" "];
-    return [element stringByReplacingMatchesInString:text options:0 range:NSMakeRange(0, text.length) withTemplate:@"\n"];
+    // Strip complete comments before elements. In either pass an incomplete suffix stays literal.
+    for (NSUInteger pass = 0; pass < 2; pass++) {
+        NSString *start = pass ? @"<" : @"<!--", *end = pass ? @">" : @"-->";
+        NSMutableString *out = [NSMutableString string];
+        NSUInteger at = 0;
+        while (at < xml.length) {
+            NSRange open = [xml rangeOfString:start options:NSLiteralSearch range:NSMakeRange(at, xml.length - at)];
+            if (open.location == NSNotFound) break;
+            NSUInteger body = NSMaxRange(open);
+            NSRange close = [xml rangeOfString:end options:NSLiteralSearch range:NSMakeRange(body, xml.length - body)];
+            if (close.location == NSNotFound) break;
+            [out appendString:[xml substringWithRange:NSMakeRange(at, open.location - at)]];
+            [out appendString:pass ? @"\n" : @" "];
+            at = NSMaxRange(close);
+        }
+        if (at) {
+            [out appendString:[xml substringFromIndex:at]];
+            xml = out;
+        }
+    }
+    return xml;
 }
 
 // The order LyricsSources.h promises: TTML first, then LRC, then plain text. A document that looks like
@@ -312,6 +371,10 @@ static SGImportedLyrics *sheetFromText(NSString *text) {
 }
 
 SGImportedLyrics *SGImportedLyricsFromText(NSString *text, NSError **error) {
+    if ([text lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMostBytes) {
+        if (error) *error = refusal(SGLyricsImportErrorTooLarge);
+        return nil;
+    }
     NSError *reason = nil;
     SGImportedLyrics *sheet = nil;
     if (![text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length) {
@@ -357,14 +420,27 @@ static NSUInteger sg_sheetGeneration;
 static const NSUInteger kKeptSheets = 40;
 
 static SGImportedLyrics *sheetNamed(NSString *name) {
+    if (!SGImportSafeFilename(name)) return nil;
     NSUInteger generation;
+    SGImportedLyrics *kept;
     @synchronized (SGImportedLyrics.class) {
         if (!sg_sheets) sg_sheets = [NSMutableDictionary dictionary];
-        SGImportedLyrics *kept = sg_sheets[name];
-        if (kept) return kept;
+        kept = sg_sheets[name];
         generation = sg_sheetGeneration;
     }
-    NSString *text = [NSString stringWithContentsOfFile:[directory() stringByAppendingPathComponent:name] encoding:NSUTF8StringEncoding error:nil];
+    NSString *folder = directory();
+    if (!folder) return nil;
+    int dir = open(folder.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (dir < 0) return nil;
+    int fd = SGOpenImportFile(dir, name.fileSystemRepresentation, kStoredReadBytes);
+    close(dir);
+    if (fd < 0) return nil;
+    if (kept) {
+        close(fd);
+        @synchronized (SGImportedLyrics.class) { return generation == sg_sheetGeneration ? kept : nil; }
+    }
+    NSData *data = SGReadImportFile(fd, kStoredReadBytes);
+    NSString *text = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
     SGImportedLyrics *sheet = text ? sheetFromText(text) : nil;
     if (!sheet.lines.count) return nil;
     @synchronized (SGImportedLyrics.class) {
@@ -467,19 +543,10 @@ static SGLyricsResult *resultOf(SGImportedLyrics *sheet, NSString *title, NSStri
 
 // The file a link names, or nil when it is not there: the one a launch that ended between an import's
 // link and its file's write left behind is one such, and it gives no lines rather than a stuck answer.
-static SGImportedLyrics *linkedSheet(NSString *name) {
-    if (!name.length) return nil;
-    if (![NSFileManager.defaultManager fileExistsAtPath:[directory() stringByAppendingPathComponent:name]]) {
-        SGLog(@"lyrics: %@ is linked but not stored", name);
-        return nil;
-    }
-    return sheetNamed(name);
-}
-
 static SGLyricsResult *lookup(NSString *linked, NSString *title, NSArray<NSString *> *artists) {
     // A track with a file linked to it has that file's lines and no other: a link that points at nothing
     // leaves the track with none, rather than with another song's.
-    if (linked) return resultOf(linkedSheet(linked), title, artists.firstObject);
+    if (linked) return resultOf(sheetNamed(linked), title, artists.firstObject);
     for (NSString *name in SGImportedLRCFiles()) {
         @autoreleasepool {
             SGImportedLyrics *sheet = sheetNamed(name);
@@ -511,7 +578,7 @@ static void fetch(NSString *trackID, NSString *title, NSString *artist, NSString
     dispatch_once(&once, ^{ queue = dispatch_queue_create("app.retrine.imported-lyrics", DISPATCH_QUEUE_SERIAL); });
     dispatch_async(queue, ^{
         @autoreleasepool {
-            SGLyricsResult *result = linked ? resultOf(linkedSheet(linked), resolved, artists.firstObject) : nil;
+            SGLyricsResult *result = linked ? resultOf(sheetNamed(linked), resolved, artists.firstObject) : nil;
             if (!result && path) result = SGEmbeddedLyrics(path);
             if (!result && !linked) result = lookup(nil, resolved, artists);
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -621,18 +688,11 @@ void SGImportLRC(NSURL *url, NSString *uri, void (^completion)(NSString *, NSErr
     // The file's bytes and its lines are read before the store is touched, off the store queue.
     dispatch_async(importQueue(), ^{
         BOOL scoped = [url startAccessingSecurityScopedResource];
-        NSError *readError;
-        NSFileHandle *handle = [NSFileHandle fileHandleForReadingFromURL:url error:&readError];
-        NSData *data = [handle readDataUpToLength:kMostBytes + 1 error:&readError];
-        NSError *closeError;
-        if (handle && ![handle closeAndReturnError:&closeError]) readError = readError ?: closeError;
+        NSData *data = SGReadImportFile(SGOpenImportFile(AT_FDCWD, url.fileSystemRepresentation, kMostBytes), kMostBytes);
+        int readError = data ? 0 : errno;
         if (scoped) [url stopAccessingSecurityScopedResource];
-        NSError *failure = nil;
-        SGImportedLyrics *lyrics = (!handle || readError || !data) ? nil : SGImportedLyricsFromData(data, &failure);
-        if (!lyrics && !failure) {
-            SGLog(@"lyrics: %@ not read: %@", url.lastPathComponent, readError);
-            failure = refusal(SGLyricsImportErrorUnreadableFile);
-        }
+        NSError *failure = data ? nil : refusal(readError == EFBIG ? SGLyricsImportErrorTooLarge : SGLyricsImportErrorUnreadableFile);
+        SGImportedLyrics *lyrics = data ? SGImportedLyricsFromData(data, &failure) : nil;
         // The store itself is written on its own queue, after every change already asked for.
         dispatch_async(storeQueue(), ^{
             @autoreleasepool {
@@ -652,8 +712,7 @@ void SGImportPastedLyrics(NSString *text, NSString *uri, void (^completion)(NSSt
         // Through the data path, so a paste is held to the same size and content rules as a file.
         NSError *parseError = nil;
         SGImportedLyrics *lyrics = nil;
-        if ([pasted lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > kMostBytes) parseError = refusal(SGLyricsImportErrorTooLarge);
-        else if (pasted.length && ![pasted canBeConvertedToEncoding:NSUTF8StringEncoding]) parseError = refusal(SGLyricsImportErrorUnreadable);
+        if (pasted.length && ![pasted canBeConvertedToEncoding:NSUTF8StringEncoding]) parseError = refusal(SGLyricsImportErrorUnreadable);
         else lyrics = SGImportedLyricsFromText(pasted, &parseError);
         dispatch_async(storeQueue(), ^{
             @autoreleasepool {
@@ -666,7 +725,7 @@ void SGImportPastedLyrics(NSString *text, NSString *uri, void (^completion)(NSSt
 }
 
 BOOL SGDeleteImportedLRC(NSString *name, void (^completion)(BOOL deleted)) {
-    if (!name.length || name.pathComponents.count != 1) {
+    if (!SGImportSafeFilename(name)) {
         if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO); });
         return NO;
     }
@@ -675,10 +734,13 @@ BOOL SGDeleteImportedLRC(NSString *name, void (^completion)(BOOL deleted)) {
     if (completion) completion = [completion copy];
     dispatch_async(storeQueue(), ^{
         @autoreleasepool {
-            NSError *error = nil;
-            BOOL deleted = [NSFileManager.defaultManager removeItemAtPath:[directory() stringByAppendingPathComponent:name] error:&error];
-            if (!deleted && [error.domain isEqual:NSCocoaErrorDomain] && error.code == NSFileNoSuchFileError &&
-                [allLinks() allKeysForObject:name].count) deleted = YES;
+            NSString *folder = directory();
+            int dir = folder ? open(folder.fileSystemRepresentation, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC) : -1;
+            // unlinkat without AT_REMOVEDIR cannot recursively delete a directory, even on a race.
+            BOOL deleted = dir >= 0 && unlinkat(dir, name.fileSystemRepresentation, 0) == 0;
+            int failure = folder ? errno : EINVAL;
+            if (dir >= 0) close(dir);
+            if (!deleted && failure == ENOENT && [allLinks() allKeysForObject:name].count) deleted = YES;
             if (deleted) {
                 NSMutableDictionary *links = [allLinks() mutableCopy];
                 NSArray *uris = [links allKeysForObject:name];
@@ -690,7 +752,7 @@ BOOL SGDeleteImportedLRC(NSString *name, void (^completion)(BOOL deleted)) {
                 unretire(name);
                 changed(uris);
             } else {
-                SGLog(@"lyrics: %@ not deleted: %@", name, error);
+                SGLog(@"lyrics: %@ not deleted (%d)", name, failure);
             }
             if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(deleted); });
         }
@@ -768,3 +830,4 @@ void SGRetireImportedLyrics(void (^completion)(NSArray<NSString *> *removed)) {
 __attribute__((constructor)) static void sg_retireImportedLyricsAtLaunch(void) {
     dispatch_async(storeQueue(), ^{ @autoreleasepool { retireNow(); } });
 }
+#endif

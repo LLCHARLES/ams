@@ -8,7 +8,7 @@ traffic from the app or device.
 IPA builds include it by default: top-level `make build`, `make release`,
 `make install`, `make quick` and direct pipeline/quick script invocations use
 `WIREGUARD=1`. These builds require the Go release pinned in `WireGuard/go.mod`.
-`WIREGUARD=0` excludes its sources, Go archive, extra frameworks,
+`WIREGUARD=0` excludes its sources, Go companion library, extra frameworks,
 license resource and Mod Settings row and does not require Go.
 Direct `tweak/Makefile` builds still default to `WIREGUARD=0` for development,
 compile-only CI and harnesses.
@@ -20,6 +20,28 @@ When compiled in, it remains off until the user imports a profile or saves a
 proxy, explicitly enables it, then restarts. Import never enables it. It applies
 to both Retrine looks. Proxy routing needs iOS 17+ and the Network.framework
 proxy APIs; Retrine's ordinary deployment floor is unchanged.
+
+The Go runtime is not linked into the host or tweak. Both IPA variants embed
+`Frameworks/libsgwg.dylib` as a signed sibling of `spotifyglass.dylib`, **not**
+as a cyan injection input. Quick rebuilds replace/remove the sibling too.
+Off launches and external proxy startup don't load it. The first engine
+operation loads it once; this includes deliberately opening WireGuard settings
+to inspect a stored profile, importing one before enabling, or requesting
+redacted diagnostics. These use the same parser/redactor, not a second copy in
+Objective-C. Loading them neither enables a route nor removes the restart
+requirement. Do not unload a running Go runtime. The loader uses the absolute
+main-bundle Frameworks path and refuses process and main-executable dyld search
+overrides before opening it. Only CoreSimulator's process `DYLD_ROOT_PATH` is
+exempt, never a root path embedded in the host. The packaging pipeline checks
+the finished host has no `LC_DYLD_ENVIRONMENT` commands.
+It validates the bridge version, size and required functions before use. A
+failure cannot start a tunnel or validate an import; diagnostics return only
+a fixed loader error, never the unredacted report.
+
+The engine retains normal Go heap growth (`GOGC=100`) with a **64 MiB soft
+Go-managed memory limit**. This gives bursts room without paying for more
+frequent collections below the budget. It is not a hard bound on live data,
+native allocations, or process footprint.
 
 ## Ownership and readiness
 
@@ -39,7 +61,10 @@ counts every matching slot. Permitted `sendto`/`sendmsg` traffic calls the captu
 predecessor, preserving Connect's multicast relay in either installation order.
 The rebinder recognizes registered call-through chains on readiness refresh;
 the existing `SGRebindImport` wrapper retains its other callers' behavior.
-Image add/remove callbacks revoke readiness, then
+Native guards for existing slots are installed before add-image registration.
+Registration replays existing images while readiness is still false;
+one validation after both callbacks are installed covers that snapshot.
+Subsequent image add/remove callbacks revoke readiness, then
 recheck on the serial utility queue. Deferred slots are rechecked periodically.
 This does not intercept pre-initializer traffic or make dyld updates a
 transaction with arbitrary app traffic.
@@ -107,15 +132,16 @@ design addresses caller-fd ownership and asynchronous semantics.
 
 ## Exact admission
 
-Ordinary Retrine supports 9.1.78, 9.1.88, 9.1.90 and 9.2.0. Only
+Retrine supports Spotify 9.1.90, 9.2.0 (release base) and 9.2.2. Its install warning does not block launch.
+WireGuard uses a separate exact-build check. Only
 `tweak/Sources/Shared/WireGuard/SGWGTargets.inc` admits WireGuard targets:
 
 | Version / build | Evidence |
 | --- | --- |
-| 9.1.78 / 9.1.88 | No WireGuard transport acceptance; rejected by this feature. |
 | 9.1.90 / 919002269 | Local static IPA scan: main `fbce22c17e1b3e0d9be866ff9291943e`, shared `2e074234cfc63f0e9255c9881824167a`. |
 | 9.1.94 / 919401928 | Fork static evidence only: main `1dfddfa139c03735b9a5fdfa475f4700`, shared `2c12ca8c48ad33f8af6569c084a6324f`. Not Retrine playback certification. |
 | 9.2.0 / 920002054 | Local static IPA/ABI scan: main `b49e75781d8635d38bb57daf68fed8a8`, shared `30bac55f8361373aad607f0535395641`. |
+| 9.2.2 / 920202587 | Local static scan: main `bedf0071845d39bbb2d096f9a8095e66`, shared `527ccb30a88f3dadb1b985336d3bcad6`; both delegate callbacks on all three owners and all five required imports present. No device routing test. |
 
 The 9.2.0 qualification repeats the 9.1.90 source inventory and binary scan.
 `SGWGTransport.m` is the only Spotify-class consumer: its three delegates each

@@ -14,6 +14,9 @@ enum {
 static NSString *const kInput = @"spectrum", *const kOutput = @"vocals_spectrum";
 // This many windows on each copy are logged with their time.
 static const unsigned long long kLoggedWindows = 5;
+// Twenty successful predictions on this copy cover ~30 s at the engine's 1.5 s hop. Silence warm-up,
+// pauses and time spent compiling aren't evidence that this copy can separate real windows.
+static const unsigned kProofWindows = 20;
 
 const char *SGSingThermalName(void) {
     switch (NSProcessInfo.processInfo.thermalState) {
@@ -184,14 +187,16 @@ static BOOL readOutput(MLMultiArray *array, float *into) {
     return ok;
 }
 
-- (void)setFastModel:(MLModel *)model named:(NSString *)name {
+- (BOOL)setFastModel:(MLModel *)model named:(NSString *)name {
     os_unfair_lock_lock(&_lock);
     _fast = model;
     _fastName = name;
     _stats.fastFailed = false;
     _stats.windows[1] = 0;
     _stats.averageMS[1] = 0;
+    BOOL hasCPU = _model != nil;
     os_unfair_lock_unlock(&_lock);
+    return hasCPU;
 }
 
 - (SGSingSeparatorStats)stats {
@@ -238,45 +243,58 @@ static BOOL predict(MLModel *model, MLDictionaryFeatureProvider *features, float
 }
 
 // The window's time into the copy's running average, the first windows logged.
-- (void)count:(int)copy took:(double)took named:(NSString *)name {
+- (void)count:(int)copy took:(double)took named:(NSString *)name fastModel:(MLModel *)fast {
     os_unfair_lock_lock(&_lock);
+    if (fast && fast != _fast) {
+        os_unfair_lock_unlock(&_lock);
+        return; // a window finishing on a removed copy cannot prove its successor
+    }
     unsigned long long n = ++_stats.windows[copy];
     double ms = took * 1000;
     _stats.averageMS[copy] = n == 1 ? ms : _stats.averageMS[copy] * 0.8 + ms * 0.2;
     _stats.fast = copy == 1;
+    BOOL proven = fast && n == kProofWindows && _model;
+    if (proven) _model = nil;
     os_unfair_lock_unlock(&_lock);
+    if (proven) SGLog(@"sing: Neural Engine proved on %llu windows; released CPU fallback", n);
     if (n <= kLoggedWindows) SGLog(@"sing: window %llu on the %@ copy took %.0f ms (1500 ms keeps up), thermal state %s", n, name, ms, SGSingThermalName());
     if (n == kLoggedWindows) SGLog(@"sing: memory after %llu windows on the %@ copy: %@", n, name, SGSingMemoryText());
 }
 
 - (BOOL)separateLeft:(const float *)left right:(const float *)right vocalsLeft:(float *)vocalsLeft
          vocalsRight:(float *)vocalsRight error:(NSError **)error {
-    if (!_model) return NO;
-    [self analyzeLeft:left right:right into:_spectrum];
-    MLDictionaryFeatureProvider *features = [[MLDictionaryFeatureProvider alloc] initWithDictionary:@{kInput: _input} error:error];
-    if (!features) return NO;
     os_unfair_lock_lock(&_lock);
+    MLModel *cpu = _model;
     MLModel *fast = _stats.fastFailed ? nil : _fast;
     NSString *fastName = _fastName;
     os_unfair_lock_unlock(&_lock);
+    if (!cpu && !fast) return NO;
+    [self analyzeLeft:left right:right into:_spectrum];
+    MLDictionaryFeatureProvider *features = [[MLDictionaryFeatureProvider alloc] initWithDictionary:@{kInput: _input} error:error];
+    if (!features) return NO;
     if (fast) {
         CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
         NSError *fastError;
         if (predict(fast, features, _vocals, &fastError)) {
-            [self count:1 took:CFAbsoluteTimeGetCurrent() - began named:fastName];
+            [self count:1 took:CFAbsoluteTimeGetCurrent() - began named:fastName fastModel:fast];
             [self synthesize:_vocals left:vocalsLeft right:vocalsRight];
             return YES;
         }
         os_unfair_lock_lock(&_lock);
         if (_fast == fast) _stats.fastFailed = true;
-        _stats.fallbacks++;
+        if (cpu) _stats.fallbacks++;
         os_unfair_lock_unlock(&_lock);
+        if (!cpu) {
+            if (error) *error = fastError;
+            SGLog(@"sing: the proven %@ copy failed a window (%@); dry until CPU reload", fastName, fastError.localizedDescription);
+            return NO;
+        }
         SGLog(@"sing: the %@ copy failed a window (%@), so it is done on the CPU's, and the %@ copy is not used again",
               fastName, fastError.localizedDescription, fastName);
     }
     CFAbsoluteTime began = CFAbsoluteTimeGetCurrent();
-    if (!predict(_model, features, _vocals, error)) return NO;
-    [self count:0 took:CFAbsoluteTimeGetCurrent() - began named:@"CPU"];
+    if (!predict(cpu, features, _vocals, error)) return NO;
+    [self count:0 took:CFAbsoluteTimeGetCurrent() - began named:@"CPU" fastModel:nil];
     [self synthesize:_vocals left:vocalsLeft right:vocalsRight];
     return YES;
 }

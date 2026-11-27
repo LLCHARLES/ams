@@ -71,8 +71,9 @@ BOOL SGRPageFullCover(NSString *key);
 @property (nonatomic, copy) NSString *trailingOnSymbol;
 - (void)trailingStateChanged;
 // Spotify's controls, each drawn from and fired; nil hides that button. Play stays in the middle of the
-// page whether the other two are there or not. `trailingFallback` is drawn when Spotify's trailing control
-// has no image to copy. `playColor` is the color of the capsule's glyph and word, taken while
+// page whether the other two are there or not. Stacked, where the buttons shown would not fit either side of the capsule
+// at its width (SGRPlayCapsule's sgr_width) with the usual gap, Play is a circle the row's height, its glyph alone.
+// `trailingFallback` is drawn when Spotify's trailing control has no image to copy. `playColor` is the color of the capsule's glyph and word, taken while
 // SGRKeyPlayInPageColour is on; off, they are the accent.
 - (void)showShuffle:(UIView *)shuffle play:(UIView *)play trailing:(UIView *)trailing
    trailingFallback:(UIImage *)trailingFallback playColor:(UIColor *)playColor;

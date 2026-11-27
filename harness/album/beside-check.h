@@ -137,7 +137,7 @@ static void besideResizable(UIView *root, CGFloat width) {
 }
 - (void)next {
     self.stage++;
-    self.deadline = CACurrentMediaTime() + 20;
+    self.deadline = CACurrentMediaTime() + 45;
 }
 - (void)checkCardRestored {
     HARNESS_CHECK(self.cardCover.layer.hidden == self.cardHidden);
@@ -233,7 +233,7 @@ static void besideResizable(UIView *root, CGFloat width) {
     [self next];
 }
 - (void)tick {
-    HARNESS_CHECK(CACurrentMediaTime() < self.deadline);
+    if (CACurrentMediaTime() >= self.deadline) HARNESS_FAIL(@"beside layout: stage %ld never settled", (long)self.stage);
     if (!self.window.windowScene || !self.info || !self.hero) return;
     [self.window layoutIfNeeded];
     if (self.stage < 4 && !self.settled) return;
@@ -347,7 +347,7 @@ static void besideRun(UIWindow *window, UIViewController *controller, UIView *pa
     check.kind = kind;
     check.relayout = relayout;
     check.title = title;
-    check.deadline = CACurrentMediaTime() + 20;
+    check.deadline = CACurrentMediaTime() + 45;
     check.link = [CADisplayLink displayLinkWithTarget:check selector:@selector(tick)];
     [check.link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }

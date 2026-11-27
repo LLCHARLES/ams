@@ -24,7 +24,9 @@
 #import "PlayerMix.h"
 #import "PlayerLyricLine.h"
 
-static const CGFloat kPausedScale = 0.84;
+// The Music app's paused cover: 590 px wide on screen where its playing one is 809 px (and Retrine's at 0.71 was 574 px),
+// so 590 / 809.
+static const CGFloat kPausedScale = 0.73;
 // The bar's 40pt cover lives in a tilt view of its own; the player's is 354.
 static const CGFloat kCoverMinWidth = 200;
 // The Music app's cover top under the window's safe area (its player, iOS 26 at 3x: 95 pt under a 62 pt inset, 22 pt
@@ -70,15 +72,40 @@ static UIView *coverCellOf(UIView *tilt) {
 static NSHashTable<UIView *> *sg_liveRows;
 // Each live row's SGRCoverRowFollower, in the player the row was laid out in.
 static char kFollowerKey;
+// The players whose bottom stack the footer's rhythm holds without the volume row's room (SGRPlayerStackWithoutVolume).
+static NSHashTable<UIView *> *sg_stacksWithoutVolume;
+
+CGFloat SGRPlayerLiveRowBottomIn(UIView *view) {
+    CGFloat bottom = -CGFLOAT_MAX;
+    for (UIView *row in sg_liveRows) {
+        UIView *player = ((UIView *)objc_getAssociatedObject(row, &kFollowerKey)).superview;
+        if (player && [view isDescendantOfView:player] && [row isDescendantOfView:player]) {
+            bottom = MAX(bottom, CGRectGetMaxY([view convertRect:row.bounds fromView:row]));
+        }
+    }
+    return bottom;
+}
+
+void SGRPlayerStackWithoutVolume(UIView *player, BOOL without) {
+    if (!sg_stacksWithoutVolume) sg_stacksWithoutVolume = [NSHashTable weakObjectsHashTable];
+    if (!player || [sg_stacksWithoutVolume containsObject:player] == without) return;
+    if (without) [sg_stacksWithoutVolume addObject:player];
+    else [sg_stacksWithoutVolume removeObject:player];
+    for (UIView *tilt in sg_tilts) {
+        if ([tilt isDescendantOfView:player]) [tilt setNeedsLayout];
+    }
+}
 
 // How far up from the top of its tilt view the cover is drawn, so its top stands kCoverTopUnderSafeArea under the
 // window's safe area as the Music app's does, where Spotify's tilt view stands lower (118 pt on a 402x874 iPhone, the
 // Music app's 95), but never above the bottom of a live header row in the cover's own player where the row is now
 // (followed as Spotify moves it, SGRCoverRowFollower), which it would draw over and take touches from; a row moved out
-// of that player limits it no more. The cell is the whole player, its top the player's, from which the grabber is
-// placed the same way (PlayerHeader.x). Positions without transforms, so the lyrics' moves and Spotify's tilt leave it
-// be. Only ever up, away from the title row, and only in a phone's portrait player: Spotify's landscape and iPad
-// layouts are its own.
+// of that player limits it no more. With the volume row off, the rhythm stands the title row SGRPlayerVolumeToRow lower
+// (PlayerFooter.x) and the cover takes half of that room, so it opens as much over the cover as under it; not over
+// Spotify's lyric preview, which keeps the cover's place. The cell is the whole player, its top the player's, from
+// which the grabber is placed the same way (PlayerHeader.x). Positions without transforms, so the lyrics' moves and
+// Spotify's tilt leave it be. Only ever up, away from the title row, and only in a phone's portrait player: Spotify's
+// landscape and iPad layouts are its own.
 static CGFloat coverLift(UIView *tilt, UIView *cell) {
     UIWindow *window = cell.window;
     if (!window || cell.traitCollection.userInterfaceIdiom != UIUserInterfaceIdiomPhone || cell.bounds.size.width >= cell.bounds.size.height) return 0;
@@ -86,11 +113,13 @@ static CGFloat coverLift(UIView *tilt, UIView *cell) {
     for (UIView *view = tilt; view && view != cell; view = view.superview) {
         top += view.center.y - view.bounds.size.height / 2 - view.superview.bounds.origin.y;
     }
-    CGFloat highest = window.safeAreaInsets.top + kCoverTopUnderSafeArea;
-    for (UIView *row in sg_liveRows) {
-        UIView *player = ((UIView *)objc_getAssociatedObject(row, &kFollowerKey)).superview;
-        if (player && [cell isDescendantOfView:player] && [row isDescendantOfView:player]) {
-            highest = MAX(highest, CGRectGetMaxY([cell convertRect:row.bounds fromView:row]));
+    CGFloat highest = MAX(window.safeAreaInsets.top + kCoverTopUnderSafeArea, SGRPlayerLiveRowBottomIn(cell));
+    BOOL preview = NO;
+    SGRPlayerPreviewLayers(tilt.superview, &preview);
+    for (UIView *player in sg_stacksWithoutVolume) {
+        if (!preview && [cell isDescendantOfView:player]) {
+            highest += SGRPlayerVolumeToRow / 2;
+            break;
         }
     }
     return MAX(0, top - highest);
@@ -580,16 +609,20 @@ static char kHoldKey, kBadgeGlassKey;
 
 static void watchHold(UIView *tilt) {
     SGRCoverHold *existing = objc_getAssociatedObject(tilt, &kHoldKey);
-    if (existing) {
-        existing.enabled = SGGestureHoldEnabled();
-        return;
+    SGRCoverHold *hold = existing.view == tilt ? existing : nil;
+    for (SGRCoverHold *attached in tilt.gestureRecognizers) {
+        if (![attached isKindOfClass:SGRCoverHold.class]) continue;
+        if (!hold) hold = attached;
+        else if (attached != hold) [tilt removeGestureRecognizer:attached];
     }
-    SGRCoverHold *hold = [[SGRCoverHold alloc] initWithTarget:nil action:nil];
+    if (!hold) {
+        hold = [[SGRCoverHold alloc] initWithTarget:nil action:nil];
+        [hold addTarget:hold action:@selector(sgr_held)];
+        hold.minimumPressDuration = 0.35;
+        [tilt addGestureRecognizer:hold];
+    }
     hold.enabled = SGGestureHoldEnabled();
-    [hold addTarget:hold action:@selector(sgr_held)];
-    hold.minimumPressDuration = 0.35;
-    [tilt addGestureRecognizer:hold];
-    objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_ASSIGN);
+    if (existing != hold) objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 // Where the cover of a player's tilt view stands in it, its paused shrink left out; CGRectNull for any other tilt view.
@@ -600,9 +633,7 @@ static CGRect coverPlaceIn(UIView *tilt) {
     return CGRectMake(cover.center.x - size.width / 2, cover.center.y - size.height / 2, size.width, size.height);
 }
 
-static Class imageProxyClass(void) {
-    return NSClassFromString(@"_TtC22NowPlaying_ElementsKitP33_1D6A1393FEB35D7207F503DA17E7748E14ImageViewProxy");
-}
+static Class imageProxyClass;
 
 static void fillParts(UIView *holder) {
     for (UIView *part in holder.subviews)
@@ -662,7 +693,8 @@ static void fillParts(UIView *holder) {
     CGRect normal = CGRectNull;
     if (!side && host && tilt.bounds.size.width < tilt.superview.bounds.size.width)
         normal = SGRPlayerNormalCover(host, tilt, host.bounds.size.width - 6 * SGRGrid);
-    if ([watch stripOnlyIn:CGRectIsNull(normal) ? nil : tilt.superview]) {
+    // Watched whatever the strip: the preview coming or going moves the cover too (coverLift).
+    if ([watch stripOnlyIn:tilt.superview] && !CGRectIsNull(normal)) {
         side = normal.size.width;
         stripFill = YES;
     }
@@ -682,7 +714,7 @@ static void fillParts(UIView *holder) {
             if (!CGRectEqualToRect(proxy.frame, cover.bounds)) { proxy.bounds = proxy.bounds; proxy.center = proxy.center; }
             continue;
         }
-        if (![proxy isKindOfClass:imageProxyClass()]) continue;
+        if (![proxy isKindOfClass:imageProxyClass]) continue;
         if (!CGRectEqualToRect(proxy.frame, cover.bounds)) proxy.frame = cover.bounds;
         fillParts(proxy);
         for (UIView *image in proxy.subviews)
@@ -737,7 +769,8 @@ static UIView *coverOfImage(UIView *image) {
     return box && coverIn(box.superview) == box ? box : nil;
 }
 
-%hook _TtC22NowPlaying_ElementsKitP33_1D6A1393FEB35D7207F503DA17E7748E14ImageViewProxy
+%group SGRImageProxyHooks
+%hook SGRImageProxy
 - (void)setFrame:(CGRect)frame {
     UIView *box = coverOfImage((UIView *)self);
     %orig(box ? box.bounds : frame);
@@ -759,12 +792,13 @@ static UIView *coverOfImage(UIView *image) {
     fillParts(proxy);
 }
 %end
+%end
 
 %hook _TtCE15Encore_MediaKitO16EncoreFoundation6Encore9ImageView
 - (void)layoutSubviews {
     %orig;
     UIView *view = (UIView *)self;
-    if ([view.superview isKindOfClass:imageProxyClass()] && coverOfImage(view.superview)) fillParts(view);
+    if ([view.superview isKindOfClass:imageProxyClass] && coverOfImage(view.superview)) fillParts(view);
 }
 %end
 
@@ -782,7 +816,7 @@ static UIView *playerImageHolder(UIView *part) {
     UIView *proxy = holder.superview;
     UIView *tilt = proxy.superview.superview;
     return tilt && (tilt == sg_reservedTilt || objc_getAssociatedObject(tilt, &kStripFillKey)) &&
-           [proxy isKindOfClass:imageProxyClass()] && coverOfImage(proxy) ? holder : nil;
+           [proxy isKindOfClass:imageProxyClass] && coverOfImage(proxy) ? holder : nil;
 }
 
 %hook UIImageView
@@ -825,6 +859,8 @@ static SGRPlayerArtworkWatcher *sg_artworkWatcher;
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    imageProxyClass = SGFileprivateViewClass("_TtC22NowPlaying_ElementsKitP33_1D6A1393FEB35D7207F503DA17E7748E14ImageViewProxy", UIView.class);
+    if (imageProxyClass) %init(SGRImageProxyHooks, SGRImageProxy = imageProxyClass);
     %init;
     sg_tilts = [NSHashTable weakObjectsHashTable];
     sg_covers = [NSMapTable weakToWeakObjectsMapTable];

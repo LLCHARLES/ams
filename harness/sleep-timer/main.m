@@ -10,6 +10,10 @@
 #import "Shared/Player/PlayerState.h"
 #import "Core/SGPrefs.h"
 #import "clock.h"
+#import "Shared/Player/SpeedPitch.h"
+
+static SGPlayerOutputWatcher outputWatcher;
+BOOL SGPlayerWatchMusicOutput(SGPlayerOutputWatcher watcher) { outputWatcher = watcher; return YES; }
 
 @interface SPTPlayerTrack ()
 @property (nonatomic, readwrite) id URI;
@@ -39,6 +43,7 @@
 @property (nonatomic, readwrite) SPTPlayerOptions *options;
 @property (nonatomic, readwrite) BOOL isPaused;
 @property (nonatomic, readwrite) BOOL isPlaying;
+@property (nonatomic, readwrite) double playbackSpeed;
 @property (nonatomic, readwrite) SPTSleepTimer *sleepTimer;
 @property (nonatomic, readwrite) double duration;
 @property (nonatomic, readwrite) NSArray *future;
@@ -123,6 +128,8 @@ static SPTPlayerState *state(SPTPlayerTrack *playing, NSArray *future, NSArray *
     state.options = [SPTPlayerOptions new];
     state.options.repeatingContext = repeating;
     state.duration = 100;
+    state.playbackSpeed = 1;
+    state.isPlaying = YES;
     state.future = future;
     state.reverse = reverse;
     return state;
@@ -251,6 +258,19 @@ int main(void) {
         sg_positionMs = 5000;
         SGSetSleepTimer(SGSleepTimerEndOfTrack, 0);
         CHECK(sg_gain == 1, "end of track, more than a minute left: full volume");
+        beforeFade = sg_playerAsks;
+        HarnessClockAdvance(25);
+        CHECK(beforeFade == sg_playerAsks, "track deadline skips all pre-fade samples");
+        sg_positionMs = 30000;
+        sg_player.state.playbackSpeed = 2;
+        [NSNotificationCenter.defaultCenter postNotificationName:@"test.speedChanged" object:nil];
+        HarnessClockAdvance(0);
+        beforeFade = sg_playerAsks;
+        HarnessClockAdvance(4.75);
+        CHECK(sg_playerAsks == beforeFade, "doubling speed still sleeps until the new fade boundary");
+        sg_positionMs = 40500;
+        HarnessClockAdvance(.5);
+        CHECK(near(sg_gain, SGSleepTimerGainAt(59.5)), "speed edit advances the deadline without another player report");
         sg_player.state = state(b, @[c], @[a], NO);
         runFor(0.4);
         CHECK(sg_player.pauses == 3, "end of track, the next track already on: paused at once");
@@ -352,6 +372,9 @@ int main(void) {
         sg_player.state.sleepTimer = spotifyTimer(1, 15 * 60);
         runFor(0.4);
         CHECK(sg_gain == 1, "Spotify's moved 15 minutes on: the gain is back");
+        asks = sg_playerAsks;
+        HarnessClockAdvance(60);
+        CHECK(asks == sg_playerAsks, "Spotify's distant fade has no quarter-second wakes");
         sg_player.state.sleepTimer = spotifyTimer(1, 15);
         runFor(0.4);
         CHECK(sg_gain < 0.1f, "Spotify's 15 s on: 30 dB down or so");
@@ -462,6 +485,87 @@ int main(void) {
         runFor(0);
         CHECK(sg_player.pauses == pauses + 1 && SGSleepTimerCurrentMode() == SGSleepTimerOff,
               "resumed report past the wall expiry pauses immediately without a timer firing");
+        sg_player.state = state(a, @[], @[], NO);
+        sg_fadeChoice = @1;
+        sg_positionMs = 0;
+        SGSetSleepTimer(SGSleepTimerEndOfTrack, 0);
+        HarnessClockSleep(101);
+        sg_positionMs = 99800;
+        runFor(0);
+        CHECK(SGSleepTimerCurrentMode() == SGSleepTimerOff && sg_player.pauses == pauses + 2,
+              "overdue track-end report pauses before any relative timer fires");
+
+        sg_player.state = state(a, @[], @[], NO);
+        sg_positionMs = 0;
+        SGSetSleepTimer(SGSleepTimerEndOfTrack, 0);
+        HarnessClockSleep(-120);
+        sg_positionMs = 99800;
+        runFor(.25);
+        CHECK(SGSleepTimerCurrentMode() == SGSleepTimerOff, "backward clock step does not postpone track-end pause");
+
+        sg_player.state = state(a, @[], @[], NO);
+        sg_positionMs = 89500;
+        SGSetSleepTimer(SGSleepTimerEndOfAlbum, 0);
+        sg_positionMs = 90500; // same report, output flush releases a second of held sound
+        if (outputWatcher) outputWatcher(NULL);
+        HarnessClockAdvance(.25);
+        CHECK(sg_gain < 1, "output change alone brings album fade onto its next sample");
+        SGSetSleepTimer(SGSleepTimerOff, 0);
+        sg_positionMs = 88000;
+        sg_player.state.sleepTimer = spotifyTimer(2, 0);
+        runFor(.25);
+        sg_positionMs = 90500;
+        if (outputWatcher) outputWatcher(NULL);
+        HarnessClockAdvance(.25);
+        CHECK(sg_gain < 1, "output change alone brings Spotify end-of-track fade onto its next sample");
+
+        sg_player.state.sleepTimer = spotifyTimer(1, 60);
+        runFor(.25);
+        HarnessClockSleep(55);
+        sg_player.state.sleepTimer = spotifyTimer(1, 5);
+        runFor(0);
+        CHECK(near(sg_gain, SGSleepTimerGain(5, 10)), "overdue Spotify timer samples the edited fade immediately");
+        sg_spotifyFadeForced = @YES;
+        sg_player.state.sleepTimer = spotifyTimer(1, 300);
+        runFor(.25);
+        asks = sg_playerAsks;
+        HarnessClockAdvance(60);
+        CHECK(sg_playerAsks == asks && sg_gain == 1, "forced native fade spends a quiet minute without watch samples");
+        SGSetSleepTimer(SGSleepTimerAtTime, 1200);
+        sg_player.state.sleepTimer = spotifyTimer(1, 900);
+        runFor(.25);
+        asks = sg_playerAsks;
+        HarnessClockAdvance(5);
+        CHECK(sg_playerAsks == asks && sg_gain == 1 && SGSleepTimerCurrentMode() == SGSleepTimerAtTime,
+              "forced native fade stays dormant while Retrine's 20-minute timer runs");
+        SGSetSleepTimer(SGSleepTimerOff, 0);
+        sg_player.state.sleepTimer = nil;
+        sg_spotifyFadeForced = nil;
+        runFor(.25);
+
+        // Both clocks put the fade 50 s from set. Sleep suspends the relative
+        // timer, not the song or wall clock. The resume report changes no deadline.
+        for (BOOL native = NO; ; native = YES) {
+            sg_positionMs = 40000;
+            if (native) sg_player.state.sleepTimer = spotifyTimer(1, 60);
+            else SGSetSleepTimer(SGSleepTimerEndOfTrack, 0);
+            runFor(.25);
+            HarnessClockSleep(40);
+            sg_positionMs = 80250;
+            runFor(0);
+            asks = sg_playerAsks;
+            HarnessClockAdvance(9.5);
+            BOOL slept = sg_playerAsks == asks && sg_gain == 1;
+            sg_positionMs = 90000;
+            HarnessClockAdvance(.25);
+            sg_positionMs = 95250;
+            HarnessClockAdvance(5.25);
+            CHECK(slept && near(sg_gain, SGSleepTimerGain(4.75, 10)), native
+                  ? "Spotify's unchanged deadline after sleep fades by 55.25 s without pre-fade polling"
+                  : "track's unchanged deadline after sleep fades by 55.25 s without pre-fade polling");
+            if (native) break;
+            SGSetSleepTimer(SGSleepTimerOff, 0);
+        }
     }
     printf("%s\n", sg_failures ? "FAILED" : "all held");
     return sg_failures ? 1 : 0;

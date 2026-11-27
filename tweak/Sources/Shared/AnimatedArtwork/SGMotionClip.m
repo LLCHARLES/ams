@@ -1,6 +1,7 @@
 // SGMotionClip.h says what these are. The cut is the encoder's: the writer is given the cut's size and told
 // to fill it keeping the picture's shape, so it drops what overhangs either side and scales nothing.
 #import <AVFoundation/AVFoundation.h>
+#import <unistd.h>
 #import "Shared/AdBlock/Protobuf.h"
 #import "SGMotionClip.h"
 
@@ -18,7 +19,19 @@ CGSize SGMotionClipCut(CGSize shown, CGFloat ratio) {
     return CGSizeMake(floor(cut.width / 2) * 2, floor(cut.height / 2) * 2);
 }
 
-BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) {
+// A failed writer need never become ready again. Deliver terminal status to the
+// same serial queue as the sample pump so the synchronous caller is released once.
+@interface SGShapeStatus : NSObject
+@property (copy) dispatch_block_t failed;
+@end
+@implementation SGShapeStatus
+- (void)observeValueForKeyPath:(NSString *)key ofObject:(AVAssetWriter *)writer
+                        change:(NSDictionary *)change context:(void *)context {
+    if (writer.status == AVAssetWriterStatusFailed || writer.status == AVAssetWriterStatusCancelled) self.failed();
+}
+@end
+
+static BOOL writeShape(NSURL *file, CGFloat ratio, NSURL *partial) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:file options:nil];
     __block AVAssetTrack *track = nil;
     dispatch_semaphore_t loaded = dispatch_semaphore_create(0);
@@ -46,8 +59,6 @@ BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) {
 
     // Written beside the file and moved over it once whole, as SGLyricsClip.m writes, so a clip cut off
     // halfway is never found.
-    NSURL *partial = [out URLByAppendingPathExtension:@"partial"];
-    [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:partial fileType:AVFileTypeMPEG4 error:nil];
     AVAssetWriterInput *input = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:@{
         AVVideoCodecKey: AVVideoCodecTypeH264,
@@ -64,30 +75,51 @@ BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) {
         [reader cancelReading];
         return NO;
     }
-    BOOL ok = YES, started = NO;
-    while (ok) {
-        CMSampleBufferRef sample = [frames copyNextSampleBuffer];
-        if (!sample) break;
-        if (!started) {
-            [writer startSessionAtSourceTime:CMSampleBufferGetPresentationTimeStamp(sample)];
-            started = YES;
-        }
-        while (!input.readyForMoreMediaData && writer.status == AVAssetWriterStatusWriting) [NSThread sleepForTimeInterval:0.002];
-        ok = writer.status == AVAssetWriterStatusWriting && [input appendSampleBuffer:sample];
-        CFRelease(sample);
-    }
-    if (!ok || !started || reader.status != AVAssetReaderStatusCompleted) {
+    CMSampleBufferRef first = [frames copyNextSampleBuffer];
+    if (!first) {
         [reader cancelReading];
         [writer cancelWriting];
         return NO;
     }
-    [input markAsFinished];
+    [writer startSessionAtSourceTime:CMSampleBufferGetPresentationTimeStamp(first)];
+    __block id pending = CFBridgingRelease(first);
+    dispatch_queue_t queue = dispatch_queue_create("app.retrine.motion.shape", DISPATCH_QUEUE_SERIAL);
     dispatch_semaphore_t written = dispatch_semaphore_create(0);
-    [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(written); }];
+    __block BOOL ending = NO;
+    void (^end)(BOOL) = ^(BOOL success) {
+        if (ending) return;
+        ending = YES;
+        if (success) {
+            [input markAsFinished];
+            [writer finishWritingWithCompletionHandler:^{ dispatch_semaphore_signal(written); }];
+        } else {
+            [reader cancelReading];
+            if (writer.status == AVAssetWriterStatusWriting) [writer cancelWriting];
+            dispatch_semaphore_signal(written);
+        }
+    };
+    SGShapeStatus *observer = [SGShapeStatus new];
+    observer.failed = ^{ dispatch_async(queue, ^{ end(NO); }); };
+    [writer addObserver:observer forKeyPath:@"status" options:NSKeyValueObservingOptionInitial context:NULL];
+    [input requestMediaDataWhenReadyOnQueue:queue usingBlock:^{
+        while (!ending && input.readyForMoreMediaData) @autoreleasepool {
+            id sample = pending ?: CFBridgingRelease([frames copyNextSampleBuffer]);
+            pending = nil;
+            if (!sample) end(reader.status == AVAssetReaderStatusCompleted);
+            else if (![input appendSampleBuffer:(__bridge CMSampleBufferRef)sample]) end(NO);
+        }
+    }];
     dispatch_semaphore_wait(written, DISPATCH_TIME_FOREVER);
-    if (writer.status != AVAssetWriterStatusCompleted) return NO;
-    [NSFileManager.defaultManager removeItemAtURL:out error:nil];
-    return [NSFileManager.defaultManager moveItemAtURL:partial toURL:out error:nil];
+    [writer removeObserver:observer forKeyPath:@"status"];
+    return writer.status == AVAssetWriterStatusCompleted;
+}
+
+BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) {
+    NSURL *partial = [out URLByAppendingPathExtension:@"partial"];
+    unlink(partial.fileSystemRepresentation);
+    if (writeShape(file, ratio, partial) && [NSFileManager.defaultManager moveItemAtURL:partial toURL:out error:nil]) return YES;
+    unlink(partial.fileSystemRepresentation);
+    return NO;
 }
 
 NSData *SGMotionCanvasAsk(NSString *uri) {

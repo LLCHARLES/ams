@@ -102,7 +102,7 @@ replacement cannot improve a remote Connect renderer; keep that mode with Spotif
 
 ## Spotify binary: a real lead, not a proven hook
 
-Inspected the available decrypted **9.1.78** executable, SHA-256
+This historical investigation used the decrypted **9.1.78** executable, SHA-256
 `2d78c32e16c941776c1de2d38f06a61fbc0aac6a865c6a68ce4180cf1001d671`.
 Used symbols, string cross-references and bounded ARM64 disassembly; did not modify or run the binary.
 
@@ -116,7 +116,7 @@ Used symbols, string cross-references and bounded ARM64 disassembly; did not mod
   This supports investigating native external media, but establishes neither music-track eligibility
   nor required fields, authorization behavior, codecs or handoff.
 
-Addresses are unslid evidence for that exact executable, not offsets to ship. Verify 9.1.88 separately.
+Addresses are unslid evidence for that executable only. Recheck the path on 9.1.90 and 9.2.0 before using it.
 AVPlayer symbols in Canvas/video do not establish the main music player's implementation.
 
 The next native-source experiment should use a diagnostic build and generated audio: trace the context

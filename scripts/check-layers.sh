@@ -11,7 +11,7 @@ forbid() {
     layer=$1
     pattern=$2
     [ -d "$layer" ] || return
-    hits=$(grep -rnE --include='*.x' --include='*.m' --include='*.h' "#import \"($pattern)/" "$layer")
+    hits=$(grep -rnE --include='*.x' --include='*.m' --include='*.h' "^[[:space:]]*#[[:space:]]*(import|include)[[:space:]]*[\"<]($pattern)/" "$layer")
     if [ -n "$hits" ]; then
         echo "layers: $layer must not import $pattern:" >&2
         echo "$hits" >&2

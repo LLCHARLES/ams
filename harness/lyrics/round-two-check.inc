@@ -49,10 +49,12 @@ static void roundTwoChecks(UIWindow *window) {
     SGRDownloadGlyph *download = [[SGRDownloadGlyph alloc] initWithFrame:CGRectMake(0, 0, 24, 24)];
     [root.view addSubview:download];
     [download showState:SGRDownloadDownloading progress:0.5 animated:NO];
+    extern void HarnessBeginGlyphClose(void), HarnessFinishGlyphClose(void);
+    HarnessBeginGlyphClose();
     [download showState:SGRDownloadDownloaded progress:1 animated:YES];
     [download showState:SGRDownloadNone progress:0 animated:YES];
     // Run past the 220 ms ring-closing callback, then repeat the unchanged state as a layout would.
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    HarnessFinishGlyphClose();
     [download showState:SGRDownloadNone progress:0 animated:YES];
     NSUInteger visible = 0;
     UIImage *shown = nil;

@@ -1,6 +1,6 @@
 // What the mod adds to every remote-config flag Spotify reads as it starts: Flags.x hands each read to
 // SGForcedFlagValue, which asks every forcer and the All flags override. Run on the Mac (Mac Catalyst,
-// so the tweak's UIKit headers compile) over the generated table of every flag Spotify 9.1.78 has,
+// so the tweak's UIKit headers compile) over the flag table generated from the input IPA,
 // with the forcers registered the way the tweak registers them: AdBlock.m's from its constructor, the
 // redesign's through SGRedesignForceFlags, and one standing in for LyricsSources.m's (a dispatch_once
 // and a nil, which is what it costs with the lyrics sources off).

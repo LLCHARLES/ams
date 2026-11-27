@@ -158,7 +158,7 @@ static uint16_t keepFor(const Lights *lights) {
     return low;
 }
 
-CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
+static CGImageRef createDimmedArtwork(CGImageRef cover, CGSize size) {
     SGLyricsBackgroundStyle style = {SGLyricsBackgroundBlur, 0, kDimBlur, 0};
     CGImageRef blurred = SGLyricsBackgroundCreate(cover, size, style);
     if (!blurred) return NULL;
@@ -171,9 +171,34 @@ CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
     CGImageRelease(blurred);
     Lights lights = {0};
     addLights(&lights, CGBitmapContextGetData(context), (size_t)size.width, (size_t)size.height, CGBitmapContextGetBytesPerRow(context));
+    CGContextSetRGBFillColor(context, 0, 0, 0, MIN(.85, 1 - keepFor(&lights) / 256.0));
+    CGContextFillRect(context, (CGRect){CGPointZero, size});
+    CGImageRef dimmed = CGBitmapContextCreateImage(context);
     CGContextRelease(context);
-    style.darkness = 1 - keepFor(&lights) / 256.0;
-    return SGLyricsBackgroundCreate(cover, size, style);
+    return dimmed;
+}
+
+CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
+    // This renderer has a single, fixed style. Preserve the exact draw size, including fractions.
+    static NSCache<NSArray *, NSArray *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSCache new];
+        cache.countLimit = 8;
+        cache.totalCostLimit = 32 * 1024 * 1024;
+    });
+    NSArray *key = @[[NSValue valueWithPointer:cover], @(size.width), @(size.height)];
+    @synchronized (cache) {
+        NSArray *hit = [cache objectForKey:key];
+        if (hit) return CGImageRetain((__bridge CGImageRef)hit[0]);
+        CGImageRef image = createDimmedArtwork(cover, size);
+        if (image) {
+            // Retain the cover with the result: its address cannot be recycled under a live key.
+            [cache setObject:@[(__bridge id)image, (__bridge id)cover ?: NSNull.null] forKey:key
+                        cost:CGImageGetBytesPerRow(image) * CGImageGetHeight(image)];
+        }
+        return image;
+    }
 }
 
 static BOOL isHangul(unichar c) {
@@ -755,7 +780,7 @@ static BOOL writeReady(AVAssetWriter *writer, AVAssetWriterInput *input, CMTime 
     [writer addObserver:status forKeyPath:@"status" options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew context:NULL];
     [input requestMediaDataWhenReadyOnQueue:queue usingBlock:^{
         if (finished) return;
-        while (input.readyForMoreMediaData) {
+        while (input.readyForMoreMediaData) @autoreleasepool {
             NSInteger result = (!current || current()) && writer.status == AVAssetWriterStatusWriting ? frame() : -1;
             if (result > 0) continue;
             [input markAsFinished];
@@ -774,12 +799,9 @@ static BOOL writeReady(AVAssetWriter *writer, AVAssetWriterInput *input, CMTime 
     return writer.status == AVAssetWriterStatusCompleted && (!current || current());
 }
 
-BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+static BOOL writeLayoutPartial(NSURL *partial, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
                                  SGLyricsClipLayout layout, BOOL (^current)(void)) {
-    // Written beside the file and moved over it once whole, so a clip cut off halfway is never found.
-    NSURL *partial = [file URLByAppendingPathExtension:@"partial"];
-    [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:partial fileType:AVFileTypeMPEG4 error:nil];
     if (!writer) return NO;
     // A scene has no backdrop to breathe: one frame, held as long as the loop.
@@ -811,7 +833,6 @@ BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef co
     CGImageRef words;
     if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, &words)) {
         [writer cancelWriting];
-        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
         return NO;
     }
     CGImageRef background = newBackdrop(backdrop, cover, size, layout);
@@ -841,12 +862,25 @@ BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef co
     });
     CGImageRelease(words);
     CGImageRelease(background);
-    if (!ok) {
-        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
-        return NO;
-    }
-    [NSFileManager.defaultManager removeItemAtURL:file error:nil];
-    return [NSFileManager.defaultManager moveItemAtURL:partial toURL:file error:nil];
+    return ok;
+}
+
+static BOOL publishClip(NSURL *file, BOOL (^writePartial)(NSURL *)) {
+    NSURL *partial = [file URLByAppendingPathExtension:@"partial"];
+    NSFileManager *files = NSFileManager.defaultManager;
+    [files removeItemAtURL:partial error:nil];
+    // A destination that appeared while encoding may already be leased to MediaPlayer.
+    if (writePartial(partial) && [files moveItemAtURL:partial toURL:file error:nil]) return YES;
+    [files removeItemAtURL:partial error:nil];
+    return NO;
+}
+
+BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                 NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
+                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
+    return publishClip(file, ^BOOL(NSURL *partial) {
+        return writeLayoutPartial(partial, backdrop, cover, previous, line, translation, next, size, style, layout, current);
+    });
 }
 
 // Over moving artwork. The video is read as BGRA, the dimming and the words are drawn into each frame where
@@ -911,12 +945,20 @@ static void setKeep(Over *over, size_t rows, CGFloat band) {
     for (size_t y = 0; y < rows; y++) over->keep[y] = (uint16_t)round(256 * (1 - dimAt(y, rows, band)));
 }
 
+static void freeOver(Over over) {
+    CGImageRelease(over.words);
+    free(over.keep);
+    free(over.blurred);
+    free(over.feather);
+}
+
 static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
                      SGLyricsClipLayout layout) {
     Over over = {0};
     if (!newWords(previous, line, translation, next, motion.cut, layout, NO, &over.drawn, &over.words)) return over;
     size_t rows = (size_t)motion.cut.height;
     over.keep = malloc(rows * sizeof(uint16_t));
+    if (!over.keep) goto failed;
     CGRect cut = cutIn(motion);
     if (layout == SGLyricsClipOverArtwork) {
         // Blurred whole, with no edge to fade; until fitBand judges the stretch, darkened as white needs.
@@ -924,7 +966,9 @@ static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString
         over.soft = cut;
         size_t width = (size_t)cut.size.width;
         over.blurred = malloc(width * rows * 4);
+        if (!over.blurred) goto failed;
         over.feather = malloc(rows * sizeof(uint16_t));
+        if (!over.feather) goto failed;
         Lights none = {0};
         uint16_t keep = keepFor(&none);
         for (size_t y = 0; y < rows; y++) over.feather[y] = 256, over.keep[y] = keep;
@@ -940,16 +984,14 @@ static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString
     size_t width = (size_t)over.soft.size.width, height = (size_t)over.soft.size.height;
     size_t fade = MAX(MIN((size_t)(2 * reach), height / 2), 1);
     over.blurred = malloc(width * height * 4);
+    if (!over.blurred) goto failed;
     over.feather = malloc(height * sizeof(uint16_t));
+    if (!over.feather) goto failed;
     for (size_t y = 0; y < height; y++) over.feather[y] = (uint16_t)(256 * MIN(1.0, MIN(y, height - 1 - y) / (double)fade));
     return over;
-}
-
-static void freeOver(Over over) {
-    CGImageRelease(over.words);
-    free(over.keep);
-    free(over.blurred);
-    free(over.feather);
+failed:
+    freeOver(over);
+    return (Over){0};
 }
 
 // The first of the rows behind the words in a BGRA frame of the video, `base`, at their left edge.
@@ -1189,7 +1231,7 @@ CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSStri
     return frame;
 }
 
-BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
+static BOOL writeMotionPartial(NSURL *partial, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
                                  NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:motionFile options:nil];
     Motion motion;
@@ -1197,8 +1239,6 @@ BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previ
     if (!track) return NO;
     // No longer than the video, which is then written whole and loops as it was made to.
     seconds = MIN(seconds, motion.length);
-    NSURL *partial = [file URLByAppendingPathExtension:@"partial"];
-    [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:partial fileType:AVFileTypeMPEG4 error:nil];
     AVAssetWriterInput *input = [AVAssetWriterInput assetWriterInputWithMediaType:AVMediaTypeVideo outputSettings:@{
         AVVideoCodecKey: AVVideoCodecTypeH264,
@@ -1221,7 +1261,6 @@ BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previ
     __block Over over = makeOver(motion, previous, line, translation, next, layout);
     if (!over.keep) {
         [writer cancelWriting];
-        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
         return NO;
     }
     fitBand(asset, motion, &over, from, seconds);
@@ -1275,12 +1314,14 @@ BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previ
         return appended ? 1 : -1;
     });
     freeOver(over);
-    if (!ok) {
-        [NSFileManager.defaultManager removeItemAtURL:partial error:nil];
-        return NO;
-    }
-    [NSFileManager.defaultManager removeItemAtURL:file error:nil];
-    return [NSFileManager.defaultManager moveItemAtURL:partial toURL:file error:nil];
+    return ok;
+}
+
+BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
+    return publishClip(file, ^BOOL(NSURL *partial) {
+        return writeMotionPartial(partial, motionFile, previous, line, translation, next, from, seconds, layout, current);
+    });
 }
 
 NSString *SGLyricsClipLook(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed) {

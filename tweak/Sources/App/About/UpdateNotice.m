@@ -75,36 +75,37 @@ static void offerWhenClear(NSInteger tries) {
             SGOpenURL(release.url);
         }]];
     [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"settings.mod.update.notice.action.not_now", @"Not now") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(sheet);
     [top presentViewController:sheet animated:YES completion:nil];
     SGLog(@"update notice: offered %@ over %@", version, NSStringFromClass(top.class));
 }
 
 void SGWatchForUpdates(void) {
     // Once per launch, a few seconds after Spotify first comes to the front.
-    static BOOL launched;
-    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+    __block __weak id active;
+    active = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
                                                     object:nil
                                                      queue:NSOperationQueue.mainQueue
                                                 usingBlock:^(NSNotification *note) {
-        if (launched) return;
-        launched = YES;
+        [NSNotificationCenter.defaultCenter removeObserver:active];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kSettle * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            BOOL tell = SGEnabled(SGKeyUpdateNotice);
-            if (tell && SGUpdateVersion()) {   // the last check knows one already
+            if (!SGEnabled(SGKeyUpdateNotice)) return;
+            BOOL checking = SGCheckForUpdate(NO);
+            if (SGUpdateVersion()) {   // the last check knows one already
                 offerWhenClear(kTries);
-            } else if (tell) {
-                __block id landed = [NSNotificationCenter.defaultCenter addObserverForName:SGUpdateCheckedNotification
+            }
+            // A cached release told on a previous launch does not consume this
+            // launch's offer. The check may find one the user has not seen.
+            if (checking && !sg_offered) {
+                __block __weak id landed;
+                landed = [NSNotificationCenter.defaultCenter addObserverForName:SGUpdateCheckedNotification
                                                                                     object:nil
                                                                                      queue:NSOperationQueue.mainQueue
                                                                                 usingBlock:^(NSNotification *n) {
                     [NSNotificationCenter.defaultCenter removeObserver:landed];
-                    landed = nil;
                     offerWhenClear(kTries);
                 }];
             }
-            // Inside the six hours this does nothing and no check lands, which is the point: the
-            // sheet is for a release that turned up, not for every launch.
-            if (tell) SGCheckForUpdate(NO);
         });
     }];
 }

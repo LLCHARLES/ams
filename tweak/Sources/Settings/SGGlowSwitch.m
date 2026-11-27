@@ -152,6 +152,8 @@ static CAShapeLayer *newStroke(CGFloat width) {
     CGFloat side = self.bounds.size.height - kKnobInset * 2;
     CGFloat width = side + (_pressed ? kKnobStretch : 0);
     CGFloat x = self.on ? self.bounds.size.width - kKnobInset - width : kKnobInset;
+    // As UISwitch does, right to left the knob is on at the left end.
+    if (self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) x = self.bounds.size.width - x - width;
     _knob.frame = CGRectMake(x, kKnobInset, width, side);
     _knob.layer.cornerRadius = side / 2;
 }

@@ -23,6 +23,7 @@ static NSData *gid(NSUInteger n){uint8_t b[16]={0};b[14]=n>>8;b[15]=n;return [NS
 static NSData *item(NSString *u,NSUInteger s){return join(@[text(1,u),SAPProtoInteger(2,s)]);}
 static NSUInteger mode,mutations,resetAlbum,resetPlaylist,trackRemoves,libraryRemoves,cancelReads,reads,completions;
 static NSProgress *cancelDuringSkips;static NSUInteger readsAtCancel;
+static BOOL lagAlbumReadbackOnce;
 static BOOL albumHeld,playlistHeld;static NSMutableDictionary *states,*saved;static NSMutableArray *pending;static NSMutableSet *removedLibrary;
 static void setUp(NSUInteger m){mode=m;mutations=resetAlbum=resetPlaylist=trackRemoves=libraryRemoves=cancelReads=reads=completions=0;traceBegins=0;traceEvents=NSMutableArray.array;albumHeld=(m==0||m==1||m==7||m==13||m>=20);playlistHeld=(m==2||m==3||m==14);states=[@{uri(1,@"track"):@3,uri(2,@"track"):@3}mutableCopy];saved=[@{uri(1,@"track"):@YES,uri(2,@"track"):@YES,uri(20,@"album"):@YES}mutableCopy];pending=NSMutableArray.array;removedLibrary=NSMutableSet.set;}
 static void clearUnheld(void){if(!albumHeld&&!playlistHeld)for(NSString *u in states.allKeys)states[u]=@0;}
@@ -54,7 +55,10 @@ dispatch_block_t SAPCallReadOnlyServiceCancellable(NSString *s,NSString *method,
    NSUInteger state=mode==9&&mutations?1:[states[u]unsignedIntegerValue];[d appendData:SAPProtoBytes(1,item(u,state))];}response=d;
  }else if([method isEqual:@"Contains"]){
   assert([s isEqual:@"spotify.your_library_esperanto.proto.YourLibraryService"]&&fields.count<=64);NSMutableData *d=[SAPProtoInteger(98,200)mutableCopy];
-  for(NSDictionary *f in fields){assert([f[@"number"]intValue]==3);NSString *u=[[NSString alloc]initWithData:f[@"value"]encoding:NSUTF8StringEncoding];[d appendData:SAPProtoBytes(2,join(@[text(1,u),SAPProtoInteger(2,[saved[u]boolValue])]))];}response=d;
+  for(NSDictionary *f in fields){assert([f[@"number"]intValue]==3);NSString *u=[[NSString alloc]initWithData:f[@"value"]encoding:NSUTF8StringEncoding];
+   BOOL present=[saved[u]boolValue];
+   if(lagAlbumReadbackOnce&&libraryRemoves&&[u isEqual:uri(20,@"album")]){present=YES;lagAlbumReadbackOnce=NO;}
+   [d appendData:SAPProtoBytes(2,join(@[text(1,u),SAPProtoInteger(2,present)]))];}response=d;
   if(mode==11)response=SAPProtoInteger(98,200);
  }else {assert([method isEqual:@"GetEntity"]);response=metadata();}
  __block BOOL cancelled=NO;dispatch_block_t deliver=^{if((mode==21||mode==22)&&[method isEqual:@"GetEntity"]){eventsBeforeReset=traceEvents.count;traceGeneration++;if(mode==21)tracing=NO;}reply(response,error);if(mode==19&&[method isEqual:@"Contains"]&&[SAPProtoString(fields,3)isEqual:uri(1300,@"album")]){readsAtCancel=reads;dispatch_async(dispatch_get_main_queue(),^{[cancelDuringSkips cancel];});}};
@@ -78,7 +82,24 @@ static void waitFor(BOOL(^condition)(void)){NSDate *end=[NSDate dateWithTimeInte
 static NSArray *run(NSArray *selection,NSString **failure){__block NSArray *results=nil;__block NSString *error=nil;__block BOOL done=NO,returned=NO;NSProgress *p=SAPDeleteOfflineLibrarySelection(selection,^(NSDictionary *e){assert(returned&&NSThread.isMainThread);},^(NSArray *r,NSString *e){assert(returned&&NSThread.isMainThread);completions++;results=r;error=e;done=YES;});assert(p);returned=YES;waitFor(^{return done;});assert(completions==1);if(failure)*failure=error;return results;}
 int main(void){@autoreleasepool{
  NSString *error=nil;NSArray *r;
+ // In both cases Spotify keeps reporting the download after the remove command.
+ // Only the second album was saved, and its first post-command read is stale.
+ BOOL reasonFailure=NO;
+ for(NSNumber *full in @[@NO,@YES]){
+  setUp(9);saved[uri(20,@"album")]=full;lagAlbumReadbackOnce=full.boolValue;
+  NSArray *selection=rows(full.boolValue,YES);
+  r=run(selection,&error);
+  NSUInteger offline=0;
+  NSString *message=SAPOfflineLibraryRemovalSummary(r,selection.count,error,&offline);
+  NSString *expected=full.boolValue?@"Removed from library: 2 / 2\nRemoved from offline storage: 0 / 2\nSpotify still reports a download: 2":@"Removed from library: 1 / 1\nRemoved from offline storage: 0 / 1\nSpotify still reports a download: 1";
+  if(![message isEqual:expected]){fprintf(stderr,"%s: %s\n",full.boolValue?"Album unsaved after retry":"No album policy to preserve",message.UTF8String);reasonFailure=YES;}
+ }
+ if(reasonFailure)return 1;
+ __block NSMutableArray *removedBatches=NSMutableArray.array;
+ id observer=[NSNotificationCenter.defaultCenter addObserverForName:@"SAPOfflineTracksRemoved" object:nil queue:nil usingBlock:^(NSNotification *note){[removedBatches addObject:note.object];}];
  tracing=NO;setUp(0);r=run(rows(YES,YES),&error);assert(!error&&traceBegins==0&&traceEvents.count==0);puts("PASS diagnostics off creates no deletion trace operation or records");
+ assert(removedBatches.count==1 && [[NSSet setWithArray:removedBatches[0]]isEqual:[NSSet setWithArray:[rows(YES,YES)valueForKey:@"uri"]]]);
+ [NSNotificationCenter.defaultCenter removeObserver:observer];
  tracing=YES;setUp(0);r=run(rows(YES,YES),&error);assert(!error&&traceBegins==1&&traceEvent(@"selection")&&traceEvent(@"context_members")&&[traceEvent(@"album_metadata")[@"accepted"]boolValue]&&traceEvent(@"command_reply")&&traceEvent(@"verified_items")&&traceEvent(@"finished"));assert(resetAlbum==1&&trackRemoves==0&&libraryRemoves==2);puts("PASS correlated deletion trace contains selection, holders, proof, command and verified results without changing commands");
  setUp(7);run(rows(YES,YES),&error);NSDictionary *proof=traceEvent(@"album_metadata");assert([proof[@"reason"]isEqual:@"album_identity_mismatch"]&&[proof[@"expected_uri"]isEqual:uri(20,@"album")]&&[proof[@"observed_uri"]isEqual:uri(999,@"album")]);puts("PASS rejected album identity evidence reports exact expected and native identities");
  // A native GetEntity album contains GID-only track references, not display rows.
@@ -92,6 +113,7 @@ int main(void){@autoreleasepool{
  for(NSUInteger m=21;m<=22;m++){tracing=YES;setUp(m);run(rows(YES,YES),&error);assert(!error&&traceEvents.count==eventsBeforeReset);}tracing=NO;puts("PASS disabled/reset diagnostics rejects subsequent observations from old operation");
  setUp(0);r=run(rows(YES,YES),&error);assert(!error&&r.count==2&&resetAlbum==1&&[removedLibrary containsObject:uri(20,@"album")]);for(NSDictionary *v in r)assert([v[@"offline_removed"]boolValue]&&[v[@"library_removed"]boolValue]);puts("PASS full album policies and saved entries removed only after full metadata proof");
  setUp(1);r=run(rows(NO,YES),&error);assert(resetAlbum==0&&resetPlaylist==0&&trackRemoves==1&&![removedLibrary containsObject:uri(20,@"album")]&&![r[0][@"offline_removed"]boolValue]&&[r[0][@"library_removed"]boolValue]&&[saved[uri(2,@"track")]boolValue]);puts("PASS partial album retained, unrelated tracks and saved album untouched");
+ NSDictionary *heldByAlbum=r[0];
  setUp(2);r=run(rows(YES,NO),&error);assert(resetPlaylist==1&&r.count==2);for(NSDictionary *v in r)assert([v[@"offline_removed"]boolValue]);puts("PASS full playlist policy cleared without unfollowing playlist");
  setUp(3);r=run(rows(NO,NO),&error);assert(resetPlaylist==0&&trackRemoves==1&&![r[0][@"offline_removed"]boolValue]);puts("PASS partial playlist preserves other music");
  for(NSUInteger m=4;m<=5;m++){setUp(m);r=run(rows(NO,NO),&error);assert(error.length&&mutations==0);}setUp(11);r=run(rows(NO,NO),&error);assert(error.length&&mutations==0);setUp(0);r=run(@[@{@"uri":@"bad"}],&error);assert(error.length&&mutations==0);puts("PASS malformed/missing baselines and invalid selection fail closed");
@@ -99,6 +121,14 @@ int main(void){@autoreleasepool{
  setUp(8);r=run(rows(NO,NO),&error);assert(!error&&trackRemoves==1&&libraryRemoves==1&&[r[0][@"offline_removed"]boolValue]&&[r[0][@"library_removed"]boolValue]);puts("PASS timeout followed by actual verified effect succeeds without replay");
  setUp(7);r=run(rows(YES,YES),&error);assert(resetAlbum==0&&![removedLibrary containsObject:uri(20,@"album")]);puts("PASS foreign album metadata never authorizes broad removal");
  setUp(13);r=run(rows(YES,NO),&error);assert(error.length&&resetAlbum==1);for(NSDictionary *v in r)assert([v[@"offline_removed"]boolValue]&&![v[@"library_removed"]boolValue]);puts("PASS retained wholly selected saved album propagates to every member even without row album metadata");
+ NSMutableArray *mixed=r.mutableCopy;
+ for(NSUInteger i=0;i<6;i++)[mixed addObject:heldByAlbum];
+ NSUInteger offline=0;
+ NSString *summary=SAPOfflineLibraryRemovalSummary(mixed,8,error,&offline);
+ if(offline!=2 || ![summary isEqual:@"Removed from library: 6 / 8\nRemoved from offline storage: 2 / 8\nPlaylist or album kept to protect other tracks: 6\nLibrary removal not confirmed: 2"]){
+  fprintf(stderr,"Unexpected mixed removal summary: %s\n",summary.UTF8String);return 1;
+ }
+ puts("PASS mixed removal shows both totals and counts every track once, without per-track details");
  setUp(9);r=run(rows(NO,NO),&error);assert(![r[0][@"offline_removed"]boolValue]);puts("PASS Item.ERROR1 is never NOT_DOWNLOADED0");
  setUp(0);__block BOOL immediateDone=NO;__block NSArray *immediateResults=nil;NSProgress *immediate=SAPDeleteOfflineLibrarySelection(rows(YES,YES),nil,^(NSArray *v,NSString *e){assert(e.length);immediateResults=v;immediateDone=YES;completions++;});[immediate cancel];waitFor(^{return immediateDone;});assert(immediateResults.count==2&&mutations==0&&reads==0&&completions==1);for(NSDictionary *v in immediateResults)assert(![v[@"offline_removed"]boolValue]&&![v[@"library_removed"]boolValue]);puts("PASS immediate cancellation returns all selected rows as unverified");
  setUp(14);r=run(rows(YES,NO),&error);assert(resetPlaylist==0&&trackRemoves==2);for(NSDictionary *v in r)assert(![v[@"offline_removed"]boolValue]);puts("PASS freshly read playlist unselected member blocks broad reset");

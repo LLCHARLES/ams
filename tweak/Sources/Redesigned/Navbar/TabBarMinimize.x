@@ -15,6 +15,7 @@
 static Class sg_containerClass;
 static __weak UIScrollView *sg_page;
 static char kInContainer;
+static NSUInteger sg_hierarchy = 2;
 static SGRMinimizeTrack sg_track;
 static BOOL sg_waitForTouch;
 
@@ -44,6 +45,14 @@ static void scrolled(UIScrollView *scrollView) {
     SGRSetTabBarMinimized(minimized, YES);
 }
 
+// Moving a wrapper mid-fling does not send didMoveToSuperview to its scroll view.
+%hook UIView
+- (void)didMoveToSuperview {
+    sg_hierarchy += 2;
+    %orig;
+}
+%end
+
 %hook UIScrollView
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
     BOOL begin = %orig;
@@ -52,10 +61,6 @@ static void scrolled(UIScrollView *scrollView) {
         objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return begin;
 }
-- (void)didMoveToSuperview {
-    %orig;
-    objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
 - (void)didMoveToWindow {
     %orig;
     objc_setAssociatedObject(self, &kInContainer, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -63,12 +68,14 @@ static void scrolled(UIScrollView *scrollView) {
 - (void)setContentOffset:(CGPoint)offset {
     %orig;
     NSNumber *inside = objc_getAssociatedObject(self, &kInContainer);
-    // A wrapper can join the tab page mid-fling, without another pan to clear its cached NO.
-    if (!inside || (!inside.boolValue && self.isDecelerating)) {
-        inside = inContainer(self) ? @YES : @NO;
+    // Low bit: a page. Remaining bits: the hierarchy in which it was classified.
+    NSUInteger cached = inside.unsignedIntegerValue;
+    if ((cached & ~(NSUInteger)1) != sg_hierarchy) {
+        cached = sg_hierarchy | inContainer(self);
+        inside = @(cached);
         objc_setAssociatedObject(self, &kInContainer, inside, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    if (inside.boolValue) scrolled(self);
+    if (cached & 1) scrolled(self);
 }
 %end
 

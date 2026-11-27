@@ -7,7 +7,7 @@
 // The follow state comes from a mock of Spotify's collection platform under its real class and selector
 // names: `none` at once, or in `late` a second in; Following, as saved, after the tap made at 2.5 s.
 #import <UIKit/UIKit.h>
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 #import "../album/motion-visibility.h"
 #import "../album/hero-veil-check.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
@@ -412,6 +412,10 @@ static void verifyTitle(UIView *root, BOOL rtl) {
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"motion-visibility"]) {
+        motionVisibilityCheck(self.window, YES);
+        return YES;
+    }
     CGFloat W = self.window.bounds.size.width, H = self.window.bounds.size.height;
     BOOL collapsed = [NSProcessInfo.processInfo.arguments containsObject:@"collapsed"];
     BOOL late = [NSProcessInfo.processInfo.arguments containsObject:@"late"];
@@ -542,14 +546,14 @@ static void verifyTitle(UIView *root, BOOL rtl) {
     [self.window makeKeyAndVisible];
 
     if (checkListeners) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        HarnessWhen(@"artist header ready for listener checks", ^BOOL { return veilFind(root.view, @"SGRHeaderInfo").window != nil; }, ^{
             verifyListeners(root, header, list, self.source);
         });
         return YES;
     }
 
     if (reloadSections) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        HarnessWhen(@"artist collection visible", ^BOOL { return list.window != nil; }, ^{
             [list layoutIfNeeded];
             for (NSInteger item = 0; item < 3; item++) {
                 UICollectionViewLayoutAttributes *a = [list layoutAttributesForItemAtIndexPath:[NSIndexPath indexPathForItem:item inSection:0]];
@@ -687,12 +691,13 @@ static void verifyTitle(UIView *root, BOOL rtl) {
               pinned ? NSStringFromCGRect(pinned.frame) : @"MISSING", pinned.alpha);
     });
     UIView *rootView = root.view;
-    motionVisibilityCheck(rootView, YES);
     if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-play"])
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ verifyPlay(rootView); });
+        HarnessWhen(@"artist play and field colour", ^BOOL {
+            return [veilFind(rootView, @"SGRHeaderInfo") valueForKey:@"play"] && [veilFind(rootView, @"SGRArtistHero") valueForKey:@"fieldColor"];
+        }, ^{ verifyPlay(rootView); });
     if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-title"]) {
         BOOL rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ verifyTitle(rootView, rtl); });
+        HarnessWhen(@"artist title mounted", ^BOOL { return veilFind(rootView, @"SGRHeaderInfo").window != nil; }, ^{ verifyTitle(rootView, rtl); });
     }
     // `veil` / `veil-off` (../album/hero-veil-check.h): the page scrolled by its own scroll view, the header's container
     // in it.

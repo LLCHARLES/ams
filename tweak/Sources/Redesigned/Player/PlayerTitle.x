@@ -72,13 +72,14 @@ static CGFloat sg_slide;             // how far the lyrics slide the title towar
 
 static void placeRow(void);
 
-// The Music app's sizes: Title 3 in the player, Headline and Body beside the lyrics' thumbnail (PlayerLyrics.x), the
+// The Music app's sizes: Title 3 in the player, Headline and Subheadline beside the lyrics' thumbnail (PlayerLyrics.x;
+// capped at Extra Extra Extra Large), the
 // two column player keeping the player's. Capped where the player's row still holds two lines of it. In the family the
 // app draws in: the system font, which Fonts.x draws in the chosen one, unless Spotify's is drawn (Shared/Fonts,
 // SGAppFontDrawn); then the family of `given`, the font Spotify set, at the Music app's size and weight.
 static UIFont *shownFont(BOOL title, UIFont *given) {
-    BOOL lyrics = SGRPlayerLyricsOpen() && !SGRPlayerTwoColumns();
-    UIFontTextStyle style = lyrics ? (title ? UIFontTextStyleHeadline : UIFontTextStyleBody) : UIFontTextStyleTitle3;
+    BOOL lyrics = SGRPlayerPageOpen() && !SGRPlayerTwoColumns();
+    UIFontTextStyle style = lyrics ? (title ? UIFontTextStyleHeadline : UIFontTextStyleSubheadline) : UIFontTextStyleTitle3;
     UIFontWeight weight = title ? UIFontWeightSemibold : UIFontWeightRegular;
     UIFont *system = SGCategoryCappedFont(style, weight, UIContentSizeCategoryExtraExtraExtraLarge);
     NSString *family = given.familyName;
@@ -170,9 +171,24 @@ static void setShownFont(UILabel *self, SEL _cmd, UIFont *font) {
     ((void (*)(id, SEL, UIFont *))spotifys(self, _cmd))(self, _cmd, shownFont(isTitle(self), font));
 }
 
-// The artist in the secondary color; the title as Spotify paints it.
+// The artist in the Music app's ink: white ADDED to what is behind it (plusL), 0.44 of it, so it brightens and darkens
+// with the cover behind it (measured on its player: 112 of 255 above the backdrop over a light, a mid and a dark
+// cover, saturating at white on a light one); under Increase Contrast the secondary color as it was. Over a light
+// backdrop, where that adds next to nothing, the alpha rises to kArtistInkLight (SGRBackdropInk.h), and it is drawn
+// plain where plusL cannot see the backdrop. The title as Spotify paints it.
+// Compared with the Music app's player at 3x over a dark blue and a pink animated cover, 0.44 drew the artist 70 to 90
+// of 255 above its backdrop where the Music app's stands 125 to 160 above it (near white with the backdrop's tint), so
+// it was lifted to 0.62. Those were drawn plain: the ink was decided while the opening player's container was masked
+// and kept. Added to the backdrop it is the Music app's 0.46 (115 of 255 above it, as measured).
+static const CGFloat kArtistInk = 0.48, kArtistInkLight = 0.9;
 static void setShownColor(UILabel *self, SEL _cmd, UIColor *color) {
-    ((void (*)(id, SEL, UIColor *))spotifys(self, _cmd))(self, _cmd, isTitle(self) ? color : SGRSecondary());
+    BOOL title = isTitle(self), contrast = UIAccessibilityDarkerSystemColorsEnabled(), plusL = YES;
+    UIColor *ink = title ? color : (contrast ? SGRSecondary() : SGRInkFor(self, kArtistInk, kArtistInkLight, &plusL));
+    ((void (*)(id, SEL, UIColor *))spotifys(self, _cmd))(self, _cmd, ink);
+    if (!title) {
+        NSString *filter = contrast || !plusL ? nil : @"plusL";
+        if (![self.layer.compositingFilter isEqual:filter]) self.layer.compositingFilter = filter;
+    }
 }
 
 // Whether Spotify asked for the mark holder to be hidden; its own flag until it is held.
@@ -242,6 +258,11 @@ static void adopt(UILabel *label, BOOL title) {
     [label setText:objc_getAssociatedObject(label, &kOriginalKey)];
     [label setFont:label.font];
     [label setTextColor:label.textColor];
+    // The artist's ink follows how light the backdrop is: taken again at each new reading.
+    if (!title) {
+        __weak UILabel *weak = label;
+        SGRBackdropInkObserve(label, ^{ [weak setTextColor:weak.textColor]; });
+    }
 }
 
 static void refresh(void) {

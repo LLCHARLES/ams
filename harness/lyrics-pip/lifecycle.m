@@ -1,7 +1,12 @@
 // Compile the real engine, replacing only its system PiP transport. No real PiP/audio session starts.
 #import "tests.h"
 #import <objc/runtime.h>
+#import "../dispatch-clock.h"
+#define dispatch_time HarnessTime
+#define dispatch_after HarnessAfter
 #import "../../tweak/Sources/Shared/LyricsPiP/LyricsPiP.m"
+#undef dispatch_after
+#undef dispatch_time
 
 static BOOL paused = YES, loading;
 static BOOL loadFailed;
@@ -42,12 +47,14 @@ NSString *SGKaraokePlayingTrack(void) {
     return [SGTestTrackURI() hasPrefix:@"spotify:track:"] ? [SGTestTrackURI() substringFromIndex:14] : SGTestTrackURI();
 }
 id SGKaraokePlayer(void) { return player; }
-NSInteger SGKaraokePositionMs(void) { return position; }
+static NSUInteger clockReads;
+NSInteger SGKaraokePositionMs(void) { clockReads++; return position; }
 NSInteger SGKaraokeDelayMs(void) { return 0; }
 void SGKaraokeSeek(NSInteger ms) { requestedSeek = ms; loading = YES; }
 NSArray *SGKaraokeLinesForTrack(NSString *track) { return testLines; }
 void SGKaraokeRequestLyrics(NSString *track) {}
-NSString *SGLyricsGeminiLanguage(void) { return @"en"; }
+static NSString *translationLanguage = @"en";
+NSString *SGLyricsGeminiLanguage(void) { return translationLanguage; }
 void SGLyricsSyncSavedTranslation(NSString *track, NSString *language, NSArray<SGKaraokeLine *> *lines) {
     translationReads++;
     for (SGKaraokeLine *line in lines) if (!line.translation.length) line.translation = @"Saved translation";
@@ -105,8 +112,8 @@ static UIAlertController *retryAlert;
             lyricsRetry = alert.actions.firstObject;
             return;
         }
-        SGTestAssert([alert.message isEqual:@"Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify."],
-            @"disabled tap gives exact activation and restart guidance");
+        SGTestAssert([alert.message isEqual:@"Enable lyrics in Mod Settings → Picture in Picture, then restart Spotify."],
+            [NSString stringWithFormat:@"disabled tap gives exact activation and restart guidance (got %@: %@)", alert.title, alert.message]);
         alerts++;
     }
     if (completion) completion();
@@ -236,7 +243,9 @@ void SGTestLifecycle(void) {
     SGTestAssert(SGTestPump(^BOOL { return [engine.shown[0] isEqual:@"No lyrics available"]; }),
         @"PiP returns to genuine absence after a healthy miss");
     NSUInteger frames = engine.testLayer.frames;
+    SGLyricsPiPStyle *steady = engine.style;
     for (int i = 0; i < 20; i++) [engine refresh];
+    SGTestAssert(engine.style == steady, @"unchanged line keeps the same prepared style");
     SGTestAssert(engine.testLayer.frames == frames, @"unchanged content and background do not repeat frames");
     [engine pictureInPictureControllerDidStartPictureInPicture:(id)pip];
     SGTestAssert(engine.active && !engine.starting && engine.timer == nil, @"paused active session has no render timer");
@@ -269,6 +278,24 @@ void SGTestLifecycle(void) {
     frames = engine.testLayer.frames;
     for (NSUInteger i = 0; i < 10; i++) [engine refresh];
     SGTestAssert(engine.testLayer.frames == frames, @"new style identity is cached after one frame");
+    SGTestSetting(SGKeyPiPFont, @"library:fixture");
+    [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+    SGTestAssert(SGTestPump(^BOOL { return [engine.style.font isEqual:@"system"]; }), @"unregistered selection draws in system font");
+    frames = engine.testLayer.frames;
+    steady = engine.style;
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    for (NSUInteger i = 0; i < 10; i++)
+        [center postNotificationName:SGFontLibraryChangedNotification object:nil userInfo:@{@"identifier": @"fixture"}];
+    __block BOOL drained = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    SGTestAssert(SGTestPump(^BOOL { return drained; }) && engine.style == steady && engine.testLayer.frames == frames,
+                 @"download progress does not rebuild style or redraw a paused frame");
+    extern NSString *SGTestRegisteredFamily;
+    SGTestRegisteredFamily = @"Georgia";
+    [center postNotificationName:SGFontLibraryChangedNotification object:nil userInfo:@{@"identifier": @"fixture"}];
+    SGTestAssert(SGTestPump(^BOOL { return [engine.style.font isEqual:@"Georgia"] && engine.testLayer.frames > frames; }),
+                 @"registration of the selected family refreshes paused PiP");
+    SGTestRegisteredFamily = nil;
     SGTestSetting(SGKeyPiPFont, nil);
 
     SGKaraokeWord *word = [SGKaraokeWord new]; word.text = @"Original";
@@ -281,11 +308,19 @@ void SGTestLifecycle(void) {
         [engine.shown[3] isEqual:@"Saved pronunciation"] &&
         !line.translation && !line.pronunciation, @"saved supplements appear without modifying shared source lines");
     NSUInteger reads = translationReads + pronunciationReads;
+    clockReads = 0;
     for (NSUInteger i = 0; i < 10; i++) [engine refresh];
+    SGTestAssert(clockReads == 10, @"text and annotation share the frame's single clock sample");
     SGTestAssert(translationReads + pronunciationReads == reads, @"saved supplements are not reread from storage on each tick");
     heldTranslationLoads = [NSMutableArray array];
     frames = engine.testLayer.frames;
     NSData *translatedPixels = engine.testLayer.pixels;
+    [engine backgroundChanged:[NSNotification notificationWithName:NSUserDefaultsDidChangeNotification object:nil]];
+    __block BOOL refreshed = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ refreshed = YES; });
+    SGTestAssert(SGTestPump(^BOOL { return refreshed; }) && !heldTranslationLoads.count,
+        @"unrelated defaults changes keep prepared lines");
+    translationLanguage = @"ko";
     [engine backgroundChanged:[NSNotification notificationWithName:NSUserDefaultsDidChangeNotification object:nil]];
     SGTestAssert(SGTestPump(^BOOL { return heldTranslationLoads.count == 1; }), @"defaults refresh reaches the held saved-translation read");
     SGTestAssert([engine.shown[4] isEqual:@"Saved translation"] && [engine.testLayer.pixels isEqual:translatedPixels]
@@ -298,7 +333,9 @@ void SGTestLifecycle(void) {
     rulePresent = YES; ruleTranslation = NO; rulePronunciation = YES;
     // followLanguageRule in the lyrics view owns applying defaults to the effective switches.
     SGTestSetting(@"spotifyglass.redesign.lyricsTranslation", @NO);
-    [engine lyricsChanged:[NSNotification notificationWithName:SGLyricsLanguageDidChangeNotification object:nil]];
+    reads = translationReads;
+    [engine backgroundChanged:[NSNotification notificationWithName:NSUserDefaultsDidChangeNotification object:nil]];
+    SGTestAssert(SGTestPump(^BOOL { return translationReads > reads; }), @"translation preference changes reprepare source lines");
     SGTestAssert(SGTestPump(^BOOL { return ![engine.shown[4] length]; }) && [engine.shown[3] length],
         @"effective language-rule switches independently hide translation");
     SGTestSetting(@"spotifyglass.redesign.lyricsPronunciation", @NO);
@@ -354,8 +391,13 @@ void SGTestLifecycle(void) {
     SGTestAssert(requestedSeek == 20000 && replaced == 1, @"rapid skips accumulate the target and acknowledge superseded requests once");
     position = requestedSeek; loading = NO; [engine refresh];
     SGTestAssert(replaced == 2 && paused && player.resumes == 0, @"newest rapid skip completes at its own target");
+    HarnessStartClock();
     [engine pictureInPictureController:(id)pip skipByInterval:CMTimeMake(10, 1) completionHandler:^{ completions++; }];
-    SGTestAssert(SGTestPump(^BOOL { return completions == 8; }) && player.resumes == 0,
+    HarnessAdvanceClock(2 * NSEC_PER_SEC - 1);
+    SGTestAssert(completions == 7, @"unacknowledged seek stays pending before its deadline");
+    HarnessAdvanceClock(1);
+    HarnessStopClock();
+    SGTestAssert(completions == 8 && player.resumes == 0,
         @"unacknowledged seek times out once without starting audio");
     loading = NO; [engine refresh];
     NSUInteger pausesBeforeClose = player.pauses;
@@ -435,6 +477,8 @@ void SGTestIntent(void) {
         SGTestAssert(SGTestPump(^BOOL { return engine.shown != nil; }), @"queued-track seek fixture opens");
         TestPiP *pip = (id)engine.pip;
         __block NSUInteger oldDone = 0, newDone = 0;
+        [engine pictureInPictureControllerDidStartPictureInPicture:(id)pip];
+        HarnessStartClock();
         [engine pictureInPictureController:(id)pip skipByInterval:CMTimeMake(10, 1) completionHandler:^{ oldDone++; }];
         SGTestAssert(requestedSeek == 110000 && oldDone == 0, @"old track has an unacknowledged seek target");
         SGTestSetTrack(@"spotify:track:new-seek", nil);
@@ -446,11 +490,15 @@ void SGTestIntent(void) {
             @"second skip before queued refresh bases forward/backward bounds on actual new-track position");
         SGTestAssert(paused && player.resumes == 0 && player.pauses == 0 && CMTimebaseGetRate(engine.clock) == 0,
             @"retiring old seek does not change the new song's paused playback");
+        // The refresh queued before the second skip belongs to the frames that skip reset, so the
+        // engine drops it; Spotify's report after the seek settles is what acknowledges it. The
+        // seek timeout runs on the driven clock and cannot fire here.
         position = requestedSeek; loading = NO;
+        [engine playerStateDidReport:SGPlayerState()];
         SGTestAssert(SGTestPump(^BOOL { return newDone == 1; }) && oldDone == 1,
-            @"queued refresh acknowledges only the new track's settled target");
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2.1];
-        SGTestPump(^BOOL { return deadline.timeIntervalSinceNow <= 0; });
+            @"the settled report acknowledges only the new track's target");
+        HarnessAdvanceClock(2100 * NSEC_PER_MSEC);
+        HarnessStopClock();
         SGTestAssert(oldDone == 1 && newDone == 1 && paused && player.resumes == 0 && player.pauses == 0,
             @"stale seek timeout callbacks cannot repeat completion or change playback");
         [engine finish];

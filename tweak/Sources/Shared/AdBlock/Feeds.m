@@ -33,6 +33,7 @@ static BOOL adSection(NSData *section) {
     size_t length = section.length;
     const uint8_t *bytes = section.bytes;
     char *text = malloc(length ?: 1);
+    if (!text) return NO;
     for (size_t i = 0; i < length; i++) text[i] = tolower(bytes[i]);
     BOOL ad = containsAny(text, length, hardMarkers, COUNT(hardMarkers))
         || (!containsAny(text, length, keepMarkers, COUNT(keepMarkers))

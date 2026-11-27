@@ -25,6 +25,11 @@ NSArray<NSString *> *SGDSPCrossfeedModeNames(void) { return @[]; }
 NSArray<NSString *> *SGDSPReverbPresetNames(void) { return @[]; }
 static void SGPlayerSetOutputControl(BOOL on, double gain, double threshold, double release) {}
 
+// This fixture supplies the selected file; preset-files.m tests the disk reader.
+NSMutableData *SGDSPReadTextFile(NSURL *url, NSError **error) {
+    return [NSMutableData dataWithContentsOfURL:url];
+}
+
 #include "AudioEffectsConfig.m"
 
 // A route/format notification asks the production drain for a full reapplication.

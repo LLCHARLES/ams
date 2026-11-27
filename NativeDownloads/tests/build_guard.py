@@ -9,9 +9,8 @@ from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 from build_retrine_9190 import read_input, prepare_native, require_separate_output
-from patch_native_restrictions import layout, SETTER, CAVE
-from patch_key_request_mode import WINDOW, PROVIDER, MAPPING, DLSYM_STUB
-from patch_native_trace import POINTS
+from patch_native_restrictions import layout
+from pixie_target import PROFILES
 
 
 def rejects(call, label):
@@ -29,16 +28,17 @@ assert len(native) == len(prepared[0])
 print("PASS supported Spotify source and all overlay guards")
 rejects(lambda: require_separate_output(source, source), "input equals output")
 rejects(lambda: read_input(source), "base without Retrine")
-rejects(lambda: prepare_native(prepared[0]), "repeat overlay")
-_, _, segments, _ = layout(native)
+_, _, segments, uuid = layout(native)
+profile, = (p for p in PROFILES if p.main_uuid == uuid)
+rejects(lambda: prepare_native(prepared[0], profile), "repeat overlay")
 text = next(s for s in segments if s[0] == b"__TEXT")
 _, vm, _, fileoff, _, _ = text
 sites = [(label, address - vm + fileoff) for label, address in [
-    ("restriction instructions", SETTER), ("restriction cave", CAVE),
-    ("key request window", WINDOW), ("key provider", PROVIDER),
-    ("key mapping", MAPPING), ("dlsym stub", DLSYM_STUB),
+    ("restriction instructions", profile.setter), ("restriction cave", profile.caves[4]),
+    ("key request window", profile.window), ("key provider", profile.provider),
+    ("key mapping", profile.mapping), ("dlsym stub", profile.dlsym),
 ]]
-for name, address, cave, expected, kind in POINTS:
+for name, address, cave, expected, kind in profile.trace_points:
     if kind:
         sites.append((name + " prologue", address - vm + fileoff))
     sites.append((name + " cave", cave - vm + fileoff))
@@ -53,7 +53,7 @@ for _ in range(struct.unpack_from("<I", native, 16)[0]):
 for label, offset in sites:
     changed = bytearray(native)
     changed[offset] ^= 1
-    rejects(lambda: prepare_native(bytes(changed)), label)
+    rejects(lambda: prepare_native(bytes(changed), profile), label)
 with tempfile.TemporaryDirectory(prefix="pixie-guard-") as temporary:
     bad = Path(temporary) / "wrong-version.ipa"
     with ZipFile(bad, "w") as archive:

@@ -6,6 +6,7 @@
 #import "Shared/Lossless/LosslessQuality.h"
 #import "Shared/Lossless/SGLossless.h"
 #import "SpotifyPrefs.h"
+#import "Shared/WireGuard/SGWGABI.h"
 
 static __weak SPTPreferences *sg_preferences, *sg_loaded;
 
@@ -32,6 +33,7 @@ static void reconcileWhenLoaded(void) {
 %hook _TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation
 - (id)initWithScheduler:(id)scheduler {
     id made = %orig;
+    if (![made isKindOfClass:NSClassFromString(@"_TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation")]) return made;
     sg_preferences = made;
     dispatch_async(dispatch_get_main_queue(), ^{ reconcileWhenLoaded(); });
     return made;
@@ -39,6 +41,12 @@ static void reconcileWhenLoaded(void) {
 %end
 
 %ctor {
+    Class cls = NSClassFromString(@"_TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation");
+    if (!SGWGMethodMatches(class_getInstanceMethod(cls, @selector(initWithScheduler:)), "@", @[@"@"]) ||
+        !SGWGMethodMatches(class_getInstanceMethod(cls, @selector(playbackSpeed)), @encode(NSInteger), @[])) {
+        SGLog(@"spotify prefs: readiness API unavailable");
+        return;
+    }
     %init;
     SGRequireClasses(@[@"_TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation"]);
 }

@@ -63,6 +63,13 @@ static void selector(AudioUnit unit, uint64_t epoch, double sourceFrame, double 
 }
 // A stand-in stage: inspect the actual pull callback Sing receives, then alter its samples.
 static OSStatus stage(UInt32 frames, AudioBufferList *data, SGPlayerPull pull, void *context) {
+    static BOOL checkedEmpty;
+    if (!checkedEmpty) {
+        checkedEmpty = YES;
+        UInt32 sounding = UINT32_MAX;
+        if (pull(context, 0, data, &sounding) != noErr || sounding != 0)
+            HARNESS_FAIL(@"empty pull must succeed with no sounding frames");
+    }
     replacedBlock=NO;
     OSStatus status=pull(context,frames,data,NULL);
     if (!status && replacedBlock) {

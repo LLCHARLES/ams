@@ -1,29 +1,21 @@
-// Fluid artwork: the cover itself, blurred and slowly warped behind the player. Four copies of a
-// blurred, saturated cover, each far larger than the screen, turn about different centers at different
-// speeds, two each way; where they overlap the picture seems to flow. A shade over the bottom keeps the
-// controls legible.
-//
-// Like SGRFlow.h it is all Core Animation: repeating rotations the render server plays, nothing drawn
-// per frame by the app. Stopping holds every copy where it is, and starting again carries on from there.
+// Fluid artwork: the cover itself, blurred and slowly turning behind the player, drawn as the Music app draws its
+// backdrop: on the GPU (SGRFluidGPU.h), three turning copies of the cover in a quarter-size picture, mixed toward
+// black and saturated, blurred, and shown through a breathing mesh, mixed toward white and color-graded. Where Metal
+// cannot draw (or until its first frame) Core Animation copies stand in (Light), with a shade over the bottom.
 //
 // The Player page tunes it with six sliders (Redesigned/Player/PlayerSettings.m), stored as whole numbers under
 // spotifyglass.redesign.fluid.<speed|warp|blur|saturation|brightness|grain>. Every layer follows a change at once.
-// Grain is the Smooth renderer's alone: the Light renderer's copies have no grain to scale, and leave it unused.
+// spotifyglass.redesign.fluid.renderer chooses the Smooth GPU pipeline (default) or preblurred Light copies.
 //
-// Two renderers draw it, picked on the same page (spotifyglass.redesign.fluid.renderer): Light, the turning copies
-// above, which cost the app nothing per frame, and Smooth (SGRFluidGPU.h), the same blurred cover flowing on the
-// GPU, a new cover running in through the old one. Smooth starts under the copies and they go only once its first
-// frame is on screen, so a slow or failed shader leaves Light showing. Both hold still on the same conditions.
-//
-// Threading: main thread only; the blur runs off it.
+// Threading: main thread only; the cover's preparation runs off it.
 #import <UIKit/UIKit.h>
 
 typedef NS_ENUM(NSInteger, SGRFluidSetting) {
     SGRFluidSpeed,        // percent of the turns' speed
     SGRFluidWarp,         // percent of how far apart the copies turn and how much the upper three show
-    SGRFluidBlur,         // the blur's strength, 1.25 px of radius each on the 128 px cover
+    SGRFluidBlur,         // the on-screen Gaussian radius, relative to the standard setting
     SGRFluidSaturation,   // percent
-    SGRFluidBrightness,   // percent, under the ceiling that keeps the player's text legible
+    SGRFluidBrightness,   // percent, on linear light
     SGRFluidGrain,        // percent of the Smooth renderer's grain (SGRFluidGPU.h); 100 is its standard dither
     SGRFluidSettingCount,
 };
@@ -36,8 +28,8 @@ void SGRResetFluidSettings(void);   // all six back to their standard values, on
 extern NSNotificationName const SGRFluidSettingsDidChangeNotification;
 
 typedef NS_ENUM(NSInteger, SGRFluidRenderer) {
-    SGRFluidRendererLight,    // Core Animation's turning copies: the standard
-    SGRFluidRendererSmooth,   // the GPU's flow (SGRFluidGPU.h), a little more battery
+    SGRFluidRendererLight,    // Core Animation's turning copies, a little less battery; shown wherever Metal is missing
+    SGRFluidRendererSmooth,   // the GPU's flow (SGRFluidGPU.h): the standard
 };
 SGRFluidRenderer SGRFluidRendererChosen(void);
 // Stores the choice and posts SGRFluidSettingsDidChangeNotification on the main thread. Reset leaves it.

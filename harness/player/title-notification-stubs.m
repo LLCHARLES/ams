@@ -71,12 +71,20 @@ BOOL SGRPlayerLyricsAvailable(void) { return YES; }
 BOOL SGRPlayerLyricsNone(void) { return NO; }
 // The lyrics turned sideways: with them closed the screen is the player's, laid out without lines.
 BOOL SGRPlayerLyricsOpen(void) { return YES; }
+BOOL SGRPlayerPageOpen(void) { return SGRPlayerLyricsOpen(); }
+void SGRBackdropInkObserve(UIView *view, void (^changed)(void)) {}
+UIColor *SGRInkFor(UIView *view, CGFloat alpha, CGFloat lightAlpha, BOOL *plusL) {
+    if (plusL) *plusL = NO;
+    return [UIColor.whiteColor colorWithAlphaComponent:alpha];
+}
 BOOL SGFlag(NSString *key, BOOL fallback) {
     if ([key isEqual:SGKeyLyricsSimplifyTitles]) return simplify;
     if ([key isEqual:SGKeyLyricsTranslateTitles]) return translations;
     return fallback;
 }
 BOOL SGRPlayerIsTransitioning(void) { return NO; }
+void SGRPlayerPreparePortraitLyricsForReveal(void) {}
+NSNotificationName const SGRPlayerVisibilityDidChangeNotification = @"harness.visibility";
 NSString *const SGPlayerTransitionEndedNotification = @"harness.playerTransitionEnded";
 void SGRequireClasses(NSArray<NSString *> *names) {}
 id SGKaraokePlayer(void) { return nil; }

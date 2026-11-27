@@ -21,13 +21,21 @@ static NSTimeInterval continuousSeconds(void) {
     return (double)mach_continuous_time() * timebase.numer / timebase.denom / NSEC_PER_SEC;
 }
 
+static SGPlayLog *sg_log;
+
 SGPlayLog *SGListeningLog(void) {
-    static SGPlayLog *log;
-    if (!log) {
+    if (!sg_log) {
         NSURL *file = [SGDataRoot(NSApplicationSupportDirectory) URLByAppendingPathComponent:@"Listening.tsv"];
-        if (file) log = [[SGPlayLog alloc] initWithPath:file.path];
+        if (file) sg_log = [[SGPlayLog alloc] initWithPath:file.path];
     }
-    return log;
+    return sg_log;
+}
+
+NSString *SGListeningStatsSummary(void) {
+    if (!SGEnabled(SGKeyListeningStats)) return SGL(@"common.off", @"Off");
+    // Opening settings shouldn't load the listening history just to count it.
+    if (!sg_log.playsGeneration || sg_log.loadError) return SGL(@"common.on", @"On");
+    return @(sg_log.plays.count).stringValue;
 }
 
 static NSString *stringIn(id value) {

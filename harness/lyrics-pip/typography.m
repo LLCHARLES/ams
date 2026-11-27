@@ -13,7 +13,8 @@ void SGRegisterCustomFontAsync(void) { SGTestFontAsks++; }
 void SGFontLibraryRegisterInstalled(void) { SGTestFontAsks++; }
 NSArray *SGFontLibrary(void) { return @[]; }
 BOOL SGFontLibraryInstalled(NSString *identifier) { return NO; }
-NSString *SGFontLibraryRegisteredFamily(NSString *identifier) { return nil; }
+NSString *SGTestRegisteredFamily;
+NSString *SGFontLibraryRegisteredFamily(NSString *identifier) { return [identifier isEqual:@"fixture"] ? SGTestRegisteredFamily : nil; }
 void SGFontLibraryRegisterAsync(NSString *identifier, void (^done)(NSString *family)) {}
 SGLibraryFont *SGFontLibraryFont(NSString *identifier) { return nil; }
 

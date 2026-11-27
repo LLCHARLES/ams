@@ -7,13 +7,15 @@
 #import "Shared/Gestures/Gestures.h"
 #import "Shared/Player/PlayerSettings.h"
 
+extern BOOL SGGestureHandlesTap(UIView *cover);
+
 // A single tap on the cover is Spotify's way into the tilt mode, the artwork alone in 3D. That is
 // the half of a double tap that misses, so while the zones are on it would open on the way to every
 // gesture; the tap goes back to Spotify with the switch. The Player page's Full screen cover on tap
 // (SGKeyHideFullScreenCover) keeps it from Spotify too.
 %hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
 - (void)handleTap {
-    if (SGFlag(SGKeyGestures, NO) || SGHidden(SGKeyHideFullScreenCover)) return;
+    if (SGGestureHandlesTap((UIView *)self) || SGHidden(SGKeyHideFullScreenCover)) return;
     %orig;
 }
 %end

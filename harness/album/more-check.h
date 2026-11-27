@@ -129,7 +129,8 @@ static void moreRun(UIView *root, NSArray<UICollectionViewCell *> *cells, UIColo
         moreGlyph(reused).image = moreBaked(NO);
         for (UIView *cell in cells) morePass(cell);
 
-        checkSteps(@[@0.3, ^{
+        checkSteps(@[^{
+            HARNESS_AWAIT(moreGlyph(baked).layer.mask != nil);
             moreExpectTint(@"baked", baked, moreDots(), target(), NO);
             // Through the glyph's own picture: between two dots nothing.
             moreExpectClear(@"baked, between the dots", baked, CGPointMake((kMoreDots[0] + kMoreDots[1]) / 2, 12));
@@ -149,12 +150,13 @@ static void moreRun(UIView *root, NSArray<UICollectionViewCell *> *cells, UIColo
             if (fired != 1) HARNESS_FAIL(@"⋯'s action ran %lu times", (unsigned long)fired);
             // Lands with the row laid out and nothing laying it out again.
             moreGlyph(late).image = moreBaked(NO);
-        }, @0.3, ^{
+        }, ^{
+            HARNESS_AWAIT(moreGlyph(late).layer.mask != nil);
             moreExpectTint(@"landed late", late, moreDots(), target(), NO);
-            NSLog(@"[harness] SHOT album-more");
-        }, @1.5, ^{
+            checkShot(@"album-more");
+        }, ^{
             moreGlyph(replaced).image = moreBaked(YES);
-        }, @0.3, ^{
+        }, ^{
             moreExpectTint(@"replaced", replaced, @[middle], target(), NO);
             moreExpectClear(@"replaced, where the old dot was", replaced, CGPointMake(kMoreDots[0], 12));
             // Reused for something that is not an album's track row (a cell keeps its list, and its list its page): the
@@ -164,7 +166,7 @@ static void moreRun(UIView *root, NSArray<UICollectionViewCell *> *cells, UIColo
                 [cell prepareForReuse];
                 morePass(cell);
             }
-        }, @0.3, ^{
+        }, ^{
             moreExpectWhite(@"reused as no album track row", reused, CGPointMake(kMoreDots[1], 12));
             moreExpectWhite(@"template, reused as no album track row", reusedSymbol, middle.CGPointValue);
             if (moreGlyph(reused).layer.mask) HARNESS_FAIL(@"the glyph reused as no album track row keeps a mask");

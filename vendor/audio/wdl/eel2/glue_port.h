@@ -46,6 +46,7 @@ enum {
 
   EEL_BC_POP_FPSTACK_TO_PTR,
   EEL_BC_POP_FPSTACK_TOSTACK,
+  EEL_BC_POP_STACK_TO_FPSTACK,
 
   EEL_BC_PUSH_VAL_AT_P1_TO_FPSTACK, 
   EEL_BC_PUSH_VAL_AT_P2_TO_FPSTACK, 
@@ -339,7 +340,7 @@ static void GLUE_POP_FPSTACK_TO_WTP_TO_PX(unsigned char *buf, int wv)
   memcpy(buf + GLUE_SET_PX_FROM_WTP_SIZE,GLUE_POP_FPSTACK_TO_WTP,sizeof(GLUE_POP_FPSTACK_TO_WTP));
 };
 
-static unsigned char GLUE_POP_STACK_TO_FPSTACK[1] = { 0 }; // todo
+BC_DECL(POP_STACK_TO_FPSTACK)
 
 #define GLUE_INLINE_LOOPS
 
@@ -445,11 +446,15 @@ static void *GLUE_realAddress(void *fn, int *size)
   return rd+1;
 }
 
+#ifndef EEL_BC_STACKSIZE
 #define EEL_BC_STACKSIZE (65536)
+#endif
 
-// todo: check for stack overflows! we could determine if this is possible at compile time.
 #define EEL_BC_STACK_POP_SIZE 8
-#define EEL_BC_STACK_PUSH(type, val) (*(type *)(stackptr -= EEL_BC_STACK_POP_SIZE)) = (val)
+#define EEL_BC_STACK_PUSH(type, val) do { \
+  if (stackptr == __stack) return 0; \
+  (*(type *)(stackptr -= EEL_BC_STACK_POP_SIZE)) = (val); \
+} while (0)
 #define EEL_BC_STACK_POP() (stackptr += EEL_BC_STACK_POP_SIZE)
 
 #define EEL_BC_TRUE ((EEL_F*)(INT_PTR)1)
@@ -457,9 +462,10 @@ static void *GLUE_realAddress(void *fn, int *size)
 
 
 
-static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt) 
+static int GLUE_CALL_CODE_BUDGET(INT_PTR bp, INT_PTR cp, INT_PTR rt, unsigned budget)
 {
-  char __stack[EEL_BC_STACKSIZE];
+  _Alignas(8) char __stack[EEL_BC_STACKSIZE];
+  _Static_assert(EEL_BC_STACKSIZE % EEL_BC_STACK_POP_SIZE == 0, "whole stack slots");
   char *iptr = (char*)cp;
   char *stackptr=__stack + EEL_BC_STACKSIZE;
   EEL_F *p1 = NULL, *p2 = NULL, *p3 = NULL, *wtp = (EEL_F*)bp;
@@ -471,6 +477,10 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
 
   EEL_F fpstack[GLUE_MAX_FPSTACK_SIZE];
   EEL_F *_fpstacktop=fpstack-1;
+  // Every VM entry passes through here, so a pointer left from an earlier call is replaced before use.
+  *nseel_ram_budget((EEL_F **)rt) = budget == ~0u ? NULL : &budget;
+  int *refused = nseel_ram_refused((EEL_F **)rt);
+  *refused = 0;
   for (;;)
   {
     EEL_BC_TYPE inst = *(EEL_BC_TYPE *)iptr;
@@ -487,11 +497,9 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
       case EEL_BC_POP_FPSTACK: fp_rewind(1); break;
       case EEL_BC_NOP: break;
       case EEL_BC_RET: 
-        if (EEL_BC_STACK_POP() > __stack+EEL_BC_STACKSIZE) 
-        {
-          return;
-        }
-        iptr = *(void **)(stackptr - EEL_BC_STACK_POP_SIZE);
+        if (stackptr == __stack+EEL_BC_STACKSIZE) return !*refused;
+        iptr = *(void **)stackptr;
+        EEL_BC_STACK_POP();
       break;
       case EEL_BC_JMP_NC: 
         iptr += sizeof(GLUE_JMP_TYPE)+*(GLUE_JMP_TYPE *)iptr;
@@ -546,6 +554,9 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
         iptr += sizeof(void*);
       break;
       case EEL_BC_MOVE_STACK:
+        // Compiler-emitted reservations and releases are whole stack slots.
+        if (*(int *)iptr < __stack - stackptr ||
+            *(int *)iptr > __stack + EEL_BC_STACKSIZE - stackptr) return 0;
         stackptr += *(int *)iptr;
         iptr += sizeof(int);
       break;
@@ -588,6 +599,11 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
       case EEL_BC_POP_FPSTACK_TOSTACK:
         EEL_BC_STACK_PUSH(EEL_F, fp_pop());
       break;
+      case EEL_BC_POP_STACK_TO_FPSTACK:
+        if (stackptr == __stack+EEL_BC_STACKSIZE) return 0;
+        fp_push(*(EEL_F *)stackptr);
+        EEL_BC_STACK_POP();
+      break;
       case EEL_BC_PUSH_VAL_AT_P1_TO_FPSTACK: 
         fp_push(*p1);
       break;
@@ -608,7 +624,8 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
       break;
 
       case EEL_BC_LOOP_LOADCNT:
-        if ((EEL_BC_STACK_PUSH(int, (int)fp_pop())) < 1)
+        EEL_BC_STACK_PUSH(int, (int)fp_pop());
+        if (*(int *)stackptr < 1)
         {
           EEL_BC_STACK_POP();
           iptr+= sizeof(GLUE_JMP_TYPE)+*(GLUE_JMP_TYPE *)iptr;
@@ -623,6 +640,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
         }
       break;
       case EEL_BC_LOOP_END:
+        if (!budget--) return 0;
         wtp = *(void **) (stackptr);
         if (--(*(int *)(stackptr+EEL_BC_STACK_POP_SIZE)) <= 0)
         {
@@ -641,6 +659,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
       break;
 #endif
       case EEL_BC_WHILE_BEGIN:
+        if (!budget--) return 0;
         EEL_BC_STACK_PUSH(void *, wtp);
       break;
       case EEL_BC_WHILE_END:
@@ -851,6 +870,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
       break;
       case EEL_BC_FCALL:
         {
+          if (!budget--) return 0;
           char *newiptr = *(char **)iptr;
           EEL_BC_STACK_PUSH(void *, (iptr += sizeof(void *)));
           iptr = newiptr;
@@ -910,6 +930,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F *(*f)(void *,EEL_F*) = *(EEL_F *(**)(void *, EEL_F *)) (iptr+sizeof(void *));
           p1 = f(*(void **)iptr,p1);
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC2PARM:
@@ -917,6 +938,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F *(*f)(void *,EEL_F*,EEL_F*) = *(EEL_F *(**)(void *, EEL_F *, EEL_F *)) (iptr+sizeof(void *));
           p1 = f(*(void **)iptr,p2, p1);
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC3PARM:
@@ -924,6 +946,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F *(*f)(void *,EEL_F*,EEL_F*,EEL_F*) = *(EEL_F *(**)(void *, EEL_F *, EEL_F *, EEL_F *)) (iptr+sizeof(void *));
           p1 = f(*(void **)iptr,p3, p2, p1);
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC1PARM_RETD:
@@ -931,6 +954,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F (*f)(void *,EEL_F*) = *(EEL_F (**)(void *, EEL_F *)) (iptr+sizeof(void *));
           fp_push(f(*(void **)iptr,p1));
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC2PARM_RETD:
@@ -938,6 +962,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F (*f)(void *,EEL_F*,EEL_F*) = *(EEL_F (**)(void *, EEL_F *, EEL_F *)) (iptr+sizeof(void *));
           fp_push(f(*(void **)iptr,p2, p1));
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC2XPARM_RETD:
@@ -945,6 +970,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F (*f)(void *,void *,EEL_F*,EEL_F*) = *(EEL_F (**)(void *, void *, EEL_F *, EEL_F *)) (iptr+2*sizeof(void *));
           fp_push(f(*(void **)iptr,((void **)iptr)[1],p2, p1));
           iptr += sizeof(void *)*3;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
       case EEL_BC_GENERIC3PARM_RETD:
@@ -952,6 +978,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
           EEL_F (*f)(void *,EEL_F*,EEL_F*,EEL_F*) = *(EEL_F (**)(void *, EEL_F *, EEL_F *, EEL_F *)) (iptr+sizeof(void *));
           fp_push(f(*(void **)iptr,p3, p2, p1));
           iptr += sizeof(void *)*2;
+          if (*refused) return 0; // a bulk memory function ran out of budget
         }
       break;
 
@@ -1025,5 +1052,7 @@ static void GLUE_CALL_CODE(INT_PTR bp, INT_PTR cp, INT_PTR rt)
 #undef fp_pop
 #undef fp_push
 };
+
+#define GLUE_CALL_CODE(bp,cp,rt) GLUE_CALL_CODE_BUDGET(bp,cp,rt,~0u)
 
 #endif

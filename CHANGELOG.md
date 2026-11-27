@@ -1,5 +1,189 @@
 # Changelog
 
+## [1.0.1-beta.7](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.6...v1.0.1-beta.7) (2026-11-27)
+
+
+### Fixes
+
+* AI DJ를 열 때 빈 대기열의 레이아웃 반복으로 죽던 문제 ([098ddc3](https://github.com/oneulddu/Retrine/commit/098ddc33bb73ebf3172fe08f2b6caaf96095f44d))
+* Apple Music 대기열의 손잡이 드래그와 AutoMix 토글 상태 동기화 ([#74](https://github.com/oneulddu/Retrine/issues/74)) ([0370439](https://github.com/oneulddu/Retrine/commit/037043960f51b4e07d1006ffcfd4cde7b418f568))
+* Fluid 네모 조각 없애고 클립 없는 곡 배경 멈춤 추가 ([#66](https://github.com/oneulddu/Retrine/issues/66)) ([4d60954](https://github.com/oneulddu/Retrine/commit/4d609543ee3545a422c0a3f1587bd7226c053c52))
+* IPA 빌드가 macOS 러너를 못 받으면 Intel 러너로 다시 빌드 ([#69](https://github.com/oneulddu/Retrine/issues/69)) ([f4bf885](https://github.com/oneulddu/Retrine/commit/f4bf8857a1113c50369098823cefaa452b263381))
+* iPad을 돌리면 홈 머리 버튼이 아바타를 따라가지 않던 문제 ([66dfc1b](https://github.com/oneulddu/Retrine/commit/66dfc1b0144440433e161a2172f7e004a90e6a68))
+* 볼륨을 끄면 커버 아래 틈, DJ 버튼과 가사 머리 겹침 ([#71](https://github.com/oneulddu/Retrine/issues/71)) ([64275d8](https://github.com/oneulddu/Retrine/commit/64275d88308490cb382f70e27926ceb54cb835eb))
+* 설정 가져오기에서 파일 선택 뒤 반응이 없던 문제 ([#75](https://github.com/oneulddu/Retrine/issues/75)) ([21dac9f](https://github.com/oneulddu/Retrine/commit/21dac9fcb7b77712ca3640f0e1b092f28280e8e1))
+* 설정 검색 기록과 번역 설정의 개편 후속 정리 ([0a98534](https://github.com/oneulddu/Retrine/commit/0a985347d2ee0365ae4eb2a2be9cd71f9e82d315))
+* 설정 의존 행·경로 문구·백업 제외 정리 ([1aca697](https://github.com/oneulddu/Retrine/commit/1aca697cefb9296c45290c2abfcb1a2fdd71953c))
+* 설정 첫 화면을 목적별 여섯 구역으로 정리 ([9af6032](https://github.com/oneulddu/Retrine/commit/9af6032c9afb18a1b28c4390245170118e3cdd33))
+* 설정 페이지 안의 중복과 오배치 정리 ([cb9e731](https://github.com/oneulddu/Retrine/commit/cb9e7319db0c427ee47090796475976e2eabb9e8))
+* 움직이는 아트워크 누락·검은 띠 고치고 Smooth 기본 ([#67](https://github.com/oneulddu/Retrine/issues/67)) ([502a8f9](https://github.com/oneulddu/Retrine/commit/502a8f99d9ad03d81ae27545dafefd697bb29801))
+* 커스텀 탭 막대가 실행 직후 일부 탭과 아이콘을 놓치던 문제 ([#72](https://github.com/oneulddu/Retrine/issues/72)) ([47ae35c](https://github.com/oneulddu/Retrine/commit/47ae35cba45f47a1a1f9969586d5553f54b4d565))
+
+## [1.0.1-beta.6](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.5...v1.0.1-beta.6) (2026-11-26)
+
+
+### Fixes
+
+* iPad 창을 줄일 때 가사 커버가 헤더에 가려지지 않게 ([654271b](https://github.com/oneulddu/Retrine/commit/654271bf554b1c4dedac767f6f3dbd6216e8b9ab))
+* iPad 플레이어 패널을 여닫을 때 탭 막대 페이드 경계 없애기 ([#63](https://github.com/oneulddu/Retrine/issues/63)) ([e6d303c](https://github.com/oneulddu/Retrine/commit/e6d303c325047de768ac4c240b86474ba3f2ad7c))
+* Pixie 패치가 실행 메모리 밖 패딩을 쓰지 않게 하기 ([a776af5](https://github.com/oneulddu/Retrine/commit/a776af56d4583f75fc8c84940539007d1af702f0))
+* 배경 색 읽기마다 진행 막대를 다시 배치하지 않기 ([8f74555](https://github.com/oneulddu/Retrine/commit/8f745551695aeabef37c33c3e71cbe41bf97e902))
+* 새 디자인 플레이어·Fluid·가사·재생목록을 Apple Music 방식으로 ([#64](https://github.com/oneulddu/Retrine/issues/64)) ([48f6a0a](https://github.com/oneulddu/Retrine/commit/48f6a0a720722b9c0c360c3eb6644fb37eb3d288))
+* 잠금 화면 가사 클립 발열 대응 보완 ([c30cc3d](https://github.com/oneulddu/Retrine/commit/c30cc3de89e16308790df9242445a05170742159))
+* 잠금 화면 가사 클립의 불필요한 인코딩 줄이기 ([1a2e1fd](https://github.com/oneulddu/Retrine/commit/1a2e1fd73d19b495710a699eb82653837b05d992))
+* 잠금 화면 카드 부모 앱은 서명 불일치 때만 지정 ([586e50d](https://github.com/oneulddu/Retrine/commit/586e50d05944a4a8917673f7882604f50879d35d))
+* 재생 중 불필요한 백그라운드 작업 줄이기 ([1aa0336](https://github.com/oneulddu/Retrine/commit/1aa0336d91453655113a1f8f5f2a4a0e1f3fbdbd))
+* 재서명한 앱에서 잠금 화면 카드를 누르면 Spotify가 열리게 하기 ([#65](https://github.com/oneulddu/Retrine/issues/65)) ([9099eae](https://github.com/oneulddu/Retrine/commit/9099eae87e121abf83b3e4fa6cf5b93bf3b0e14a))
+
+
+### Performance
+
+* 가려지거나 사라진 가사·배경·진행 막대 갱신 멈추기 ([b430906](https://github.com/oneulddu/Retrine/commit/b43090674fd4ec2387b3f2839a57e43ec99ca0c7))
+
+## [1.0.1-beta.5](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.4...v1.0.1-beta.5) (2026-11-25)
+
+
+### Fixes
+
+* Pixie 삭제 실패 안내를 개수와 이유로 요약 ([ac8f44e](https://github.com/oneulddu/Retrine/commit/ac8f44e21a1461a1a754a718dd2cdceab83bd4db))
+* Pixie로 받은 곡의 가사를 오프라인용으로 저장 ([967aec7](https://github.com/oneulddu/Retrine/commit/967aec7dc65b812e802f6cfff4fc61cd90a7dde2))
+* Spotify 9.2.2를 Pixie 없이 지원 ([d7d70e2](https://github.com/oneulddu/Retrine/commit/d7d70e25a10e6020e21b2f552556dd803c700398))
+* Spotify 9.2.2에서도 Pixie 다운로드 허용 ([5b07970](https://github.com/oneulddu/Retrine/commit/5b07970c0737d563507e17e5cfd5be89993b3091))
+* Spotify 9.2.2에서도 크레딧 카드 숨기기 ([407e067](https://github.com/oneulddu/Retrine/commit/407e0677db1beeea76fa5d6d681dc502cc353c10))
+* 가사 삭제 직후 다시 켜기와 재생 저장 공간 확보 보완 ([f2a642a](https://github.com/oneulddu/Retrine/commit/f2a642a896fcbda74406d28fac26c001de4daf39))
+* 사용이 꺼진 Pixie 대상은 어떤 빌드에도 넘기지 않기 ([bc228b6](https://github.com/oneulddu/Retrine/commit/bc228b6b90d50acc7a42bb00f47ed79e75a4da27))
+* 좁은 행의 둥근 재생 버튼과 미니 플레이어 영상 마스크 ([e250b11](https://github.com/oneulddu/Retrine/commit/e250b11cbacaba0d3b24a6ff2ba52988affff5ca))
+* 카드를 모두 숨긴 플레이어 아래 빈 스크롤 없애기 ([d949236](https://github.com/oneulddu/Retrine/commit/d9492360e84fe7fca2c8f045316a1df8b14643ca))
+* 플레이어 카드 머리글 숨기기와 Messages 링크 정리 ([bc6f172](https://github.com/oneulddu/Retrine/commit/bc6f1723baed4988185c0a7cde4c28c89492f494))
+* 플레이어 하네스에 Pixie 가사 큐 대역 추가 ([4cf44ff](https://github.com/oneulddu/Retrine/commit/4cf44ff99b74e0e1cea7f03e76c829b31c067990))
+
+## [1.0.1-beta.4](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.3...v1.0.1-beta.4) (2026-11-25)
+
+
+### Fixes
+
+* RTL에서 모드 설정 색상 견본 행 순서 수정 ([6c2910b](https://github.com/oneulddu/Retrine/commit/6c2910bb62a5311494b09bf15cf0e1df84233d73))
+* 개발 빌드의 폰 드라이버 토큰을 키체인에 저장 ([96d42c8](https://github.com/oneulddu/Retrine/commit/96d42c8e1f7e0b1c0ed91146da8780b45ad51668))
+* 발열 무시를 켠 Visualizer 대체 화면이 과열 때 사라지지 않게 ([d14c165](https://github.com/oneulddu/Retrine/commit/d14c16574ff577aca00f311945957e10805f7e00))
+* 작은 보관함 헤더와 목록이 위로 밀려 올라가지 않게 ([015fe2a](https://github.com/oneulddu/Retrine/commit/015fe2ac87fd55c5284bb252ac192a1442b2992e))
+
+
+### Performance
+
+* Live Activity가 가사 조회 완료 기록을 따로 쌓지 않기 ([e38010c](https://github.com/oneulddu/Retrine/commit/e38010c20d215f3d71608fce02dd39d1b000ffc8))
+* Visualizer가 그리는 빈도만큼만 화면 주사율 요청 ([3f89dc2](https://github.com/oneulddu/Retrine/commit/3f89dc2a2d3bd41689d34e5fd3e01f82216ead41))
+* WireGuard 이미지 변경 때 준비 재검증을 하나로 합치기 ([4c3a186](https://github.com/oneulddu/Retrine/commit/4c3a18662fba3a42a736fbf5456f272873ce7eef))
+* 화면 밖 앨범·아티스트 영상 헤더의 디코더 해제 ([10be11f](https://github.com/oneulddu/Retrine/commit/10be11f70a2253f637697cb4ab9ea4a2c7a26e4b))
+
+## [1.0.1-beta.3](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.2...v1.0.1-beta.3) (2026-11-25)
+
+
+### Fixes
+
+* Pixie 화면 이동 충돌을 막고 지원 로그에서 기기 정보 빼기 ([182bb5d](https://github.com/oneulddu/Retrine/commit/182bb5d4e3e82d1c9e910011ebcc06c47d65584f))
+* RTL 언어와 큰 글자 크기에서 설정·Sing·Recap·투어 배치 수정 ([8a7b1e5](https://github.com/oneulddu/Retrine/commit/8a7b1e592d67343d6fda070f78882432e15f2c37))
+* Spotify 파일 이동에도 비공개 클래스를 찾고 9.2.0 로컬 재생 허용 ([a5dd8ab](https://github.com/oneulddu/Retrine/commit/a5dd8ab16307f97e648993acbc9e043cbe8625b0))
+* 릴리스에서 진단 서버를 빼고 링크·로그·입력 검사 보강 ([22fb020](https://github.com/oneulddu/Retrine/commit/22fb020be76793ca9d3bd92e028998ed7d8f381f))
+* 프로필 드로어에서 모드 설정 행이 사라지던 문제 수정 ([3e4c2b5](https://github.com/oneulddu/Retrine/commit/3e4c2b51ae0d667b06b03a9065ee4dfd8d0765d2))
+
+
+### Performance
+
+* Smooth 배경·가사 화면·이미지 렌더의 메모리 줄이기 ([f573dae](https://github.com/oneulddu/Retrine/commit/f573daec4e5abbce0838e9b1bc4e5e5792160544))
+* 꺼진 기능의 시작 작업을 미루고 시작 안정성 보강 ([9ca8c94](https://github.com/oneulddu/Retrine/commit/9ca8c94185db14ea43799b367c2436bfcc270011))
+* 누수와 무제한 캐시를 정리하고 번역 첫 읽기 대기 줄이기 ([ec83db9](https://github.com/oneulddu/Retrine/commit/ec83db954f86898ca0ba0d5adc4d697cc21e2c5e))
+
+## [1.0.1-beta.2](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.1...v1.0.1-beta.2) (2026-11-24)
+
+
+### Features
+
+* Spotify 9.1.78·9.1.88 지원 종료 ([aa4ccdf](https://github.com/oneulddu/Retrine/commit/aa4ccdffff33c0d3e288b9001d2bac2bddf7a176))
+
+
+### Fixes
+
+* Spotify 내부 구조가 바뀌어도 충돌하지 않게 보호 ([42d7665](https://github.com/oneulddu/Retrine/commit/42d7665bf31a892468cd58ceccafb48c43f6ecc2))
+* 라이트 모드에서 Retrine 알림과 시트가 밝게 뜨는 문제 수정 ([4073088](https://github.com/oneulddu/Retrine/commit/40730888c74a02e6031a52b4bacf8b6f61611644))
+* 보안·개인정보 감사 P0 항목 수정 ([8f0129a](https://github.com/oneulddu/Retrine/commit/8f0129ade93a86e5a5f3c66da26f024c92861cc5))
+* 재생 화면 제스처와 속도 표시의 해제된 참조 제거 ([bc959f6](https://github.com/oneulddu/Retrine/commit/bc959f6709b90179741fb01cfb3ff17b2bc6fc98))
+* 진단 내보내기의 로그 접두사 범위 오류 수정 ([4eb6ca2](https://github.com/oneulddu/Retrine/commit/4eb6ca23e61131318f13d2cb99e700f7631254f7))
+
+
+### Performance
+
+* Sing의 CPU·ANE 모델 동시 상주 줄이기 ([929e2b3](https://github.com/oneulddu/Retrine/commit/929e2b3204a9983249faa30e392455860f121abd))
+* WireGuard를 끄면 Go 런타임을 불러오지 않기 ([860724f](https://github.com/oneulddu/Retrine/commit/860724f65e3e99bd6d5b102aa7a8f0d366b68f78))
+* 감상기록을 메모리에 다 올리지 않고 필요할 때 읽기 ([d11b307](https://github.com/oneulddu/Retrine/commit/d11b3078072d514f7576717253e2b3f555263c2a))
+* 아티스트 블러·유체 배경·가사 화면의 GPU 메모리 줄이기 ([00e20ee](https://github.com/oneulddu/Retrine/commit/00e20ee7c2287149877e6e7b0bdaa726cae742b6))
+* 잠금화면 미리보기 메모리 경고 대응과 시작 시 검색 줄이기 ([4dc6333](https://github.com/oneulddu/Retrine/commit/4dc633303fe93653ccc1333de18bfbe9ebe9c92c))
+* 컨볼버 IR 로드와 무손실 엔진 버퍼 메모리 줄이기 ([2680c8f](https://github.com/oneulddu/Retrine/commit/2680c8fe45d786eb64c7b8375de55a86666504a4))
+
+
+### Chores
+
+* 다음 베타 버전을 1.0.1-beta.2로 고정 ([34b08a5](https://github.com/oneulddu/Retrine/commit/34b08a56a107b489206d21da9e7e6e4f955d8a88))
+
+## [1.0.1-beta.1](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.0...v1.0.1-beta.1) (2026-11-24)
+
+
+### Fixes
+
+* WireGuard 유휴 연결 절단과 리스너 복구 회귀 수정 ([c4fa499](https://github.com/oneulddu/Retrine/commit/c4fa49985c63877628963bb564df00c420b59c70))
+* 모션 위 가사 클립 교체와 할당 실패 처리 수정 ([b32ee6f](https://github.com/oneulddu/Retrine/commit/b32ee6f91163b2b426656843f2cfe55e81e9c3fc))
+* 새 디자인 레이어 훅 스레드 가드와 비활성 Fluid 배경 수정 ([1e0b6ee](https://github.com/oneulddu/Retrine/commit/1e0b6eea4214db5f1342a74d2d218b401135778d))
+* 폰트 가져오기·번역 저장소 잠금 해제 순서·정리 용량 표시 수정 ([b210914](https://github.com/oneulddu/Retrine/commit/b2109142418827c8a9d574844d34496ed73cfc52))
+
+
+### Performance
+
+* Smooth 셰이더가 전환 뒤 다음 그림만 읽게 하기 ([130493c](https://github.com/oneulddu/Retrine/commit/130493c67b25c661ecd26362239fee3dde72f816))
+* WireGuard 준비 후 복구 타이머·직접 가사 세션·바이트 집계 줄이기 ([f906985](https://github.com/oneulddu/Retrine/commit/f9069859d2126228ad9f92b5ed6318cdf4be772c))
+* 가사 조회·저장과 잠금화면·Live Activity·가사 화면 유휴 작업 줄이기 ([af4ac9e](https://github.com/oneulddu/Retrine/commit/af4ac9e793a06b878477fd9301f09b2dfeb9f468))
+* 새 디자인 탭바·색 훅·금요일 링·다운로드 버튼 반복 작업 줄이기 ([f39299e](https://github.com/oneulddu/Retrine/commit/f39299eeac2e6c4d65188b3852daec0e40509170))
+* 오디오 기능의 유휴 깨우기 줄이기 ([c560878](https://github.com/oneulddu/Retrine/commit/c560878f9549a5d61fe01e072ffe89c0b1c78d48))
+* 잠금화면 배경·모션 클립·PiP·수면 타이머 반복 작업 줄이기 ([f1a4c25](https://github.com/oneulddu/Retrine/commit/f1a4c25ec033807fa5b64cfe482e5c2d5d549708))
+* 카운터 저장·AutoMix·언어 인식기의 반복 비용 줄이기 ([3d6f4f2](https://github.com/oneulddu/Retrine/commit/3d6f4f2c4f5114c0b0b4d85b8788a2e5ccb54d5f))
+
+## [1.0.1-beta.0](https://github.com/oneulddu/Retrine/compare/v1.0.0...v1.0.1-beta.0) (2026-11-24)
+
+
+### Features
+
+* 모든 곡 가사 가져오기와 로컬 파일 내장 가사 지원 ([a1bf798](https://github.com/oneulddu/Retrine/commit/a1bf798d9aa1264cccb1f11502c390edc2ea66af))
+* 새 디자인 유리 재질·색조·터치 반응과 저장 표시 선택 추가 ([90fc689](https://github.com/oneulddu/Retrine/commit/90fc68905d7e59ba043c6b2acdb60de1b50a5ea6))
+* 아티스트 Play를 길게 눌러 셔플 재생 ([9d2ebcf](https://github.com/oneulddu/Retrine/commit/9d2ebcf6be8085d84cb3db6726a5982672378c50))
+* 앨범 트랙 번호를 디스크별로 표시 ([89b9c0c](https://github.com/oneulddu/Retrine/commit/89b9c0cac4e4db112a17567c7af1f0a514e11b4d))
+* 플레이리스트 헤더 정보 표시 스위치 추가 ([f63e16c](https://github.com/oneulddu/Retrine/commit/f63e16c041ed78fd0bfd2ec1be25be5fb57da4c5))
+
+
+### Fixes
+
+* TTML 크기 제한·모션 임시 파일 정리·잠금화면 반복 비용 수정 ([1a57904](https://github.com/oneulddu/Retrine/commit/1a579042658d18ccb402b238fee3cc64cb3114bb))
+* WireGuard 시작 실패 복구와 연결·다이얼 시간 제한 수정 ([cd8c0eb](https://github.com/oneulddu/Retrine/commit/cd8c0ebb8e439fbbf65d62a8f605dcbfd5996087))
+* 레이어 훅·Connect·머리 제스처·폰트의 스레드 경쟁 수정 ([4d47d63](https://github.com/oneulddu/Retrine/commit/4d47d631e7191d78044128616f313e17d20eb0b6))
+* 백업에서 WireGuard 설정 제외와 확장·SponsorBlock 메모리 안정성 수정 ([3d91c93](https://github.com/oneulddu/Retrine/commit/3d91c93487e1844948e9a0bea459a29c8dd10d03))
+* 번역 저장소·WireGuard 리스너·광고 차단 재생·빌드 스크립트 안정성 수정 ([0bc46ef](https://github.com/oneulddu/Retrine/commit/0bc46ef9f4516157d0eed1edb848a61053c103fa))
+* 새 디자인 숨은 플레이어 GPU 작업·유리·앨범 노트 수정 ([0493378](https://github.com/oneulddu/Retrine/commit/0493378e257382bb841e2eedf02040df860a2fd3))
+* 새 디자인 저장 표시·가사 카드·가사 버튼 유리 안정성 수정 ([1c20299](https://github.com/oneulddu/Retrine/commit/1c202995b9fbbb47efb22806d3c10fa3996e6598))
+* 설정·진단·공용 유틸의 감사 지적 수정 ([ce4c44a](https://github.com/oneulddu/Retrine/commit/ce4c44a9ae215d77a88aa40329b00f7abc17e227))
+* 시작 정리가 실패하면 가져오기 임시 폴더 정리를 다시 시도 ([5ad1a8d](https://github.com/oneulddu/Retrine/commit/5ad1a8dfbbe12c68292baccf39526fda21d95706))
+* 아티스트 월별 리스너를 정보 섹션 설정에서 첫 화면부터 숨김 ([0c24b60](https://github.com/oneulddu/Retrine/commit/0c24b608caed977949fc2071c697a99d9f9ded3d))
+* 오디오 렌더링 경로의 버퍼 넘침·레이스·재귀 깊이 수정 ([e5b89a0](https://github.com/oneulddu/Retrine/commit/e5b89a0a272c472fa3f75c662d7f1aeaffb4bcc9))
+* 지역 spclient 서버를 쓰는 계정에서도 요청 헤더 수집 ([79e5de2](https://github.com/oneulddu/Retrine/commit/79e5de226c4264f9a0c48181207a708f65b44339))
+* 키 없는 가사 소스가 오프라인 저장을 막던 문제와 잠금화면 가사 안정성 수정 ([af3e2f2](https://github.com/oneulddu/Retrine/commit/af3e2f28b36222e38692a02141890357d366acc2))
+
+
+### Performance
+
+* 가사 배경·설정 화면·가사 줄 배치의 반복 비용 줄임 ([9c089df](https://github.com/oneulddu/Retrine/commit/9c089df16fe3aba17dfceaa18fde9c451121184b))
+* 광고 차단 네트워크 훅의 청크별 경로 검사와 응답별 할당 제거 ([e00763e](https://github.com/oneulddu/Retrine/commit/e00763e050c333bb0581989946af38fe48aaf81f))
+
+
+### Chores
+
+* 다음 베타를 1.0.1로 지정 ([7667374](https://github.com/oneulddu/Retrine/commit/7667374b1b314ccb6720193983cfa563ffdfb082))
+
 ## [1.0.0](https://github.com/oneulddu/Retrine/compare/v1.0.0-beta.42...v1.0.0) (2026-11-23)
 
 

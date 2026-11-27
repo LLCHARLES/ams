@@ -47,6 +47,8 @@ static NSString *cellLabel(SGGestureAction action) {
 }
 
 - (void)reload {
+    self.userInteractionEnabled = SGFlag(SGKeyGestures, NO);
+    self.alpha = self.userInteractionEnabled ? 1 : 0.45;
     NSArray<NSNumber *> *zones = SGGestureZones();
     while (_labels.count > zones.count) {
         [_labels.lastObject removeFromSuperview];
@@ -156,6 +158,7 @@ static NSString *cellLabel(SGGestureAction action) {
     [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.sourceView = _grid;
     sheet.popoverPresentationController.sourceRect = _grid.bounds;
+    SGPresentDark(sheet);
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -250,11 +253,22 @@ static NSString *cellLabel(SGGestureAction action) {
             cell.selectionStyle = UITableViewCellSelectionStyleDefault;
             break;
     }
+    BOOL enabled = [self sectionEnabled:path.section];
+    cell.userInteractionEnabled = enabled;
+    cell.contentView.alpha = cell.accessoryView.alpha = enabled ? 1 : 0.45;
+    if (enabled) cell.accessibilityTraits &= ~UIAccessibilityTraitNotEnabled;
+    else cell.accessibilityTraits |= UIAccessibilityTraitNotEnabled;
     return cell;
+}
+
+- (BOOL)sectionEnabled:(NSInteger)section {
+    // Edge holds have their own switch, independent of double taps.
+    return (section != 1 && section != 2 && section != 5) || SGFlag(SGKeyGestures, NO);
 }
 
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
     [table deselectRowAtIndexPath:path animated:YES];
+    if (![self sectionEnabled:path.section]) return;
     if (path.section == 1) SGSetInt(SGKeyGestureSplit, path.row);
     else if (path.section == 2) SGSetInt(SGKeyGestureStep, path.row);
     else if (path.section == 4) SGSetInt(SGKeyGestureHoldSpeed, path.row);
@@ -269,6 +283,7 @@ static NSString *cellLabel(SGGestureAction action) {
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndex:4] withRowAnimation:UITableViewRowAnimationFade];
     } else {
         SGSetEnabled(SGKeyGestures, toggle.on);
+        [self refresh];
     }
 }
 

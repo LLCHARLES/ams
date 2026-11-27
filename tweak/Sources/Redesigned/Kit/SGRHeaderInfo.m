@@ -223,6 +223,8 @@ NSArray<UIImageView *> *SGRCreatorFaces(UIView *root) {
     BOOL _clipsUnderBar;
     __weak UIScrollView *_clipScroll;
     BOOL _beside, _besideFonts;
+    // Laid out once at a size: until then every pass runs outside any animation (-layoutSubviews).
+    BOOL _laidOut;
     __weak UIView *_besideMore, *_besideDownload;
     __weak UIView *_morePage, *_downloadPage;
     dispatch_block_t _besideRefresh;
@@ -755,7 +757,6 @@ static const NSUInteger kMeasuredWidths = 3;
 - (void)setRoundPlay:(BOOL)roundPlay {
     if (_roundPlay == roundPlay) return;
     _roundPlay = roundPlay;
-    _play.round = roundPlay;
     _play.cutOut = roundPlay && cutOutPlay();
     [self sgr_fillPlay];
     [self setNeedsLayout];
@@ -838,8 +839,32 @@ static const NSUInteger kMeasuredWidths = 3;
     return [self sgr_contentHeightForTextWidth:MAX(0, width - 2 * (_beside ? 0 : kSide))];
 }
 
+// The first placement, from the zero frame the info is made with, and the first layout of what is in it join no
+// animation running around them: a page laid out inside one as it opens would slide the row in from the corner.
+- (void)setFrame:(CGRect)frame {
+    if (!CGRectIsEmpty(self.frame) || CGRectIsEmpty(frame)) {
+        [super setFrame:frame];
+        return;
+    }
+    [UIView performWithoutAnimation:^{ [super setFrame:frame]; }];
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (_laidOut) {
+        [self sgr_layout];
+        return;
+    }
+    // Any pass before it, at the zero size, is outside any animation as well: what it places would start from there.
+    _laidOut = !CGRectIsEmpty(self.bounds);
+    // The buttons are laid out here too, from this pass, rather than later in the same pass and inside the animation.
+    [UIView performWithoutAnimation:^{
+        [self sgr_layout];
+        for (UIView *button in @[self->_shuffle, self->_play, self->_trailing]) [button layoutIfNeeded];
+    }];
+}
+
+- (void)sgr_layout {
     CGFloat width = self.bounds.size.width, inset = _beside ? 0 : kSide, text = MAX(0, width - 2 * inset);
     BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     NSTextAlignment leading = rtl ? NSTextAlignmentRight : NSTextAlignmentLeft;
@@ -896,6 +921,14 @@ static const NSUInteger kMeasuredWidths = 3;
     // Play on the middle of the page, the other two hung off its sides, so it holds its place whether both
     // are there or not.
     CGFloat row = [self sgr_rowHeight];
+    // As wide as its words ask (sgr_width), unless the buttons shown either side of it would then not fit with the usual
+    // gap: Play is then round, a circle the row's height with its glyph alone, its word only what VoiceOver reads. Beside
+    // the cover the row was fitted before the cover was given its column (-sgr_coverBesideIn:...).
+    CGFloat playWidth = MAX(kPlayWidth, [_play sgr_width]);
+    CGFloat flank = _shuffle.hidden && _trailing.hidden ? 0 : row + kRowSpacing;
+    BOOL narrow = !_roundPlay && !_beside && playWidth > width - 2 * (kSide + flank);
+    if (_play.round != (_roundPlay || narrow)) _play.round = _roundPlay || narrow;
+    if (narrow) playWidth = row;
     if (_roundPlay) {
         // The circle the row's height; the round buttons level with its middle.
         CGFloat side = SGRGlassCircleSize, level = y + round((row - side) / 2);
@@ -905,9 +938,6 @@ static const NSUInteger kMeasuredWidths = 3;
         _trailing.frame = CGRectMake(CGRectGetMaxX(play) + kRoundSpacing, level, side, side);
     } else {
         CGFloat side = row;
-        // As wide as its word, short of pushing the other two off the page.
-        CGFloat playWidth = MAX(kPlayWidth, [_play sgr_width]);
-        if (!_beside) playWidth = MIN(playWidth, width - 2 * (kSide + side + kRowSpacing));
         CGRect play = CGRectMake(round((width - playWidth) / 2), y, playWidth, side);
         _play.frame = play;
         _shuffle.frame = CGRectMake(CGRectGetMinX(play) - kRowSpacing - side, y, side, side);

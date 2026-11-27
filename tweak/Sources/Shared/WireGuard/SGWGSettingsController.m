@@ -1,6 +1,6 @@
 #import "SGWGSettingsController.h"
 #import "SGWGCore.h"
-#import <objc/message.h>
+#import "Core/SGPrefs.h"
 
 #import "Core/SGLocalize.h"
 #import "Core/SGGlass.h"
@@ -376,10 +376,7 @@ static NSArray<NSString *> *Kinds(void) { return @[SGWGKindWireGuard, SGWGKindHT
         message:SGL(@"settings.wireguard.restart_message", @"Fully close and reopen Spotify to apply this setting.") preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.wireguard.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.wireguard.close_now", @"Close app now") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
-        SEL suspend = NSSelectorFromString(@"suspend");
-        if ([UIApplication.sharedApplication respondsToSelector:suspend])
-            ((void (*)(id, SEL))objc_msgSend)(UIApplication.sharedApplication, suspend);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ exit(0); });
+        SGRestartSpotify();
     }]];
     SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
@@ -635,11 +632,13 @@ static NSString *ErrorText(NSError *error) {
 
 @end
 
-static BOOL sg_recoveryPending, sg_recoveryShown;
+static BOOL sg_recoveryPending;
+extern dispatch_block_t SGWGRecoveryPresentationCompletion(void);
 
 static void PresentPendingRecovery(void) {
         if (!sg_recoveryPending) return;
-        if (SGWGReady() || !SGWGActiveThisLaunch() || sg_recoveryShown) {
+        dispatch_block_t presented = SGWGRecoveryPresentationCompletion();
+        if (!presented || !SGWGActiveThisLaunch()) {
             sg_recoveryPending = NO;
             return;
         }
@@ -661,8 +660,7 @@ static void PresentPendingRecovery(void) {
             style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { SGWGSetSettingEnabled(NO); }]];
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.wireguard.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
         SGPresentDark(alert);
-        [presenter presentViewController:alert animated:YES completion:nil];
-        sg_recoveryShown = YES;
+        [presenter presentViewController:alert animated:YES completion:presented];
         sg_recoveryPending = NO;
 }
 

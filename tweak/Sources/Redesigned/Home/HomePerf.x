@@ -238,6 +238,7 @@ static BOOL isHomeTab(UIViewController *page) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    if (!probing()) return;
     %init;
     SGRequireClasses(@[
         @"_TtC16Home_EvoPageImpl33EvoLoadableResourceViewController",

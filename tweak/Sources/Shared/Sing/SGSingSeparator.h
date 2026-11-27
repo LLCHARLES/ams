@@ -14,8 +14,8 @@
 //
 // Two copies of the model can stand behind one separator: the CPU's, which it is made with, and a faster one (the
 // Neural Engine's) handed over once it is loaded and warm, which then takes every window, in the background too. A
-// window the faster copy fails is done again on the CPU's, and the faster copy is not used again until another is
-// handed over (Sing.x drops it for the launch). The first windows on each copy are logged with their time.
+// window the faster copy fails is done again on the CPU's while that fallback is still warm. Once proven, the
+// faster copy runs alone; a subsequent failure leaves playback dry until the loader brings back the CPU's.
 //
 // Threading: one separator is used by one thread at a time (its buffers are its own); the faster copy can be set from
 // any thread.
@@ -49,8 +49,8 @@ typedef struct {
 @interface SGSingSeparator : NSObject
 // Nil `model` makes one that only does the STFT, for the harness.
 - (instancetype)initWithModel:(MLModel *)model;
-// The faster copy, already warm, and the name the log gives it; nil takes it away.
-- (void)setFastModel:(MLModel *)model named:(NSString *)name;
+// Nil removes the fast copy. Returns whether the CPU fallback is still resident after the change.
+- (BOOL)setFastModel:(MLModel *)model named:(NSString *)name;
 - (SGSingSeparatorStats)stats;
 // One prediction of silence on `model`, which Core ML spends allocating and specializing, so the first real window
 // does not; its time in seconds, or a negative number and `error` when the model failed or answered in a shape the

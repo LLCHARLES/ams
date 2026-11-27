@@ -13,6 +13,12 @@
 static NSString *const kSpeedButtonID = @"Components.UI.SpeedControlButtonNowPlaying";
 static char kSpeedButtonKey, kWatchedKey;
 
+@interface SGRSpeedLabelOwner : NSObject
+@property (nonatomic, weak) UIView *button;
+@end
+@implementation SGRSpeedLabelOwner
+@end
+
 // The stack of Spotify's speed labels inside the button: the stack view that holds the labels.
 static UIStackView *labelStackIn(UIView *view) {
     for (UIView *sub in view.subviews) {
@@ -45,14 +51,16 @@ void SGRPlayerFitSpeedLabel(UIView *host) {
     UIView *button = SGRFindByIdentifier(host, kSpeedButtonID, &kSpeedButtonKey);
     UIStackView *labels = labelStackIn(button);
     if (!labels) return;
-    __weak UIView *weakButton = button;
     // Spotify lays the stack out again as the speed changes, with no pass of the controls after it.
-    if (objc_getAssociatedObject(labels, &kWatchedKey) != button) {
-        objc_setAssociatedObject(labels, &kWatchedKey, button, OBJC_ASSOCIATION_ASSIGN);
+    SGRSpeedLabelOwner *owner = objc_getAssociatedObject(labels, &kWatchedKey);
+    if (!owner) {
+        owner = [SGRSpeedLabelOwner new];
+        objc_setAssociatedObject(labels, &kWatchedKey, owner, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         SGRObserveLayout(labels, ^(UIView *view) {
-            UIView *watchedButton = weakButton;
+            UIView *watchedButton = owner.button;
             if (watchedButton) fit((UIStackView *)view, watchedButton);
         });
     }
+    owner.button = button;
     fit(labels, button);
 }

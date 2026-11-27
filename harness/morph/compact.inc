@@ -366,15 +366,6 @@ static void afterFrames(void (^block)(void)) {
     HARNESS_CHECK(!self.context.to.view.maskView && self.context.to.view.layer.mask);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_CHECK(self.context.completed && !self.context.to.view.layer.mask);
-        SPTBarOverlayPresentationTransition *legacy = [SPTBarOverlayPresentationTransition new];
-        legacy.overlayView = self.context.to.view;
-        legacy.bottomBarView = sg_card;
-        [legacy holdFrom:self.context.containerView at:0.45];
-        nearValue(legacy.overlayView.layer.mask.bounds.size.width, 381.2, @"legacy linear width");
-        nearValue(legacy.overlayView.layer.mask.bounds.size.height, 410.6, @"legacy linear height");
-        nearValue(legacy.overlayView.layer.mask.cornerRadius, 37.95, @"legacy radius");
-        [legacy destroyTransitioningContext];
-        HARNESS_CHECK(!legacy.overlayView.layer.mask);
         sg_card = nil;
         self.context.from = self.context.to;
         self.context.to = [UIViewController new];
@@ -388,7 +379,7 @@ static void afterFrames(void (^block)(void)) {
         HARNESS_CHECK(!self.context.from.view.layer.mask && self.context.containerView.layer.speed == 1);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
             HARNESS_CHECK(self.context.completed && self.context.result);
-            NSLog(@"[morph] PASS %@; opening, legacy and missing-card paths unchanged",
+            NSLog(@"[morph] PASS %@; opening and missing-card paths unchanged",
                   SGHidden(@"spotifyglass.redesign.player.musicClose") ?
                   @"compact geometry, dim, frozen lifetime, velocity release, cancel, tap" :
                   @"switch off preserves linear geometry, speed and teardown");

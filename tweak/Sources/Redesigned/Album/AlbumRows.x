@@ -955,7 +955,8 @@ static void motionBatch(UICollectionView *list, NSInteger delta) {
         for (UICollectionViewCell *cell in list.visibleCells) [cell setNeedsLayout];
 }
 
-%hook _TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView
+%group SGRAlbumCollectionHooks
+%hook SGRAlbumCollection
 - (void)layoutSubviews {
     UICollectionView *list = (id)self;
     UIView *page = SGRAlbumPageOf(list.superview);
@@ -972,6 +973,7 @@ static void motionBatch(UICollectionView *list, NSInteger delta) {
     motionBatch(list, 1);
     %orig(updates, ^(BOOL finished) { motionBatch(list, -1); if (completion) completion(finished); });
 }
+%end
 %end
 
 %hook _TtC12Element_List18CollectionViewCell
@@ -1007,6 +1009,8 @@ static void motionBatch(UICollectionView *list, NSInteger delta) {
     if (!SGRedesignedUI()) return;
     sg_trackNumbers = SGFlag(SGRKeyAlbumTrackNumbers, NO);
     %init;
+    Class list = SGFileprivateViewClass("_TtC32CreativeWorkPlatform_TemplateKitP33_5F894CA2C02A3F3767683E90D6AA015014CollectionView", UICollectionView.class);
+    if (list) %init(SGRAlbumCollectionHooks, SGRAlbumCollection = list);
     if (countsPlace() == SGRAlbumPlayCountsInMenu) %init(SGRAlbumMenuActions);
     if (countsPlace() == SGRAlbumPlayCountsInRow) {
         // Posted on the main thread (AlbumPlays.m).

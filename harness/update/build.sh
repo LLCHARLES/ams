@@ -9,7 +9,7 @@ VERSION=${1:-0.18.0}
 rm -rf "$OUT"; mkdir -p "$OUT/UpdateHarness.app"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -isysroot "$SDK" -Wno-deprecated-declarations -DSG_VERSION="\"$VERSION\"" \
     "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" \
     "$SRC"/App/About/Update.m "$SRC"/App/About/UpdatePage.m "$SRC"/App/About/UpdateNotice.m \

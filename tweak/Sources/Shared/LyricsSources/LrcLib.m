@@ -253,7 +253,7 @@ static SGLyricsResult *resultFor(NSArray<NSDictionary *> *records, NSInteger sec
         while (timesWords(top)) {
             worded = SGLyricsfileLines(top[@"lyricsfile"]);
             if (worded) break;
-            SGLog(@"lrclib: record %@ times words in a Lyricsfile this cannot read", top[@"id"]);
+            SGLog(@"lrclib: unreadable timed Lyricsfile");
             NSMutableDictionary *onLines = [top mutableCopy];
             [onLines removeObjectForKey:@"hasWordSync"];
             left[[left indexOfObjectIdenticalTo:top]] = onLines;
@@ -265,7 +265,7 @@ static SGLyricsResult *resultFor(NSArray<NSDictionary *> *records, NSInteger sec
 SGLyricsAsk SGLrcLibAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *result)) {
     if (!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(), ^{ SGLrcLibAsk(query, done); }); return; }
     if (!query.title.length || !query.artist.length) {
-        SGLog(@"lrclib: nothing to search with for %@", query.trackID);
+        SGLog(@"lrclib: no names to search");
         done(nil);
         return;
     }
@@ -284,7 +284,7 @@ SGLyricsAsk SGLrcLibAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
                 query.requestContext.emptyNameSearch = SGLrcLibAsk;
             return resultFor(matching(found, title, artist, seconds), seconds);
         }, ^(SGLyricsResult *result) {
-                SGLog(@"lrclib: search for %@ by %@ gave %@", title, artist,
+                SGLog(@"lrclib: search gave %@",
                       !result ? @"nothing" : result.instrumental ? @"an instrumental"
                       : result.synced ? [NSString stringWithFormat:@"%lu %@ lines", (unsigned long)result.karaokeLines.count, result.wordTimed ? @"word timed" : @"timed"]
                       : [NSString stringWithFormat:@"%lu untimed lines", (unsigned long)result.texts.count]);
@@ -306,7 +306,7 @@ SGLyricsAsk SGLrcLibAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
                 bySearch();
                 return;
             }
-            SGLog(@"lrclib: %@ by %@ matched exactly, %@", title, artist,
+            SGLog(@"lrclib: exact match, %@",
                   result.instrumental ? @"instrumental" : result.wordTimed ? @"word timed" : result.synced ? @"timed" : @"untimed");
             done(result);
     });

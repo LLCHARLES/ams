@@ -8,6 +8,8 @@
 static NSData *(^reply)(NSURLRequest *);
 static NSInteger replyStatus = 200;
 static NSError *replyError;
+static NSURL *redirectTarget;
+static BOOL splitAtLimit;
 static _Atomic NSUInteger decoded;
 static IMP originalJSON, originalLineStart, originalXML, originalMatches;
 static BOOL watchModels;
@@ -27,6 +29,7 @@ static id checkedMatches(NSRegularExpression *regex, SEL selector, NSString *tex
 static NSMutableArray *heldTokenTasks;
 static BOOL holdMacro;
 @interface TransportTask : NSObject
+@property (nonatomic, strong) NSURLRequest *originalRequest;
 @property (nonatomic, copy) dispatch_block_t work;
 @property (nonatomic) BOOL cancelled, hold;
 - (void)resume;
@@ -35,7 +38,7 @@ static BOOL holdMacro;
 @implementation TransportTask
 - (void)resume {
     if (self.hold) [heldTokenTasks addObject:self];
-    else dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), self.work);
+    else dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ self.work(); });
 }
 - (void)cancel { self.cancelled = YES; }
 @end
@@ -52,7 +55,7 @@ static BOOL holdMacro;
 @implementation TransportSession
 + (instancetype)sharedSession { return [self new]; }
 + (instancetype)sessionWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue {
-    CHECK(configuration.HTTPCookieStorage == nil && configuration.URLCache == nil);
+    CHECK(!configuration.HTTPCookieStorage && !configuration.URLCache && !configuration.URLCredentialStorage && !configuration.HTTPShouldSetCookies);
     TransportSession *session = [self new];
     session.delegate = delegate;
     session.queue = queue ?: [NSOperationQueue new];
@@ -63,16 +66,33 @@ static BOOL holdMacro;
 - (TransportTask *)dataTaskWithRequest:(NSURLRequest *)request {
     if (SGLyricsProviderURLAllowed(request.URL)) CHECK(SGLyricsRequestIsMarked(request));
     TransportTask *task = [TransportTask new];
+    task.originalRequest = request;
+    task.hold = heldTokenTasks && [request.URL.path hasSuffix:holdMacro ? @"macro.subtitles.get" : @"token.get"];
     __weak TransportTask *weakTask = task;
     task.work = ^{
         TransportTask *activeTask = weakTask;
         NSData *data = reply(request);
-        NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:replyStatus HTTPVersion:@"HTTP/1.1" headerFields:nil];
+        __block NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:replyStatus HTTPVersion:@"HTTP/1.1" headerFields:@{@"Retry-After": @"7"}];
         [self.queue addOperationWithBlock:^{
             CHECK(!NSThread.isMainThread);
+            if (redirectTarget) {
+                NSURLRequest *next = [NSURLRequest requestWithURL:redirectTarget];
+                [self.delegate URLSession:(id)self task:(id)activeTask willPerformHTTPRedirection:response newRequest:next
+                    completionHandler:^(NSURLRequest *allowed) {
+                        if (!allowed) return;
+                        CHECK([allowed.URL isEqual:redirectTarget] && [[allowed valueForHTTPHeaderField:@"client-token"] isEqual:@"fixture"]);
+                        response = [[NSHTTPURLResponse alloc] initWithURL:allowed.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:nil];
+                    }];
+            }
             [self.delegate URLSession:(id)self dataTask:(id)activeTask didReceiveResponse:response completionHandler:^(NSURLSessionResponseDisposition disposition) {
                 CHECK(disposition == NSURLSessionResponseAllow);
-                if (data) [self.delegate URLSession:(id)self dataTask:(id)activeTask didReceiveData:data];
+                if (splitAtLimit) {
+                    const NSUInteger limit = 2 * 1024 * 1024;
+                    [self.delegate URLSession:(id)self dataTask:(id)activeTask didReceiveData:[data subdataWithRange:NSMakeRange(0, limit)]];
+                    CHECK(!activeTask.cancelled);
+                    [self.delegate URLSession:(id)self dataTask:(id)activeTask didReceiveData:[data subdataWithRange:NSMakeRange(limit, 1)]];
+                    CHECK(activeTask.cancelled);
+                } else if (data) [self.delegate URLSession:(id)self dataTask:(id)activeTask didReceiveData:data];
                 [self.delegate URLSession:(id)self task:(id)activeTask didCompleteWithError:replyError];
             }];
         }];
@@ -119,6 +139,7 @@ static void clearProbeDefaults(void) { [probeDefaults removePersistentDomainForN
 + (NSUserDefaults *)standardUserDefaults { return probeDefaults; }
 @end
 #define NSURLSession TransportSession
+#import "Shared/LyricsSources/SGBoundedRequest.m"
 #import "transport.inc"
 // NetEase has its own 3-second request policy.
 #define kTimeout kNetEaseTimeout
@@ -154,7 +175,7 @@ dispatch_block_t SGSpotifyISRCWithOutcome(NSString *uri, NSUInteger tries, void 
 }
 NSString *SGLyricsTranslationLanguage(void) { return nil; }
 static void waitFor(BOOL *finished) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!*finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     CHECK(*finished);
@@ -289,6 +310,20 @@ static void checkProbeShapes(void) {
     }, context);
     CHECK(!context.failed && [SGKaraokeLineText(named.karaokeLines.firstObject) isEqual:@"Name fallback"]);
     fixtureISRC = nil;
+    [probeDefaults setObject:@"fixture-token" forKey:@"spotifyglass.musixmatch.token"];
+    replyStatus=429;
+    reply=^NSData *(NSURLRequest *request){return nil;};
+    context=SGLyricsRequestContext.new;
+    NSTimeInterval before=NSDate.date.timeIntervalSince1970;
+    CHECK(!probeAnswer(SGMusixmatchAsk,context));
+    CHECK(context.rateLimitUntil>=before+7 && !context.definiteMiss);
+    replyStatus=200;
+    reply=^NSData *(NSURLRequest *request){
+        return json(@{@"message":@{@"header":@{@"status_code":@200},@"body":@{@"macro_calls":@{
+            @"matcher.track.get":@{@"message":@{@"header":@{@"status_code":@404}}}}}}});
+    };
+    context=SGLyricsRequestContext.new;
+    CHECK(!probeAnswer(SGMusixmatchAsk,context) && context.definiteMiss && !context.failed);
     for (NSNumber *matcherCode in @[@400, @200]) {
         reply = ^NSData *(NSURLRequest *request) {
             if ([request.URL.path hasSuffix:@"token.get"])
@@ -369,6 +404,31 @@ int main(void) {
         originalXML = method_setImplementation(class_getInstanceMethod(NSXMLParser.class, @selector(parse)), (IMP)checkedXML);
         originalMatches = method_setImplementation(class_getInstanceMethod(NSRegularExpression.class, @selector(matchesInString:options:range:)), (IMP)checkedMatches);
         NSURL *url = [NSURL URLWithString:@"https://fixture.invalid/lyrics"];
+        __block BOOL checked = NO;
+        replyStatus = 307;
+        reply = ^NSData *(NSURLRequest *request) { CHECK([[request valueForHTTPHeaderField:@"client-token"] isEqual:@"fixture"]); return nil; };
+        for (NSString *address in @[@"https://FIXTURE.invalid:443/final", @"https://other.invalid/final",
+                                     @"https://fixture.invalid:444/final", @"http://fixture.invalid:443/final"]) {
+            redirectTarget = [NSURL URLWithString:address];
+            NSInteger expected = [address isEqual:@"https://FIXTURE.invalid:443/final"] ? 200 : 307;
+            checked = NO;
+            SGLyricsGetJSONReply(url, @{@"client-token": @"fixture"}, ^(id root, NSHTTPURLResponse *response) {
+                CHECK(response.statusCode == expected); checked = YES;
+            });
+            waitFor(&checked);
+        }
+        redirectTarget = nil;
+        replyStatus = 200;
+        checked = NO;
+        reply = ^NSData *(NSURLRequest *request) { return [NSMutableData dataWithLength:2 * 1024 * 1024 + 1]; };
+        splitAtLimit = YES;
+        [SGBoundedRequestTask([NSURLRequest requestWithURL:url], 0, ^(NSData *data, NSURLResponse *response, NSError *error) {
+            CHECK(!data && error.code == NSURLErrorDataLengthExceedsMaximum);
+            dispatch_async(dispatch_get_main_queue(), ^{ checked = YES; });
+        }) resume];
+        waitFor(&checked);
+        splitAtLimit = NO;
+        atomic_store(&sg_failures, 0);
         NSString *large = [@"a" stringByPaddingToLength:500000 withString:@"a" startingAtIndex:0];
         reply = ^NSData *(NSURLRequest *request) { return json(@{@"text": large, @"candidate": @17}); };
         __block BOOL finished = NO;

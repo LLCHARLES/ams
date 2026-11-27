@@ -45,6 +45,7 @@ void SGPositionPinnedPreview(UITableView *table, UIView *header, CGFloat height)
 
 void SGPresentInformation(UIViewController *presenter, NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+    SGPresentDark(alert);
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
     [presenter presentViewController:alert animated:YES completion:nil];
 }
@@ -75,8 +76,10 @@ CGFloat SGSliderTextHeight(NSString *title, NSString *subtitle, CGFloat width) {
 CGFloat SGLayOutSliderText(UILabel *title, UILabel *value, UILabel *subtitle, CGFloat x, CGFloat y, CGFloat width) {
     CGFloat line = ceil(title.font.lineHeight);
     BOOL stacked = SGAccessibilityTextSize();
+    // Right to left, the value sits at the left end of the line and the title at the right.
+    BOOL rtl = title.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     title.numberOfLines = stacked ? 0 : 1;
-    value.textAlignment = stacked ? NSTextAlignmentNatural : NSTextAlignmentRight;
+    value.textAlignment = stacked ? NSTextAlignmentNatural : rtl ? NSTextAlignmentLeft : NSTextAlignmentRight;
     if (stacked) {
         CGFloat height = textHeight(title.text, title.font, width);
         title.frame = CGRectMake(x, y, width, height);
@@ -85,8 +88,9 @@ CGFloat SGLayOutSliderText(UILabel *title, UILabel *value, UILabel *subtitle, CG
     } else {
         [value sizeToFit];
         CGFloat valueWidth = MIN(width, MAX(value.bounds.size.width, 44));
-        value.frame = CGRectMake(x + width - valueWidth, y, valueWidth, line);
-        title.frame = CGRectMake(x, y, MAX(1, CGRectGetMinX(value.frame) - x - 8), line);
+        CGFloat titleWidth = MAX(1, width - valueWidth - 8);
+        value.frame = CGRectMake(rtl ? x : x + width - valueWidth, y, valueWidth, line);
+        title.frame = CGRectMake(rtl ? x + width - titleWidth : x, y, titleWidth, line);
     }
     y += line;
     if (subtitle && !subtitle.hidden && subtitle.text.length) {
@@ -295,7 +299,10 @@ UIImage *SGTileImage(NSString *symbol) {
 }
 
 UIImageView *SGChevronView(void) {
-    return SGSymbolView(@"chevron.right", 13, UIImageSymbolWeightBold, 16);
+    UIImageView *chevron = SGSymbolView(@"chevron.right", 13, UIImageSymbolWeightBold, 16);
+    // Points the way the page goes: to the left in a right-to-left layout.
+    chevron.image = chevron.image.imageFlippedForRightToLeftLayoutDirection;
+    return chevron;
 }
 
 CGFloat SGSectionHeaderHeight(void) { return MAX(38, ceil(SGSubtitleFont().lineHeight) + 14); }
@@ -422,6 +429,10 @@ void SGPresentPopover(UIViewController *panel, UIView *from) {
     __block void (^present)(void);
     present = ^{
         UIViewController *top = SGTopController();
+        if (!from.window || from.window != top.viewIfLoaded.window) {
+            present = nil;
+            return;
+        }
         if ((top.isBeingDismissed || top.isBeingPresented || top.transitionCoordinator) && ++tries < 20) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), present);
             return;
@@ -437,7 +448,7 @@ NSString *const SGRepoURL = @"https://github.com/oneulddu/Retrine";
 
 void SGOpenURL(NSString *url) {
     NSURL *target = url ? [NSURL URLWithString:url] : nil;
-    if (!target) return;
+    if (![target.scheme.lowercaseString isEqual:@"https"] || !target.host.length) return;
     dispatch_async(dispatch_get_main_queue(), ^{
         [UIApplication.sharedApplication openURL:target options:@{} completionHandler:nil];
     });

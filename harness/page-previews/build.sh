@@ -16,7 +16,7 @@ mkdir -p "$APP" "$OUT/gen" "$OUT/png"
 python3 "$HERE/../album-counts/cover-source.py" "$SRC" "$OUT/gen/cover-prefs.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" \
     -I"$SRC" -iquote "$SRC/Redesigned/Kit" -Wall -Werror -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/stubs.m" "$OUT/gen/SGRAccent.m" "$OUT/gen/cover-prefs.m" \
     "$SRC/Redesigned/Kit/SGRPagePreview.m" "$SRC/Redesigned/Kit/SGRTokens.m" "$SRC/Redesigned/Kit/SGRPalette.m" \
@@ -27,6 +27,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC/Redesigned/Album/AlbumPlaysText.m" \
     "$SRC/Redesigned/Album/AlbumPlaysPlace.m" "$SRC/Redesigned/Artist/ArtistSettings.m" \
     "$SRC/Shared/Player/SGLastTrack.m" "$SRC/Shared/AnimatedArtwork/MotionSources.m" \
+    "$SRC/Shared/LyricsSources/SGBoundedRequest.m" \
     "$SRC/Shared/AnimatedArtwork/SGMotionTicket.m" \
     "$SRC/Settings/SGPage.m" "$SRC/Settings/SGPageStyle.m" "$SRC/Settings/SGModPage.m" "$SRC/Settings/SGSettingsSearch.m" "$SRC/Settings/SGSettingsIndex.m" "$SRC/Settings/SGGlowSwitch.m" \
     "$SRC/Settings/SGSourcesPage.m" \

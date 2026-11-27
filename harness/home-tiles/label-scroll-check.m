@@ -32,9 +32,12 @@ void SGRSetTabBarMinimized(BOOL on, BOOL animated) { minimized = on; }
 @implementation _TtC23NavigationUI_TabBarImpl19TabBarContainerImpl @end
 @interface PlayerScroll : UIScrollView
 @property NSUInteger reads;
+@property NSUInteger chainReads;
 @end
 @implementation PlayerScroll
 - (BOOL)isTracking { _reads++; return YES; }
+- (BOOL)isDecelerating { return YES; }
+- (UIResponder *)nextResponder { _chainReads++; return super.nextResponder; }
 @end
 
 int main(int argc, char **argv) {
@@ -61,10 +64,13 @@ int main(int argc, char **argv) {
             UIViewController *page = [_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl new];
             PlayerScroll *scroll = [[PlayerScroll alloc] initWithFrame:CGRectMake(0, 0, 100, 100)];
             scroll.contentSize = CGSizeMake(100, 1000);
-            scroll.reads = 0;
+            UIView *wrapper = [UIView new];
+            [wrapper addSubview:scroll];
+            scroll.contentOffset = CGPointMake(0, 1);
+            scroll.reads = scroll.chainReads = 0;
             for (int i = 0; i < 40; i++) scroll.contentOffset = CGPointMake(0, i);
-            HARNESS_CHECK(!scroll.reads && !minimized);
-            [page.view addSubview:scroll];
+            HARNESS_CHECK(!scroll.reads && !scroll.chainReads && !minimized);
+            [page.view addSubview:wrapper];
             scroll.contentOffset = CGPointMake(0, 50);
             scroll.contentOffset = CGPointMake(0, 100);
             HARNESS_CHECK(minimized);

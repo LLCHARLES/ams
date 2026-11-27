@@ -259,8 +259,9 @@ static NSString *libraryFile(SGDSPFileKind kind, NSString *effect, BOOL on) {
 }
 
 // A text file with a NUL after it, for the parsers.
+extern NSMutableData *SGDSPReadTextFile(NSURL *url, NSError **error);
 static NSData *textFile(NSString *path) {
-    NSMutableData *data = [NSMutableData dataWithContentsOfFile:path];
+    NSMutableData *data = SGDSPReadTextFile([NSURL fileURLWithPath:path], nil);
     [data appendBytes:"" length:1];
     return data;
 }

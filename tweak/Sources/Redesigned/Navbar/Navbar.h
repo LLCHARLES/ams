@@ -11,8 +11,8 @@
 // off; applies as soon as the bar lays out again. Spotify's own fade under its bar stays off either way.
 #define SGRKeyNavbarFade @"spotifyglass.redesign.navbar.fade"
 // Apple symbols: the glass bar draws each of Spotify's own tabs with an SF Symbol for the page it opens (TabBar.x), on
-// the bar, the Tab bar page's preview and its list; a tab of the mod's own keeps the icon picked for it. Off unless
-// set; applies as soon as the bar lays out again.
+// the bar, the Tab bar page's preview and its list; a tab of the mod's own keeps the icon picked for it. On unless
+// switched off; applies as soon as the bar lays out again.
 #define SGRKeyNavbarSymbols @"spotifyglass.redesign.navbar.symbols"
 
 extern NSString *const SGRNavbarID;      // NSString, the entry's identity
@@ -48,6 +48,8 @@ NSURL *SGRNavbarTabURL(NSString *uri);
 
 // Navbar.x, called from the tab bar's layout passes in TabBar.x.
 void SGRComposeTabBar(UIView *tabBar);
+// Visible sources in their composed order, including custom tabs awaiting their first stack layout.
+NSArray<UIView *> *SGRComposedTabItems(UIView *tabBar);
 // Lays the bar out again after the Navbar page changes something, so it does not wait for a touch.
 void SGRRefreshTabBar(void);
 // Whether a tab of the composed row is one of the split tabs at its trailing end, for TabBar.x's second bar.
@@ -77,6 +79,9 @@ CGRect SGRTabBarGlassRow(UIView *view);
 // A tab's glyph as the glass bar draws it, white, filled when `active` (TabBar.x), Apple symbols' SF Symbol for one of
 // Spotify's while that is on, for the Tab bar page.
 UIImage *SGRNavbarGlyph(NSDictionary *entry, BOOL active);
+// The name the glass bar shows for one of Spotify's tabs labelled `title`: the Music app's "검색" for Spotify's Korean
+// "검색하기", every other label as Spotify gives it (TabBar.x), so the Tab bar page lists what the bar shows.
+NSString *SGRStockTabTitle(NSString *title);
 // Lets a laid out bar's titles shrink a little before UIKit cuts them short (TabBar.x), for the page's preview too.
 void SGRShrinkTabTitles(UIView *bar);
 // The fade under the bars (TabBar.x), for the page's preview too: how far above the glass bar's top it starts, and

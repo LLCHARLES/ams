@@ -218,7 +218,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     NSString *_demoText;
     CGFloat _chipWidth, _chipHeight, _titleHeight, _artistHeight, _timeHeight;
     CGFloat _position;
-    BOOL _paused, _active, _demo;
+    BOOL _paused, _active, _demo, _previewMiss;
     BOOL _hideShuffle, _hideRepeat, _hideVideo;
     NSString *_track;      // the shown track
     NSString *_artworkOf;  // the last track whose cover the card asked for
@@ -491,7 +491,10 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
 // The clip, the hills, black, a photo or the full-screen cover cover the field, which then holds still, as in the
 // player; and so it does for a paused song, and for the demo where motion is not allowed.
 - (void)holdField {
-    _field.motionHeld = !_active || _paused || _motion != nil || _visualiser != nil || _backdrop != nil || !_still.hidden || (_demo && !noClipMotionAllowed());
+    // The visualizer still shows the field through its hills; a backdrop or full-screen still does not.
+    _field.covered = !_active || _backdrop != nil || !_still.hidden || _motion != nil;
+    _field.motionHeld = !_active || _paused || _motion != nil || _visualiser != nil || _backdrop != nil || !_still.hidden ||
+        (_demo && !noClipMotionAllowed()) || ((_demo || _previewMiss) && SGRPlayerNoClipHoldEnabled());
 }
 
 - (BOOL)demoAvailable {
@@ -552,10 +555,16 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     NSString *track = _track;
     NSUInteger generation = _generation;
     __weak SGRPlayerPreview *weakSelf = self;
-    void (^arrived)(void) = !self.window || _demo ? nil : ^{
+    _previewMiss = NO;
+    void (^arrived)(BOOL) = !self.window || _demo ? nil : ^(BOOL found){
         SGRPlayerPreview *preview = weakSelf;
         if (!preview || !preview->_active || preview->_generation != generation || ![SGShownTrackNow().uri isEqualToString:track]) return;
-        if (!preview->_motion && !preview->_demo && SGRPlayerBackground() == SGRPlayerBackgroundAnimated) [preview reloadBackgroundAnimated:YES];
+        if (preview->_motion || preview->_demo || SGRPlayerBackground() != SGRPlayerBackgroundAnimated) return;
+        if (found) [preview reloadBackgroundAnimated:YES];
+        else {
+            preview->_previewMiss = YES;
+            [preview holdField];
+        }
     };
     // Black or the photo lies over a field made as the artwork's last choice, as in the player.
     SGRPlayerBackgroundKind look = SGRPlayerArtworkBackground();
@@ -987,6 +996,8 @@ SGModSection *SGRPlayerButtonsSection(void) {
 // A choice of Song without a clip is shown on the card at once.
 - (void)noClipPicked {
     [self.preview setDemo:YES];
+    [self refreshVisibility];
+    [self.tableView reloadData];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
@@ -1119,6 +1130,14 @@ SGModRow *SGRLyricsHideRow(void) {
     return row;
 }
 
+SGModRow *SGRLyricsKeepMicRow(void) {
+    SGModRow *row = SGSwitchRow(SGL(@"settings.lyrics.keep_mic.title", @"Keep the mic"),
+                                SGL(@"settings.lyrics.keep_mic.subtitle", @"Sing's mic stays when the controls are hidden. Off, it hides with them, as in Apple Music, and stays only while Sing is on."),
+                                SGRKeyLyricsKeepMic);
+    row.visible = ^BOOL { return SGRLyricsHideMode() != SGRLyricsHideOff; };
+    return row;
+}
+
 UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     NSArray *lineSizes = @[SGL(@"settings.player.lyric_line.size_19", @"19 pt"), SGL(@"settings.player.lyric_line.size_17", @"17 pt")];
     SGRPlayerPreview *preview = [[SGRPlayerPreview alloc] initWithFrame:CGRectMake(0, 0, 320, kPreviewCompactHeight)];
@@ -1128,22 +1147,28 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     backgrounds.accessibilityLabel = SGL(@"settings.player.background.a11y", @"Background");
     backgrounds.apportionsSegmentWidthsByContent = YES;
 
-    SGModRow *lowData = SGOptionRow(SGL(@"settings.player.motion_low_data.title", @"Download in Low Data Mode"), SGL(@"settings.player.motion_low_data.subtitle", @"Up to about 7 MB a song. Applies to animated artwork throughout Retrine."), SGKeyMotionLowData);
-    lowData.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated; };
-    SGModRow *sources = SGMotionSourcesRow();
-    sources.visible = lowData.visible;
     // What a song with no clip shows under Animated, from the two switches that are it; a pick shows it on the card.
     SGModRow *noClip = SGMenuRow(SGL(@"settings.player.no_clip.title", @"Song without a clip"), noClipNames(), ^NSString *{
         return noClipNames()[noClipStored()];
     }, ^(NSInteger index) {
         if (index < SGRNoClipCover || index > SGRNoClipVisualiser) return;
         pickNoClip(index);
+        SGRPlayerHoldField();
         [weakPlayerPage noClipPicked];
     });
-    noClip.visible = lowData.visible;
+    noClip.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated; };
     noClip.searchIdentifier = @"spotifyglass.redesign.player.noClip";
+    SGModRow *holdNoClip = SGOptionRow(SGL(@"settings.player.no_clip.hold", @"Keep background still"), nil, SGRKeyPlayerHoldNoClip);
+    holdNoClip.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated && noClipStored() == SGRNoClipCover; };
+    holdNoClip.changed = ^(BOOL on) {
+        SGRPlayerHoldField();
+        [weakPlayerPage.preview holdField];
+    };
     SGModRow *visualiserStyle = SGRVisualiserStyleRow();
     visualiserStyle.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundVisualiser; };
+    SGModRow *visualizers = SGSearchIdentified(SGPageRow(SGL(@"settings.player.visualizers.title", @"Visualizers"),
+        ^UIViewController *{ return SGRVisualiserSettingsPage(); }), @"page.visualizers");
+    visualizers.visible = visualiserStyle.visible;
 
     // Black or a photo in place of the artwork; the photo is asked for the first time it is chosen.
     SGModRow *behind = SGMenuRow(SGL(@"settings.player.behind.title", @"Behind the Player"), behindNames(), ^NSString *{
@@ -1208,10 +1233,20 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
                                                  SGL(@"settings.player.music_icons.subtitle", @"The Music app's lyrics, AirPlay and queue icons under the controls, and the AI DJ's button as a waveform, in place of Spotify's."),
                                                  SGRKeyPlayerMusicIcons), @"playerMusicIcons");
     musicIcons.changed = ^(BOOL on) { SGRPlayerLookChanged(); };
+    // Where the footer's queue button shows the queue: Spotify's own screen, or the Music app's page in the player
+    // (PlayerQueue.m, PlayerLyrics.x). Both choices keep the two-column player's side list.
+    SGModRow *queueStyle = SGWithNew(SGChoiceRow(SGL(@"settings.player.queue_style.title", @"Queue"),
+                                                 SGL(@"settings.player.queue_style.subtitle", @"Choose how the queue opens after restart. The two-column iPad player always shows it in the side column."),
+                                                 SGRKeyPlayerQueueStyle,
+                                                 @[SGL(@"settings.player.queue_style.spotify", @"Spotify"), SGL(@"settings.player.queue_style.music", @"Apple Music")],
+                                                 SGRPlayerQueueStyleSpotify), @"playerQueueStyle");
+    queueStyle.choiceNotes = @[SGL(@"settings.player.queue_style.spotify_note", @"Spotify's own queue screen opens over the player, where songs can be reordered and removed."),
+                               SGL(@"settings.player.queue_style.music_note", @"The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back. AutoMix controls global transitions; per-playlist Mix stays in the playlist's ⋯ menu.")];
     // On until switched off, as the Music app's header has only the grabber over the cover.
-    SGModRow *hideContext = SGSwitchRow(SGL(@"settings.player.hide_context.title", @"Hide where it plays from"),
-                                      SGL(@"settings.player.hide_context.subtitle", @"Hide the artist, album or playlist name at the top of the player."),
+    SGModRow *hideContext = SGShownRow(SGL(@"settings.player.hide_context.title", @"Where it plays from"),
+                                      SGL(@"settings.player.hide_context.subtitle", @"The artist, album or playlist name at the top of the player."),
                                       SGRKeyPlayerHideContext);
+    hideContext.defaultOn = YES; // the stored *hide* switch defaults on
     hideContext.changed = ^(BOOL on) {
         SGRPlayerLookChanged();
         [weakPlayerPage.preview reloadLook];
@@ -1230,12 +1265,15 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
                                                 SGL(@"settings.player.landscape.subtitle", @"Turn your iPhone while the player is open, even with the lyrics closed."),
                                                 SGRKeyPlayerLandscape), @"playerLandscape");
     landscape.visible = ^BOOL { return UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPhone; };
+    SGModRow *size = SGMenuRow(SGL(@"settings.player.lyric_line.size", @"Lyrics line size"), lineSizes,
+        ^NSString *{ return lineSizes[SGRPlayerLineSmall() ? 1 : 0]; }, ^(NSInteger i) { SGRSetPlayerLineSmall(i == 1); });
+    size.waitsOn = SGRKeyPlayerLyricLine;
 
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:
         SGSection(nil, @[behind, choosePhoto]),
-        SGNotedSection(nil, @[sources, noClip, lowData],
+        SGNotedSection(nil, @[noClip, holdNoClip],
                        SGL(@"settings.player.no_clip.footer", @"Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.")),
-        SGSection(nil, @[visualiserStyle]),
+        SGSection(nil, @[visualiserStyle, visualizers]),
         SGNotedSection(nil, fluid, SGL(@"settings.player.fluid.footer", @"Smooth lets the cover flow and carries the next song's cover in through it, "
                                    @"using a little more battery. Brightness above 100% can make white text harder to read. A paused song holds the "
                                    @"background still. Animated and Visualizer use these where they show Fluid.")),
@@ -1244,20 +1282,18 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
                                       SGWithNew(SGOptionRow(SGL(@"settings.player.lyric_line.title", @"Lyrics Line"),
                                                   SGL(@"settings.player.lyric_line.subtitle", @"The line being sung, under the cover. Tap it to open the lyrics."),
                                                   SGRKeyPlayerLyricLine), @"playerLyricLine"),
-                                      SGMenuRow(SGL(@"settings.player.lyric_line.size", @"Size"), lineSizes,
-                                                ^NSString *{ return lineSizes[SGRPlayerLineSmall() ? 1 : 0]; },
-                                                ^(NSInteger i) { SGRSetPlayerLineSmall(i == 1); }),
+                                      size, SGSimplifyTitlesRow(),
                                       SGWithNew(SGSwitchRow(SGL(@"settings.player.rolling_digits.title", @"Rolling time digits"),
                                                   SGL(@"settings.player.rolling_digits.subtitle", @"The digits that change under the progress bar roll into place."),
                                                   SGRKeyPlayerRollingDigits), @"playerRollingDigits"),
-                                      starAdd, musicIcons, landscape,
+                                      starAdd, musicIcons, queueStyle, landscape,
                                       SGOptionRow(SGL(@"settings.player.music_close.title", @"Music-like player close"),
                                                   SGL(@"settings.player.music_close.subtitle", @"Close into the mini player in stages. Applies after restarting Spotify."),
                                                   SGRKeyPlayerMusicClose)],
                        SGL(@"settings.player.controls.footer", @"Volume puts a slider under the controls for this iPhone, or the speaker's while Spotify plays on another device. "
-                       @"Follow the cover paints the like, shuffle and repeat in the color of the song playing.")),
+                       @"Follow the cover paints the like, shuffle and repeat in the color of the song playing. Restart Spotify to apply all control changes.")),
         SGNotedSection(SGL(@"settings.player.mini_player.header", @"Mini player"), SGRNowPlayingBarRows(),
-                       SGL(@"settings.player.mini_player.footer", @"Apple Music style moves the now playing bar in between two tabs as you scroll down.")), nil];
+                       SGL(@"settings.player.mini_player.footer", @"Apple Music style moves the mini player between two tabs as you scroll down.")), nil];
     [sections addObjectsFromArray:more];
     // Fluid, Animated and Visualizer share the field (PlayerMotion.x reads the choice on every track, PlayerVisualiser.m
     // on the field's layout); Still and Colors are a field of another kind, made once a launch (PlayerField.x). The

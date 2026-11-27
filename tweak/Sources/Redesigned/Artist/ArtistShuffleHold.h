@@ -4,37 +4,6 @@
 #import "Redesigned/Kit/SGRRestyle.h"
 #import "Shared/Haptics/Haptics.h"
 
-static id artistStringsAsset(NSBundle *bundle, NSString *asset) {
-    NSData *data = bundle ? [[NSDataAsset alloc] initWithName:asset bundle:bundle].data : nil;
-    return data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-}
-
-static NSDictionary *artistControlWords(void) {
-    static NSDictionary *words;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        NSURL *url = [NSBundle.mainBundle URLForResource:@"SPTStrings" withExtension:@"bundle"];
-        NSBundle *bundle = url ? [NSBundle bundleWithURL:url] : nil;
-        NSArray *keys = artistStringsAsset(bundle, @"_i18n.KEYS");
-        NSDictionary *files = artistStringsAsset(bundle, @"_i18n.INDEX");
-        NSMutableDictionary *found = [NSMutableDictionary dictionary];
-        for (NSString *language in [NSBundle.mainBundle.preferredLocalizations arrayByAddingObject:@"en"]) {
-            NSString *file = [files isKindOfClass:NSDictionary.class] ? files[language] : nil;
-            NSArray *values = artistStringsAsset(bundle, [@"_i18n." stringByAppendingString:file ?: language]);
-            if (![keys isKindOfClass:NSArray.class] || ![values isKindOfClass:NSArray.class]) continue;
-            for (NSString *key in @[@"ShuffleButtonOff", @"ShuffleButtonOn", @"ShuffleButtonOnSmartShuffle",
-                                    @"AccessibilityPlay", @"AccessibilityPause", @"AccessibilityShufflePlay"]) {
-                NSUInteger i = [keys indexOfObject:[@"encore:sEncore" stringByAppendingString:key]];
-                if (i >= values.count || ![values[i] isKindOfClass:NSString.class] || ![values[i] length]) continue;
-                if (!found[key]) found[key] = [NSMutableSet set];
-                [found[key] addObject:values[i]];
-            }
-        }
-        words = found;
-    });
-    return words;
-}
-
 @interface SGRArtistHold : UILongPressGestureRecognizer <UIGestureRecognizerDelegate>
 @property(nonatomic, weak) UIView *shuffle, *play, *header;
 @property(nonatomic, copy) NSString *artist, *heldArtist;
@@ -51,13 +20,17 @@ static NSDictionary *artistControlWords(void) {
     if (!self.artist.length || !capsule.window || capsule.hidden || self.play != capsule.source ||
         self.header.window != capsule.window || ![self.play isDescendantOfView:self.header] ||
         ![self.shuffle isDescendantOfView:self.header] || !SGRSourceEnabled(self.play) || !SGRSourceEnabled(self.shuffle)) return NO;
-    NSDictionary *words = artistControlWords();
-    NSString *value = self.shuffle.accessibilityValue, *label = self.play.accessibilityLabel;
-    if (!value || !label) return NO;
+    NSDictionary<NSString *, NSSet<NSString *> *> *words = SGRSpotifyControlWords();
+    NSString *value = self.shuffle.accessibilityValue;
+    if (!value) return NO;
     *on = [words[@"ShuffleButtonOn"] containsObject:value] || [words[@"ShuffleButtonOnSmartShuffle"] containsObject:value];
+    if (!*on && ![words[@"ShuffleButtonOff"] containsObject:value]) return NO;
+    if (SGRPlayButtonPlaying(self.play, playing)) return YES;
+    // Without the play button's own state, only its label tells, in the languages Spotify's strings carry.
+    NSString *label = self.play.accessibilityLabel;
+    if (!label) return NO;
     *playing = [words[@"AccessibilityPause"] containsObject:label];
-    return (*on || [words[@"ShuffleButtonOff"] containsObject:value]) &&
-           (*playing || [words[@"AccessibilityPlay"] containsObject:label] || [words[@"AccessibilityShufflePlay"] containsObject:label]);
+    return *playing || [words[@"AccessibilityPlay"] containsObject:label] || [words[@"AccessibilityShufflePlay"] containsObject:label];
 }
 - (BOOL)shuffleArtist {
     BOOL on, playing;

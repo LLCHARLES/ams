@@ -2,7 +2,10 @@
 // without a layout, just as the display-link follower does after UIKit completes the open.
 #import <UIKit/UIKit.h>
 #import "Redesigned/Kit/SGRRestyle.h"
+#import "Redesigned/Kit/SGRBackdropInk.h"
 #import "harness-fail.h"
+
+void SGRBackdropInkSetSource(UIView *source) {}
 
 static UIView *screen;
 static CGRect drawn;

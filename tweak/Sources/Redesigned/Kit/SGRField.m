@@ -194,7 +194,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
         [self.layer insertSublayer:_fluidLayer above:_solid];
     }
     // The fluid field is the whole picture, as the moving one is.
-    _fluidLayer.hidden = !fluid || _covered;
+    [self updateMotion];
     _black.hidden = fluid || _flows;
     if (fluid) _backdrop.hidden = YES;
     if (fluid && _image) [_fluidLayer setArtwork:_image animated:NO];
@@ -234,7 +234,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     _covered = covered;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _fluidLayer.hidden = !_fluid || covered;
+    [self updateMotion];
     [CATransaction commit];
 }
 
@@ -261,12 +261,14 @@ UIColor *SGRFieldShownColor(UIColor *color) {
 
 - (void)updateMotion {
     if (!_flow && !_fluidLayer) return;
-    // A locked phone keeps the player in its window, so being in front counts as much as being in one.
+    // Keep the last frame for the switcher snapshot; only motion needs the app to be active.
     BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    BOOL may = self.window && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion()
+    BOOL visible = self.window && !self.hidden;
+    _fluidLayer.hidden = !_fluid || _covered || !visible;
+    BOOL may = visible && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion()
             && !SGRMotionHeldForPowerOrHeat() && !_motionHeld;
-    _fluidLayer.moving = may && _fluid;
-    BOOL moving = may && _flows && !_flow.hidden;
+    _fluidLayer.moving = may && _fluid && !_covered;
+    BOOL moving = may && _flows && !_covered && !_flow.hidden;
     if (!_flow || moving == _flow.moving) return;
     _flow.moving = moving;
     static NSUInteger logged;
@@ -275,6 +277,11 @@ UIColor *SGRFieldShownColor(UIColor *color) {
 
 - (void)didMoveToWindow {
     [super didMoveToWindow];
+    [self updateMotion];
+}
+
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
     [self updateMotion];
 }
 
@@ -308,7 +315,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     _image = image;
     _identity = [identity copy];
     _paletteCurrent = NO;
-    if (_fluid) [_fluidLayer setArtwork:image animated:animated && self.window != nil];
+    if (_fluid) [_fluidLayer setArtwork:image animated:animated && !_fluidLayer.hidden];
     [self readPaletteAnimated:animated];
 }
 

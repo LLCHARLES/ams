@@ -4,6 +4,7 @@
 #import "Shared/AdBlock/AdBlock.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/SpotifyPrefs/SpotifyPrefs.h"
+#import "Shared/WireGuard/SGWGABI.h"
 #import "AutoMix.h"
 #import "SGTransitionFactsInternal.h"
 
@@ -12,6 +13,7 @@
 @end
 
 static __weak SPTCoreProductState *sg_productState;
+static BOOL sg_transitionAPI;
 
 // Made once per session, as the account is known. Its argument is the core's C++ object, not an Objective-C one.
 %hook SPTCoreProductState
@@ -24,14 +26,14 @@ static __weak SPTCoreProductState *sg_productState;
 
 BOOL SGTransitionSettingsRead(SGTransitionSettings *settings) {
     SPTPreferences *preferences = SGSpotifyPreferences();
-    if (!preferences) return NO;
+    if (!sg_transitionAPI || !preferences) return NO;
     *settings = (SGTransitionSettings){preferences.audioAutomix, preferences.audioCrossfade, preferences.audioCrossfadeTime};
     return YES;
 }
 
 BOOL SGTransitionSettingsWrite(SGTransitionSettings settings) {
     SPTPreferences *preferences = SGSpotifyPreferences();
-    if (!preferences) return NO;
+    if (!sg_transitionAPI || !preferences) return NO;
     // The time first: under Spoof Premium Crossfade.x turns crossfade on or off with it.
     preferences.audioCrossfadeTime = settings.milliseconds;
     preferences.audioCrossfade = settings.crossfade;
@@ -113,10 +115,25 @@ void SGAutoMixSetSeconds(NSInteger seconds) {
     SGTransitionSettingsWrite(s);
 }
 
+static NSString *productString(NSString *key, BOOL *compatible) {
+    SPTCoreProductState *state = sg_productState;
+    // An absent state (not loaded yet) or an absent key was always allowed. A changed API is not.
+    BOOL valid = !state || SGWGMethodMatches(class_getInstanceMethod(object_getClass(state), @selector(stringForKey:)), "@", @[@"@"]);
+    id value = valid ? [state stringForKey:key] : nil;
+    valid = valid && (!value || [value isKindOfClass:NSString.class]);
+    if (compatible) *compatible = valid;
+    if (!valid) {
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ SGLog(@"automix: product state string API unavailable"); });
+    }
+    return valid ? value : nil;
+}
+
 BOOL SGAutoMixAccountAllows(void) {
     if (SGHidden(SGKeyFakePremium)) return YES;
-    NSString *type = [sg_productState stringForKey:@"type"];
-    return !type || [type isEqualToString:@"premium"];
+    BOOL compatible;
+    NSString *type = productString(@"type", &compatible);
+    return compatible && (!type || [type isEqualToString:@"premium"]);
 }
 
 NSString *SGAutoMixSummary(void) {
@@ -217,6 +234,7 @@ static void settingsChanged(void) {
 
 // Observe Spotify's own Playback page as well as the mod's writes. None of the facts machinery writes preferences,
 // changes the queue, or drives playback.
+%group SGTransitionPreferenceHooks
 %hook _TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation
 - (void)setAudioAutomix:(BOOL)on {
     %orig;
@@ -230,6 +248,7 @@ static void settingsChanged(void) {
     %orig;
     settingsChanged();
 }
+%end
 %end
 
 #if SG_DRIVER
@@ -257,8 +276,8 @@ NSDictionary *SGAutoMixProbeCommand(NSDictionary *p, NSString **error) {
                 @"inStart": @(facts.inStart), @"inEnd": @(facts.inEnd),
             } : (id)NSNull.null,
             @"automix" : @(s.automix), @"crossfade" : @(s.crossfade), @"ms" : @(s.milliseconds),
-            @"type" : [sg_productState stringForKey:@"type"] ?: @"unknown",
-            @"catalogue" : [sg_productState stringForKey:@"catalogue"] ?: @"unknown",
+            @"type" : productString(@"type", NULL) ?: @"unknown",
+            @"catalogue" : productString(@"catalogue", NULL) ?: @"unknown",
             @"switch" : @(SGFlag(SGKeyAutoMix, NO)), @"style" : @(SGAutoMixCurrentStyle()),
             @"saved" : [NSUserDefaults.standardUserDefaults arrayForKey:SGKeyAutoMixSaved] ?: @[],
             @"allows" : @(SGAutoMixAccountAllows()),
@@ -274,6 +293,19 @@ NSDictionary *SGAutoMixProbeCommand(NSDictionary *p, NSString **error) {
 
 %ctor {
     %init;
+    Class cls = NSClassFromString(@"_TtC31Preferences_CorePreferencesImpl28SPTPreferencesImplementation");
+    sg_transitionAPI =
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(audioAutomix)), @encode(BOOL), @[]) &&
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(audioCrossfade)), @encode(BOOL), @[]) &&
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(audioCrossfadeTime)), @encode(NSInteger), @[]) &&
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(setAudioAutomix:)), "v", @[@(@encode(BOOL))]) &&
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(setAudioCrossfade:)), "v", @[@(@encode(BOOL))]) &&
+        SGWGMethodMatches(class_getInstanceMethod(cls, @selector(setAudioCrossfadeTime:)), "v", @[@(@encode(NSInteger))]);
+    if (sg_transitionAPI) {
+        %init(SGTransitionPreferenceHooks);
+    } else {
+        SGLog(@"automix: transition preference API unavailable");
+    }
     SGRequireClasses(@[@"SPTCoreProductState"]);
     if (SGFlag(SGKeyAutoMix, NO)) startProbe();
     dispatch_async(dispatch_get_main_queue(), ^{ SGAutoMixStartTransitionObserver(); });

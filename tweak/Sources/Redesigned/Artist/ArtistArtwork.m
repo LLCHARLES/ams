@@ -5,6 +5,7 @@
 #import "Shared/AnimatedArtwork/SGMotionClip.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Redesigned/Kit/SGRMotionBudget.h"
+#import "Redesigned/Kit/SGRHeaderClip.h"
 #import "Redesigned/Player/Player.h"
 #import "ArtistArtwork.h"
 
@@ -112,14 +113,12 @@ NSArray<NSString *> *SGRArtistReleaseTitles(UIView *root) {
 }
 @end
 
-static void *kArtistReady = &kArtistReady;
 static char kScrollContext;
 @implementation SGRArtistMotionView {
-    NSURL *_file; // retains the store's lease while the player uses it
-    AVQueuePlayer *_player;
+    SGRHeaderClip *_clip;
+    SGRHeaderPage *_clipPage;
     NSHashTable *_motionScrolls;
-    AVPlayerLooper *_looper;
-    AVPlayerLayer *_video;
+    BOOL _resigning, _background;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if (!(self = [super initWithFrame:frame])) return nil;
@@ -128,87 +127,74 @@ static char kScrollContext;
     self.clipsToBounds = YES;
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePlayback)
         name:SGRPlayerVisibilityDidChangeNotification object:nil];
+    __weak SGRArtistMotionView *weakView = self;
+    _clipPage = [[SGRHeaderPage alloc] initWithRefresh:^{ [weakView updatePlayback]; }];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updatePlayback)
+        name:UIApplicationDidReceiveMemoryWarningNotification object:nil];
     for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
-        NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+        UIApplicationDidEnterBackgroundNotification])
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(appState:) name:name object:nil];
+    for (NSNotificationName name in @[NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
         UIAccessibilityReduceMotionStatusDidChangeNotification,
         UIAccessibilityVideoAutoplayStatusDidChangeNotification])
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateSoon) name:name object:nil];
     return self;
 }
 - (void)dealloc {
+    [_clip invalidate];
     SGRBindViewportScrolls(nil, _motionScrolls, self, &kScrollContext);
     [NSNotificationCenter.defaultCenter removeObserver:self];
-    [_video removeObserver:self forKeyPath:@"readyForDisplay" context:kArtistReady];
-    [_player pause];
 }
 - (void)showFile:(NSURL *)file {
-    if ([_file isEqual:file]) return;
-    [_player pause];
-    [_video removeObserver:self forKeyPath:@"readyForDisplay" context:kArtistReady];
-    [_video removeFromSuperlayer];
-    _video = nil;
-    _looper = nil;
-    _player = nil;
-    _file = file;
+    if ([_clip.file isEqual:file]) { [self updatePlayback]; return; }
+    [_clip invalidate];
+    _clip = nil;
     if (!file) {
         SGRObserveVisibility(self, nil);
         SGRBindViewportScrolls(nil, _motionScrolls, self, &kScrollContext);
         _motionScrolls = nil;
         return;
     }
-    _player = [AVQueuePlayer new];
-    _player.muted = YES;
-    _player.preventsDisplaySleepDuringVideoPlayback = NO;
-    _player.automaticallyWaitsToMinimizeStalling = NO;
-    _looper = [AVPlayerLooper playerLooperWithPlayer:_player templateItem:[AVPlayerItem playerItemWithURL:file]];
-    _video = [AVPlayerLayer playerLayerWithPlayer:_player];
-    _video.videoGravity = AVLayerVideoGravityResizeAspectFill;
-    _video.frame = self.bounds;
-    _video.opacity = 0;
-    [self.layer addSublayer:_video];
-    [_video addObserver:self forKeyPath:@"readyForDisplay" options:NSKeyValueObservingOptionInitial context:kArtistReady];
+    __weak SGRArtistMotionView *weakSelf = self;
+    _clip = [[SGRHeaderClip alloc] initWithFile:file appearance:^(BOOL shown, BOOL entrance) {
+        SGRArtistMotionView *view = weakSelf;
+        if (!entrance || !view.window || SGRReduceMotion()) return;
+        CABasicAnimation *fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+        fade.fromValue = @0;
+        fade.toValue = @1;
+        fade.duration = 0.2;
+        [view->_clip.layer addAnimation:fade forKey:@"fade"];
+    }];
+    [_clip setFrame:self.bounds];
+    [self.layer addSublayer:_clip.layer];
     if (!_motionScrolls) {
         _motionScrolls = [NSHashTable weakObjectsHashTable];
-        __weak SGRArtistMotionView *weakSelf = self;
         SGRObserveVisibility(self, ^{ [weakSelf motionHierarchyChanged]; });
     }
     [self motionHierarchyChanged];
 }
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
     if (context == &kScrollContext) { [self updatePlayback]; return; }
-    if (context != kArtistReady) {
-        [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
-        return;
-    }
-    __weak SGRArtistMotionView *weakSelf = self;
-    dispatch_async(dispatch_get_main_queue(), ^{
-        SGRArtistMotionView *view = weakSelf;
-        AVPlayerLayer *video = object;
-        if (!view || view->_video != video || !video.readyForDisplay || video.opacity == 1) return;
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        video.opacity = 1;
-        if (view.window && !SGRReduceMotion()) {
-            CABasicAnimation *fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
-            fade.fromValue = @0;
-            fade.toValue = @1;
-            fade.duration = 0.2;
-            [video addAnimation:fade forKey:@"fade"];
-        }
-        [CATransaction commit];
-    });
+    [super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+- (void)appState:(NSNotification *)note {
+    _resigning = ![note.name isEqual:UIApplicationDidBecomeActiveNotification];
+    _background = [note.name isEqual:UIApplicationDidEnterBackgroundNotification];
+    [self updatePlayback];
 }
 - (void)updateSoon {
     dispatch_async(dispatch_get_main_queue(), ^{ [self updatePlayback]; });
 }
 - (void)updatePlayback {
-    if (!_player) return;
-    BOOL may = SGMotionHeaderMayPlay(SGRViewInViewport(self, SGRSettledPlayerRect(self.window)),
-        UIApplication.sharedApplication.applicationState == UIApplicationStateActive,
+    [_clipPage bindHeader:self];
+    if (!_clip) return;
+    UIApplicationState state = UIApplication.sharedApplication.applicationState;
+    BOOL front = !_resigning && state == UIApplicationStateActive;
+    BOOL visible = !_background && state != UIApplicationStateBackground &&
+                   [_clipPage visibleInViewport:SGRViewInViewport(self, SGRSettledPlayerRect(self.window))];
+    BOOL may = SGMotionHeaderMayPlay(visible, front,
         SGRReduceMotion(), SGRMotionHeldForPowerOrHeat(), UIAccessibilityIsVideoAutoplayEnabled());
-    if (may != (_player.rate != 0)) {
-        if (may) [_player play]; else [_player pause];
-    }
+    [_clip updateVisible:visible active:front mayPlay:may];
 }
 - (void)motionHierarchyChanged {
     SGRBindViewportScrolls(self, _motionScrolls, self, &kScrollContext);
@@ -218,7 +204,7 @@ static char kScrollContext;
     [super layoutSubviews];
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    _video.frame = self.bounds;
+    [_clip setFrame:self.bounds];
     [CATransaction commit];
     [self updatePlayback];
 }

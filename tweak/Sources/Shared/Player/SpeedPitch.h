@@ -119,9 +119,13 @@ BOOL SGPlayerMusicClientFormat(AudioStreamBasicDescription *format);
 // starts or stops it, or a format of it changes: the time to read its format, add a render notify to it and start
 // over what was held. Called on Spotify's audio thread or a queue of Shared/Player's, under a lock a dispose
 // waits for, so the unit stays alive through the call; it must not wait on the main thread. NO when
-// Spotify's output cannot be reached at all. Register from a %ctor; up to four.
+// Spotify's output cannot be reached at all or every slot is taken. Register from a %ctor; up to five
+// (Audio Effects, Haptics, Sing, the sleep timer and Fluid's spectrum).
 typedef void (*SGPlayerOutputWatcher)(AudioUnit output);
 BOOL SGPlayerWatchMusicOutput(SGPlayerOutputWatcher watcher);
+// A watcher added and removed while running (Fluid's spectrum, only while a moving Smooth field reads it). On
+// either it is called once at once, under the same lock, with the music's output when added and NULL when removed.
+BOOL SGPlayerSetDemandWatcher(SGPlayerOutputWatcher watcher, BOOL on);
 
 #if SG_DRIVER
 // Speed-rebuffer test (FLEX builds): completed runs of silence from the music's mixer so far, and the last one's

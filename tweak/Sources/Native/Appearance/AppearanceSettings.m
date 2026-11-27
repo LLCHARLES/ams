@@ -34,7 +34,7 @@ static void chooseColor(NSInteger rgb) {
 
 // The native look's rows of the Appearance page (App/Pages.m): the preset from a menu, then the color in
 // effect, which opens the sheet of recent colors and the picker; a color stored from there is Custom.
-NSArray<SGModRow *> *SGNativeAppearanceRows(void) {
+NSArray<SGModSection *> *SGNativeAppearanceSections(void) {
     SGModRow *explicit = SGOptionRow(SGL(@"settings.appearance.hide_explicit.title", @"Hide explicit badge"),
         SGL(@"settings.appearance.hide_explicit.subtitle", @"Hide the E mark, without changing content restrictions or VoiceOver"), SGKeyHideExplicit);
     explicit.changed = ^(BOOL on) { SGRefreshExplicitBadges(); };
@@ -46,9 +46,11 @@ NSArray<SGModRow *> *SGNativeAppearanceRows(void) {
     });
     colour.swatch = ^UIColor *{ return SGColorRGB(SGAccentRGB()); };
     return @[
-        SGWithSymbol(SGOptionRow(SGL(@"settings.appearance.amoled_background.title", @"AMOLED background"), nil, SGKeyAmoled), @"moon"),
-        SGWithSymbol(menu, @"paintpalette"),
-        SGWithSymbol(colour, @"eyedropper"),
-        SGWithSymbol(explicit, @"e.square"),
+        SGSection(SGL(@"settings.appearance.theme.header", @"Theme"), @[
+            SGWithSymbol(SGOptionRow(SGL(@"settings.appearance.amoled_background.title", @"AMOLED background"), nil, SGKeyAmoled), @"moon")]),
+        SGSection(SGL(@"settings.appearance.accent.header", @"Accent"), @[
+            SGWithSymbol(SGSearchIdentified(menu, @"menu.native.accentPreset"), @"paintpalette"),
+            SGWithSymbol(SGSearchIdentified(colour, SGKeyAccent), @"eyedropper")]),
+        SGSection(SGL(@"settings.appearance.pages.header", @"Pages & badges"), @[SGWithSymbol(explicit, @"e.square")]),
     ];
 }

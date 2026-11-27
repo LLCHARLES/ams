@@ -8,10 +8,11 @@ Retrine IPA builds include Pixie's native download manager by default and requir
 ```sh
 make release                                # primary Spotify 9.2.0
 make release IPA=ipa/Spotify-9.1.90.ipa     # compatibility lane
+make release IPA=ipa/Spotify-9.2.2.ipa      # compatibility lane
 ```
 
-These produce `out/retrine-<version>-pixie.ipa` and
-`out/retrine-<version>-pixie-spotify-9.1.90.ipa`, separately from the input and ordinary
+These produce `out/retrine-<version>-pixie.ipa`,
+`out/retrine-<version>-pixie-spotify-9.1.90.ipa` and `-pixie-spotify-9.2.2.ipa`, separately from the input and ordinary
 Retrine output. An explicit `IPA=` overrides the Pixie primary target.
 `make build` and `make install` use the same overlay (the latter also signs and installs).
 The direct pipeline includes Pixie unless given `--no-pixie` or `PIXIE=0`.
@@ -19,9 +20,9 @@ The direct pipeline includes Pixie unless given `--no-pixie` or `PIXIE=0`.
 
 ## Supported targets
 
-Packaging accepts the exact decrypted Spotify **9.2.0** (`920002054`) and
-**9.1.90** (`919002269`) profiles. Main and SpotifyShared UUIDs are recorded in
-`NativeDownloads/targets/spotify-9.2.0.json` and `spotify-9.1.90.json`.
+Packaging accepts the exact decrypted Spotify **9.2.0** (`920002054`), **9.2.2**
+(`920202587`) and **9.1.90** (`919002269`) profiles. Main and SpotifyShared UUIDs are
+recorded in `NativeDownloads/targets/spotify-<version>.json`.
 Version, build, both UUIDs, instruction windows, import bindings and unused executable
 padding are checked before the base build; requested Pixie mismatches fail closed.
 
@@ -30,6 +31,19 @@ using the verified Eevee `0d9feaa` manager layout, including the eight-byte
 quota-field shift. The host also routes nebula account attributes through Pixie's
 conversion. Downloading, keeping a download across an app restart, and deleting
 it were verified on a real device. Jailbreak packaging remains 9.1.90-only.
+
+**Downloads also work on 9.2.2,** admitted on Eevee `8c08046`'s layout. Its manager
+fields sit 0x80 further than 9.2.0's (shift 136, proven by the setter's loads), and every
+patch site is beyond branch range of the header padding, so all trampolines live in the
+zero padding after the last `__TEXT` section. On a real device (iOS 27.2.1) a single track
+and a 16-track album downloaded, stayed across a restart, played in Spotify's offline mode,
+exported as M4A and Ogg, and deleted cleanly.
+
+The queue flags (online, sync level and the like) keep the unshifted base on every target.
+They read `online=0` or invalid on the phone under 9.1.90, 9.2.0 and 9.2.2 alike. Downloads
+do not depend on them, but the compatibility check behind restoring key request mode 0
+(`SAPModeChangeBlockReason`) still requires `online` and `connection_allows_offlining`, so
+that restore stays refused while they read this way.
 
 All builds reject existing Pixie
 payloads, partial overlays, malformed inputs and encrypted executables.

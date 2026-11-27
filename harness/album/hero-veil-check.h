@@ -8,7 +8,7 @@
 // (veil-check.sh). Then the literal checks run, and the harness logs a
 // PASS line and exits 0, or a FAIL line and exits 1 (../harness-fail.h).
 #import <UIKit/UIKit.h>
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 
 static UIView *veilFind(UIView *root, NSString *className) {
     NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:root];
@@ -106,8 +106,11 @@ static void veilRun(UIView *root, NSString *page, NSString *mode, BOOL zooms, BO
     UIView *(^surface)(UIView *) = ^UIView *(UIView *hero) { return surfaceOf ? surfaceOf(hero) : hero; };
     // d = 0, 190, 400, then on with the veil a d where the title is half under the bar line, measured at rest.
     NSUInteger count = on ? 4 : 3;
-    for (NSUInteger i = 0; i < count; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((start + 1.5 * i) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    HarnessWhen(@"page hero, title and picture mounted", ^BOOL {
+        UIView *hero = veilFind(root, heroClass);
+        return hero.window && veilTitle(veilFind(root, @"SGRHeaderInfo")).window && surface(hero).window;
+    }, ^{
+        for (NSUInteger i = 0; i < count; i++) {
             NSString *name;
             CGFloat d;
             if (i < 3) {
@@ -121,9 +124,14 @@ static void veilRun(UIView *root, NSString *page, NSString *mode, BOOL zooms, BO
             UIView *hero = veilFind(root, heroClass);
             NSLog(@"[harness] %@ %@ d=%.0f: radius %.2f, dim %.3f", page, mode, d, veilRadius(surface(hero)), veilAlpha(surface(hero)));
             NSLog(@"[harness] SHOT %@-%@-%@", page, mode, name);
-        });
-    }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((start + 1.5 * count) * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if ([NSProcessInfo.processInfo.arguments containsObject:@"capture-veil"]) {
+                [CATransaction flush];
+                NSString *ack = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+                NSLog(@"[harness] VEIL-ACK %@", ack);
+                HARNESS_AWAIT([NSFileManager.defaultManager fileExistsAtPath:ack]);
+                HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:ack error:nil]);
+            }
+        }
         UIView *hero = veilFind(root, heroClass), *info = veilFind(root, @"SGRHeaderInfo");
         HARNESS_CHECK(hero && hero.window && info);
         UIView *drawnOn = surface(hero);

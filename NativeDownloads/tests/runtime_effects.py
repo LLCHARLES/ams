@@ -78,6 +78,12 @@ main=r'''
 - (void)URLSession:(id)s task:(id)t didCompleteWithError:(id)e {}
 @end
 int main(void) {@autoreleasepool {
+    // No test image publication or second constructor has run yet.
+    if(addedImage || removedImage)return 1;
+    SAPLoad();
+    if(!addedImage || !removedImage || effects || patches || writes) {
+        fputs("bootstrap did not initialize image observation before admission\n",stderr);return 1;
+    }
     Cache *cache=[Cache new];cache.storage=[NSMutableDictionary dictionary];
     NSData *body=SAPProtoBytes(1,SAPProtoBytes(3,[NSData data]));
     const uint8_t accountBytes[]={0x0a,0x0d,0x0a,7,'o','f','f','l','i','n','e',0x12,2,0x10,0};

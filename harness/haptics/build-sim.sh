@@ -25,7 +25,7 @@ mkdir -p "$OUT/gen" "$OUT/HapticsHarness.app"
 # Shared/Player keeps Spotify's outputs apart and tells Music Haptics which is the music's.
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Player/SpeedPitch.x" > "$OUT/gen/SpeedPitch.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O1 -DSG_DRIVER=1 -isysroot "$SDK" -Wno-deprecated-declarations \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O1 -DSG_DRIVER=1 -isysroot "$SDK" -Wno-deprecated-declarations \
     $EXTRA -I"$SRC" -I"$SRC/Shared/Haptics" -I"$SRC/Shared/Player" -I"$OUT/gen" -Isim \
     sim/main.m sim/fakehaptics.m ../scene.m ../audio-effects/player-observer-stub.m output-driver.m "$OUT/gen/SpeedPitch.m" "$SRC/Shared/Player/SGTimePitch.m" "$HAPTICS/SGMusicAnalyzer.m" $SETTINGS \
     "$SRC/Core/SGRebind.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGViewTree.m" "$SRC/Core/SGFlagForce.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGGlass.m" \

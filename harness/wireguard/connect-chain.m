@@ -10,6 +10,7 @@
 #import "../harness-fail.h"
 
 BOOL SGWGReady(void) { return YES; }
+NSString *SGWGAppVersion(void) { return nil; }
 id SGWGCreateNativeProxyConfig(void) { return nil; }
 
 static ssize_t (*systemSendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
@@ -59,6 +60,14 @@ int main(int argc, char **argv) {
             HARNESS_CHECK(SGWGInstallNativePatches());
         }
         HARNESS_CHECK(SGWGInstallNativePatches()); // readiness refresh must not form a cycle
+
+        int pair[2];
+        HARNESS_CHECK(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+        HARNESS_CHECK(sendto(pair[0], "x", 1, 0, NULL, 0) == 1);
+        struct sockaddr_in remote = {.sin_len = sizeof(remote), .sin_family = AF_INET};
+        inet_pton(AF_INET, "192.0.2.1", &remote.sin_addr);
+        HARNESS_CHECK(sendto(pair[0], "x", 1, 0, (const void *)&remote, sizeof(remote)) == -1 && errno == ENETUNREACH);
+        close(pair[0]); close(pair[1]);
 
         // Exercise the other imported entry points with permitted local destinations.
         struct addrinfo *addresses = NULL;

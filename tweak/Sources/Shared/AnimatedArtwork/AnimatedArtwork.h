@@ -93,10 +93,18 @@ SGMotionTicket *SGMotionRequestSongCover(NSString *artist, NSString *album, NSSt
 // one returns YES (its file is then requested). A nil `found` file signals no candidate
 // in the title search, not an identified release without video or a transfer failure.
 typedef BOOL (^SGMotionRowMatch)(NSString *artist, NSString *song);
-void SGMotionAlbumRowMatcher(NSString *albumArtist, NSString *album, CGFloat pixels, void (^ready)(SGMotionRowMatch match), void (^found)(NSURL *file));
+void SGMotionAlbumRowMatcher(NSString *albumArtist, NSString *album, NSString *albumURI, CGFloat pixels, void (^ready)(SGMotionRowMatch match), void (^found)(NSURL *file));
 // Main queue. A page may use rows only when the header did not identify a release.
-void SGMotionPageAlbumCover(NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file, BOOL identified));
-void SGMotionPageIdentifierCover(NSString *albumURI, NSString *album, CGFloat pixels, void (^done)(NSURL *file));
+void SGMotionPageAlbumCover(NSString *artist, NSString *album, NSString *albumURI, CGFloat pixels, void (^done)(NSURL *file, BOOL identified));
+// Only a confirmed miss permits an unrestricted title search. A known still edition permits a year-bound one.
+typedef NS_ENUM(NSInteger, SGMotionIdentifierOutcome) {
+    SGMotionIdentifierUnavailable, SGMotionIdentifierMiss, SGMotionIdentifierStill, SGMotionIdentifierClip, SGMotionIdentifierAmbiguous,
+    SGMotionIdentifierKnownTitle
+};
+void SGMotionPageIdentifierCover(NSString *albumURI, NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file, SGMotionIdentifierOutcome outcome));
+// After the identifiers named a still edition: the album by its title among Apple's releases of the album's year on
+// Spotify (within a year), so another of the same name and another year cannot stand in; nil without a year or a clip.
+void SGMotionPageStillEditionCover(NSString *albumURI, NSString *artist, NSString *album, CGFloat pixels, void (^done)(NSURL *file));
 SGMotionTicket *SGMotionRequestSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
                                       CGFloat pixels, void (^done)(NSURL *file, NSString *source));
 SGMotionTicket *SGMotionRequestAlbumSongClip(NSString *uri, NSURL *canvas, NSString *artist, NSString *album, NSString *song,
@@ -145,11 +153,11 @@ void SGMotionCacheClear(void (^done)(BOOL complete));
 // The first frame of a local video. Main queue.
 void SGMotionPoster(NSURL *file, void (^done)(UIImage *poster));
 
-// Settings: what the lock screen shows, the lyrics' style and Low Data Mode; below iOS 26 the one row
+// Settings: what the lock screen shows and the lyrics' style; below iOS 26 the one row
 // SGLockScreenArtworkNeedsRow, which says the setting needs iOS 26 and, tapped, why.
 NSArray *SGLockScreenMotionRows(void);
 SGModRow *SGLockScreenArtworkNeedsRow(void);
-// The page's last row: the size of the downloaded covers and artist photos, and a tap that clears them after asking.
+// Mod > Storage: downloaded covers and artist photos, cleared only after confirmation.
 SGModRow *SGArtworkCacheRow(void);
 
 // Pure steps, for the harness.

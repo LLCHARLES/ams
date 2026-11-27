@@ -3,6 +3,11 @@
 #undef SGLyricsClipWriteWithLayout
 #import "Core/SGDataRoot.h"
 
+// The now-playing drivers define these around their own copies of the generated sources; this binary links
+// the plain generated files and never runs the artwork checks that read them.
+NSUInteger harnessArtworkHashes;
+BOOL harnessCoverRevisions(UIImage *a, UIImage *b) { return NO; }
+
 // Fail normally rather than feeding nil to a real encoder and raising a crash dialog.
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,

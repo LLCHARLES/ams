@@ -20,16 +20,26 @@ static BOOL sg_hideLyricsInline;
 static const SGNativeMarkerRule cards[] = {
     {@"Lyrics_CardElementImpl", SGHideLyricsCard},
     {@"CreatorBiography", SGHideAboutArtist},
+    {@"ArtistAbout", SGHideAboutArtist},
     {@"VideoRecommendations", SGHideRelatedVideos},
     {@"SongDNA_", SGHideSongDNA},
     {@"LiveEvents_", SGHideLiveEvents},
     {@"WatchFeed_", SGHideExploreArtist},
     {@"Creator_Credits", SGHideCredits},
+    {@"CreatorElements_Credits", SGHideCredits}, // Spotify 9.2.2's module name
     {@"Merch_", SGHideMerch},
     {@"RelatedContentRecommendations", SGHideRecommendations},
 };
 
 enum { kCards = sizeof(cards) / sizeof(cards[0]) };
+
+static BOOL hasPlayerControls(UIView *view) {
+    static char key;
+    return SGFindRemembered(view, &key, ^BOOL(UIView *v) {
+        return [v isKindOfClass:UISlider.class] || SGClassNamed(v.class, @"SliderNowPlaying")
+            || SGClassNamed(v.class, @"PlaybackControlsGridView");
+    }) != nil;
+}
 
 // Whether the cell is one of the player's cards: its own first subview or its content view's names the page.
 // Spotify's cell has held the name in both places (Redesigned/Player/PlayerCards.x, and the trees above).
@@ -65,13 +75,99 @@ static NSString *hiddenKeyFor(UICollectionViewCell *cell) {
 - (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
     UICollectionViewLayoutAttributes *result = %orig;
     NSString *key = hiddenKeyFor((UICollectionViewCell *)self);
-    if (!key) return result;
+    if (!key || hasPlayerControls((UIView *)self)) return result;
     result.size = CGSizeMake(result.size.width, 0);
     ((UIView *)self).clipsToBounds = YES;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"collapsed the first card, %@", key); });
     return result;
 }
+%end
+
+static NSString *const kPlayerListID = @"scrolling_npv_collection_view_accessibility_identifier";
+
+static BOOL inPlayerScroll(UIView *view) {
+    for (UIView *v = view.superview; v; v = v.superview) {
+        if (SGClassNamed(v.class, @"NowPlaying_Scroll") || SGClassNamed(v.class, @"NPVScroll")) return YES;
+        if (![v isKindOfClass:UICollectionView.class]) continue;
+        UICollectionView *list = (UICollectionView *)v;
+        if ([list.accessibilityIdentifier isEqualToString:kPlayerListID] ||
+            SGClassNamed([list.dataSource class], @"NowPlaying_Scroll") ||
+            SGClassNamed([list.delegate class], @"NowPlaying_Scroll")) return YES;
+    }
+    return NO;
+}
+
+static BOOL hidePlayerHeader(UIView *view) {
+    return inPlayerScroll(view) && !hasPlayerControls(view);
+}
+
+static void trimCardSpacing(UICollectionView *list) {
+    if (![list.accessibilityIdentifier isEqualToString:kPlayerListID] || list.dragging || list.decelerating) return;
+    // Query the whole layout, not the cells on screen: a later card or footer must stay reachable.
+    CGSize size = list.contentSize;
+    CGFloat end = 0;
+    for (UICollectionViewLayoutAttributes *a in [list.collectionViewLayout layoutAttributesForElementsInRect:(CGRect){CGPointZero, size}]) {
+        if (a.hidden || a.alpha == 0 || a.size.height <= 0) continue;
+        UIView *view;
+        if (a.representedElementCategory == UICollectionElementCategoryCell) view = [list cellForItemAtIndexPath:a.indexPath];
+        else if (a.representedElementCategory == UICollectionElementCategorySupplementaryView)
+            view = [list supplementaryViewForElementKind:a.representedElementKind atIndexPath:a.indexPath];
+        else continue;
+        if (!view || (!view.hidden && view.alpha != 0)) end = MAX(end, CGRectGetMaxY(a.frame));
+    }
+    // Keep Spotify's inset separate from our deduction; it may have supplied a new one since layout.
+    static char key;
+    NSValue *previous = objc_getAssociatedObject(list, &key);
+    CGPoint insets = previous.CGPointValue; // original, applied
+    UIEdgeInsets inset = list.contentInset;
+    CGFloat original = previous && inset.bottom == insets.y ? insets.x : inset.bottom;
+    CGFloat blank = end > 0 ? MAX(0, size.height - end) : 0;
+    // The scroll limit includes the adjusted inset too. Leaving its 34 pt on the phone
+    // still lets the full-height controls page scroll past its bottom.
+    CGFloat automatic = list.adjustedContentInset.bottom - inset.bottom;
+    CGFloat bottom = blank > 0 ? -blank - automatic : original;
+    if (inset.bottom == bottom) return;
+    objc_setAssociatedObject(list, &key, blank ? [NSValue valueWithCGPoint:CGPointMake(original, bottom)] : nil,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    inset.bottom = bottom;
+    list.contentInset = inset;
+}
+
+%group SGHiddenPlayerHeaders
+%hook UICollectionView
+- (void)layoutSubviews {
+    %orig;
+    trimCardSpacing(self);
+}
+%end
+
+%hook _TtC12Element_List21SupplementaryItemView
+- (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
+    UICollectionViewLayoutAttributes *result = %orig;
+    if (!hidePlayerHeader((UIView *)self)) return result;
+    // Don't change the list's proposed attributes: it can fit this header again after reuse.
+    UICollectionViewLayoutAttributes *collapsed = [result copy];
+    collapsed.size = CGSizeMake(result.size.width, 0);
+    return collapsed;
+}
+- (void)layoutSubviews {
+    %orig;
+    UIView *view = (UIView *)self;
+    static char key;
+    NSNumber *priorAlpha = objc_getAssociatedObject(view, &key);
+    if (hidePlayerHeader(view)) {
+        if (view.alpha != 0) {
+            objc_setAssociatedObject(view, &key, @(view.alpha), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            view.alpha = 0;
+        }
+    } else if (priorAlpha) {
+        // A reused header (or one now holding controls) is Spotify's again.
+        if (view.alpha == 0) view.alpha = priorAlpha.doubleValue;
+        objc_setAssociatedObject(view, &key, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+%end
 %end
 
 #pragma mark - player buttons, lyrics under the artwork
@@ -221,6 +317,13 @@ static BOOL inCoverCell(UIView *tilt) {
     if (!SGNativeUI()) return;
     sg_hideLyricsInline = SGHidden(SGHideLyricsInline);
     %init;
+    // Unmarked section headers cannot be attributed to one card switch. Only hide
+    // them when every card is switched off on the native Player page.
+    BOOL allHidden = YES;
+    for (size_t i = 0; i < kCards; i++) allHidden &= SGHidden(cards[i].key);
+    if (allHidden) {
+        %init(SGHiddenPlayerHeaders);
+    }
     SGRequireClasses(@[
         @"_TtC12Element_List18CollectionViewCell",
         @"_TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit",

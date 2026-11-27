@@ -9,6 +9,10 @@ __weak UIView *sg_npvBackdropRoot = nil;
 
 %hook CALayer
 - (void)setBackgroundColor:(CGColorRef)color {
+    if (!NSThread.isMainThread) {
+        %orig;
+        return;
+    }
     if (color && (sg_lyricsCardRoot || sg_lyricsPageRoot || sg_homeRoot || sg_npvBackdropRoot)) {
         UIView *view = (UIView *)self.delegate;
         if ([view isKindOfClass:UIView.class] && view.layer == self && !SGKeepsColor(view)) {

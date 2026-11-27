@@ -1,4 +1,5 @@
 #import <Security/Security.h>
+#import "Core/SGKeychain.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGPageStyle.h"
@@ -36,16 +37,7 @@ static BOOL storeKey(NSString *key) {
     SGLyricsCredentialChanged(SGLyricsAIClaude);
     sg_keyAvailable = nil;
     [sg_done removeAllObjects];
-    OSStatus deleted = SecItemDelete((__bridge CFDictionaryRef)keyQuery());
-    if (deleted != errSecSuccess && deleted != errSecItemNotFound) {
-        SGLog(@"claude: the old key could not be removed (%d)", (int)deleted);
-        return NO;
-    }
-    if (!key.length) return YES;
-    NSMutableDictionary *item = [keyQuery() mutableCopy];
-    item[(__bridge id)kSecValueData] = [key dataUsingEncoding:NSUTF8StringEncoding];
-    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+    OSStatus status = SGStoreDeviceKey(keyQuery(), key);
     if (status != errSecSuccess) SGLog(@"claude: the key could not be kept (%d)", (int)status);
     return status == errSecSuccess;
 }
@@ -77,7 +69,7 @@ NSArray<NSString *> *SGClaudeReplyIn(id root, NSInteger status, NSError *error, 
     NSDictionary *reply = [root isKindOfClass:NSDictionary.class] ? root : nil;
     id detail = [reply[@"error"] isKindOfClass:NSDictionary.class] ? reply[@"error"][@"message"] : nil;
     if (error) failure = SGL(@"settings.translation.claude.error.unreachable", @"Claude could not be reached.");
-    else if (status == 401 || status == 403) failure = SGL(@"settings.translation.claude.error.keyinvalid", @"Claude turned the key down. Check it on the Lyrics page.");
+    else if (status == 401 || status == 403) failure = SGL(@"settings.translation.claude.error.keyinvalid", @"Claude turned the key down. Check it in Lyrics › Translation & AI.");
     else if (status == 429 || (status >= 500 && status <= 599)) failure = SGL(@"settings.translation.claude.error.busy", @"Claude is busy right now. Try again in a minute.");
     else if (status == 400 && [detail isKindOfClass:NSString.class] && [detail length]) {
         NSString *message = [detail length] > 1024 ? [detail substringToIndex:1024] : detail;
@@ -111,7 +103,7 @@ NSArray<NSString *> *SGClaudeReplyIn(id root, NSInteger status, NSError *error, 
 
 NSURLRequest *SGClaudeRequest(NSString *system, NSString *prompt, NSString **problem) {
     NSString *key = storedKey(), *model = SGClaudeModel();
-    if (!key) { *problem = SGL(@"settings.translation.claude.error.nokey", @"Add a Claude API key on the Lyrics page first."); return nil; }
+    if (!key) { *problem = SGL(@"settings.translation.claude.error.nokey", @"Add a Claude API key in Lyrics › Translation & AI first."); return nil; }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://api.anthropic.com/v1/messages"]];
     request.HTTPMethod = @"POST";
     request.timeoutInterval = 60;
@@ -133,7 +125,7 @@ void SGLyricsTranslateWithClaudeFormat(NSString *trackID, NSArray<SGKaraokeLine 
         NSArray *texts = SGLyricsAITexts(lines);
         NSString *prompt = texts ? SGLyricsTranslationPromptForFormat(texts, languageTag, format) : nil;
         if (!prompt) { done(nil, unreadable()); return; }
-        if (!SGClaudeKeySet()) { done(nil, SGL(@"settings.translation.claude.error.nokey", @"Add a Claude API key on the Lyrics page first.")); return; }
+        if (!SGClaudeKeySet()) { done(nil, SGL(@"settings.translation.claude.error.nokey", @"Add a Claude API key in Lyrics › Translation & AI first.")); return; }
         NSString *model = SGClaudeModel();
         NSString *instruction = SGLyricsTranslationInstructionForLanguage(format, languageTag);
         NSString *memo = [NSString stringWithFormat:@"%@|%@|%ld|%@", trackID, languageTag, (long)format, instruction];

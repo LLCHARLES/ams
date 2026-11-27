@@ -23,4 +23,10 @@
 + (instancetype)buttonWithSymbol:(NSString *)symbol pointSize:(CGFloat)size title:(NSString *)accessibilityTitle;
 @property (nonatomic, readonly) SGRGlyphView *glyph;
 @property (nonatomic, copy) void (^onTap)(void);
+// Above 0, a press only takes the glyph to this alpha, at once, with no sink and no spring: the Music app's footer
+// buttons (the label at 0.6 while pressed, 1 otherwise, not animated).
+// 0, the default, keeps the press above.
+@property (nonatomic) CGFloat pressedAlpha;
+// Called as such a press comes and goes, for a drawing that stands in for the glyph (PlayerFooter.x's Encore glyph).
+@property (nonatomic, copy) void (^onPress)(BOOL pressed);
 @end

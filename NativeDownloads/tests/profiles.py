@@ -8,17 +8,75 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from zipfile import ZipFile
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"tools"))
-from pixie_target import V9190,V9200,select_profile,artifact_name
+from pixie_target import V9190,V9200,V9202,select_profile,artifact_name
 from build_retrine_9190 import prepare_native,read_input,input_profile,verify_caves
 from generate_target import generate_headers,validate_headers
 import patch_native_restrictions as quota
 import patch_key_request_mode as key
 import patch_native_trace as trace
 import patch_imports as audio
+
+
+class HeldProfile(unittest.TestCase):
+    def test_matching_layout_with_disabled_admission_is_never_patchable(self):
+        disabled = replace(V9190, enabled=False)
+        info = {"CFBundleShortVersionString": disabled.version, "CFBundleVersion": disabled.build}
+        with patch("pixie_target.TARGETS", (disabled,)):
+            for options in ({}, {"require_enabled": False}, {"jailbreak": True, "require_enabled": False}):
+                with self.subTest(options=options), self.assertRaises(ValueError):
+                    select_profile(info, disabled.main_uuid, disabled.shared_uuid, **options)
+
+class StaticProfile922(unittest.TestCase):
+    """Spotify 9.2.2: fields moved +0x80 and every cave sits after the last __TEXT section."""
+    @classmethod
+    def setUpClass(cls):
+        with ZipFile(ROOT.parent/"ipa/Spotify-9.2.2.ipa") as archive:
+            cls.raw,cls.profile=input_profile(archive)
+
+    def test_selection_shift_and_artifact(self):
+        self.assertEqual(self.profile,V9202)
+        self.assertEqual(artifact_name("1.2.3",V9202),"retrine-1.2.3-pixie-spotify-9.2.2.ipa")
+        with ZipFile(ROOT.parent/"ipa/Spotify-9.2.2.ipa") as archive,self.assertRaisesRegex(ValueError,"Jailbreak"):
+            input_profile(archive,jailbreak=True)
+        # Independent setter loads: 9.2.0's +0x2c8/+0x2c0/+0x2d8/+0x2d0/+0x2e0, each +0x80.
+        for address,expected in {
+            0x1098eb380:"08a441f9",0x1098eb384:"194043b9",0x1098eb394:"68ae41f9",
+            0x1098eb3a4:"685243b9",0x1098eb3b4:"68b241f9",
+            0x10972d6a4:"fc0308aa08404239",
+        }.items():
+            start=address-0x100000000
+            self.assertEqual(self.raw[start:start+len(bytes.fromhex(expected))].hex(),expected)
+        self.assertEqual(V9202.quota_block,0x2b0+0x88)
+
+    def test_tail_caves_branches(self):
+        result=prepare_native(self.raw,V9202)[0]
+        tail_start,tail_end=0xd11a894,0xd11c000
+        for address,cave in [(V9202.setter,V9202.caves[4])]+[(p[1],p[2]) for p in V9202.trace_points]:
+            word=struct.unpack_from("<I",result,address-0x100000000)[0]
+            delta=word&0x3ffffff
+            if delta&(1<<25):delta-=1<<26
+            self.assertEqual(address+4*delta,cave)
+            self.assertTrue(tail_start<=cave-0x100000000<tail_end)
+        changed=bytearray(self.raw);changed[V9202.caves[4]-0x100000000]=1
+        with self.assertRaises(ValueError):prepare_native(bytes(changed),V9202)
+
+    def test_tail_caves_need_mapped_text(self):
+        # The same bytes and UUID, but __TEXT mapping a page less than it stores: its tail caves are not executable.
+        shrunk=bytearray(self.raw);cursor=32
+        for _ in range(struct.unpack_from("<I",shrunk,16)[0]):
+            command,length=struct.unpack_from("<II",shrunk,cursor)
+            if command==0x19 and shrunk[cursor+8:cursor+24].split(b"\0")[0]==b"__TEXT":
+                filesize=struct.unpack_from("<Q",shrunk,cursor+48)[0]
+                struct.pack_into("<Q",shrunk,cursor+32,filesize-0x4000)
+                break
+            cursor+=length
+        else:self.fail("no __TEXT")
+        with self.assertRaisesRegex(ValueError,"maps less"):prepare_native(bytes(shrunk),V9202)
 
 
 class StaticProfile(unittest.TestCase):

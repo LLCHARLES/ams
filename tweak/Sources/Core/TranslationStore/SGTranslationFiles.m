@@ -1,29 +1,34 @@
 #import "SGTranslationFiles.h"
 #import "Core/SGFileHash.h"
 #import <TargetConditionals.h>
+NSNotificationName const SGTranslationStorageAvailable = @"retrine.translationStorageAvailable";
 #if (TARGET_OS_IOS && !TARGET_OS_MACCATALYST) || defined(SG_LYRICS_TEST_STORE)
 #import <UIKit/UIKit.h>
 #import <stdatomic.h>
 
 // Files use CompleteUntilFirstUserAuthentication, so availability latches at first unlock.
 static atomic_bool unlocked;
+static void storageAvailable(BOOL recovery) {
+    BOOL alreadyUnlocked = atomic_exchange(&unlocked, true);
+    [NSNotificationCenter.defaultCenter postNotificationName:SGTranslationStorageAvailable object:@(alreadyUnlocked && recovery)];
+}
+static BOOL availableNow(void) {
+#ifdef SG_LYRICS_TEST_STORE
+    extern BOOL SGLyricsTestProtectedDataAvailable(void);
+    return SGLyricsTestProtectedDataAvailable();
+#else
+    return UIApplication.sharedApplication.protectedDataAvailable;
+#endif
+}
 __attribute__((constructor)) static void observeUnlock(void) {
     void (^setup)(void) = ^{
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationProtectedDataDidBecomeAvailable
-            object:nil queue:nil usingBlock:^(NSNotification *note) { atomic_store(&unlocked, true); }];
-#ifdef SG_LYRICS_TEST_STORE
-        extern BOOL SGLyricsTestProtectedDataAvailable(void);
-        BOOL available = SGLyricsTestProtectedDataAvailable();
-#else
-        BOOL available = UIApplication.sharedApplication.protectedDataAvailable;
-        // The injected image can initialize before UIApplicationMain creates the application.
-        if (!UIApplication.sharedApplication)
-            [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidFinishLaunchingNotification
-                object:nil queue:nil usingBlock:^(NSNotification *note) {
-                    if (UIApplication.sharedApplication.protectedDataAvailable) atomic_store(&unlocked, true);
-                }];
-#endif
-        if (available) atomic_store(&unlocked, true);
+            object:nil queue:nil usingBlock:^(NSNotification *note) { storageAvailable(YES); }];
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidFinishLaunchingNotification
+            object:nil queue:nil usingBlock:^(NSNotification *note) {
+                if (availableNow()) storageAvailable(NO);
+            }];
+        if (availableNow()) storageAvailable(NO);
     };
     // Injected at launch this runs on main, so the first prepare: already sees it. Loaded by a dlopen elsewhere,
     // waiting for main from inside an image initializer could wait on main's own dyld lock.
@@ -32,6 +37,13 @@ __attribute__((constructor)) static void observeUnlock(void) {
 }
 #endif
 #import <fcntl.h>
+BOOL SGTranslationStorageUnlocked(void) {
+#if (TARGET_OS_IOS && !TARGET_OS_MACCATALYST) || defined(SG_LYRICS_TEST_STORE)
+    return atomic_load(&unlocked);
+#else
+    return YES;
+#endif
+}
 #import <unistd.h>
 #import <sys/stat.h>
 #import <errno.h>
@@ -72,6 +84,7 @@ static BOOL flushURL(NSURL *url, NSError **error) {
 @interface SGTranslationJSONCursor : NSObject
 @property NSString *text;
 @property NSUInteger index;
+@property NSUInteger values;
 - (BOOL)value:(NSUInteger)depth;
 @end
 @implementation SGTranslationJSONCursor
@@ -79,35 +92,62 @@ static BOOL flushURL(NSURL *url, NSError **error) {
     while (_index < _text.length && [[NSCharacterSet whitespaceAndNewlineCharacterSet] characterIsMember:[_text characterAtIndex:_index]]) _index++;
 }
 - (unichar)peek { [self space]; return _index < _text.length ? [_text characterAtIndex:_index] : 0; }
-- (NSString *)string {
+- (BOOL)hexQuad:(unichar *)unit {
+    if (_text.length - _index < 4) return NO;
+    unsigned value = 0;
+    for (unsigned i = 0; i < 4; i++) {
+        unichar c = [_text characterAtIndex:_index++];
+        if (c >= '0' && c <= '9') value = value * 16 + c - '0';
+        else if ((c | 32) >= 'a' && (c | 32) <= 'f') value = value * 16 + (c | 32) - 'a' + 10;
+        else return NO;
+    }
+    *unit = (unichar)value;
+    return YES;
+}
+- (NSString *)stringKey:(BOOL)key {
     [self space];
     if ([self peek] != '"') return nil;
     NSUInteger start = _index++;
-    BOOL escaped = NO;
+    BOOL needsDecode = NO;
     while (_index < _text.length) {
         unichar c = [_text characterAtIndex:_index++];
-        if (!escaped && c == '"') {
+        if (c == '"') {
+            // Foundation validates the whole document once. Only keys need their decoded spelling here.
+            if (!key) return @"";
+            if (!needsDecode) return [_text substringWithRange:NSMakeRange(start + 1, _index - start - 2)];
             NSString *token = [_text substringWithRange:NSMakeRange(start, _index - start)];
             NSData *data = [[NSString stringWithFormat:@"[%@]", token] dataUsingEncoding:NSUTF8StringEncoding];
             NSArray *value = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
             return value.firstObject;
         }
-        if (!escaped && c == '\\') escaped = YES; else escaped = NO;
+        if (c < 0x20) return nil;
+        if (c != '\\') continue;
+        needsDecode = YES;
+        if (_index == _text.length) return nil;
+        c = [_text characterAtIndex:_index++];
+        if (c == 'u') {
+            unichar unit;
+            if (![self hexQuad:&unit] || CFStringIsSurrogateLowCharacter(unit)) return nil;
+            if (CFStringIsSurrogateHighCharacter(unit) &&
+                (_text.length - _index < 6 || [_text characterAtIndex:_index++] != '\\' ||
+                 [_text characterAtIndex:_index++] != 'u' || ![self hexQuad:&unit] || !CFStringIsSurrogateLowCharacter(unit))) return nil;
+        } else if (c != '"' && c != '\\' && c != '/' && c != 'b' && c != 'f' && c != 'n' && c != 'r' && c != 't') return nil;
     }
     return nil;
 }
 - (BOOL)value:(NSUInteger)depth {
-    if (depth > 16) return NO;
+    // Allow a full transfer manifest or pending stage (up to 10,000 descriptors).
+    if (depth > 16 || ++_values > 32 * SGTranslationTransferEntries) return NO;
     unichar c = [self peek];
-    if (c == '"') return [self string] != nil;
+    if (c == '"') return [self stringKey:NO] != nil;
     if (c == '{' || c == '[') {
         _index++;
         unichar end = c == '{' ? '}' : ']';
         NSMutableSet *keys = [NSMutableSet set];
         if ([self peek] == end) { _index++; return YES; }
-        for (;;) {
+        for (;;) { @autoreleasepool {
             if (c == '{') {
-                NSString *key = [self string];
+                NSString *key = [self stringKey:YES];
                 if (!key || [keys containsObject:key] || [self peek] != ':') return NO;
                 [keys addObject:key]; _index++;
             }
@@ -115,7 +155,7 @@ static BOOL flushURL(NSURL *url, NSError **error) {
             unichar next = [self peek]; _index++;
             if (next == end) return YES;
             if (next != ',') return NO;
-        }
+        }}
     }
     NSUInteger start = _index;
     while (_index < _text.length) {
@@ -129,9 +169,13 @@ static BOOL flushURL(NSURL *url, NSError **error) {
 
 id SGTranslationReadJSON(NSData *data, NSError **error) {
     if (!data || data.length > SGTranslationRecordBytes) { fail(error, @"Invalid or oversized JSON."); return nil; }
-    SGTranslationJSONCursor *cursor = [SGTranslationJSONCursor new];
-    cursor.text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (!cursor.text || ![cursor value:0] || [cursor peek]) { fail(error, @"Invalid JSON or duplicate keys."); return nil; }
+    BOOL valid;
+    @autoreleasepool {
+        SGTranslationJSONCursor *cursor = [SGTranslationJSONCursor new];
+        cursor.text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+        valid = cursor.text && [cursor value:0] && ![cursor peek];
+    }
+    if (!valid) { fail(error, @"Invalid JSON or duplicate keys."); return nil; }
     return [NSJSONSerialization JSONObjectWithData:data options:0 error:error];
 }
 BOOL SGTranslationRecordKeyValid(NSString *key) {
@@ -218,10 +262,8 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
     return [self protect:url error:error] && flushURL(url, error) && flushURL(url.URLByDeletingLastPathComponent, error);
 }
 - (BOOL)prepare:(NSError **)error {
+    if (!SGTranslationStorageUnlocked()) return fail(error, @"Storage unavailable before unlock.");
     if (!_root || !_legacy) return fail(error, @"Translation storage is unavailable.");
-#if (TARGET_OS_IOS && !TARGET_OS_MACCATALYST) || defined(SG_LYRICS_TEST_STORE)
-    if (!atomic_load(&unlocked)) return fail(error, @"Storage unavailable before unlock.");
-#endif
     if (![self directory:_root error:error] || ![self directory:self.metadataURL.URLByDeletingLastPathComponent error:error]) return NO;
     struct stat root;
     if (lstat(_root.fileSystemRepresentation, &root) != 0) return posixFailure(error);
@@ -310,20 +352,31 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
     return total;
 }
 - (BOOL)writeJSON:(id)value to:(NSURL *)url grandfather:(BOOL)grandfather allowed:(BOOL (^)(void))allowed error:(NSError **)error {
-    NSData *data = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:error];
-    if (!data || !SGTranslationReadJSON(data, error)) return NO;
     NSError *failure = nil;
-    NSData *old = [self data:url missing:YES error:&failure];
+    NSData *data;
+    BOOL valid;
+    @autoreleasepool {
+        data = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:&failure];
+        valid = data && SGTranslationReadJSON(data, &failure) != nil;
+    }
+    if (!valid) { if (error) *error = failure; return NO; }
+    NSUInteger oldLength;
+    BOOL unchanged;
+    @autoreleasepool {
+        NSData *old = [self data:url missing:YES error:&failure];
+        unchanged = [old isEqual:data];
+        oldLength = old.length;
+    }
     if (failure) { if (error) *error = failure; return NO; }
-    if ([old isEqual:data]) {
+    if (unchanged) {
         if (allowed && !allowed()) return fail(error, @"Translation write was cancelled.");
         return [self protect:url error:error] && flushURL(url, error) && [self directory:url.URLByDeletingLastPathComponent error:error];
     }
-    if (!grandfather && data.length > old.length) {
+    if (!grandfather && data.length > oldLength) {
         NSError *sizeError = nil;
         unsigned long long total = [self bytes:&sizeError];
         if (sizeError) { if (error) *error = sizeError; return NO; }
-        if (total + data.length - old.length > _ceiling)
+        if (total + data.length - oldLength > _ceiling)
             return fail(error, @"Storage ceiling reached; export or delete records before adding data.");
     }
     if (![self directory:url.URLByDeletingLastPathComponent error:error]) return NO;
@@ -333,9 +386,14 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
         return fail(error, @"Insufficient free space to save translations safely.");
     NSURL *temporary = [url.URLByDeletingLastPathComponent URLByAppendingPathComponent:[@".pending-" stringByAppendingString:NSUUID.UUID.UUIDString]];
     BOOL ok = [data writeToURL:temporary options:NSDataWritingWithoutOverwriting | NSDataWritingFileProtectionCompleteUntilFirstUserAuthentication error:error];
+    data = nil;
     if (ok) {
-        NSData *check = [self data:temporary missing:NO error:error];
-        ok = check && [SGTranslationReadJSON(check, error) isEqual:value] && [self protect:temporary error:error];
+        @autoreleasepool {
+            NSData *check = [self data:temporary missing:NO error:&failure];
+            ok = check && [SGTranslationReadJSON(check, &failure) isEqual:value];
+        }
+        if (!ok && error) *error = failure;
+        if (ok) ok = [self protect:temporary error:error];
     }
     if (ok) ok = flushURL(temporary, error);
     if (ok && allowed && !allowed()) ok = fail(error, @"Translation write was cancelled.");
@@ -391,15 +449,21 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
     return [self writeJSON:merged to:url grandfather:grandfather allowed:allowed error:error];
 }
 - (BOOL)migrate:(NSError **)error {
+    return [self migrateSpace:nil key:nil error:error];
+}
+- (BOOL)migrateSpace:(NSString *)onlySpace key:(NSString *)onlyKey error:(NSError **)error {
     if (![self prepare:error]) return NO;
+    if (onlySpace && (![@[@"Translations", @"AI"] containsObject:onlySpace] || !SGTranslationRecordKeyValid(onlyKey)))
+        return fail(error, @"Invalid translation identity.");
     [_unresolved removeAllObjects];
     if ([_metadata[@"allSuppressed"] boolValue]) return YES;
     for (NSURL *base in _legacyConflicts ? @[_legacy, _legacyConflicts] : @[_legacy]) {
       struct stat st;
       if (lstat(base.fileSystemRepresentation, &st)) { if (errno == ENOENT) continue; return posixFailure(error); }
       if (!S_ISDIR(st.st_mode)) return fail(error, @"Invalid legacy cache directory.");
-      for (NSString *space in @[@"Translations", @"AI"]) {
-        if (![self visitDirectory:[base URLByAppendingPathComponent:space] visit:^BOOL(NSURL *file, NSError **listingError) {
+      for (NSString *space in onlySpace ? @[onlySpace] : @[@"Translations", @"AI"]) {
+        NSURL *directory = [base URLByAppendingPathComponent:space];
+        BOOL (^visit)(NSURL *, NSError **) = ^BOOL(NSURL *file, NSError **listingError) {
             NSString *key = file.lastPathComponent, *identity = [space stringByAppendingFormat:@"/%@", key];
             NSString *receipt = [base isEqual:self->_legacy] ? identity : [@"leftover/" stringByAppendingString:identity];
             if ([self->_metadata[@"suppressed"][identity] boolValue]) return YES;
@@ -426,7 +490,21 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
             }
             if (problem) [self->_unresolved addObject:@{@"namespace":space, @"key":key, @"url":file, @"error":problem.localizedDescription}];
             return YES;
-        } error:error]) return NO;
+        };
+        if (!onlySpace) {
+            if (![self visitDirectory:directory visit:visit error:error]) return NO;
+        } else {
+            if (lstat(directory.fileSystemRepresentation, &st)) { if (errno == ENOENT) continue; return posixFailure(error); }
+            if (!S_ISDIR(st.st_mode)) return fail(error, @"Invalid legacy cache directory.");
+            NSURL *file = [directory URLByAppendingPathComponent:onlyKey];
+            if (lstat(file.fileSystemRepresentation, &st)) { if (errno == ENOENT) continue; return posixFailure(error); }
+            // A lookup can match another Unicode spelling (or case). Feed
+            // the same directory-entry name to visit as readdir would.
+            NSString *storedName = nil;
+            if (![file getResourceValue:&storedName forKey:NSURLNameKey error:error]) return NO;
+            if (!storedName) return fail(error, @"Missing legacy translation filename.");
+            if (!visit([directory URLByAppendingPathComponent:storedName], error)) return NO;
+        }
       }
     }
     if (_unresolved.count) return fail(error, @"Legacy migration is incomplete. Original files remain available.");
@@ -479,14 +557,26 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
 - (BOOL)removeRecords:(NSArray<NSDictionary *> *)records all:(BOOL)all error:(NSError **)error {
     if (![self prepare:error]) return NO;
     NSMutableDictionary *state = [_metadata mutableCopy];
-    state[@"suppressed"] = [_metadata[@"suppressed"] mutableCopy];
-    state[@"deletedAt"] = [_metadata[@"deletedAt"] mutableCopy];
     NSNumber *version = @([state[@"deleteVersion"] unsignedLongLongValue] + 1);
     state[@"deleteVersion"] = version;
-    if (all) { state[@"allSuppressed"] = @YES; state[@"allDeletedAt"] = version; }
-    for (NSDictionary *record in records) state[@"deletedAt"][SGTranslationRecordIdentity(record)] = version;
-    for (NSDictionary *record in records) if (![record[@"recovery"] boolValue])
-        state[@"suppressed"][[record[@"namespace"] stringByAppendingFormat:@"/%@", record[@"key"]]] = @YES;
+    // A global tombstone supersedes the individual ones. A receipt is never
+    // consulted again once migration of that legacy identity is suppressed.
+    BOOL noMigration = all || [state[@"allSuppressed"] boolValue];
+    state[@"receipts"] = noMigration ? [NSMutableDictionary dictionary] : [_metadata[@"receipts"] mutableCopy];
+    state[@"suppressed"] = noMigration ? [NSMutableDictionary dictionary] : [_metadata[@"suppressed"] mutableCopy];
+    state[@"deletedAt"] = all ? [NSMutableDictionary dictionary] : [_metadata[@"deletedAt"] mutableCopy];
+    if (all) {
+        state[@"allSuppressed"] = @YES;
+        state[@"allDeletedAt"] = version;
+    } else for (NSDictionary *record in records) {
+        state[@"deletedAt"][SGTranslationRecordIdentity(record)] = version;
+        if (!noMigration && ![record[@"recovery"] boolValue]) {
+            NSString *identity = [record[@"namespace"] stringByAppendingFormat:@"/%@", record[@"key"]];
+            state[@"suppressed"][identity] = @YES;
+            [state[@"receipts"] removeObjectForKey:identity];
+            [state[@"receipts"] removeObjectForKey:[@"leftover/" stringByAppendingString:identity]];
+        }
+    }
     if (![self writeJSON:state to:self.metadataURL grandfather:YES allowed:nil error:error]) return NO;
     _metadata = state;
     NSMutableArray<NSURL *> *targets = [NSMutableArray array];

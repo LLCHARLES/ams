@@ -3,7 +3,7 @@
 # and deleted after it: Compact library off; on, with the list loading late, without a sort row and with a filter the
 # menu has no clear chip for; on at the largest accessibility text size and right to left; the Library page of Mod
 # Settings, left to right and right to left; on, with the top safe area changing under the folded chips, Spotify's
-# passes setting the whole inset, or the bottom first. SHOTS=<dir>
+# passes setting the whole inset, the bottom first, or the stacked header's live height; and a header-only row move. SHOTS=<dir>
 # keeps the screenshots the runs take. Exits nonzero on the first failed check.
 #     THEOS=$HOME/theos ./compact-check.sh
 set -eu
@@ -44,6 +44,8 @@ run "PASS all noclear" check compact noclear wrapped
 run "PASS all safearea" check compact safearea
 run "PASS all safearea" check compact wrapped safearea
 run "PASS all safearea" check compact safearea bottomfirst
+run "PASS all headerpass" check compact wrapped headerpass
+run "PASS all safearea" check compact wrapped safearea liveinset
 run "PASS all compact" check compact -tag large-text -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
 run "PASS all compact" check compact -tag rtl -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
 run "PASS all settings" settings

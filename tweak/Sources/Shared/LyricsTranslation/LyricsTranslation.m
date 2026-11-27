@@ -1,4 +1,5 @@
 #import <Security/Security.h>
+#import "Core/SGKeychain.h"
 #import <stdatomic.h>
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
@@ -107,16 +108,7 @@ static BOOL storeKey(NSString *key) {
     SGLyricsCredentialChanged(SGLyricsAIGemini);
     sg_keyAvailable = nil;
     [sg_done removeAllObjects];
-    OSStatus deleted = SecItemDelete((__bridge CFDictionaryRef)keyQuery());
-    if (deleted != errSecSuccess && deleted != errSecItemNotFound) {
-        SGLog(@"gemini: the old key could not be removed (%d)", (int)deleted);
-        return NO;
-    }
-    if (!key.length) return YES;
-    NSMutableDictionary *item = [keyQuery() mutableCopy];
-    item[(__bridge id)kSecValueData] = [key dataUsingEncoding:NSUTF8StringEncoding];
-    item[(__bridge id)kSecAttrAccessible] = (__bridge id)kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly;
-    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+    OSStatus status = SGStoreDeviceKey(keyQuery(), key);
     if (status != errSecSuccess) SGLog(@"gemini: the key could not be kept (%d)", (int)status);
     return status == errSecSuccess;
 }
@@ -124,6 +116,7 @@ static BOOL storeKey(NSString *key) {
 static void alertKeychain(NSString *title, NSString *message) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 void SGLyricsAlertKeyNotRemoved(void) {
@@ -192,7 +185,7 @@ NSArray<NSString *> *SGGeminiReplyIn(id root, NSInteger status, NSError *error, 
             ? SGL(@"settings.translation.error.timeout", @"Gemini timed out. Try a longer timeout or choose another model in Mod Settings > Lyrics > Translation & AI > Gemini.")
             : SGL(@"settings.translation.error.unreachable", @"Gemini could not be reached.");
     } else if (status == 401 || status == 403 || (status == 400 && [googleSays localizedCaseInsensitiveContainsString:@"API key"])) {
-        *problem = SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it on the Lyrics page.");
+        *problem = SGL(@"settings.translation.error.keyinvalid", @"Gemini turned the key down. Check it in Lyrics › Translation & AI.");
     } else if (status == 400) {
         *problem = googleSays.length ? [NSString stringWithFormat:SGL(@"settings.translation.error.badrequestformat", @"Gemini did not take the request: %@"), googleSays]
                                      : SGL(@"settings.translation.error.badrequest", @"Gemini did not take the request (400).");
@@ -242,7 +235,7 @@ static void sendToGemini(NSURLRequest *request, NSURLRequest *plain, NSUInteger 
         finished(nil, 0, [NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
         return;
     }
-    [[NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    [SGBoundedRequestTask(request, 0, ^(NSData *data, NSURLResponse *response, NSError *error) {
         NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
         NSString *reply = status == 400 && data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
         if (plain && [reply localizedCaseInsensitiveContainsString:@"thinking"]) {
@@ -259,7 +252,7 @@ static void sendToGemini(NSURLRequest *request, NSURLRequest *plain, NSUInteger 
             return;
         }
         finished(data, status, error);
-    }] resume];
+    }) resume];
 }
 
 // Clear Keychain: the service's own items go, the account left out so every one in it does, and with them
@@ -282,7 +275,7 @@ void SGLyricsTranslateWithGeminiFormat(NSString *trackID, NSArray<SGKaraokeLine 
                                       SGLyricsReplyFormat format, void (^done)(NSArray<NSString *> *, NSString *)) {
     NSString *key = storedKey();
     if (!key) {
-        done(nil, SGL(@"settings.translation.error.nokey", @"Add a Gemini API key on the Lyrics page first."));
+        done(nil, SGL(@"settings.translation.error.nokey", @"Add a Gemini API key in Lyrics › Translation & AI first."));
         return;
     }
     if (!sg_done) sg_done = [NSMutableDictionary dictionary];
@@ -400,7 +393,7 @@ NSURLRequest *SGGeminiAIRequest(NSString *system, NSString *prompt, NSString **p
 }
 NSURLRequest *SGGeminiAIRequestWithFormat(NSString *system, NSString *prompt, SGLyricsReplyFormat format, NSString **problem) {
     NSString *key = storedKey();
-    if (!key) { *problem = SGL(@"settings.translation.error.nokey", @"Add a Gemini API key on the Lyrics page first."); return nil; }
+    if (!key) { *problem = SGL(@"settings.translation.error.nokey", @"Add a Gemini API key in Lyrics › Translation & AI first."); return nil; }
     return geminiRequest(key, geminiBody(system, prompt, format));
 }
 

@@ -34,7 +34,7 @@ def main():
                 subprocess.run(["xcrun", "simctl", "terminate", udid, "com.retrine.editinfoharness"], check=True)
                 process.terminate()
 
-            timer = threading.Timer(40, stop_stalled)
+            timer = threading.Timer(240, stop_stalled)
             timer.start()
             try:
                 lines = []

@@ -14,7 +14,12 @@
 #import "Shared/Haptics/Haptics.h"
 
 // The row's height, the glyphs' point size and the gap between a glyph and the track.
-static const CGFloat kRowHeight = 34, kGlyphSize = 13, kGlyphGap = 10;
+static const CGFloat kRowHeight = 34, kGlyphSize = 13, kGlyphGap = 4;
+// The Music app's volume row reaches this far past the player's side margins: its speaker glyphs stand at 34 pt and
+// its track runs from 57 to 336 pt on a 402 pt screen.
+static const CGFloat kRowOut = 5;
+// The speaker glyphs' ink: plain white 0.6 over a dark backdrop, which is the Music app's added white (0.46) there.
+static const CGFloat kGlyphInkAlpha = 0.6, kGlyphInkAdd = 0.46;
 // Half the footer glyphs' height: the row stops this far above their middle.
 static const CGFloat kGlyphsHalf = 14;
 
@@ -53,6 +58,8 @@ static const CGFloat kGlyphsHalf = 14;
     CGFloat _panAt;                     // where the finger was at the drag's last write
     float _panStart;                    // the level the finger's distance from _panFrom applies to
     NSMutableSet<NSNumber *> *_panOwn;  // the levels the drag wrote, with the one it began at
+    BOOL _dragging;                     // the bar is painted for a finger's drag
+    BOOL _inkObserved;
 }
 
 // How far the fill's end goes from the slider's minimum to its maximum: negative right to left, where it goes leftward.
@@ -201,7 +208,12 @@ static UIImageView *glyph(NSString *symbol) {
 // Both sliders' tracks, of which one shows: the bar's, thickened with the fill lit while a finger drags one.
 - (void)paintDragging:(BOOL)dragging {
     CGFloat height = dragging ? SGRPlayerBarDragHeight(SGRPlayerBarHeight) : SGRPlayerBarHeight;
-    UIImage *fill = SGRPlayerBarImage(SGRPlayerBarFill(dragging), height), *track = SGRPlayerBarImage(SGRPlayerBarTrack(), height);
+    _dragging = dragging;
+    UIImage *fill = SGRPlayerBarImage(SGRPlayerBarFillOver(self, dragging, YES), height), *track = SGRPlayerBarImage(SGRPlayerBarTrackOver(self), height);
+    // The speaker glyphs stand where the bar's fill does (measured: 0.46 added), so they follow the backdrop the same way.
+    UIColor *ink = [UIColor colorWithWhite:1 alpha:SGRInkPlainAlpha(self, kGlyphInkAlpha, kGlyphInkAdd)];
+    _quiet.tintColor = ink;
+    _loud.tintColor = ink;
     [_volume setMinimumVolumeSliderImage:fill forState:UIControlStateNormal];
     [_volume setMaximumVolumeSliderImage:track forState:UIControlStateNormal];
     [_remote setMinimumTrackImage:fill forState:UIControlStateNormal];
@@ -231,6 +243,19 @@ static UIImageView *glyph(NSString *symbol) {
         [slider setNeedsLayout];
         [slider layoutIfNeeded];
     }, nil);
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (!self.window || _inkObserved) return;
+    _inkObserved = YES;
+    // Painted again at each new reading of the backdrop, in whichever state the bar is.
+    __weak SGRVolumeRow *weak = self;
+    SGRBackdropInkObserve(self, ^{
+        SGRVolumeRow *row = weak;
+        if (row) [row paintDragging:row->_dragging];
+    });
+    [self paintDragging:_dragging];
 }
 
 - (void)layoutSubviews {
@@ -327,7 +352,7 @@ BOOL SGRPlayerPlaceVolume(UIView *stack, UIView *controls, UIView *row, CGFloat 
     // halfway between the play button and the footer's glyphs where it is shorter, and without the rhythm.
     CGFloat halfway = (above + below) / 2;
     CGFloat middle = rhythm ? MAX(halfway, rowMiddle - SGRPlayerVolumeToRow) : halfway;
-    CGRect frame = CGRectMake(margin, round(middle - height / 2), MAX(0, stack.bounds.size.width - 2 * margin), height);
+    CGRect frame = CGRectMake(margin - kRowOut, round(middle - height / 2), MAX(0, stack.bounds.size.width - 2 * (margin - kRowOut)), height);
     BOOL moved = !CGRectEqualToRect(volume.frame, frame);
     if (moved) volume.frame = frame;
     settle(stack, row, moved, frame);

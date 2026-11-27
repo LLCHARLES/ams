@@ -80,7 +80,9 @@ static atomic_uint_fast64_t sg_sampleRateBits, sg_layout;
 static atomic_uint_fast64_t sg_skipped;   // renders whose buffers were not laid out as the format says
 // The strength's factor and what is followed, set on the main thread, read on the player thread.
 static atomic_uint_fast64_t sg_strengthBits;
-static atomic_int sg_follows;
+// One lock-free snapshot: even a visit to Beat between renders invalidates the old rumble.
+typedef struct { int mode; unsigned beatGeneration; } FollowSettings;
+static _Atomic(FollowSettings) sg_follows;
 // A tap the Vibrations preview asked for, and whether it is watching the taps (SGMusicHapticsWatchTaps).
 static atomic_bool sg_previewAsked, sg_watched;
 
@@ -106,9 +108,28 @@ static double loadDouble(atomic_uint_fast64_t *slot) {
 
 static SGMusicAnalyzer sg_analyzer;
 static float sg_mono[kMonoFrames];
+static bool sg_nonzeroLevel;  // last level actually published, render thread only
+static unsigned sg_levelGeneration;
+
+static bool followsEvent(SGMusicEventKind kind, SGMusicFollows follows) {
+    return kind == SGMusicEventLevel ? follows != SGMusicFollowsBeat :
+           kind != SGMusicEventSnare || follows != SGMusicFollowsBass;
+}
 
 static void pushEvent(const SGMusicEvent *event, void *context) {
-    SGMusicEventRingPush(&sg_ring, event);
+    FollowSettings follows = atomic_load_explicit(&sg_follows, memory_order_relaxed);
+    if (!followsEvent(event->kind, follows.mode)) return;
+    if (event->kind != SGMusicEventLevel) {
+        SGMusicEventRingPush(&sg_ring, event);
+        return;
+    }
+    if (!event->intensity && (!sg_nonzeroLevel || sg_levelGeneration != follows.beatGeneration)) return;
+    SGMusicEvent level = *event;
+    level.beatGeneration = follows.beatGeneration;
+    if (SGMusicEventRingPush(&sg_ring, &level)) {
+        sg_nonzeroLevel = level.intensity != 0;
+        sg_levelGeneration = level.beatGeneration;
+    }
 }
 
 // The hardware's format is float with a buffer per channel, but it is read rather than assumed (readFormat),
@@ -236,7 +257,7 @@ static NSMutableSet<NSString *> *sg_failures;
 static id<CHHapticAdvancedPatternPlayer> sg_rumble;
 static id<CHHapticPatternPlayer> sg_failedPlayer;
 static BOOL sg_rumbling;
-static double sg_rumbleSentAt, sg_quietSince;
+static double sg_rumbleSentAt, sg_quietSince, sg_zeroDeadline;
 static float sg_rumbleSent;
 
 typedef struct {
@@ -257,7 +278,7 @@ static void clearPlayback(void) {
     sg_rumble = nil;
     sg_failedPlayer = nil;
     sg_rumbling = NO;
-    sg_quietSince = 0;
+    sg_quietSince = sg_zeroDeadline = 0;
     sg_rumbleSentAt = 0;
     sg_rumbleSent = 0;
 }
@@ -296,6 +317,8 @@ static BOOL handleEngineStopped(NSError *error) {
 }
 
 static void stopEngine(void) {
+    // Teardown owns the rumble until Core Haptics confirms the stop, even if it must retry.
+    sg_quietSince = sg_zeroDeadline = 0;
     if (sg_engineStopping) return;
     if (sg_stopRequested && hostSeconds(mach_absolute_time()) < sg_retryAt) return;
     sg_stopRequested = NO;
@@ -361,7 +384,7 @@ static BOOL engineReady(void) {
 }
 
 static void stopRumble(NSTimeInterval at) {
-    sg_quietSince = 0;
+    sg_quietSince = sg_zeroDeadline = 0;
     if (handleEngineStopped(nil) || sg_engineStopping || sg_stopRequested || !sg_rumbling) return;
     NSError *error = nil;
     if (![sg_rumble stopAtTime:at error:&error]) {
@@ -413,10 +436,10 @@ static BOOL startEngine(void) {
     return engineReady();
 }
 
-// When `hostTime`'s sound is heard, in the engine's clock; `lead` is how far ahead of now that is.
-static NSTimeInterval engineTime(uint64_t hostTime, double *lead) {
+// When the sound at `sourceSeconds` is heard, in the engine's clock.
+static NSTimeInterval engineTime(double sourceSeconds, double *lead) {
     double now = hostSeconds(mach_absolute_time());
-    double heard = hostSeconds(hostTime) + loadDouble(&sg_latencyBits) - kHapticLead;
+    double heard = sourceSeconds + loadDouble(&sg_latencyBits) - kHapticLead;
     *lead = heard - now;
     return sg_engine.currentTime + MAX(0, *lead);
 }
@@ -435,7 +458,7 @@ static void tellWatcher(float intensity, double lead) {
 
 static void playTap(const SGMusicEvent *event) {
     double lead;
-    NSTimeInterval at = engineTime(event->hostTime, &lead);
+    NSTimeInterval at = engineTime(hostSeconds(event->hostTime), &lead);
     if (lead < -kLatestTap) {
         sg_stats.late++;
         return;
@@ -484,11 +507,19 @@ static void playPreview(BOOL rumbles) {
     if (engineReady()) playbackSucceeded();
 }
 
+static void finishSilentRumble(double sourceSeconds) {
+    if (sg_zeroDeadline && sourceSeconds >= sg_zeroDeadline) {
+        double lead;
+        stopRumble(engineTime(sg_zeroDeadline, &lead));
+    }
+}
+
 static void playLevel(const SGMusicEvent *event) {
     sg_stats.levels++;
     double lead;
-    NSTimeInterval at = engineTime(event->hostTime, &lead);
     double heard = hostSeconds(event->hostTime);
+    finishSilentRumble(heard);
+    NSTimeInterval at = engineTime(heard, &lead);
     // Whether it rumbles is decided at 100%, so the strength changes how hard, not how often.
     float level = MIN(1, event->intensity * kRumbleGain);
     float played = MIN(1, level * strength());
@@ -499,9 +530,12 @@ static void playLevel(const SGMusicEvent *event) {
     } else {
         sg_quietSince = 0;
     }
+    // No second zero will arrive to finish the quiet stretch. A returning level cancels
+    // this timer and resumes the normal event-driven hysteresis.
+    sg_zeroDeadline = !level && sg_rumbling && sg_quietSince ? sg_quietSince + kRumbleStopAfter : 0;
     if (!engineReady()) return;
     if (!sg_rumbling && level < kRumbleStart) return;
-    if (sg_rumbling && heard - sg_rumbleSentAt < kRumbleInterval && fabsf(level - sg_rumbleSent) < kRumbleStep) return;
+    if (sg_rumbling && level && heard - sg_rumbleSentAt < kRumbleInterval && fabsf(level - sg_rumbleSent) < kRumbleStep) return;
 
     NSError *error = nil;
     if (!sg_rumble) {
@@ -552,7 +586,7 @@ static void report(void) {
     SGLog(@"music haptics: %lu taps (%lu too late), lead %.0f ms on average and %.0f ms at the least, %lu levels, rumble %@, buffers of %u frames at %.0f Hz (%llu skipped), output latency %.0f ms, strength %.0f%%, follows %d",
           (unsigned long)sg_stats.taps, (unsigned long)sg_stats.late, sg_stats.taps ? sg_stats.leadSum / sg_stats.taps * 1000 : 0, sg_stats.leadMin * 1000,
           (unsigned long)sg_stats.levels, sg_rumbling ? @"on" : @"off", atomic_load(&sg_lastFrames), loadDouble(&sg_sampleRateBits),
-          (unsigned long long)atomic_load(&sg_skipped), loadDouble(&sg_latencyBits) * 1000, strength() * 100, atomic_load(&sg_follows));
+          (unsigned long long)atomic_load(&sg_skipped), loadDouble(&sg_latencyBits) * 1000, strength() * 100, atomic_load(&sg_follows).mode);
     sg_stats = (Stats){0};
 }
 
@@ -565,9 +599,12 @@ static double quietAfter(void) {
 static void *playerLoop(void *unused) {
     pthread_setname_np("spotifyglass.music-haptics");
     double lastEvent = 0;
+    unsigned beatGeneration = 0;
     BOOL idle = YES;
     for (;;) {
-        dispatch_time_t wait = idle && !sg_stopRequested ? DISPATCH_TIME_FOREVER : dispatch_time(DISPATCH_TIME_NOW, (int64_t)(quietAfter() * NSEC_PER_SEC));
+        double deadline = sg_stopRequested ? sg_retryAt : sg_zeroDeadline;
+        double timeout = deadline ? MAX(0, deadline - hostSeconds(mach_absolute_time())) : quietAfter();
+        dispatch_time_t wait = idle && !sg_stopRequested ? DISPATCH_TIME_FOREVER : dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC));
         dispatch_semaphore_wait(sg_wake, wait);
         @autoreleasepool {
             double now = hostSeconds(mach_absolute_time());
@@ -582,34 +619,36 @@ static void *playerLoop(void *unused) {
                 idle = YES;
                 continue;
             }
-            SGMusicFollows follows = (SGMusicFollows)atomic_load(&sg_follows);
-            BOOL rumbles = follows != SGMusicFollowsBeat, snares = follows != SGMusicFollowsBass;
-            if (!rumbles) stopRumble(CHHapticTimeImmediate);
+            // Read settings after acquiring the batch: no included level can carry a newer generation.
+            unsigned head = atomic_load_explicit(&sg_ring.head, memory_order_acquire);
+            FollowSettings settings = atomic_load(&sg_follows);
+            SGMusicFollows follows = (SGMusicFollows)settings.mode;
+            BOOL rumbles = follows != SGMusicFollowsBeat;
+            if (!rumbles || beatGeneration != settings.beatGeneration) stopRumble(CHHapticTimeImmediate);
+            beatGeneration = settings.beatGeneration;
             BOOL any = NO;
             BOOL preview = atomic_exchange(&sg_previewAsked, false);
-            unsigned head = atomic_load_explicit(&sg_ring.head, memory_order_acquire);
             unsigned tail = atomic_load_explicit(&sg_ring.tail, memory_order_relaxed);
-            if ((preview || tail != head) && startEngine()) {
-                if (preview) playPreview(rumbles);
-                SGMusicEvent event;
-                for (; tail != head && engineReady() && SGMusicEventRingPop(&sg_ring, &event); tail++) {
-                    if (event.kind == SGMusicEventLevel) {
-                        if (rumbles) playLevel(&event);
-                    } else if (event.kind == SGMusicEventKick || snares) {
-                        playTap(&event);
-                    }
-                }
-                any = YES;
+            if (preview && (any = startEngine())) playPreview(rumbles);
+            SGMusicEvent event;
+            for (; tail != head && SGMusicEventRingPop(&sg_ring, &event); tail++) {
+                if (!followsEvent(event.kind, follows)) continue; // settings changed since publication
+                if (event.kind == SGMusicEventLevel && event.beatGeneration != beatGeneration) continue;
+                if (!any && !(any = startEngine())) break;
+                if (!engineReady()) break;
+                if (event.kind == SGMusicEventLevel) playLevel(&event);
+                else playTap(&event);
             }
             // Abandon only this batch after a failure, not events published since its snapshot.
             atomic_store_explicit(&sg_ring.tail, head, memory_order_release);
+            finishSilentRumble(now);
             if (any) {
                 lastEvent = now;
                 idle = NO;
                 report();
                 continue;
             }
-            if (now - lastEvent >= quietAfter()) stopRumble(CHHapticTimeImmediate);
+            if (!sg_zeroDeadline && now - lastEvent >= quietAfter()) stopRumble(CHHapticTimeImmediate);
             if (now - lastEvent >= kEngineStopAfter) {
                 stopEngine();
                 idle = YES;
@@ -655,7 +694,11 @@ void SGMusicHapticsSetSystemCovers(BOOL covers) {
 
 static void readSettings(void) {
     storeDouble(&sg_strengthBits, SGHapticsStrength(SGKeyMusicStrength));
-    atomic_store(&sg_follows, (int)SGMusicHapticsFollows());
+    FollowSettings follows = atomic_load(&sg_follows);
+    int mode = (int)SGMusicHapticsFollows();
+    if (mode == SGMusicFollowsBeat && follows.mode != mode) ++follows.beatGeneration;
+    follows.mode = mode;
+    atomic_store(&sg_follows, follows);
 }
 
 void SGMusicHapticsSettingsChanged(void) {

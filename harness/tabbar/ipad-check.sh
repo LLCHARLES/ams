@@ -28,4 +28,5 @@ run() {
 run "PASS all names" names strict
 run "PASS all names" names strict regular
 run "PASS all fade" fade toggle regular
+run "PASS panel fade edges" panel regular
 echo "PASS tab bar iPad checks"

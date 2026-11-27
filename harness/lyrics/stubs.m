@@ -9,6 +9,7 @@
 UIColor *SGRAccentColor(void) { return nil; }
 
 NSString *const SGPlayerTransitionNotification = @"spotifyglass.playerTransition";
+NSNotificationName const SGPlayerSpeedDidChangeNotification = @"spotifyglass.player.speedChanged";
 NSString *const SGPlayerTransitionEndedNotification = @"spotifyglass.playerTransitionEnded";
 CFTimeInterval SGPlayerTransitionEnds(void) { return 0; }
 
@@ -257,6 +258,9 @@ void SGHarnessStall(BOOL stalled) {
 }
 NSInteger SGKaraokeDelayMs(void) { return [NSUserDefaults.standardUserDefaults integerForKey:SGKeyLyricsDelay]; }
 
+double SGHarnessHeldLead;
+double SGSingHeldLead(void) { return SGHarnessHeldLead; }
+
 NSInteger SGKaraokePositionMs(void) {
     if (sg_from < 0) return -1;
     CFTimeInterval now = CACurrentMediaTime();
@@ -268,11 +272,23 @@ NSInteger SGKaraokePositionMs(void) {
         SGHarnessStartClock(sg_pauseAt, sg_rate, -1, 0);
         return (NSInteger)sg_pauseAt;
     }
-    return (NSInteger)at;
+    return (NSInteger)(at - 1000 * SGHarnessHeldLead);
 }
 
 // -seekLag S: the player reports a seek S seconds after it is asked for, as Spotify's takes a few frames.
+static BOOL sg_holdSeek;
+static NSInteger sg_pendingSeek;
+void SGHarnessHoldSeek(void) {
+    sg_pendingSeek = -1;
+    sg_holdSeek = YES;
+}
+NSInteger SGHarnessReleaseSeek(void) {
+    sg_holdSeek = NO;
+    if (sg_pendingSeek >= 0) SGHarnessStartClock(sg_pendingSeek, sg_rate, -1, 0);
+    return sg_pendingSeek;
+}
 void SGKaraokeSeek(NSInteger ms) {
+    if (sg_holdSeek) { sg_pendingSeek = ms; return; }
     double lag = [NSUserDefaults.standardUserDefaults doubleForKey:@"seekLag"];
     if (lag <= 0) {
         SGHarnessStartClock(ms, sg_rate, -1, 0);

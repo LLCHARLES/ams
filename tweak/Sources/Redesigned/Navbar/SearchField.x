@@ -99,7 +99,7 @@ static void styleSearchField(UIView *button) {
     if (size.width < 200 || size.height < 40 || size.height > 60) return;
     BOOL styled = [objc_getAssociatedObject(button, &kStyledKey) boolValue];
     if (!styled && !isSearchField(button)) return;
-    objc_setAssociatedObject(button, &kStyledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if (!styled) objc_setAssociatedObject(button, &kStyledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     if (sg_searchField != button) sg_searchField = button;
 
     button.layer.backgroundColor = NULL;
@@ -146,12 +146,20 @@ static void styleSearchField(UIView *button) {
 
 %hook UILabel
 - (void)setTextColor:(UIColor *)color {
+    if (!sg_searchField.window) {
+        %orig;
+        return;
+    }
     %orig(SGIsInside((UIView *)self, sg_searchField) ? UIColor.whiteColor : color);
 }
 %end
 
 %hook SPTEncoreIconView
 - (void)setForegroundColor:(UIColor *)color {
+    if (!sg_searchField.window) {
+        %orig;
+        return;
+    }
     %orig(SGIsInside((UIView *)self, sg_searchField) ? UIColor.whiteColor : color);
 }
 %end

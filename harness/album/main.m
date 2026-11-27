@@ -5,6 +5,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import "../download-mock.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
+#import "Redesigned/Kit/SGRTokens.h"
 #import "Redesigned/Kit/SGRActionRow.h"
 #import "Redesigned/Kit/SGRField.h"
 #import <mach/mach.h>
@@ -78,7 +79,7 @@ static void watchPinnedHold(UIView *page,BOOL freeze) {
     __block CFTimeInterval start=0;
     __block SGRArtworkField *heldField=nil;
     __block BOOL observedHold=NO;
-    const NSTimeInterval holdDeadlineSeconds=10;
+    const NSTimeInterval holdDeadlineSeconds=60;
     // Counted from the end of launch, not from here: building the page in didFinishLaunching takes ~9 s on a slow CI runner.
     dispatch_async(dispatch_get_main_queue(),^{
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,(int64_t)(holdDeadlineSeconds*NSEC_PER_SEC)),dispatch_get_main_queue(),^{
@@ -100,7 +101,7 @@ static void watchPinnedHold(UIView *page,BOOL freeze) {
             [heldField holdPage:page];
             for(UIView *v in page.subviews)if([NSStringFromClass(v.class) isEqualToString:@"SGRFieldVeil"])veil=v;
         }
-        if(!veil && observedHold && CACurrentMediaTime()-start>1){
+        if(!veil && observedHold){
             done=YES;
             sg_holdChecked=YES;sg_holdPassed=!failed && veiled>0;
             NSLog(@"[harness] %@ pinned hold: %lu frames, %lu under the veil, %lu with ⋯ on download's capsule; ⋯ %@",sg_holdPassed?@"PASS":@"FAIL",
@@ -480,6 +481,11 @@ static NSString *trailingLabel(UIView *root) {
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"motion-visibility"]) {
+        self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+        motionVisibilityCheck(self.window, NO);
+        return YES;
+    }
     if ([NSProcessInfo.processInfo.arguments containsObject:@"download-background"]) {
         self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
         self.window.rootViewController = [UIViewController new];
@@ -561,7 +567,10 @@ static NSString *trailingLabel(UIView *root) {
     avatar.layer.cornerRadius = 12;
     // The artist's picture lands at 1.5 s, after the header has laid out; at 2.2 s the log says where the
     // redesign drew it.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // Both phone geometry measurements use the pre-avatar capture.
+    BOOL phoneFrames = [NSProcessInfo.processInfo.arguments containsObject:@"cover-beside"] &&
+                       [NSProcessInfo.processInfo.arguments containsObject:@"-header-width"];
+    if (!phoneFrames) dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         avatar.image = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(48, 48)] imageWithActions:^(UIGraphicsImageRendererContext *c) {
             [UIColor.orangeColor setFill];
             UIRectFill(CGRectMake(0, 0, 48, 48));
@@ -685,7 +694,7 @@ static NSString *trailingLabel(UIView *root) {
         y += 56;
     }
     _tracksBottom = y;
-    if ([NSProcessInfo.processInfo.arguments containsObject:@"ordinal-layout"]) at(3, ^{
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"ordinal-layout"]) layoutWhen(@"ordinal track cell mounted", ^BOOL { return trackCells[2].window != nil; }, ^{
         UICollectionViewCell *cell = trackCells[2];
         UILabel *title = (id)byIdentifier(cell, @"EncoreConsumerMobile.View.Granular.Title-internal");
         UIView *owner = title.superview, *row = owner.superview;
@@ -786,7 +795,7 @@ static NSString *trailingLabel(UIView *root) {
     // `verify-badge`: a row that draws its explicit badge again after the title keeps that picture while the
     // source badge looks the same, and draws it anew for a size, appearance or badge change and after reuse; reused
     // for a row with no badge it has none. Exits nonzero on failure.
-    if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-badge"]) at(3, ^{
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-badge"]) layoutWhen(@"explicit badge cell mounted", ^BOOL { return trackCells[2].window != nil; }, ^{
         UICollectionViewCell *cell = trackCells[2];
         UIView *row = cell.contentView.subviews.firstObject.subviews.firstObject;
         UIView *(^source)(void) = ^UIView *{ return byIdentifier(cell, @"Components.UI.ExplicitIcon"); };
@@ -994,21 +1003,32 @@ static NSString *trailingLabel(UIView *root) {
     if (downloads) downloadScript();
     // `faces` (faces-check.h): the artist line's faces, after the header has drawn the one the page opened with.
     // `more` (more-check.h): the track rows' ⋯ in the page's colour, once the field has read the cover.
-    if ([NSProcessInfo.processInfo.arguments containsObject:@"faces"]) at(2.5, ^{ afterPinnedHold(^{ facesRun(root.view, (UIControl *)parentRow); }); });
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"faces"]) afterPinnedHold(^{
+        layoutWhen(@"album header mounted", ^BOOL { return facesInfo(root.view).window != nil; }, ^{
+            facesRun(root.view, (UIControl *)parentRow);
+        });
+    });
     if ([NSProcessInfo.processInfo.arguments containsObject:@"more"])
-        at(3, ^{ afterPinnedHold(^{ moreRun(root.view, trackCells, ^UIColor *{ return SGRAlbumFieldColor(page); }); }); });
+        afterPinnedHold(^{
+            layoutWhen(@"coloured album field", ^BOOL {
+                CGFloat r, g, b, a;
+                return [SGRAlbumFieldColor(page) getRed:&r green:&g blue:&b alpha:&a] && checkChroma(checkLab(r, g, b)) >= 0.03;
+            }, ^{
+                moreRun(root.view, trackCells, ^UIColor *{ return SGRAlbumFieldColor(page); });
+            });
+        });
 
     if (shortTitle) {
-        at(1, ^{
-            BOOL shown = NO;
+        layoutWhen(@"visible short album title X", ^BOOL {
             for (UIView *info in header.subviews) {
                 if (![info isKindOfClass:SGRHeaderInfo.class]) continue;
                 for (UIView *text in info.subviews) {
                     if ([text isKindOfClass:UILabel.class] && [((UILabel *)text).text isEqualToString:@"X"]
-                        && !text.hidden && text.alpha > 0) shown = YES;
+                        && !text.hidden && text.alpha > 0) return YES;
                 }
             }
-            HARNESS_CHECK(shown);
+            return NO;
+        }, ^{
             NSLog(@"[harness] PASS the redesigned album header displays X");
             exit(0);
         });
@@ -1024,7 +1044,6 @@ static NSString *trailingLabel(UIView *root) {
         at(7, ^{ [trailingButton(rootView) sendActionsForControlEvents:UIControlEventTouchUpInside]; });
     }
 
-    motionVisibilityCheck(root.view, NO);
     // `motion`: Apple Music's animated cover, HARNESS_CANVAS_FILE (any mp4), handed to the hero at 2 s as the
     // catalog would hand it. The clip stays transparent until its first frame is decoded and then fades in;
     // it plays in a window and stops out of one.
@@ -1045,13 +1064,13 @@ static NSString *trailingLabel(UIView *root) {
 #pragma clang diagnostic ignored "-Warc-performSelector-leaks"
             if (hero && path) [hero performSelector:NSSelectorFromString(@"showMotion:") withObject:[NSURL fileURLWithPath:@(path)]];
 #pragma clang diagnostic pop
-            AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+            AVPlayerLayer *clip = [hero valueForKeyPath:@"clip.video"];
             NSLog(@"[harness] motion: added, ready %d, opacity %.0f, fading %@", clip.readyForDisplay, clip.opacity,
                   [clip animationForKey:@"fade"] ? @"yes" : @"no");
         });
         for (NSNumber *when in @[@2.5, @4]) {
             at(when.doubleValue, ^{
-                AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+                AVPlayerLayer *clip = [hero valueForKeyPath:@"clip.video"];
                 NSLog(@"[harness] motion at %@s: ready %d, opacity %.0f, rate %.0f", when, clip.readyForDisplay, clip.opacity, clip.player.rate);
             });
         }
@@ -1059,7 +1078,7 @@ static NSString *trailingLabel(UIView *root) {
             UIView *parent = hero.superview;
             NSUInteger index = [parent.subviews indexOfObject:hero];
             [hero removeFromSuperview];
-            AVPlayerLayer *clip = [hero valueForKey:@"_motion"];
+            AVPlayerLayer *clip = [hero valueForKeyPath:@"clip.video"];
             NSLog(@"[harness] motion out of the window: rate %.0f", clip.player.rate);
             [parent insertSubview:hero atIndex:index];
             NSLog(@"[harness] motion back in it: rate %.0f", clip.player.rate);
@@ -1143,7 +1162,7 @@ static NSString *trailingLabel(UIView *root) {
         at(2 + 3 * covers.count, ^{ NSLog(@"[harness] cover profile complete"); exit(0); });
     }
     if([NSProcessInfo.processInfo.arguments containsObject:@"verify-actions"])
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,4200*NSEC_PER_MSEC),dispatch_get_main_queue(),^{verifyAlbumActions(root.view);});
+        afterPinnedHold(^{ verifyAlbumActions(root.view); });
     // `veil` / `veil-card` / `veil-off` (hero-veil-check.h): the page scrolled by its own scroll view, the header in it.
     // Square, the veil is drawn on the picture in the hero's square, its first subview, and moves nothing.
     NSString *veil = veilMode();

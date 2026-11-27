@@ -87,6 +87,7 @@ static BOOL storeARL(NSString *arl) {
     NSMutableArray *order = [SGLyricsOrder() mutableCopy];
     [order removeObject:@"deezer"];
     if (arl.length) [order addObject:@"deezer"];
+    [NSUserDefaults.standardUserDefaults setObject:NSUUID.UUID.UUIDString forKey:@"spotifyglass.lyrics.pixie.deezerRevision"];
     SGLyricsSetOrder(order);
     return YES;
 }
@@ -169,8 +170,10 @@ static void token(SGLyricsRequestContext *context, NSString *arl, NSUInteger gen
         NSCharacterSet *safe = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."];
         if (!jwt.length || [jwt rangeOfCharacterFromSet:safe.invertedSet].location != NSNotFound || generation != sg_generation) {
             [context noteFailure:YES];
-            if (generation == sg_generation && (status == 400 || status == 401 || status == 403))
+            if (generation == sg_generation && (status == 400 || status == 401 || status == 403)) {
                 sg_authRefusedUntil = NSProcessInfo.processInfo.systemUptime + SGLyricsCredentialPauseSeconds;
+                context.credentialRejected = YES;
+            }
             done(nil);
             return;
         }
@@ -207,6 +210,7 @@ static void lyrics(SGLyricsRequestContext *context, NSString *song, NSString *ar
                 if ([sg_jwt isEqualToString:jwt]) sg_jwt = nil;
                 if (!retried) { lyrics(context, song, arl, generation, YES, done); return; }
                 sg_authRefusedUntil = NSProcessInfo.processInfo.systemUptime + SGLyricsCredentialPauseSeconds;
+                context.credentialRejected = YES;
                 done(nil);
                 return;
             }
@@ -276,6 +280,7 @@ static void askForARL(NSString *problem) {
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.lyricssources.deezer.action.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     alert.preferredAction = save;
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 

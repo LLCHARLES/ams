@@ -186,7 +186,30 @@ static UIViewController *plainScreen(void) {
         for (NSString *key in @[@"spotifyglass.update.checked", @"spotifyglass.update.releases", @"spotifyglass.update.told"])
             [NSUserDefaults.standardUserDefaults removeObjectForKey:key];
     }
-    BOOL notice = [arguments containsObject:@"notice"];
+    BOOL noticeCache = [arguments containsObject:@"notice-cache-check"];
+    BOOL notice = noticeCache || [arguments containsObject:@"notice"];
+    if (noticeCache) {
+        NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+        [store setObject:@[entry(@"1.0.0-beta.33", @"Cached")] forKey:@"spotifyglass.update.releases"];
+        [store setObject:@"1.0.0-beta.33" forKey:@"spotifyglass.update.told"];
+        [store setBool:YES forKey:SGKeyUpdateBetas];
+        [store setBool:YES forKey:SGKeyUpdateNotice];
+        [store removeObjectForKey:@"spotifyglass.update.checked"];
+        HARNESS_CHECK([SGUpdateVersion() isEqual:@"1.0.0-beta.33"]);
+        NSURLSessionConfiguration *config = NSURLSessionConfiguration.ephemeralSessionConfiguration;
+        config.protocolClasses = @[CacheReply.class];
+        method_setImplementation(class_getClassMethod(NSURLSessionConfiguration.class, @selector(ephemeralSessionConfiguration)),
+                                 imp_implementationWithBlock(^id(id receiver) { return config; }));
+        [NSNotificationCenter.defaultCenter addObserverForName:SGUpdateCheckedNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                HARNESS_CHECK([SGUpdateVersion() isEqual:@"1.0.0-beta.34"]);
+                HARNESS_CHECK([[store stringForKey:@"spotifyglass.update.told"] isEqual:@"1.0.0-beta.34"]);
+                HARNESS_CHECK([self.window.rootViewController.presentedViewController isKindOfClass:UIAlertController.class]);
+                puts("PASS already-told cached release followed by a new release sheet");
+                exit(0);
+            });
+        }];
+    }
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UINavigationController *stack = [[UINavigationController alloc] initWithRootViewController:notice ? plainScreen() : SGUpdatePage()];
     stack.navigationBar.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;

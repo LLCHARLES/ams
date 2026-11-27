@@ -9,6 +9,7 @@
 #define SGKeyStock @"spotifyglass.stock"
 // Shared with Diagnostics so screen dumps omit the user's server URL.
 #define SGKeySponsorBlockServer @"spotifyglass.sponsorblock.serverURL"
+#define SGKeyLyricsOpenAIBaseURL @"spotifyglass.lyrics.openai.baseURL"
 // Install-local authentication for the debug driver, never part of settings backups or reports.
 #define SGKeyDriverToken @"spotifyglass.driver.token"
 // Install-local rotation receipt, not branding: renaming it would rotate an existing token again.

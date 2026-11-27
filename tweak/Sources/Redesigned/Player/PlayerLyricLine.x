@@ -310,13 +310,13 @@ BOOL SGRPlayerLyricLineOn(void) {
 }
 
 - (void)tapped {
-    if (!_shown || SGRPlayerLyricsOpen()) return;
+    if (!_shown || SGRPlayerPageOpen()) return;
     SGLog(@"redesign player: the line under the cover opens the lyrics");
     SGRPlayerToggleLyrics();
 }
 
 - (BOOL)accessibilityActivate {
-    if (!_shown || SGRPlayerLyricsOpen()) return NO;
+    if (!_shown || SGRPlayerPageOpen()) return NO;
     [self tapped];
     return YES;
 }
@@ -429,7 +429,7 @@ BOOL SGRPlayerLyricLineOn(void) {
 }
 
 - (void)rearmForState:(SPTPlayerState *)state {
-    if (!_running || !_fits || !_timed || SGRPlayerLyricsOpen() || (_covers && _covers.alpha <= 0.01)) return;
+    if (!_running || !_fits || !_timed || SGRPlayerPageOpen() || (_covers && _covers.alpha <= 0.01)) return;
     if (!_armed) {
         [self tick];
         return;
@@ -479,7 +479,7 @@ BOOL SGRPlayerLyricLineOn(void) {
 - (void)tick {
     if (!_running) return;
     [self watchCovers:SGRPlayerCoverList()];
-    _obscured = SGRPlayerLyricsOpen() || (_covers && _covers.alpha <= 0.01);
+    _obscured = SGRPlayerPageOpen() || (_covers && _covers.alpha <= 0.01);
     if (_obscured) {
         [_timer invalidate];
         _timer = nil;
@@ -1087,7 +1087,7 @@ static void placeLine(void) {
     // which source the clock must show (or clear) on this layout pass.
     UIView *covers = SGRPlayerCoverList();
     if (line.running) [line watchCovers:covers];
-    BOOL obscured = SGRPlayerLyricsOpen() || (covers && covers.alpha <= 0.01);
+    BOOL obscured = SGRPlayerPageOpen() || (covers && covers.alpha <= 0.01);
     if (fits != line.fits || changed || obscured != line.obscured || wasCompact != (line.normalSide > 0) ||
         priorWidth != line.slot.size.width || priorRows != [line lyricRows]) {
         line.fits = fits;
@@ -1177,7 +1177,7 @@ static void holdPreviewMargin(UIView *preview, UIView *host) {
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)recognizer {
     UIView *preview = recognizer.view;
     CALayer *mask = objc_getAssociatedObject(preview, &kPreviewMaskKey);
-    return !SGRPlayerLyricsOpen() && !(mask && preview.layer.mask == mask);
+    return !SGRPlayerPageOpen() && !(mask && preview.layer.mask == mask);
 }
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRequireFailureOfGestureRecognizer:(UIGestureRecognizer *)other {
@@ -1185,7 +1185,7 @@ static void holdPreviewMargin(UIView *preview, UIView *host) {
 }
 
 - (void)tapped:(UITapGestureRecognizer *)recognizer {
-    if (SGRPlayerLyricsOpen()) return;
+    if (SGRPlayerPageOpen()) return;
     SGLog(@"redesign player: Spotify's lyric preview opens the lyrics");
     SGRPlayerOpenPreviewLyrics(recognizer.view);
 }

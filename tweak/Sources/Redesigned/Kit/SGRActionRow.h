@@ -11,8 +11,20 @@
 // Threading: main thread only.
 #import <UIKit/UIKit.h>
 
+// Spotify's own words for its play button and its shuffle button, from Spotify's strings bundle (SPTStrings.bundle's
+// _i18n data assets, the same in 9.1.90 and 9.2.0), in the app's preferred languages and English: each of the keys
+// AccessibilityPlay, AccessibilityPause, AccessibilityShufflePlay, ShuffleButtonOff, ShuffleButtonOn and
+// ShuffleButtonOnSmartShuffle to the set of its words; a key Spotify has no word for is missing. Read once.
+NSDictionary<NSString *, NSSet<NSString *> *> *SGRSpotifyControlWords(void);
+
+// Whether Spotify's play button `button` (an Encore PlayButtonView) is playing, from the view's own state: the Swift
+// stored property isPlaying, which the Objective-C runtime lists as a one-byte ivar (at 192 in 9.1.90 and 9.2.0), its
+// offset read from the runtime. NO, with `playing` untouched, for any other view or where the property is gone.
+BOOL SGRPlayButtonPlaying(UIView *button, BOOL *playing);
+
 // A capsule the height of SGRActionHeight with a glyph and a word in it, on prominent glass: the one
-// control of an action row that leads. `sgr_width` is the width the word it is showing asks for.
+// control of an action row that leads. `sgr_width` is the width it asks for, measured with the longest of Spotify's
+// Play and Pause words and every word it has shown for its source, so it keeps one width as Play turns to Pause.
 @interface SGRPlayCapsule : UIControl
 // Spotify's play button, the one the capsule reads and fires. Set by -feedFrom:.
 @property (nonatomic, weak, readonly) UIView *source;
@@ -102,7 +114,8 @@ static inline UIImage *SGRCutOutMask(UIView *view, CGRect shape, UIImageView *gl
 // Spotify's download button (SGRDownload.h) is drawn by Lottie, with nothing to copy: for it the button
 // draws the state Spotify reports instead -- the arrow, a ring filling up, the downloaded glyph -- and reads
 // it again while it is on screen, twice a second while a download runs, since nothing Spotify does then
-// lays out anything the page hears. So is the add-to button, drawn as a plus or, saved, a checkmark.
+// lays out anything the page hears. So is the add-to button, drawn as a plus or, saved, a fixed 22pt disc in the
+// accent color with a dark check, as downloaded is.
 - (void)feedFrom:(UIView *)source;
 @end
 

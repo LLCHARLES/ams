@@ -339,8 +339,7 @@ static BOOL completeAd(id<NSURLSessionDataDelegate> delegate, NSURLSession *sess
         };
         // A delegate may answer the response handler asynchronously on another queue.
         // Data and the original completion still belong to Foundation's delegate queue.
-        if (NSOperationQueue.currentQueue == session.delegateQueue) end();
-        else [session.delegateQueue addOperationWithBlock:end];
+        [session.delegateQueue addOperationWithBlock:end];
     };
     // Foundation waits for the response decision before issuing its completion.
     if (objc_getAssociatedObject(task, &kAdResponseKey))
@@ -643,7 +642,7 @@ static NSURLRequest *unconditional(NSURLRequest *request) {
 
 typedef void (^SGDataCompletion)(NSData *, NSURLResponse *, NSError *);
 static NSURLRequest *offlineRequest(NSURLRequest *request) {
-    if (!isOfflineConfig(request.URL)) return request;
+    if (!isOfflineConfig(request.URL) || !SGOfflineCompanionLoaded()) return request;
     NSMutableURLRequest *plain = [request mutableCopy];
     [plain setValue:nil forHTTPHeaderField:@"If-None-Match"];
     [plain setValue:nil forHTTPHeaderField:@"If-Modified-Since"];
@@ -765,8 +764,8 @@ static void installRequestFactories(void) {
     });
 }
 
-static void installOfflineHooks(void) {
-    if (!SGOfflineCompanionLoaded()) return;
+static BOOL installOfflineHooks(void) {
+    if (!SGOfflineCompanionLoaded()) return NO;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         // The store is initialized under cacheLock before any delegate hook is published.
@@ -783,6 +782,7 @@ static void installOfflineHooks(void) {
         if (own && own != class_getInstanceMethod(NSURLSession.class, selector)) %init(OfflineLocalCompletionRequests);
         %init(OfflineDelegates);
     });
+    return YES;
 }
 
 static void offlineImageAdded(const struct mach_header *image, intptr_t slide) {
@@ -812,7 +812,12 @@ static void offlineImageAdded(const struct mach_header *image, intptr_t slide) {
         %init(TaskRequests);
         if (premium) installRequestFactories();
     }
-    offlineInstallQueue = dispatch_queue_create("com.retrine.offline-loader", DISPATCH_QUEUE_SERIAL);
-    installOfflineHooks();
-    _dyld_register_func_for_add_image(offlineImageAdded);
+    // A verified provider is pinned. Only a miss needs replay and future add-image notifications.
+    if (!installOfflineHooks()) {
+        offlineInstallQueue = dispatch_queue_create("com.retrine.offline-loader", DISPATCH_QUEUE_SERIAL);
+        [NSNotificationCenter.defaultCenter addObserverForName:@"SAPOfflineProfileReady" object:nil queue:nil usingBlock:^(NSNotification *note){
+            dispatch_async(offlineInstallQueue, ^{ installOfflineHooks(); });
+        }];
+        _dyld_register_func_for_add_image(offlineImageAdded);
+    }
 }

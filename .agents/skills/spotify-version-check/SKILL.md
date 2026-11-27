@@ -13,7 +13,7 @@ Spotify renames and removes Objective-C classes and selectors between versions. 
 fails at launch in `SGRequireClasses`, so it is easy to see. A selector the tweak *calls* is different: the
 call sits behind `respondsToSelector:`, so a missing one does nothing and logs nothing. Sweep both.
 
-## What 9.1.88 and later broke
+## Why check hooks and calls separately?
 
 | Feature | Cause | How it showed |
 |---|---|---|
@@ -38,7 +38,7 @@ The hook sweep does not check what the tweak calls. Check these by hand, or exte
 
 For each selector, find which class it is sent to in the code, then grep the new dump:
 
-    grep -c '\[SPTLinkDispatcherImplementation navigateToURI:options:interactionID:\]' notes/spotify-<ver>/data/di-objc-<ver>.txt
+    grep -c '\[SPTLinkDispatcherImplementation navigateToURI:options:reason:completionHandler:resultHandler:\]' notes/spotify-<ver>/data/di-objc-<ver>.txt
 
 A count of 0 on a selector that the old version had is a silent break. A Swift ivar (`class_getInstanceVariable`)
 is not in the dump. Check it on the phone, or read the class's ivar list with `otool -ov` (below).
@@ -52,8 +52,8 @@ Eevee+Chroma IPAs; the clean-room rule (`clean-room-describer`) still holds.
 1. Unzip the binary outside the repo (`$CLAUDE_JOB_DIR/tmp` in a background job, else `$TMPDIR`). The
    later steps run in that folder:
 
-       repo=$PWD; mkdir -p "$TMPDIR/s78" && cd "$TMPDIR/s78"
-       unzip -o -q "$repo/ipa/Spotify-9.1.78.ipa" 'Payload/Spotify.app/Spotify'
+       repo=$PWD; work=$(mktemp -d) && cd "$work"
+       unzip -q "$repo/ipa/Spotify-9.2.0.ipa" 'Payload/Spotify.app/Spotify'
 
 2. Dump the Objective-C metadata once (about 170 MB, a minute) and find the class's method list:
 
@@ -67,8 +67,9 @@ Eevee+Chroma IPAs; the clean-room rule (`clean-room-describer`) still holds.
 
 3. Disassemble the range. `dis.py` uses Xcode's `llvm-objdump` and names every `objc_msgSend$` stub:
 
-       python3 -I "$repo/notes/spotify-9.1.90/tools/dis.py" Payload/Spotify.app/Spotify 0x109776338 0x109776350
+       python3 -I "$repo/notes/spotify-9.1.90/tools/dis.py" Payload/Spotify.app/Spotify "$imp" "$next_imp"
 
+   Set `imp` and `next_imp` from this exact binary, never another version's addresses.
    `/usr/bin/objdump` ignores `--start-address` on this binary and prints from the top. Use the Xcode one.
    `stubs.py` resolves single stub addresses (`adrp x1` + `ldr x1, [x1, #off]` to a selector reference; the
    pointer's low 36 bits under chained fixups, base `0x100000000`).
@@ -90,6 +91,6 @@ selector takes an object. Build the argument the old wrapper built.
 
 ## After the sweep
 
-- A fix for one version keeps the old version's path first where it still exists, so a supported version runs
-  the code it ran before (`AGENTS.md`: 9.1.78 is the version Retrine is made for).
+- Check the receiver and its superclasses on **both** supported IPAs (9.1.90 and release base 9.2.0)
+  before deleting a fallback. Keep paths either still uses; keep and report ambiguous cases.
 - Check each fix on the phone with `phone-check`, and say which versions were run and which were not.

@@ -8,6 +8,7 @@
 #import "Settings/SGModPage.h"
 #import "Settings/SGSourcesPage.h"
 #import "Shared/Lyrics/Lyrics.h"
+#import "Shared/LyricsSources/SGBoundedRequest.h"
 #import "AnimatedArtwork.h"
 #import "SGMotionClip.h"
 #import "SGMotionTicket.h"
@@ -94,8 +95,8 @@ static BOOL sg_waitingForHeaders;
     [request setValue:@"application/x-protobuf" forHTTPHeaderField:@"Content-Type"];
     request.allowsConstrainedNetworkAccess = SGFlag(SGKeyMotionLowData, NO);
     __weak SGMotionCanvasRequest *weakSelf = self;
-    self.task = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData *reply, NSURLResponse *response, NSError *error) {
-        NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+    self.task = SGBoundedRequestTask(request, 0, ^(NSData *reply, NSURLResponse *response, NSError *error) {
+        NSInteger status = !error && [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
         NSString *address = status == 200 ? SGMotionCanvasInReply(reply) : nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             SGMotionCanvasRequest *request = weakSelf;
@@ -104,7 +105,7 @@ static BOOL sg_waitingForHeaders;
             if (logged++ < 5 || status != 200) SGLog(@"motion: Canvas service for %@: %ld, %@", request.uri, (long)status, address ? @"a video" : @"none");
             [request finish:address status:status];
         });
-    }];
+    });
     [self.task resume];
 }
 @end
@@ -233,8 +234,7 @@ SGMotionTicket *SGMotionRequestAlbumSongClip(NSString *uri, NSURL *canvas, NSStr
 
 SGModRow *SGMotionSourcesRow(void) {
     SGModRow *row = SGPageRow(SGL(@"settings.artwork.sources.row.title", @"Artwork sources"), ^UIViewController *{
-        return SGSourcesPageMake(SGL(@"settings.artwork.sources.title", @"Artwork sources"), SGL(@"settings.artwork.sources.intro", @"Asked top to bottom until one has a clip for the track. Apple Music is "
-                                                     @"asked for the album by name, then by barcode or a track's recording code if needed. It never sees your account."),
+        return SGSourcesPageMake(SGL(@"settings.artwork.sources.title", @"Artwork sources"), SGL(@"settings.artwork.sources.intro", @"Sources are tried in order until one has a clip. For a new Apple Music lookup, Retrine checks the album barcode, then the track’s recording code. If neither matches, it searches by name. Apple Music never sees your account."),
                                  allSources(), ^NSArray<NSString *> * { return SGMotionSourceOrder(); },
                                  ^(NSArray<NSString *> *keys) { [NSUserDefaults.standardUserDefaults setObject:keys forKey:SGKeyMotionSources]; });
     });

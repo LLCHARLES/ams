@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 extern NSUInteger const SGTranslationRecordBytes;
+BOOL SGTranslationStorageUnlocked(void);
 extern NSUInteger const SGTranslationTransferBytes;
 extern NSUInteger const SGTranslationTransferEntries;
 NSError *SGTranslationStorageError(NSString *message);
@@ -27,6 +28,8 @@ NSDictionary *SGTranslationRecordDescriptor(NSDictionary *record, unsigned long 
 - (NSNumber *)importAuthority:(NSError **)error;
 - (BOOL)permitsImport:(NSDictionary *)record authority:(NSNumber *)authority error:(NSError **)error;
 - (BOOL)migrate:(NSError **)error;
+// The first lyrics read need not migrate unrelated songs to see its legacy lines.
+- (BOOL)migrateSpace:(NSString *)space key:(NSString *)key error:(NSError **)error;
 - (NSDictionary *)read:(NSString *)space key:(NSString *)key error:(NSError **)error;
 - (BOOL)save:(NSDictionary *)lines space:(NSString *)space key:(NSString *)key
      replace:(BOOL)replace preserveMissing:(BOOL)preserveMissing grandfather:(BOOL)grandfather

@@ -284,6 +284,7 @@ enum { kSaveRow, kImportRow, kActionRows };
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.audioeffects.presets.action.replace", @"Replace") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         [self keep:values as:name];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -321,6 +322,7 @@ enum { kSaveRow, kImportRow, kActionRows };
         self->_picked = [NSIndexPath indexPathForRow:(NSInteger)[self->_mine indexOfObject:name] inSection:1];
         [self.tableView reloadSections:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, 2)] withRowAnimation:UITableViewRowAnimationFade];
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

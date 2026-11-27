@@ -364,9 +364,10 @@ int motionMain(NSURL *out, int argc, char **argv) {
     // cuts it, in a fresh process, for the memory one takes.
     if (argc == 2 && (!strcmp(argv[0], "one") || !strcmp(argv[0], "cut"))) {
         NSURL *video = [NSURL fileURLWithPath:[NSString stringWithUTF8String:argv[1]]];
+        NSString *name = [NSString stringWithFormat:@"one-%@.mp4", NSUUID.UUID.UUIDString];
         CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
         BOOL ok = !strcmp(argv[0], "one")
-            ? SGLyricsClipWriteOverMotion([out URLByAppendingPathComponent:@"one.mp4"], video, @"(And I turn into a stalker)",
+            ? SGLyricsClipWriteOverMotion([out URLByAppendingPathComponent:name], video, @"(And I turn into a stalker)",
                                           @"I stare at the moon", nil, @"When nighttime comes", 1, 4.5, SGLyricsClipLeft, nil)
             : SGMotionClipShape(video, 0.75, [out URLByAppendingPathComponent:@"one-cut.mp4"]);
         printf("%s %s in %.0f ms; footprint now %.1f MB, peak %.1f MB\n", argv[0], ok ? "written" : "FAILED",

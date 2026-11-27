@@ -75,6 +75,7 @@ static void showFix(void) {
         SGOpenURL([SGRepoURL stringByAppendingString:@"#%EC%84%9C%EB%AA%85%EA%B3%BC-%EB%B2%88%EB%93%A4-id"]);
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(sheet);
     [top presentViewController:sheet animated:YES completion:^{
         [NSUserDefaults.standardUserDefaults setObject:appID forKey:kWarned];
     }];

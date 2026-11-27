@@ -44,7 +44,7 @@ recorded in the result. No simulator or iPhone is launched.
   fallback, one-shot mutations, late responses and manual download completion.
 - **session**: actual artist scheduler and ownership, the pair of one-track
   releases, FIFO admission, shared releases, stop/cancel/recovery races.
-- **catalog**: album parsing plus artist edition grouping, hydration limits,
+- **catalog**: artist edition grouping, hydration limits,
   cancellation, partial results, progressive publication and metadata diagnostics.
 - **playlists**: production reader/workflow/item observation with a controlled
   native service; ordering, incremental additions, duplicate URI exclusion,

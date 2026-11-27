@@ -29,7 +29,9 @@ static void register_added(void (*callback)(const struct mach_header *,intptr_t)
     for(unsigned i=0;i<imageCount;i++)callback(image_header(i),0);
 }
 static void register_removed(void (*callback)(const struct mach_header *,intptr_t)) {removedImage=callback;}
+void SAPObserveProfileImages(void);
 static void publishImages(void) {
+    SAPObserveProfileImages();
     for(unsigned i=0;i<2;i++)removedImage(image_header(i),0);
     for(unsigned i=0;i<imageCount;i++)addedImage(image_header(i),0);
 }

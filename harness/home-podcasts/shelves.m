@@ -63,6 +63,7 @@ UIFont *SGMonospacedDigitsFont(UIFont *font) { return font; }
 
 @interface ShelfFeedFixture : NSObject
 + (NSObject *)renderer;
++ (BOOL)rejectsScalarRenderer;
 + (id)generation:(NSInteger)phase;
 + (void)publish:(id)generation renderer:(NSObject *)renderer;
 @end
@@ -128,6 +129,7 @@ static void observeStoreState(id self, SEL command, id state) {
             made.contentInsets = NSDirectionalEdgeInsetsMake(24, 0, 0, 0);
             return made;
         }];
+    HARNESS_CHECK([ShelfFeedFixture rejectsScalarRenderer]);
     self.renderer = [ShelfFeedFixture renderer];
     self.collectionViewRenderer = self.renderer;
     self.unavailableCase = [NSProcessInfo.processInfo.environment[@"SG_SHELF_CASE"] isEqualToString:@"unavailable"];

@@ -3,11 +3,12 @@
 #import "SGWGCore.h"
 #import <objc/runtime.h>
 #import <os/lock.h>
+#import <stdatomic.h>
 
 static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
 static NSMutableDictionary<NSString *, NSNumber *> *completions, *statuses, *errors;
 static NSMutableArray<NSString *> *installed, *skipped;
-static uint64_t mediaBytes, apiBytes;
+static atomic_uint_fast64_t mediaBytes, apiBytes;
 
 static NSArray<NSString *> *Delegates(void) {
     return @[@"SPTCoreURLSessionDataDelegate",
@@ -43,12 +44,47 @@ static void ObserveCompletion(NSString *name, NSURLSessionTask *task, NSError *e
     os_unfair_lock_unlock(&lock);
 }
 
+typedef enum { Other, Media, API, MissingHost } HostKind;
+
+// Don't pin even the last song URL on a long-lived delegate thread. When a
+// classified URL dies, invalidate address comparisons before it can be reused.
+static atomic_uint_fast64_t urlGeneration;
+@interface SGWGHostKind : NSObject {
+@public HostKind kind;
+}
+@end
+@implementation SGWGHostKind
+- (void)dealloc { atomic_fetch_add_explicit(&urlGeneration, 1, memory_order_release); }
+@end
+
+static HostKind KindForURL(NSURL * __attribute__((objc_precise_lifetime)) url) {
+    if (!url) return MissingHost;
+    static __thread struct { uintptr_t address; uint64_t generation; HostKind kind; } last;
+    uintptr_t address = (uintptr_t)(__bridge void *)url;
+    uint64_t generation = atomic_load_explicit(&urlGeneration, memory_order_acquire);
+    if (last.address == address && last.generation == generation) return last.kind;
+    SGWGHostKind *tag = objc_getAssociatedObject(url, &urlGeneration);
+    if (!tag) {
+        @synchronized (url) {
+            tag = objc_getAssociatedObject(url, &urlGeneration);
+            if (!tag) {
+                NSString *host = url.host;
+                NSString *category = SGWGHostCategory(host);
+                tag = [SGWGHostKind new];
+                tag->kind = !host ? MissingHost : [category isEqual:@"media"] ? Media : [category isEqual:@"api"] ? API : Other;
+                objc_setAssociatedObject(url, &urlGeneration, tag, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+    }
+    last = (typeof(last)){address, generation, tag->kind};
+    return tag->kind;
+}
+
 static void ObserveData(NSURLSessionTask *task, NSData *data) {
-    NSString *category = SGWGHostCategory(task.currentRequest.URL.host ?: task.originalRequest.URL.host);
-    os_unfair_lock_lock(&lock);
-    if ([category isEqualToString:@"media"]) mediaBytes += data.length;
-    else if ([category isEqualToString:@"api"]) apiBytes += data.length;
-    os_unfair_lock_unlock(&lock);
+    HostKind kind = KindForURL(task.currentRequest.URL);
+    if (kind == MissingHost) kind = KindForURL(task.originalRequest.URL);
+    if (kind == Media) atomic_fetch_add_explicit(&mediaBytes, data.length, memory_order_relaxed);
+    if (kind == API) atomic_fetch_add_explicit(&apiBytes, data.length, memory_order_relaxed);
 }
 
 static void Hook(NSString *name, BOOL data) {
@@ -100,7 +136,9 @@ NSArray<NSString *> *SGWGTransportReportLines(void) {
         [NSString stringWithFormat:@"spotify.completions: %@", Summary(completions)],
         [NSString stringWithFormat:@"spotify.http-status: %@", Summary(statuses)],
         [NSString stringWithFormat:@"spotify.errors: %@", Summary(errors)],
-        [NSString stringWithFormat:@"spotify.received-bytes: media %llu api %llu", (unsigned long long)mediaBytes, (unsigned long long)apiBytes],
+        [NSString stringWithFormat:@"spotify.received-bytes: media %llu api %llu",
+            (unsigned long long)atomic_load_explicit(&mediaBytes, memory_order_relaxed),
+            (unsigned long long)atomic_load_explicit(&apiBytes, memory_order_relaxed)],
         [NSString stringWithFormat:@"spotify.hooks: %lu installed | skipped: %@", (unsigned long)installed.count, [skipped componentsJoinedByString:@"; "] ?: @"none"],
         @"coverage: URLSession and Spotify main-image native TCP imports; remote UDP is blocked. Background services, remote Connect devices and playback are not device-verified.",
         [NSString stringWithFormat:@"input: Spotify %@; class/selector presence is static evidence, not proof of playback. Destination counters count connection attempts.", SGWGAppVersion()]

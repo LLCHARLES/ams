@@ -373,6 +373,7 @@ static NSString *trimmed(NSString *text) {
     }]];
     [sheet addAction:[UIAlertAction actionWithTitle:SGL(@"settings.edit_info.keep_editing", @"Keep editing") style:UIAlertActionStyleCancel handler:nil]];
     sheet.popoverPresentationController.barButtonItem = self.navigationItem.leftBarButtonItem;
+    SGPresentDark(sheet);
     [self presentViewController:sheet animated:YES completion:nil];
 }
 
@@ -399,6 +400,7 @@ static NSString *trimmed(NSString *text) {
         photos.delegate = self;
         picker = photos;
     }
+    SGPresentDark(picker);
     [self presentViewController:picker animated:YES completion:nil];
 }
 
@@ -436,6 +438,7 @@ static NSString *trimmed(NSString *text) {
             UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.edit_info.not_an_image.title", @"Not an image") message:SGL(@"settings.edit_info.not_an_image.message", @"Pick a JPEG, PNG or HEIC file.")
                                                                     preferredStyle:UIAlertControllerStyleAlert];
             [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleDefault handler:nil]];
+            SGPresentDark(alert);
             [editor presentViewController:alert animated:YES completion:nil];
         });
     });

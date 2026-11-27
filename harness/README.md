@@ -29,28 +29,36 @@ first matching name or directory. The shortcut requires the running registry to 
 the head literal, so entries derived or modified after it cannot be missed.
 A harness with no tweak
 dependency is always selected, with a warning. The selected harnesses are
-packed into at most three shards by greedy weight and run as
+packed into at most five shards by greedy weight and run as
 `Harnesses <shard>` jobs with a 45-minute timeout. Each shard containing a Theos harness uses
 the setup-Theos action; its caches contain build tools/output, never
 credentials or test data.
 
-The cap reduces macOS runner demand without changing the weighting. The successful
-full scheduled run [43850580004](https://github.com/oneulddu/retrine/actions/runs/43850580004)
-(2026-11-16, `297145c6`) reported 78 harness durations totaling 3,601.7 seconds.
-Repacking those measurements with the current three-shard plan gives 820.7,
-1,209.4 and 1,571.6 seconds. Per-job setup/cleanup overhead was 42–71 seconds,
-including 35–61 seconds for Theos. The largest projection plus the worst overhead
-is 27m23s, leaving 17m37s within the unchanged 45-minute timeout for variability
-and newer checks (SponsorBlock was not present in that measured run).
-These are projections, not a measured three-shard run.
+When a harness exits nonzero, the runner summarizes new `.ips` files in the
+user's `Library/Logs/DiagnosticReports`: process, exception, termination, and the
+first 15 frames of the crashed thread. A signal exit (including shell status
+above 128) or failed simulator harness waits up to 10 seconds for ReportCrash,
+stopping after two quiet seconds once a report is printed. Other failures scan
+once without waiting. Reports are selected by creation time, not proof of
+causation. No reports are uploaded or removed.
 
-`.github/workflows/runner-starvation-retry.yml` inspects completed Mac harnesses
-and WireGuard checks runs of pull requests. It retries failed jobs once, only on attempt 1
-of a failed/cancelled run when **every** non-successful job has no steps and a
-check-run annotation containing `was not acquired by Runner`. Real failures,
-mixed failures, missing annotations and later attempts are logged without retry.
-The privileged workflow runs only its own inline code, with no checkout or
-execution of code/artifacts from the triggering run.
+On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
+Host, Catalyst and simulator harnesses build for the runner's architecture;
+iPhone device libraries still target arm64. On same-repo PRs the Ubuntu watchdog
+watches for up to 20 minutes and cancels only if **all planned Mac jobs** have
+been queued for at least 90 seconds. Linux jobs aren't watched. Forks and
+Dependabot PRs wait for GitHub's natural starvation failure.
+
+`.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
+at most once: if `macos-latest` starves, the second and final attempt uses
+`macos-26-intel` without a watchdog. A retry requires either GitHub's
+`was not acquired by Runner` annotation on at least one workload with no
+steps (other unsuccessful jobs must also be unacquired or have been cancelled),
+or a successful or cancelled watchdog's warning naming the exact cancelled
+Mac jobs, all without runners or steps and with other workloads successful. It
+does not retry a job failure with steps, a timeout, a superseded run or a SHA no longer at the PR head. The
+last attempt waits in the queue normally. The privileged retry workflow runs
+default-branch inline code only; it doesn't check out PR code or read artifacts.
 
 Locally, the same script explains and runs selections from the repo root:
 
@@ -123,6 +131,7 @@ their check executable in the workflow.
 | `palette/field-check.sh` | Catalyst player field palette requests across mode changes and stale replies; the flow layer's stepped drift, held and resumed. |
 | `pitch/build.sh` | Synthetic sine pitch/speed assertions, no song argument. |
 | `player/queue-check.sh` | Playing Next history, selection and cover delivery, including cancellation and a retry after an offline failure. |
+| `python3 player/ui-check.py shuffle heat` | One simulator build checks per-track style selection, the missing-clip stand-in and its heat override. Creates and deletes a `PlayerUI-` simulator unless `--udid` names a booted one. |
 | `player/title-notification-check.sh` | Player labels enabled live from an all-off launch and landscape title notifications, using offline fixtures. |
 | `player/title-style-check.sh` | Catalyst: the player's title and artist type through the real `PlayerTitle.x`, Korean text, Spotify's setters, lyrics 17/17 and Spotify's family kept. |
 | `player/progress-check.sh` | Catalyst: tracker cadence and visibility, first-reveal values, Spotify's own pause, and coverage published after a late opening morph without another layout. |
@@ -150,6 +159,7 @@ their check executable in the workflow.
 | `player-refinements/check.sh` | Catalyst rolling-digit rules, column reuse, repeated setters without attributed-text reads, repair after an external edit, detached visibility observers, and the real roll on a label in a window, plus Star add button and Saved mark (the old Plain checkmark switch, and Dot) through Logos. |
 | `prefs/check.sh` | Foundation preference validation plus counter persistence and file-hash checks (`counters.m`), and the Load ahead gate read through `SGEnabled` for wrong kinds and stock reset (`optional-work.m`). |
 | `radio-modes/build.sh` | Foundation Spotify mocks, spoofing off/on. |
+| `rtl/check.sh` | Simulator executable of its own, run left to right and then right to left: the glowing switch's knob, a slider row's value and title, a page row's value and chevron, a row's color swatch and value, the Sing card's column and play, the mic's upright slider, a recap story bar and its back and forward tap regions, and a gliding title's start and direction, each mirrored or kept as the direction asks. Its simulators are named `RetrineRTLCheck-<pid>`; a run deletes any of that name a cancelled run left. |
 | `settings-bars/build.sh` | Catalyst `SGInsetForBars` over a 6,000-view mock window: walks counted across repeated layouts, inset follows a bar resized, hidden, removed, added, or a table moved to another window. |
 | `settings-search/build.sh` | Mod Settings search: page-at-a-time index on a real run loop, keywords below titles, recent places by setting name across looks and languages. |
 | `sing/render-regressions-build.sh` | Mac build of `SGSingEngine.m` with audio doubles: placed vocals keep float headroom through downstream attenuation, and the room reverb goes idle once Sing stops feeding it. |
@@ -200,6 +210,7 @@ by merely compiling them.
 | `lyrics-page/build.sh` | iOS simulator settings UI. |
 | `menu/build.sh` | iOS simulator UI. |
 | `mod-settings/build.sh` | iOS simulator settings UI. |
+| `mod-settings/light-check.sh` | iOS simulator screenshots in Light and Dark Mode: the mod's alerts dark over a window in the system's appearance, as Spotify's is. |
 | `morph/build.sh` | iOS simulator visual rendering. `morph/check.sh` checks the opt-in Music-like close against 9.1.90's compact transition doubles: staged geometry, velocity release, cancellation with the reversed fraction, and the off path's old numbers. |
 | `native-player/build.sh` | iOS simulator UI; `sponsorblock` checks SponsorBlock's progress bar marks (`../sponsorblock/markers-check.m`, also run by `player/`'s `sponsorblock` scenario). |
 | `onboarding/build.sh` | iOS simulator UI; generates fixture release notes only inside its output directory. |

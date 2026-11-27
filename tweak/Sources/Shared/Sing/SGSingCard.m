@@ -255,6 +255,10 @@ static CGFloat height(float rms) {
     return CGSizeMake(size.width, 12 + MAX(kCardHeight, text + 168) + 12 + stops + 8);
 }
 
+- (BOOL)mirrored {
+    return self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat width = self.bounds.size.width, side = 16;
@@ -263,19 +267,29 @@ static CGFloat height(float rms) {
     _card.frame = CGRectMake(side, 12, width - 2 * side, cardHeight);
     _stops.frame = CGRectMake(side, CGRectGetMaxY(_card.frame) + 12, width - 2 * side, stopsHeight);
     CGFloat inner = _card.bounds.size.width, textWidth = inner - 2 * kInset - kColumn - 12;
-    _column.frame = CGRectMake(inner - kInset - kColumn, kInset, kColumn, cardHeight - 2 * kInset);
+    // The card is laid out left to right and mirrored whole right to left: the column at the left, the words and
+    // play at the right, and the lines running in from the right to end under the column.
+    BOOL rtl = self.mirrored;
+    CGRect (^across)(CGRect) = ^CGRect(CGRect frame) {
+        if (rtl) frame.origin.x = inner - CGRectGetMaxX(frame);
+        return frame;
+    };
+    _column.frame = across(CGRectMake(inner - kInset - kColumn, kInset, kColumn, cardHeight - 2 * kInset));
     CGFloat y = kInset + 2;
     for (UIView *label in @[_title, _artist, _state]) {
         CGFloat lineHeight = [(UIFont *)[label valueForKey:@"font"] lineHeight];
-        label.frame = CGRectMake(kInset + 2, y, textWidth, lineHeight);
+        label.frame = across(CGRectMake(kInset + 2, y, textWidth, lineHeight));
         y += lineHeight + (label == _artist ? 6 : 1);
     }
-    _play.frame = CGRectMake(kInset, cardHeight - kInset - 48, 48, 48);
+    _play.frame = across(CGRectMake(kInset, cardHeight - kInset - 48, 48, 48));
     SGShapeGlass(SGGlassFor(_play, @selector(addSubview:)), 24, YES);
-    _graph.frame = CGRectMake(0, y + 8, inner - kInset - kColumn - 6, CGRectGetMinY(_play.frame) - y - 16);
+    // The graph turned over as a whole, its lines, their glide and the fade at its ends with it.
+    _graph.transform = CGAffineTransformIdentity;
+    _graph.frame = across(CGRectMake(0, y + 8, inner - kInset - kColumn - 6, CGRectGetMinY(_play.frame) - y - 16));
+    _graph.transform = rtl ? CGAffineTransformMakeScale(-1, 1) : CGAffineTransformIdentity;
     for (CAShapeLayer *line in @[_rest, _vocals]) line.frame = _graph.bounds;
     _graph.layer.mask.frame = _graph.bounds;
-    _song.accessibilityFrameInContainerSpace = CGRectMake(0, 0, CGRectGetMinX(_column.frame), CGRectGetMinY(_play.frame));
+    _song.accessibilityFrameInContainerSpace = across(CGRectMake(0, 0, inner - kInset - kColumn, CGRectGetMinY(_play.frame)));
     BOOL wasVisible = _graphVisible;
     [self updateVisibility];
     if (wasVisible && _graphVisible) [self drawLines:NO];
@@ -517,7 +531,8 @@ static CGFloat height(float rms) {
 
 - (void)stateTapped:(UITapGestureRecognizer *)tap {
     CGPoint at = [tap locationInView:_card];
-    if (at.y > CGRectGetMaxY(_state.frame) + 8 || at.x > CGRectGetMinX(_column.frame)) return;
+    BOOL columnSide = self.mirrored ? at.x < CGRectGetMaxX(_column.frame) : at.x > CGRectGetMinX(_column.frame);
+    if (at.y > CGRectGetMaxY(_state.frame) + 8 || columnSide) return;
     [self explainState];
 }
 
@@ -532,6 +547,7 @@ static CGFloat height(float rms) {
         }]];
     }
     [alert addAction:[UIAlertAction actionWithTitle:SGSingCurrentState() == SGSingStateFailed ? SGL(@"common.cancel", @"Cancel") : SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 

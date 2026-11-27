@@ -32,9 +32,11 @@
 #import "PlayerMix.h"
 #import "Shared/AutoMix/AutoMixPreview.h"
 
-static const CGFloat kSkipGlyphSize = 32, kPlayGlyphSize = 44;
+// The Music app's transport glyphs measured at 3x: previous and next 39 pt wide, pause 29 pt wide and 40 tall, where
+// 32 and 44 drew 42 and 26 by 35.
+static const CGFloat kSkipGlyphSize = 29.5, kPlayGlyphSize = 50;
 // The platter the Music app fades in behind a pressed transport glyph (SGRPress.h), about twice the glyph.
-static const CGFloat kSkipPlatter = 64, kPlayPlatter = 76;
+static const CGFloat kSkipPlatter = 59, kPlayPlatter = 86;
 // A spinner that is still up this long after a state change is buffering, not a track starting.
 static const NSTimeInterval kSpinnerCheck = 0.6;
 
@@ -191,6 +193,8 @@ static BOOL shuffleAndRepeatGone(UIView *host, UIStackView *row) {
 // The emptied ends stay where the stack put them, and next's moves under repeat's (the last of the row is on top):
 // an empty view that takes touches swallows them, so the ends take none while the two are spread (quietEnds).
 static const CGFloat kSpreadReachMax = 140;
+// The Music app's previous and next stand 107 pt either side of play's middle on a 402 pt screen: this share of the room.
+static const CGFloat kSpreadShare = 0.31;
 static char kSpreadSlotsKey, kSpreadShiftKey, kQuietEndsKey;
 
 // The row's own slot that holds `view`, or nil.
@@ -257,7 +261,7 @@ static void spreadSkips(UIView *host, UIStackView *row, BOOL endsEmpty) {
             return (slot.center.x < playX ? playX : width - playX) - slot.bounds.size.width / 2;
         };
         CGFloat inside = MIN(width, host.bounds.size.width - 2 * SGRPlayerSideMargin);
-        CGFloat reach = MIN(MIN(inside / 3, kSpreadReachMax), MIN(room(previous), room(next)));
+        CGFloat reach = MIN(MIN(inside * kSpreadShare, kSpreadReachMax), MIN(room(previous), room(next)));
         CGFloat (^outward)(UIView *) = ^CGFloat(UIView *slot) {
             CGFloat offset = slot.center.x - playX;
             CGFloat more = MAX(0, reach - fabs(offset));
@@ -417,6 +421,8 @@ static UILabel *monospaced(UIView *host, NSString *identifier, const void *findK
     }
     if (sg_rollingDigits) SGRRollDigits(label);
     else SGRMonospacedDigits(label);
+    // The Music app's type for the times (SGRTimeLabelStyle), over Spotify's.
+    SGRTimeLabelStyle(label);
     return label;
 }
 
@@ -638,14 +644,20 @@ static NSString *const kSliderID = @"SPTNowPlayingSliderV2";
 static void watchSlider(UIView *host) {
     UISlider *slider = (UISlider *)SGRFindByIdentifier(host, kSliderID, &kSliderKey);
     if (![slider isKindOfClass:UISlider.class]) return;
-    SGRSeekTap *tap = objc_getAssociatedObject(host, &kSeekTapKey);
+    SGRSeekTap *existing = objc_getAssociatedObject(host, &kSeekTapKey);
+    SGRSeekTap *tap = existing.view == host ? existing : nil;
+    for (SGRSeekTap *attached in host.gestureRecognizers) {
+        if (![attached isKindOfClass:SGRSeekTap.class]) continue;
+        if (!tap) tap = attached;
+        else if (attached != tap) [host removeGestureRecognizer:attached];
+    }
     if (!tap) {
         tap = [[SGRSeekTap alloc] initWithTarget:nil action:nil];
         [tap addTarget:tap action:@selector(sgr_seek)];
         [host addGestureRecognizer:tap];
-        objc_setAssociatedObject(host, &kSeekTapKey, tap, OBJC_ASSOCIATION_ASSIGN);
         SGLog(@"redesign player: a tap around the progress bar seeks");
     }
+    if (existing != tap) objc_setAssociatedObject(host, &kSeekTapKey, tap, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     tap.slider = slider;
 }
 
@@ -658,7 +670,9 @@ static void watchSlider(UIView *host) {
 static const CGFloat kScrubTimeDrop = 3;
 // The Music app keeps its time row clear of the bar: the times, and the audio quality badge between them, stand this
 // much lower than Spotify lays them out, by a translation of theirs, so Spotify's layout stays underneath.
-static const CGFloat kTimesDrop = 8;
+// 6, measured against the Music app's player at 3x: the digits stood 2 pt lower than its own at 8. Against it again over
+// two animated covers (402 by 874 pt), the digits and the badge stood 1.3 pt higher than its own at 6: 7.3.
+static const CGFloat kTimesDrop = 7.3;
 static const NSUInteger kScrubUnitReach = 6;
 static char kScrubTakeKey, kScrubTakeLabelKey, kScrubRemainingKey, kScrubRemainingLabelKey, kScrubColorKey;
 static __weak UISlider *sg_scrubSlider;
@@ -677,6 +691,8 @@ static UIView *timesAround(UISlider *slider) {
 static void brighten(UIView *view, BOOL on, BOOL animated) {
     if (![view isKindOfClass:UILabel.class]) return;
     UILabel *label = (UILabel *)view;
+    // The times' dim ink (SGRTimeLabelStyle) is left alone while they are white.
+    SGRTimeLabelLit(label, on);
     UIColor *kept = objc_getAssociatedObject(label, &kScrubColorKey);
     UIColor *to = on ? SGRPrimary() : kept;
     if (on && !kept && label.textColor) objc_setAssociatedObject(label, &kScrubColorKey, label.textColor, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -710,6 +726,25 @@ UIColor *SGRPlayerBarTrack(void) {
     return [UIColor colorWithWhite:1 alpha:SGRIncreaseContrast() ? kBarTrackContrastAlpha : kBarTrackAlpha];
 }
 
+// The Music app's bars are white ADDED to what is behind them: measured on its player over a dark blue, a dark pink
+// and a white cover, the progress fill stands 112 of 255 above the backdrop (0.44), the volume fill 140 (0.55) and
+// either track 45 (0.175), saturating at white over a light one. The bars here are plain translucent white, which is
+// the same thing over a dark backdrop (kBarFillAlpha, kBarTrackAlpha) and over a lighter one only at the alpha
+// SGRInkPlainAlpha works out: a white cover's fill was 228 of 255 and its track 201 against the Music app's 255 and
+// 237, which left the bar pale on it.
+static const CGFloat kBarFillAdd = 0.44, kVolumeFillAdd = 0.55, kBarTrackAdd = 0.175;
+
+UIColor *SGRPlayerBarFillOver(UIView *view, BOOL lit, BOOL volume) {
+    if (lit) return SGRPlayerBarFill(YES);
+    CGFloat floorAlpha = CGColorGetAlpha(SGRPlayerBarFill(NO).CGColor);
+    return [UIColor colorWithWhite:1 alpha:SGRInkPlainAlpha(view, floorAlpha, volume ? kVolumeFillAdd : kBarFillAdd)];
+}
+
+UIColor *SGRPlayerBarTrackOver(UIView *view) {
+    CGFloat floorAlpha = CGColorGetAlpha(SGRPlayerBarTrack().CGColor);
+    return [UIColor colorWithWhite:1 alpha:SGRInkPlainAlpha(view, floorAlpha, kBarTrackAdd)];
+}
+
 // How much a finger dragging a bar thickens its track; the stretched middle the caps leave a track image.
 static const CGFloat kBarDragGrow = 1.75, kBarStretch = 1;
 
@@ -727,7 +762,7 @@ CGFloat SGRPlayerBarDragHeight(CGFloat height) {
     return round(height * kBarDragGrow);
 }
 
-static char kBarKey, kBarMinKey, kBarMaxKey, kHeldKey;
+static char kBarKey, kBarMinKey, kBarMaxKey, kHeldKey, kBarInkKey;
 static char kLayoutKey;
 static BOOL sg_mixProgress;
 static NSUInteger sg_mixRevision = 1;
@@ -817,7 +852,7 @@ static void setHeldBar(UISlider *slider, BOOL on) {
         bar.fill = [CALayer layer];
         bar.fill.backgroundColor = SGRPlayerBarFill(YES).CGColor;
         bar.remaining = [CALayer layer];
-        bar.remaining.backgroundColor = SGRPlayerBarTrack().CGColor;
+        bar.remaining.backgroundColor = SGRPlayerBarTrackOver(slider).CGColor;
         [bar.rail.layer addSublayer:bar.fill];
         [bar.rail.layer addSublayer:bar.remaining];
         [slider.superview insertSubview:bar aboveSubview:slider];
@@ -825,7 +860,7 @@ static void setHeldBar(UISlider *slider, BOOL on) {
         updateHeldBar(slider);
         bar.rail.frame = CGRectInset(bar.bounds, 0, (bar.heldHeight-bar.restHeight)/2);
         bar.rail.layer.cornerRadius = bar.restHeight/2;
-        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFill(NO).CGColor);
+        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFillOver(slider, NO, NO).CGColor);
         hideTrackImages(slider, bar);
     }
     NSUInteger generation = ++bar.generation;
@@ -833,7 +868,7 @@ static void setHeldBar(UISlider *slider, BOOL on) {
         CGFloat height = on ? bar.heldHeight : bar.restHeight;
         bar.rail.frame = CGRectInset(bar.bounds, 0, (bar.heldHeight-height)/2);
         bar.rail.layer.cornerRadius = height/2;
-        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFill(on).CGColor);
+        bar.fill.opacity = CGColorGetAlpha(SGRPlayerBarFillOver(slider, on, NO).CGColor);
     };
     SGRAnimateLayout(bar, ^{
         // The transition snapshots the rail. Don't also interpolate its bounds during the dissolve.
@@ -882,8 +917,22 @@ static void colorTrack(UISlider *slider, BOOL minimum, UIColor *color) {
 
 static void colorBar(UISlider *slider) {
     if (slider == sg_scrubSlider || !objc_getAssociatedObject(slider, &kBarKey)) return;
-    colorTrack(slider, YES, SGRPlayerBarFill(NO));
-    colorTrack(slider, NO, SGRPlayerBarTrack());
+    // Over a light backdrop the bar is drawn at the alpha the Music app's added white comes to there; a new reading of
+    // the backdrop colors it again, at once and without a layout: readings come every 0.125 s through a cover's
+    // crossfade, and one that leaves the bar's colors as they were (colorTrack) must cost nothing. The next layout
+    // still checks the colors.
+    if (!objc_getAssociatedObject(slider, &kBarInkKey)) {
+        objc_setAssociatedObject(slider, &kBarInkKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        __weak UISlider *weak = slider;
+        SGRBackdropInkObserve(slider, ^{
+            UISlider *shown = weak;
+            if (!shown) return;
+            invalidateColor(shown);
+            colorBar(shown);
+        });
+    }
+    colorTrack(slider, YES, SGRPlayerBarFillOver(slider, NO, NO));
+    colorTrack(slider, NO, SGRPlayerBarTrackOver(slider));
 }
 
 static void brightenTimes(UIView *unit, BOOL on, BOOL animated) {
@@ -1108,6 +1157,31 @@ static BOOL sameBarPixel(UISlider *slider, float value) {
 // The ordinary player's duration unit and the AI DJ's (DJMDurationElementsUnit) hold the same progress bar and times.
 static char kDurationHostKey;
 
+
+// The badge's text, glyph and fill inked as the times are (SGRBackdropInk.h): each stands the same step above the
+// backdrop whatever it is. Measured beside the Music app over a 184 of 255 gray, its box stood at 203 to 205 (+19) where
+// a fixed 17/255 fill stood at 189 (+5) and the box all but vanished. Taken again at each new reading of the backdrop.
+static const CGFloat kBadgeLightInk = 0.6;
+static void inkBadge(UIView *host) {
+    UIView *badge = SGAudioQualityShownBadge(host);
+    if (!badge) return;
+    BOOL plusL = YES;
+    CGFloat ink = CGColorGetAlpha(SGRInkFor(badge, SGAudioQualityStandardInk(), kBadgeLightInk, &plusL).CGColor);
+    CGFloat fill = CGColorGetAlpha(SGRInkFor(badge, SGAudioQualityStandardFill(), 0, &plusL).CGColor);
+    SGAudioQualitySetRedesignedInk(host, ink, fill, plusL);
+}
+
+// The badge placed between the times and inked for what is behind it.
+static char kBadgeInkKey;
+static void placeBadge(UIView *host) {
+    SGAudioQualityPlaceRedesignedBadge(host, kTimesDrop);
+    inkBadge(host);
+    if (objc_getAssociatedObject(host, &kBadgeInkKey)) return;
+    objc_setAssociatedObject(host, &kBadgeInkKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    __weak UIView *weak = host;
+    SGRBackdropInkObserve(host, ^{ if (weak) inkBadge(weak); });
+}
+
 static void durationLaidOut(UIViewController *unit) {
     UIView *host = unit.viewIfLoaded;
     if (!host) return;
@@ -1133,7 +1207,7 @@ static void durationLaidOut(UIViewController *unit) {
                            SGRFindByIdentifier(host, @"now-playing-time-remaning-label", &kRemainingTimeKey) ?: NSNull.null]) {
         if ([time isKindOfClass:UIView.class] && !CGAffineTransformEqualToTransform(time.transform, drop)) time.transform = drop;
     }
-    SGAudioQualityPlaceRedesignedBadge(host, kTimesDrop);
+    placeBadge(host);
     // Whether Spotify's font has digits of one width shows in the descriptor's feature settings.
     if (!taken) return;
     static dispatch_once_t once;
@@ -1156,7 +1230,7 @@ static void durationLaidOut(UIViewController *unit) {
     if (![time.accessibilityIdentifier isEqualToString:@"now-playing-time-take-label"]) return;
     for (UIView *view = time.superview; view; view = view.superview) {
         if (!objc_getAssociatedObject(view, &kDurationHostKey)) continue;
-        SGAudioQualityPlaceRedesignedBadge(view, kTimesDrop);
+        placeBadge(view);
         return;
     }
 }

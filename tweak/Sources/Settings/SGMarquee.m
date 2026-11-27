@@ -8,7 +8,7 @@ static NSString *const kScroll = @"sg.marquee";
 @implementation SGMarqueeLabel {
     UILabel *_label;
     CAGradientLayer *_fade;
-    CGFloat _scrolled;   // how far the running animation travels, 0 while still
+    CGFloat _scrolled;   // how far, and which way, the running animation travels; 0 while still, NAN to start over
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -38,13 +38,13 @@ static NSString *const kScroll = @"sg.marquee";
     if ([text isEqualToString:_label.text]) return;
     _label.text = text;
     self.accessibilityLabel = text;
-    _scrolled = -1;   // starts over from its start
+    _scrolled = NAN;   // starts over from its start
     [self setNeedsLayout];
 }
 
 - (void)setFont:(UIFont *)font {
     _label.font = font;
-    _scrolled = -1;
+    _scrolled = NAN;
     [self setNeedsLayout];
 }
 
@@ -52,10 +52,26 @@ static NSString *const kScroll = @"sg.marquee";
     _label.textColor = textColor;
 }
 
+- (void)setScrollingPaused:(BOOL)paused {
+    if (_scrollingPaused == paused) return;
+    _scrollingPaused = paused;
+    CALayer *layer = _label.layer;
+    CFTimeInterval offset = [layer convertTime:CACurrentMediaTime() fromLayer:nil];
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    layer.speed = paused ? 0 : 1;
+    layer.timeOffset = paused ? offset : 0;
+    if (!paused) {
+        layer.beginTime = 0;
+        layer.beginTime = [layer convertTime:CACurrentMediaTime() fromLayer:nil] - offset;
+    }
+    [CATransaction commit];
+}
+
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     // A view out of its window loses its animations; back in one, it scrolls again.
-    _scrolled = -1;
+    _scrolled = NAN;
     [self setNeedsLayout];
 }
 
@@ -65,8 +81,10 @@ static NSString *const kScroll = @"sg.marquee";
     CGFloat textWidth = ceil([_label sizeThatFits:CGSizeMake(CGFLOAT_MAX, size.height)].width);
     CGFloat overflow = textWidth - size.width;
     BOOL scrolls = overflow > 0.5 && !UIAccessibilityIsReduceMotionEnabled() && self.window;
+    // Right to left the text starts at the right edge and runs on, and moves, toward the left.
+    BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
     _label.lineBreakMode = scrolls ? NSLineBreakByClipping : NSLineBreakByTruncatingTail;
-    CGRect frame = CGRectMake(0, 0, scrolls ? textWidth : size.width, size.height);
+    CGRect frame = CGRectMake(scrolls && rtl ? size.width - textWidth : 0, 0, scrolls ? textWidth : size.width, size.height);
     if (!CGRectEqualToRect(_label.frame, frame)) _label.frame = frame;
 
     self.layer.mask = scrolls ? _fade : nil;
@@ -76,16 +94,19 @@ static NSString *const kScroll = @"sg.marquee";
         // The trailing edge fades, where the text runs on; its start stays crisp at rest.
         _fade.colors = @[(id)UIColor.blackColor.CGColor, (id)UIColor.blackColor.CGColor, (id)UIColor.clearColor.CGColor];
         _fade.locations = @[@0, @(1 - edge), @1];
+        _fade.startPoint = CGPointMake(rtl ? 1 : 0, 0.5);
+        _fade.endPoint = CGPointMake(rtl ? 0 : 1, 0.5);
     }
 
-    CGFloat travel = scrolls ? overflow + kFade : 0;
+    // The distance the text moves, toward its trailing side: leftward (negative) left to right.
+    CGFloat travel = scrolls ? (rtl ? 1 : -1) * (overflow + kFade) : 0;
     if (travel == _scrolled && [_label.layer animationForKey:kScroll]) return;
     _scrolled = travel;
     [_label.layer removeAnimationForKey:kScroll];
     if (!scrolls) return;
-    CFTimeInterval glide = travel / kSpeed, total = 2 * (kRest + glide);
+    CFTimeInterval glide = fabs(travel) / kSpeed, total = 2 * (kRest + glide);
     CAKeyframeAnimation *scroll = [CAKeyframeAnimation animationWithKeyPath:@"transform.translation.x"];
-    scroll.values = @[@0, @0, @(-travel), @(-travel), @0];
+    scroll.values = @[@0, @0, @(travel), @(travel), @0];
     scroll.keyTimes = @[@0, @(kRest / total), @((kRest + glide) / total), @((2 * kRest + glide) / total), @1];
     scroll.timingFunctions = @[
         [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionLinear],

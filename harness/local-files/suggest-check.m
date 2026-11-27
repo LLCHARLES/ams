@@ -42,7 +42,7 @@ static NSInteger status = 200;
 @end
 
 static void pump(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(done());

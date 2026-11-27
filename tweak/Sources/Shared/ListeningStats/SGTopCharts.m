@@ -61,7 +61,8 @@ typedef struct { int64_t end; NSUInteger index; } SGChartRow;
     _kind = kind;
     NSMutableDictionary<NSString *, NSString *> *memo = [NSMutableDictionary dictionary];
     NSMutableArray *keys = [NSMutableArray arrayWithCapacity:_plays.count];
-    _rows = malloc(MAX((NSUInteger)1, _plays.count) * sizeof(SGChartRow));
+    _rows = calloc(MAX((NSUInteger)1, _plays.count), sizeof(SGChartRow));
+    if (!_rows) return nil;
     [_plays enumerateObjectsUsingBlock:^(SGPlay *play, NSUInteger i, BOOL *stop) {
         NSString *key = play.end < end && SGPlayIsMusic(play) ? chartKey(play, kind, memo) : nil;
         [keys addObject:key ?: (id)NSNull.null];
@@ -134,6 +135,7 @@ SGChart *SGChartBuild(NSArray<SGPlay *> *plays, SGChartKind kind, SGStatsPeriod 
     if (!shown) return nil;
     int64_t start = unixSeconds(shown.startDate), end = unixSeconds(shown.endDate);
     SGChartLog *log = [[SGChartLog alloc] initWithPlays:plays kind:kind before:end];
+    if (!log) return nil;
     NSDictionary<NSString *, SGChartEntry *> *played = [log entriesFrom:start to:end];
     SGChart *chart = [SGChart new];
     chart.played = played.count;

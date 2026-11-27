@@ -9,4 +9,6 @@
 @property (nonatomic, copy) NSString *text;
 @property (nonatomic, strong) UIFont *font;
 @property (nonatomic, strong) UIColor *textColor;
+// The owner can freeze the glide without restarting it at the leading edge on reveal.
+@property (nonatomic) BOOL scrollingPaused;
 @end

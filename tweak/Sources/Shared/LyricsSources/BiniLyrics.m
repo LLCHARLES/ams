@@ -38,7 +38,7 @@ static NSDictionary *bestOf(id results, NSInteger seconds) {
 
 static void searchByName(SGLyricsQuery *query, void (^done)(SGLyricsResult *result)) {
     if (!query.title.length || !query.artist.length) {
-        SGLog(@"binilyrics: nothing to search with for %@", query.trackID);
+        SGLog(@"binilyrics: no names to search");
         done(nil);
         return;
     }
@@ -57,7 +57,7 @@ static void searchByName(SGLyricsQuery *query, void (^done)(SGLyricsResult *resu
         return bestOf(results, seconds);
     }, ^(NSDictionary *found) {
         if (!found) {
-            SGLog(@"binilyrics: nothing within %lds of %@ by %@", (long)kLengthSlack, query.title, query.artist);
+            SGLog(@"binilyrics: no recording within %lds", (long)kLengthSlack);
             done(nil);
             return;
         }
@@ -73,8 +73,8 @@ static void searchByName(SGLyricsQuery *query, void (^done)(SGLyricsResult *resu
             if (ttml && !result) [query.requestContext noteFailure:YES];
             return result;
         }, ^(SGLyricsResult *result) {
-            if (!result) SGLog(@"binilyrics: %@ gave nothing the page could show", found[@"lyricsUrl"]);
-            else SGLog(@"binilyrics: %@ by %@ has %lu %@ lines", query.title, query.artist,
+            if (!result) SGLog(@"binilyrics: nothing the page could show");
+            else SGLog(@"binilyrics: %lu %@ lines",
                        (unsigned long)result.karaokeLines.count, result.wordTimed ? @"word timed" : @"line timed");
             done(result);
         });
@@ -90,7 +90,8 @@ SGLyricsAsk SGBiniLyricsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
     captured.album = query.album; captured.seconds = query.seconds;
     captured.requestContext = query.requestContext;
     query = captured;
-    if (query.trackID.length != 22) {
+    // The playback ISRC service logs the URI on failure. Bulk already has validated names.
+    if (query.trackID.length != 22 || query.requestContext.bulk) {
         searchByName(query, done);
         return;
     }

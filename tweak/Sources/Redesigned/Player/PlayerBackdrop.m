@@ -210,7 +210,7 @@ void SGRPlayerBackdropLaidOut(SGRArtworkField *field) {
     if (made) {
         view = [[SGRPlayerBackdropView alloc] initWithFrame:field.bounds];
         objc_setAssociatedObject(field, &kBackdropKey, view, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [view setLyrics:SGRPlayerLyricsOpen() animated:NO];
+        [view setLyrics:SGRPlayerPageOpen() animated:NO];
         SGLog(@"redesign player: %@ behind the player", SGRPlayerBackground() == SGRPlayerBackgroundPhoto ? @"the photo" : @"black");
     }
     sg_backdrop = view;
@@ -237,7 +237,7 @@ BOOL SGRPlayerBackdropShowing(void) {
 
 void SGRPlayerBackdropLyricsChanged(void) {
     SGRPlayerBackdropView *view = sg_backdrop;
-    [view setLyrics:SGRPlayerLyricsOpen() animated:view.window != nil];
+    [view setLyrics:SGRPlayerPageOpen() animated:view.window != nil];
 }
 
 UIView *SGRPlayerBackdropPreview(void) {
@@ -310,5 +310,6 @@ void SGRPlayerPickPhoto(UIViewController *from, void (^done)(BOOL stored)) {
     sg_picker = [SGRPlayerPhotoPicker new];
     sg_picker.done = done;
     picker.delegate = sg_picker;
+    SGPresentDark(picker);
     [from presentViewController:picker animated:YES completion:nil];
 }

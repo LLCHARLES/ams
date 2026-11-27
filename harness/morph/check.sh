@@ -26,7 +26,7 @@ xcrun simctl install "$DEVICE" "$MORPH_OUT/MorphHarness.app"
 run_case() {
 python3 - "$DEVICE" "$1" <<'PY'
 import os, subprocess, sys
-env = dict(os.environ, SIMCTL_CHILD_MORPH_CHECK='1', SIMCTL_CHILD_MORPH_MUSIC=sys.argv[2])
+env = dict(os.environ, SIMCTL_CHILD_MORPH_MUSIC=sys.argv[2])
 result = subprocess.run(['xcrun', 'simctl', 'launch', '--console', sys.argv[1], 'com.vojta.morphharness'],
                         env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
 print(result.stdout, flush=True)

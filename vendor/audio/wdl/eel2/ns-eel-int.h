@@ -240,6 +240,8 @@ typedef struct _compileContext
     int maxblocks;
     double closefact;
     EEL_F *blocks[NSEEL_RAM_BLOCKS];
+    unsigned *vm_budget; // the running call's step budget, charged by bulk memory functions (NULL: none)
+    int vm_refused; // a bulk function ran out of budget during the running call
   } *ram_state; // allocated from blocks with 16 byte alignment
 
   void *gram_blocks;
@@ -312,6 +314,8 @@ int nseel_lookup(compileContext *ctx, opcodeRec **opOut, const char *sname);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAMAlloc(EEL_F **blocks, unsigned int w);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAMAllocGMEM(EEL_F ***blocks, unsigned int w);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemSet(EEL_F **blocks,EEL_F *dest, EEL_F *v, EEL_F *lenptr);
+unsigned **nseel_ram_budget(EEL_F **blocks);
+int *nseel_ram_refused(EEL_F **blocks);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemFree(void *blocks, EEL_F *which);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemTop(void *blocks, EEL_F *which);
 EEL_F * NSEEL_CGEN_CALL __NSEEL_RAM_MemCpy(EEL_F **blocks,EEL_F *dest, EEL_F *src, EEL_F *lenptr);

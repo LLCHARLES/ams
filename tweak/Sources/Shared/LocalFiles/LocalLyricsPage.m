@@ -163,6 +163,7 @@ static NSString *refusalText(NSError *error) {
         [types addObject:[UTType typeWithFilenameExtension:ext conformingToType:UTTypeData]];
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types asCopy:YES];
     picker.delegate = self;
+    SGPresentDark(picker);
     [self presentViewController:picker animated:YES completion:nil];
 }
 

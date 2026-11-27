@@ -73,8 +73,8 @@ void SGDSPReverbReset(SGDSPReverb *reverb);
 
 // A script in JSFX's shape: a desc: line and sliderN: defaults, then @init, @slider, @block and @sample
 // sections, spl0 and spl1 the samples, srate the rate. NULL and why, with the file's line, when it does
-// not compile.
+// not compile. *slow tells a refusal for using up @init/@slider's work budget from other failures.
 typedef struct SGDSPLiveprog SGDSPLiveprog;
-SGDSPLiveprog *SGDSPLiveprogCreate(const char *script, double rate, char *error, size_t errorSize);
+SGDSPLiveprog *SGDSPLiveprogCreate(const char *script, double rate, bool *slow, char *error, size_t errorSize);
 void SGDSPLiveprogRun(void *liveprog, float *left, float *right, uint32_t frames);
 void SGDSPLiveprogFree(void *liveprog);

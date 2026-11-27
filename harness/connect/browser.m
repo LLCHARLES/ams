@@ -36,8 +36,30 @@ static void drainLocation(void) {
     CFRunLoopRun();
 }
 
+@interface SPTEsperantoPlayer : NSObject
+@property (nonatomic) BOOL watched;
+@end
+@implementation SPTEsperantoPlayer
+- (void)addPlayerObserver:(id)observer {
+    if ([observer respondsToSelector:@selector(player:stateDidChange:)]) self.watched = YES;
+}
+@end
+
+static void checkPlayerSelection(void) {
+    NSArray *players = @[[SPTEsperantoPlayer new], [SPTEsperantoPlayer new]];
+    dispatch_apply(players.count, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^(size_t i) {
+        [players[i] addPlayerObserver:[NSObject new]];
+    });
+    drainLocation();
+    HARNESS_CHECK(SGPlayerInstance() == SGPlayer() && [SGPlayer() watched]);
+    HARNESS_CHECK([players[0] watched] != [players[1] watched]);
+}
+
 int main(void) {
     @autoreleasepool {
+        @autoreleasepool { checkPlayerSelection(); }
+        // With the first weak player gone, the next winner needs an observer too.
+        checkPlayerSelection();
         SGHarnessBeginTimerCapture();
         Method search = class_getInstanceMethod(NSNetServiceBrowser.class, @selector(searchForServicesOfType:inDomain:));
         Method stop = class_getInstanceMethod(NSNetServiceBrowser.class, @selector(stop));

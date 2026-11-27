@@ -1,6 +1,7 @@
 // Only admitted Spotify images are rebound. BSD remote traffic is denied;
 // Network.framework retains the original endpoint and TLS identity.
 #import "SGWGCore.h"
+#import "SGWGImage.h"
 #import "SGWGBridge.h"
 #import "Core/SGRebind.h"
 #import <Network/Network.h>
@@ -127,19 +128,18 @@ static BOOL AllowSend(int fd, const struct sockaddr *address, socklen_t length) 
     int kind = 0;
     socklen_t size = sizeof(kind);
     if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &kind, &size)) return NO;
-    if (kind == SOCK_DGRAM) {
-        if (!address) {
-            length = sizeof(peer);
-            if (getpeername(fd, (struct sockaddr *)&peer, &length)) return NO;
-            address = (const struct sockaddr *)&peer;
-        }
-        if (!LocalAddress(address, length)) {
-            atomic_fetch_add(&bsdDenied, 1);
-            errno = ENETUNREACH;
-            return NO;
-        }
+    // Connected streams use their peer even when a caller supplies a destination.
+    if (address && !LocalAddress(address, length)) goto denied;
+    if (!address || kind == SOCK_STREAM) {
+        length = sizeof(peer);
+        if (getpeername(fd, (struct sockaddr *)&peer, &length)) return NO;
+        if (!LocalAddress((struct sockaddr *)&peer, length)) goto denied;
     }
     return NoSIGPIPE(fd);
+denied:
+    atomic_fetch_add(&bsdDenied, 1);
+    errno = ENETUNREACH;
+    return NO;
 }
 
 static ssize_t HookSendto(int fd, const void *bytes, size_t size, int flags,
@@ -166,7 +166,7 @@ BOOL SGWGInstallNativePatches(void) {
     });
     if (!realNWCreate || !realConnect || !realGetaddrinfo) return NO;
 #ifdef SGWG_TESTING
-    return YES;
+    return !getenv("SGWG_TEST_DEFER_SLOTS");
 #else
     const char *symbols[] = {"nw_connection_create", "connect", "getaddrinfo", "sendto", "sendmsg"};
     void *replacements[] = {HookNWCreate, HookConnect, HookGetaddrinfo, HookSendto, HookSendmsg};
@@ -174,19 +174,16 @@ BOOL SGWGInstallNativePatches(void) {
     NSUInteger expected = 0, installed = 0, deferred = 0;
     BOOL complete = YES, mainSeen = NO, sharedSeen = NO;
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        NSString *name = @(_dyld_get_image_name(i)).lastPathComponent;
-        BOOL main = [name isEqualToString:@"Spotify"] ||
-            [name isEqualToString:[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"]];
-        BOOL shared = [name isEqualToString:@"SpotifyShared"];
-        if (!main && !shared) continue;
-        mainSeen |= main; sharedSeen |= shared;
+        SGWGImageMatch match = SGWGMatchImage(_dyld_get_image_name(i));
+        if (!match.main && !match.shared) continue;
+        mainSeen |= match.main; sharedSeen |= match.shared;
         const struct mach_header *header = _dyld_get_image_header(i);
-        if (header->magic != MH_MAGIC_64) { complete = NO; continue; }
+        if (!header || header->magic != MH_MAGIC_64) { complete = NO; continue; }
         for (NSUInteger j = 0; j < sizeof(symbols) / sizeof(*symbols); j++) {
             SGImportSlots slots = SGRebindImageImport((const struct mach_header_64 *)header,
                 _dyld_get_image_vmaddr_slide(i), symbols[j], replacements[j], originals[j]);
             expected += slots.expected; installed += slots.installed; deferred += slots.deferred;
-            complete &= slots.inspected && slots.expected == slots.installed && (!main || slots.expected > 0);
+            complete &= slots.inspected && slots.expected == slots.installed && (!match.main || slots.expected > 0);
         }
     }
     atomic_store(&expectedSlots, (unsigned)expected);

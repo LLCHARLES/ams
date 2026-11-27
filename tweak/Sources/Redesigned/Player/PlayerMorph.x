@@ -1,41 +1,17 @@
 // Player redesign: the player grows out of the now playing bar's card and the cover flies out of the
 // card's artwork, the way the Music app opens its player, instead of Spotify's slide up and fade.
 //
-// Spotify 9.1.78 runs the open and the close through SPTBarOverlayPresentationTransition: it hides the
-// real bar and tab bar, moves stand-ins, and sets -setProgress: (0 the bar, 1 the player, clamped) on
-// every frame of its own display link, from a spring when tapped and from the finger when dragged
-// (setProgress: at 0x109815464). There it sets the player's frame to the container's bounds moved down by
-// the bar's bottom edge times (1 - progress), and the player's alpha, and moves and fades the bar's stand-in.
-//
-// The morph rides on that progress, after Spotify's own, so taps, drags and canceled drags follow:
-//   the sheet   a rounded rect from the card's frame and radius to the screen's, filled with the
-//               field's color, under the player, showing at once;
-//   the player  masked to the sheet, its content scaled and moved so its top left is the sheet's
-//               (sublayerTransform, and the frame's top moved to the sheet's; Spotify's gesture code
-//               reads back only the frame's height), its own background color lifted off meanwhile
-//               (a sublayerTransform does not move it), and faded in over the first part of the growth;
-//   the bar     Spotify's stand-in riding the sheet's top edge, gone by a quarter of the way;
-//   the tab bar Spotify's stand-in hidden, since the real one stays in view around the sheet
-//               and the stand-in would be a second tab bar;
-//   the cover   a copy flown from the card's artwork to the player's cover, moved within the sheet,
-//               the player's own cover and shadow hidden meanwhile.
-// All of it is taken down in -destroyTransitioningContext, which Spotify calls from -animationEnded:.
+// CompactOverlayTransition owns the player's frame, the bar crossfade and completion. The morph
+// follows the presented layer to place the sheet, mask and flying cover. Music-style close instead
+// adds keyframes to Spotify's animator and restores the overlay before Spotify's completion.
 //
 // Skipped on a regular width (Spotify's iPad branch), with Reduce Motion on, or while the bar has no
 // card (hidden, not styled yet): Spotify's own transition then runs untouched.
 #import "Core/SGCore.h"
+#import "Shared/WireGuard/SGWGABI.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "Redesigned/NowPlayingBar/NowPlayingBar.h"
 #import "Player.h"
-
-@interface SPTBarOverlayPresentationTransition : NSObject
-- (id<UIViewControllerContextTransitioning>)transitioningContext;
-- (UIView *)overlayView;
-- (UIView *)barSnapshotView;
-- (UIView *)tabBarSnapshotView;
-- (CGRect)barFrame;
-- (double)progress;
-@end
 
 static const CGFloat kScreenRadiusFallback = 55;
 // Exported here so the settings row and the transition use the same preference.
@@ -87,15 +63,14 @@ static CGFloat screenRadius(void) {
 @end
 
 @implementation SGRPlayerMorph {
-    __weak UIView *_container, *_overlay, *_bar;
+    __weak UIView *_container, *_overlay;
     UIView *_sheet;
     UIImageView *_cover;
     CALayer *_mask;
-    CGRect _card, _barArtwork, _barRest, _spotifyFrame;
-    CGFloat _cardRadius, _barArtworkRadius, _spotifyAlpha;
-    CGColorRef _overlayColor;
+    CGRect _card, _barArtwork;
+    CGFloat _cardRadius, _barArtworkRadius;
+    id _overlayColor; // ARC owns the layer's original CGColor even if the transition is abandoned
     BOOL _coverHidden;
-    BOOL _follows;   // 9.1.90: Spotify animates the player's frame and alpha, which the morph then only reads
     UIView *_musicMask, *_dim;
     CGRect _musicOpenFrame, _musicCoverFrame;
     CGAffineTransform _musicOpenTransform;
@@ -108,26 +83,16 @@ static CGFloat screenRadius(void) {
     return CGRectGetMinY(_card);
 }
 
-// 9.1.90's CompactOverlayTransition animates the player itself, so the morph follows where it is drawn. Spotify also
-// crossfades its bar stand-in with the player at each end, on the render server, so the bar is in its place the moment
-// the card lands even when the main thread stalls; the stand-in is left to Spotify.
-- (void)follow {
-    _follows = YES;
-}
-
-- (instancetype)initWithContainer:(UIView *)container overlay:(UIView *)overlay bar:(UIView *)bar barRest:(CGRect)barRest {
+- (instancetype)initWithContainer:(UIView *)container overlay:(UIView *)overlay bar:(UIView *)bar {
     CGFloat radius = 0;
     CGRect card = SGRNowPlayingCardFrameIn(container, &radius);
     if (CGRectIsNull(card) || CGRectIsEmpty(card)) return nil;
     if (!(self = [super init])) return nil;
     _container = container;
     _overlay = overlay;
-    _bar = bar;
-    _barRest = barRest;
     _card = card;
     _cardRadius = radius;
     _barArtwork = SGRNowPlayingArtworkFrameIn(container, &_barArtworkRadius);
-    _spotifyAlpha = overlay.alpha;
 
     _sheet = [[UIView alloc] initWithFrame:card];
     _sheet.userInteractionEnabled = NO;
@@ -138,7 +103,7 @@ static CGFloat screenRadius(void) {
 
     // The player's own paint is not a sublayer, so the content's transform would leave it where Spotify
     // put the player, a band below the sheet's top edge; the sheet paints instead.
-    _overlayColor = CGColorRetain(overlay.layer.backgroundColor);
+    _overlayColor = (__bridge id)overlay.layer.backgroundColor;
     overlay.layer.backgroundColor = NULL;
 
     _mask = [CALayer layer];
@@ -165,27 +130,17 @@ static CGFloat screenRadius(void) {
 }
 
 - (void)apply:(CGFloat)t {
-    UIView *container = _container, *overlay = _overlay, *bar = _bar;
+    UIView *container = _container, *overlay = _overlay;
     if (!container || !overlay) return;
     t = MIN(1, MAX(0, t));
-    _spotifyAlpha = overlay.alpha;
-    _spotifyFrame = overlay.frame;
-
-    if (_follows) {
-        // Where Spotify's animation has the player now: its frame's model value is already the end. Not drawn yet (an
-        // open's first frame), it is at the bar and transparent.
-        CALayer *drawn = overlay.layer.presentationLayer;
-        _spotifyFrame = drawn ? drawn.frame : (CGRect){{_spotifyFrame.origin.x, self.restY}, _spotifyFrame.size};
-        _spotifyAlpha = drawn ? drawn.opacity : 0;
-    }
+    // The model frame is already at the end. Before the first drawn frame the player is at the bar and transparent.
+    CALayer *drawn = overlay.layer.presentationLayer;
+    CGPoint origin = drawn ? drawn.frame.origin : CGPointMake(overlay.frame.origin.x, self.restY);
+    CGFloat opacity = drawn ? drawn.opacity : 0;
     CGRect full = container.bounds;
     CGRect sheet = lerpRect(_card, full, t);
     CGFloat radius = lerp(_cardRadius, screenRadius(), t);
     CGFloat scale = full.size.width > 0 ? sheet.size.width / full.size.width : 1;
-    // The player's top goes to the sheet's: a mask clips nothing above the layer's bounds, so content
-    // raised above Spotify's frame would show square corners. Spotify reads back only the player's
-    // height (0x109815b4c, 0x109815c28), which stays.
-    CGPoint origin = _follows ? _spotifyFrame.origin : CGPointMake(_spotifyFrame.origin.x, sheet.origin.y);
     CGSize size = overlay.bounds.size;
     CGPoint middle = CGPointMake(size.width / 2, size.height / 2);
     CGPoint target = CGPointMake(sheet.origin.x - origin.x, sheet.origin.y - origin.y);
@@ -196,27 +151,16 @@ static CGFloat screenRadius(void) {
     [CATransaction setDisableActions:YES];
     [UIView performWithoutAnimation:^{
         overlay.layer.sublayerTransform = CATransform3DIdentity;
-        if (!self->_follows) overlay.frame = (CGRect){origin, self->_spotifyFrame.size};
         CGRect coverInPlayer = SGRPlayerCoverFrameIn(overlay);
 
         overlay.layer.sublayerTransform = CATransform3DScale(CATransform3DMakeTranslation(shift.x, shift.y, 0), scale, scale, 1);
         self->_mask.frame = CGRectMake(target.x, target.y, sheet.size.width, sheet.size.height);
         self->_mask.cornerRadius = radius;
-        if (!self->_follows) overlay.alpha = ramp(0.08, 0.55, t);
 
         self->_sheet.frame = sheet;
         self->_sheet.layer.cornerRadius = radius;
         // The sheet is the player's own paint, so it fades with the player Spotify fades against its bar stand-in.
-        self->_sheet.alpha = self->_follows ? self->_spotifyAlpha : ramp(0, 0.15, t);
-
-        // The card's top edge is the sheet's.
-        CGFloat rise = sheet.origin.y - self->_card.origin.y;
-        if (bar && !self->_follows) {
-            CGRect frame = bar.frame;
-            frame.origin.y = self->_barRest.origin.y + rise;
-            bar.frame = frame;
-            bar.alpha = 1 - ramp(0, 0.25, t);
-        }
+        self->_sheet.alpha = opacity;
 
         if (self->_cover) {
             // Worked out relative to the sheet, so the cover stays on it the whole way rather than
@@ -339,16 +283,11 @@ static CGFloat screenRadius(void) {
         [_dim removeFromSuperview];
         _dim = nil;
         _musicMask = nil;
-        // Spotify's completion restores/removes the overlay next; do not use the follower's saved frame.
-        _follows = YES;
     }
     overlay.layer.sublayerTransform = CATransform3DIdentity;
     if (overlay.layer.mask == _mask) overlay.layer.mask = nil;
-    if (!_follows) overlay.alpha = _spotifyAlpha;
-    if (overlay && !_follows) overlay.frame = _spotifyFrame;
-    if (!overlay.layer.backgroundColor) overlay.layer.backgroundColor = _overlayColor;
-    CGColorRelease(_overlayColor);
-    _overlayColor = NULL;
+    if (!overlay.layer.backgroundColor) overlay.layer.backgroundColor = (__bridge CGColorRef)_overlayColor;
+    _overlayColor = nil;
     [_sheet removeFromSuperview];
     [_cover removeFromSuperview];
     [CATransaction commit];
@@ -359,39 +298,7 @@ static CGFloat screenRadius(void) {
 
 @end
 
-static char kMorphKey;
-
-static SGRPlayerMorph *morphFor(SPTBarOverlayPresentationTransition *transition, BOOL create) {
-    SGRPlayerMorph *morph = objc_getAssociatedObject(transition, &kMorphKey);
-    if (morph || !create || SGRReduceMotion()) return morph;
-    id<UIViewControllerContextTransitioning> context = [transition transitioningContext];
-    UIView *container = context.containerView, *overlay = [transition overlayView];
-    if (!container || !overlay || overlay.superview != container) return nil;
-    if (container.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular) return nil;
-    morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay bar:[transition barSnapshotView] barRest:[transition barFrame]];
-    if (morph) objc_setAssociatedObject(transition, &kMorphKey, morph, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return morph;
-}
-
-%hook SPTBarOverlayPresentationTransition
-- (void)setProgress:(double)progress {
-    %orig;
-    SGRPlayerMorph *morph = morphFor(self, YES);
-    [morph apply:[self progress]];
-    if (morph) [self tabBarSnapshotView].alpha = 0;
-}
-
-- (void)destroyTransitioningContext {
-    SGRPlayerMorph *morph = morphFor(self, NO);
-    if (morph) {
-        [morph tearDown];
-        objc_setAssociatedObject(self, &kMorphKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    %orig;
-}
-%end
-
-#pragma mark - 9.1.90
+#pragma mark - Compact overlay transition
 
 // 9.1.90 presents the player with MainUI_TabBarUIImpl.CompactOverlayTransition, a UIKit animator that moves the
 // player up from below the screen (animateTransition:, and startInteractiveTransition: for a drag) with its own
@@ -467,9 +374,18 @@ static void runAtSpeed(CALayer *layer, float speed) {
 }
 @end
 
-static id ivarOf(id object, const char *name) {
-    Ivar ivar = class_getInstanceVariable(object_getClass(object), name);
-    return ivar ? object_getIvar(object, ivar) : nil;
+@interface SGStoredField : NSObject
++ (BOOL)supportsField:(NSString *)name on:(id)object ofClass:(Class)cls;
++ (id)field:(NSString *)name on:(id)object ofClass:(Class)cls;
+@end
+
+static UIView *ivarOf(id object, const char *name) {
+    return [SGStoredField field:@(name) on:object ofClass:UIView.class];
+}
+
+static BOOL hasSnapshotFields(id transition) {
+    return [SGStoredField supportsField:@"npbSnapshotView" on:transition ofClass:UIView.class] &&
+           [SGStoredField supportsField:@"tabBarSnapshotView" on:transition ofClass:UIView.class];
 }
 
 static char kFollowerKey;
@@ -488,7 +404,7 @@ static UICubicTimingParameters *musicTiming(BOOL velocityShaped) {
 }
 
 static void followTransition(id transition, id<UIViewControllerContextTransitioning> context) {
-    if (SGRReduceMotion() || !context) return;
+    if (SGRReduceMotion() || !context || !hasSnapshotFields(transition)) return;
     UIView *container = context.containerView;
     if (container.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular) return;
     UIViewController *to = [context viewControllerForKey:UITransitionContextToViewControllerKey];
@@ -496,9 +412,8 @@ static void followTransition(id transition, id<UIViewControllerContextTransition
     if (!overlay || overlay.superview != container) return;
     SGRMorphFollower *old = objc_getAssociatedObject(transition, &kFollowerKey);
     [old finish];
-    SGRPlayerMorph *morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay bar:ivarOf(transition, "npbSnapshotView") barRest:CGRectZero];
+    SGRPlayerMorph *morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay bar:ivarOf(transition, "npbSnapshotView")];
     if (!morph) return;
-    [morph follow];
     ((UIView *)ivarOf(transition, "tabBarSnapshotView")).alpha = 0;
     SGRMorphFollower *follower = [SGRMorphFollower new];
     follower.morph = morph;
@@ -531,17 +446,8 @@ static BOOL musicCloseSupportedOwner(id transition, id<UIViewControllerContextTr
     if (!sMusicCloseEnabled || !context ||
         [context viewControllerForKey:UITransitionContextToViewControllerKey].isBeingPresented || SGRReduceMotion() ||
         context.containerView.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular) return NO;
-    const char *fields[] = {"overlayView", "npbSnapshotView", "tabBarSnapshotView"};
-    for (NSUInteger i = 0; i < sizeof(fields) / sizeof(fields[0]); i++) {
-        Ivar field = class_getInstanceVariable(object_getClass(transition), fields[i]);
-        // Spotify's Swift classes give their ivars an empty type encoding (9.1.90's three fields here are object
-        // references, by name), Objective-C doubles give '@'; anything else is not the owner traced.
-        const char *type = field ? ivar_getTypeEncoding(field) : NULL;
-        if (!type || (type[0] != '@' && type[0] != '\0')) return NO;
-    }
-    if (![transition respondsToSelector:@selector(animateTransition:)] ||
-        ![transition respondsToSelector:@selector(startInteractiveTransition:)] ||
-        ![transition respondsToSelector:@selector(transitionDuration:)]) return NO;
+    if (!hasSnapshotFields(transition) ||
+        ![SGStoredField supportsField:@"overlayView" on:transition ofClass:UIView.class]) return NO;
     CGRect card = SGRNowPlayingCardFrameIn(context.containerView, NULL);
     return !CGRectIsNull(card) && !CGRectIsEmpty(card);
 }
@@ -565,6 +471,7 @@ static void compactTransition(id transition, id<UIViewControllerContextTransitio
     if (!claimed) followTransition(transition, context);
 }
 
+%group SGRCompactMorph
 %hook _TtC19MainUI_TabBarUIImpl24CompactOverlayTransition
 - (NSTimeInterval)transitionDuration:(id<UIViewControllerContextTransitioning>)context {
     if (musicCloseSupportedOwner(self, context)) return kMusicCloseDurationSeconds;
@@ -582,6 +489,7 @@ static void compactTransition(id transition, id<UIViewControllerContextTransitio
 }
 %end
 
+%end
 %group SGRMusicCloseHooks
 %hook UIViewPropertyAnimator
 - (id)initWithDuration:(NSTimeInterval)duration curve:(UIViewAnimationCurve)curve animations:(void (^)(void))animations {
@@ -592,7 +500,7 @@ static void compactTransition(id transition, id<UIViewControllerContextTransitio
     if (!overlay || overlay != [sMusicContext viewForKey:UITransitionContextFromViewKey] || overlay.superview != container)
         return %orig;
     SGRPlayerMorph *morph = [[SGRPlayerMorph alloc] initWithContainer:container overlay:overlay
-        bar:ivarOf(sMusicTransition, "npbSnapshotView") barRest:CGRectZero];
+        bar:ivarOf(sMusicTransition, "npbSnapshotView")];
     if (!morph) return %orig;
     sMusicClaimed = YES;
     [morph beginMusicClose];
@@ -662,10 +570,17 @@ static void compactTransition(id transition, id<UIViewControllerContextTransitio
 
 %ctor {
     if (!SGRedesignedUI()) return;
-    sMusicCloseEnabled = SGHidden(SGRKeyPlayerMusicClose);
-    %init;
+    Class compact = NSClassFromString(@"_TtC19MainUI_TabBarUIImpl24CompactOverlayTransition");
+    BOOL supported = SGWGMethodMatches(class_getInstanceMethod(compact, @selector(animateTransition:)), "v", @[@"@"]) &&
+        SGWGMethodMatches(class_getInstanceMethod(compact, @selector(startInteractiveTransition:)), "v", @[@"@"]) &&
+        SGWGMethodMatches(class_getInstanceMethod(compact, @selector(transitionDuration:)), "d", @[@"@"]);
+    sMusicCloseEnabled = supported && SGHidden(SGRKeyPlayerMusicClose);
+    if (supported) {
+        %init(SGRCompactMorph);
+    } else {
+        SGLog(@"player morph: compact animator API unavailable");
+    }
     if (sMusicCloseEnabled) {
         %init(SGRMusicCloseHooks);
     }
-    SGRequireClasses(@[@"SPTBarOverlayPresentationTransition"]);
 }

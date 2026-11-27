@@ -81,6 +81,11 @@ static char kButtonGlassKey, kPanelGlassKey;
     SGRShowGlass(shape, !_tucked);
 }
 
+- (void)refreshGlass {
+    if (_tucked) return;
+    SGRRefreshGlass(objc_getAssociatedObject(self, &kButtonGlassKey));
+}
+
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGRect bounds = self.bounds;
@@ -273,6 +278,8 @@ static void tell(NSString *message, NSString *action, void (^then)(void)) {
         _slider.minimumValue = 0;
         _slider.maximumValue = 2;
         _slider.transform = CGAffineTransformMakeRotation(-M_PI_2);
+        // Turned upright it has no reading direction: right to left it would start at the top.
+        _slider.semanticContentAttribute = UISemanticContentAttributeForceLeftToRight;
         _slider.accessibilityLabel = SGL(@"settings.karaoke.card.vocals.a11y", @"Vocals");
         [_slider addTarget:self action:@selector(slid) forControlEvents:UIControlEventValueChanged];
         [_slider addTarget:self action:@selector(holdPanel) forControlEvents:UIControlEventTouchDown];

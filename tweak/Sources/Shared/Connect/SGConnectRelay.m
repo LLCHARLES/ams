@@ -139,7 +139,7 @@ static void dropRecord(int index) {
 
 static void dropExpired(uint64_t time) {
     for (int i = sg_recordCount - 1; i >= 0; i--) {
-        if (sg_records[i].made + kRecordLife < time) dropRecord(i); // made may be later than time, from another thread
+        if (sg_records[i].made + kRecordLife < time) dropRecord(i);
     }
 }
 
@@ -147,8 +147,8 @@ static void handOver(int spotify, const uint8_t *reply, size_t length, const str
     uint8_t *bytes = malloc(length);
     if (!bytes) return;
     memcpy(bytes, reply, length);
-    uint64_t time = now();
     os_unfair_lock_lock(&sg_lock);
+    uint64_t time = now();
     dropExpired(time);
     if (sg_recordCount == kMaxRecords) dropRecord(0);
     sg_records[sg_recordCount++] = (Record){spotify, time, bytes, length, *from};
@@ -360,8 +360,8 @@ BOOL SGConnectRelayQuery(int socket, const void *query, size_t length) {
     // Counted, and said once a minute, so the limit's effect shows in the log.
     static uint64_t ran, skipped, countedFrom;
     static NSMutableDictionary<NSData *, NSNumber *> *lastRun;
-    uint64_t time = now();
     os_unfair_lock_lock(&sg_lock);
+    uint64_t time = now();
     if (!lastRun) lastRun = [NSMutableDictionary dictionary];
     // The question for its address family, whatever socket asked it: Spotify sends the same query from two sockets
     // of each family every two seconds or so, and each started a round of its own to every receiver.

@@ -24,7 +24,7 @@
 @interface MissingReadiness : NSObject
 @end
 @implementation MissingReadiness
-- (void)navigateToURI:(id)uri options:(long long)options interactionID:(id)interaction {}
+- (void)navigateToURI:(id)uri options:(long long)options reason:(id)reason completionHandler:(id)completion resultHandler:(id)result {}
 @end
 @interface NavigationReason : NSObject
 @end
@@ -98,6 +98,7 @@ int main(void) {
             @[@"url", @"https://open.spotify.com/embed/track/0sf12qNH5qcw8qpgymFOqD?action=download&context=spotify:internal:x", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
             @[@"url", @"spotify://eevee/open.spotify.com/track/0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
             @[@"url", @"spotify://eevee/https%3A%2F%2Fopen.spotify.com%2Ftrack%2F0sf12qNH5qcw8qpgymFOqD", @"spotify:track:0sf12qNH5qcw8qpgymFOqD"],
+            @[@"url", @"spotify://eevee/https%3A%2F%2Fspotify.link%2Fab%3Fq%3Da%0Ab", NSNull.null],
             @[@"url", @"https://spotify.link/hRkBrwub9xb", @"https://spotify.link/hRkBrwub9xb"],
             @[@"url", @"vitrine://spotify.app.link/invite?token=a%2Fb", @"https://spotify.app.link/invite?token=a%2Fb"],
             @[@"url", @"https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB?si=x&action=play", @"https://open.spotify.com/socialsession/3o9uY8HJoj1IzCZs29YGcB"],
@@ -174,7 +175,7 @@ int main(void) {
             }
         }
         for (NSArray *test in @[
-            @[(id)LegacyDispatcher.class, NSNull.null, @YES],
+            @[(id)LegacyDispatcher.class, (id)NavigationReason.class, @NO],
             @[(id)ModernDispatcher.class, (id)NavigationReason.class, @YES],
             @[(id)ModernDispatcher.class, NSNull.null, @NO],
             @[(id)MissingReadiness.class, (id)NavigationReason.class, @NO],

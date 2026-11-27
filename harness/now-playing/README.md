@@ -60,9 +60,22 @@ ActivityKit bridge and unrelated services. Saved-translation store completions a
 paused artist-row/artwork deletion without a lyrics view, activity restore/save/delete/language
 and source replacement, and no activity-triggered automatic translation are covered. A held
 clip encoder checks that same-track seeks discard obsolete next-line jobs and serve current
-demand before the latest prefetch. A held filesystem cleanup interleaves an already-queued
+demand before the latest prefetch, and that the held clip, its line seeked past, stops rather than
+finishing (the encoder stand-ins ask `current` as the real writers do each frame). A held filesystem cleanup interleaves an already-queued
 worker with a new track's cleanup and video request; the delivered URL must remain readable
 after both cleanups finish.
+
+With a missing sheet the harness counts the row and artwork timer fires, admitted fixture requests
+and MediaPlayer setters separately. It releases a lookup on a header notification, holds it across
+pause/resume with no retries left, and publishes lyrics on completion. The real keeper's no-header
+and 401/renewed-header paths run in `harness/lyrics-sources/state-build.sh`.
+
+The activity clock drives the production timer handler with virtual time: a seek near a lyric
+boundary, a quiet panel's refresh, an empty player, pause, a closed background card, a refused
+start, renewal and expiry. Player reports, intents and PiP return run between deadlines.
+`build-resend.sh` checks deferred background resend cancellation and the encoded payload budget.
+`build-artwork-upgrade.sh` checks that a legacy-only lock-screen motion setting migrates and starts
+at launch without reentering its migration.
 
 Device ActivityKit delivery,
 actual video decoding/encoding, and lock-screen presentation still need a device check.

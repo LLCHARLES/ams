@@ -257,6 +257,7 @@ static NSInteger sg_nodBefore, sg_shakeBefore;
 @property (nonatomic, copy) NSArray<Step> *steps;
 @property (nonatomic) NSUInteger current;
 @property (nonatomic, strong) NSDate *stepStarted;
+@property (nonatomic) BOOL awaitingMotion;
 // What the sheet's recordings are fed, one a recording, in order; the last is fed on and on.
 @property (nonatomic, strong) NSMutableArray<void (^)(void)> *feeds;
 @property (nonatomic) BOOL fedThisRecording;
@@ -354,9 +355,12 @@ static NSInteger sg_nodBefore, sg_shakeBefore;
     ];
 }
 
-// Waits until `done` says yes; the harness fails it after 20 s.
-static Step until(BOOL (^done)(void)) {
-    return done;
+// Include the predicate, rather than just its index in a scripted sequence.
+#define until(...) ^BOOL { \
+    BOOL ready = (__VA_ARGS__)(); \
+    if (!ready && -self.stepStarted.timeIntervalSinceNow >= 60) \
+        HARNESS_FAIL(@"still waiting for %s", #__VA_ARGS__); \
+    return ready; \
 }
 
 static Step waitFor(double seconds) {
@@ -379,7 +383,7 @@ static Step waitFor(double seconds) {
             [switches.firstObject sendActionsForControlEvents:UIControlEventValueChanged];
             return YES;
         },
-        waitFor(1),
+        until(^BOOL { return sg_active && [self.table numberOfRowsInSection:2] == 3; }),
         ^BOOL {
             check(sg_active, @"switch on, playing: listening");
             check([self.table numberOfRowsInSection:2] == 3, @"nothing learned: no Forget row");
@@ -480,6 +484,25 @@ static Step waitFor(double seconds) {
             [self tapRow:2 section:2];
             check([[self rowAt:2 section:2].value() isEqualToString:@"Listening…"], [NSString stringWithFormat:@"Try it listens: %@", [self rowAt:2 section:2].value()]);
             doubleNod(0.35, 0.4);
+            [sg_motionQueue waitUntilAllOperationsAreFinished]; // detection queued its result behind this main-thread step
+            [self.page viewWillDisappear:NO];
+            check(![self rowAt:2 section:2].value().length, @"leaving clears the pending Try");
+            return YES;
+        },
+        ^BOOL {
+            check(!sg_calls.count, @"a detection delivered after leaving cannot run the configured Like");
+            [self.page viewWillAppear:NO];
+            [self tapRow:2 section:2];
+            shake(0.21, 2.5);
+            [sg_motionQueue waitUntilAllOperationsAreFinished];
+            [self.page viewWillDisappear:NO];
+            [self.page viewWillAppear:NO];
+            [self tapRow:2 section:2];
+            return YES;
+        },
+        ^BOOL {
+            check([[self rowAt:2 section:2].value() isEqualToString:@"Listening…"], @"a late detection cannot finish another Try");
+            doubleNod(0.35, 0.4);
             return YES;
         },
         until(^BOOL { return ![[self rowAt:2 section:2].value() isEqualToString:@"Listening…"]; }),
@@ -516,14 +539,13 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.teach.viewIfLoaded.window != nil; }),
-        waitFor(0.5),
         // The ring, live: the head held still, then down as in a nod's dip.
         ^BOOL {
             hold(1);
             for (int n = 0; n < 5; n++) send(0.1 - 0.25, 3.0);
             return YES;
         },
-        waitFor(0.4),
+        until(^BOOL { return [self ringDot].y > [self ringCentre].y + 30 && [self tick:30] > 0.4; }),
         ^BOOL {
             CGPoint dot = [self ringDot], centre = [self ringCentre];
             check(dot.y > centre.y + 30 && fabs(dot.x - centre.x) < 4, [NSString stringWithFormat:@"a nod's dip takes the dot down: %.0f, %.0f from the center", dot.x - centre.x, dot.y - centre.y]);
@@ -532,7 +554,10 @@ static Step waitFor(double seconds) {
             hold(1.5);
             return YES;
         },
-        waitFor(1.5),
+        until(^BOOL {
+            CGPoint dot = [self ringDot], centre = [self ringCentre];
+            return hypot(dot.x - centre.x, dot.y - centre.y) < 12 && [self tick:30] < 0.05;
+        }),
         ^BOOL {
             CGPoint dot = [self ringDot], centre = [self ringCentre];
             check(hypot(dot.x - centre.x, dot.y - centre.y) < 12, [NSString stringWithFormat:@"still again: the dot comes back, %.0f, %.0f", dot.x - centre.x, dot.y - centre.y]);
@@ -541,7 +566,7 @@ static Step waitFor(double seconds) {
             for (int n = 0; n < 5; n++) send(0.1, 3.0 + 0.18);
             return YES;
         },
-        waitFor(0.4),
+        until(^BOOL { return [self ringDot].x < [self ringCentre].x - 30 && [self tick:45] > 0.4; }),
         ^BOOL {
             CGPoint dot = [self ringDot], centre = [self ringCentre];
             check(dot.x < centre.x - 30, [NSString stringWithFormat:@"a swing left takes the dot left: %.0f, %.0f", dot.x - centre.x, dot.y - centre.y]);
@@ -549,7 +574,7 @@ static Step waitFor(double seconds) {
             hold(1.5);
             return YES;
         },
-        waitFor(1.5),
+        until(^BOOL { return [[self teachCount] isEqual:@"0 of 5"]; }),
         ^BOOL {
             check([[self teachText:@"heading"] isEqualToString:@"Nod twice"], [NSString stringWithFormat:@"the sheet asks for nods first: %@", [self teachText:@"heading"]]);
             check([[self teachCount] isEqualToString:@"0 of 5"], [NSString stringWithFormat:@"none yet: %@", [self teachCount]]);
@@ -596,7 +621,6 @@ static Step waitFor(double seconds) {
             [self setPlaying:NO];
             return YES;
         },
-        waitFor(10),
         until(^BOOL { return [[self teachText:@"heading"] isEqualToString:@"All set"]; }),
         ^BOOL {
             sg_nodBefore = SGInt(SGKeyHeadNod, 0);
@@ -613,7 +637,7 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.nav.presentedViewController == nil; }),
-        waitFor(0.6),
+        until(^BOOL { return sg_active && [self.table numberOfRowsInSection:2] == 4; }),
         ^BOOL {
             check([self.table numberOfRowsInSection:2] == 4, @"something learned: the Forget row shows");
             check([[self rowAt:0 section:2].value() isEqualToString:@"Learned"], [NSString stringWithFormat:@"Teach reads %@", [self rowAt:0 section:2].value()]);
@@ -637,7 +661,7 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.teach.viewIfLoaded.window != nil; }),
-        waitFor(0.5),
+        until(^BOOL { return sg_active && !self.teach.transitionCoordinator; }),
         ^BOOL {
             check(sg_active, @"paused, the sheet up: it holds the motion");
             [self teachButton:@"primaryButton"];
@@ -647,7 +671,7 @@ static Step waitFor(double seconds) {
         until(^BOOL { return [[self teachText:@"heading"] isEqualToString:@"Shake your head"]; }),
         until(^BOOL { return [[self teachCount] isEqualToString:@"3 of 5"]; }),
         until(^BOOL { return [[self teachText:@"heading"] isEqualToString:@"Move normally"]; }),
-        waitFor(1),
+        until(^BOOL { return [[self teachValue:@"listening"] boolValue]; }),
         ^BOOL {
             UIBarButtonItem *cancel = self.teach.navigationItem.leftBarButtonItem;
             [UIApplication.sharedApplication sendAction:cancel.action to:cancel.target from:cancel forEvent:nil];
@@ -664,13 +688,13 @@ static Step waitFor(double seconds) {
             [self tapRow:3 section:2];
             return YES;
         },
-        waitFor(0.5),
+        until(^BOOL { return [self alertTitle] != nil; }),
         ^BOOL {
             check([[self alertTitle] isEqualToString:@"Forget your nod and shake?"], [NSString stringWithFormat:@"Forget asks first: %@", [self alertTitle]]);
             [self press:UIAlertActionStyleDestructive];
             return YES;
         },
-        waitFor(0.6),
+        until(^BOOL { return [self.table numberOfRowsInSection:2] == 3 && !self.nav.presentedViewController; }),
         ^BOOL {
             check(SGInt(SGKeyHeadNod, 0) == 0 && SGInt(SGKeyHeadShake, 0) == 0, @"Forget clears both");
             check([self.table numberOfRowsInSection:2] == 3, @"nothing learned again: the Forget row goes");
@@ -729,13 +753,14 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.teach.viewIfLoaded.window != nil; }),
-        waitFor(0.5),
+        ^BOOL { [self.teach viewDidAppear:NO]; return YES; }, // replaces a listener whose nil callback is queued
+        until(^BOOL { return !self.teach.transitionCoordinator; }),
         ^BOOL { [self teachButton:@"primaryButton"]; return YES; },
         until(^BOOL { return [[self teachCount] isEqualToString:@"3 of 5"]; }),
         until(^BOOL { return [[self teachText:@"heading"] isEqualToString:@"Shake your head"]; }),
         until(^BOOL { return [[self teachCount] isEqualToString:@"3 of 5"]; }),
         until(^BOOL { return [[self teachText:@"heading"] isEqualToString:@"Move normally"]; }),
-        waitFor(1),
+        until(^BOOL { return [[self teachValue:@"listening"] boolValue]; }),
         ^BOOL {
             if (disconnect)
                 [sg_fakeManager.delegate headphoneMotionManagerDidDisconnect:sg_fakeManager];
@@ -759,7 +784,7 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.nav.presentedViewController == nil; }),
-        waitFor(0.5),
+        until(^BOOL { return !self.nav.transitionCoordinator; }),
     ];
 }
 
@@ -775,7 +800,7 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.teach.viewIfLoaded.window != nil; }),
-        waitFor(0.5),
+        until(^BOOL { return !self.teach.transitionCoordinator; }),
         ^BOOL {
             [self teachButton:@"primaryButton"];
             UIBarButtonItem *cancel = self.teach.navigationItem.leftBarButtonItem;
@@ -783,7 +808,7 @@ static Step waitFor(double seconds) {
             return YES;
         },
         until(^BOOL { return self.nav.presentedViewController == nil; }),
-        waitFor(0.6),
+        until(^BOOL { return !self.nav.transitionCoordinator; }),
         ^BOOL {
             [sg_calls removeAllObjects];
             [self tapRow:2 section:2];
@@ -864,22 +889,34 @@ static Step waitFor(double seconds) {
     self.fedThisRecording = YES;
     void (^next)(void) = self.feeds.firstObject;
     if (self.feeds.count > 1) [self.feeds removeObjectAtIndex:0];
-    // A moment in, as someone moves after the tone.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), next);
+    next();
 }
 
 - (void)tick {
+    if (self.awaitingMotion) {
+        if (-self.stepStarted.timeIntervalSinceNow > 60) HARNESS_FAIL(@"motion samples did not drain before step %lu", (unsigned long)self.current);
+        return;
+    }
     [self feed];
     if (self.current >= self.steps.count) return;
     if (!self.stepStarted) self.stepStarted = [NSDate date];
     BOOL done = self.steps[self.current]();
-    if (!done && -self.stepStarted.timeIntervalSinceNow > 20) {
-        check(NO, [NSString stringWithFormat:@"step %lu timed out", (unsigned long)self.current]);
-        done = YES;
+    if (!done && -self.stepStarted.timeIntervalSinceNow > 60) {
+        HARNESS_FAIL(@"step %lu did not complete", (unsigned long)self.current);
     }
     if (!done) return;
     self.current++;
     self.stepStarted = nil;
+    if (sg_motionQueue) {
+        self.awaitingMotion = YES;
+        self.stepStarted = [NSDate date];
+        // The fake headphones deliver on the product's serial motion queue.
+        // The following step can inspect calls only after the samples and
+        // their main-queue publications have run.
+        [sg_motionQueue addOperationWithBlock:^{
+            dispatch_async(dispatch_get_main_queue(), ^{ self.awaitingMotion = NO; self.stepStarted = nil; });
+        }];
+    }
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
@@ -910,7 +947,7 @@ static Step waitFor(double seconds) {
         dispatch_async(dispatch_get_main_queue(), ^{ checkOrdinaryRing(); });
         return YES;
     }
-    self.steps = [@[waitFor(1.5)] arrayByAddingObjectsFromArray:[shot isEqualToString:@"cancel-try"] ? [self cancelTryChecks] : shot ? [self shot:shot] : [self checks]];
+    self.steps = [@[until(^BOOL { return self.table.window && [self.table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]]; })] arrayByAddingObjectsFromArray:[shot isEqualToString:@"cancel-try"] ? [self cancelTryChecks] : shot ? [self shot:shot] : [self checks]];
     [NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(tick) userInfo:nil repeats:YES];
     return YES;
 }

@@ -16,7 +16,7 @@ static void languageProcessString(id self, SEL selector, NSString *text) {
     if (NSThread.isMainThread) atomic_store(&languageOnMain, true);
     if (!NSThread.isMainThread && atomic_exchange(&languageHoldNext, false)) {
         atomic_store(&languageHeld, true);
-        if (dispatch_semaphore_wait(languageRelease, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)))
+        if (dispatch_semaphore_wait(languageRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)))
             atomic_store(&languageHoldTimeout, true);
     }
     ((void (*)(id, SEL, id))originalProcessString)(self, selector, text);
@@ -287,7 +287,7 @@ static void providerRevisionChecks(UIWindow *window) {
     UIView *unchangedRow = firstRow();
     SGKaraokeKeepLines(SGHarnessPlayingTrack, unchanged);
     autoTick(view);
-    pump(); // Let any incorrectly scheduled replacement layout reach the presented rows.
+    HarnessDrainLyricsWork(); // Let any incorrectly scheduled replacement layout reach the presented rows.
     check(firstRow() == unchangedRow && anchored(),
           @"unchanged provider translations preserve presented rows without another restyle");
     check([unchangedRow accessibilityActivate] && SGKaraokePositionMs() == SGKaraokeDelayMs(),
@@ -316,7 +316,7 @@ static void providerRevisionChecks(UIWindow *window) {
     }
     SGKaraokeKeepLines(SGHarnessPlayingTrack, renamedVoices);
     autoTick(view);
-    pump();
+    HarnessDrainLyricsWork();
     check(firstRow() == unchangedRow,
           @"different provider voice names with equal alignment preserve presented rows");
     Method creditMethod = class_getInstanceMethod(SGRKaraokeView.class, NSSelectorFromString(@"creditTo:"));

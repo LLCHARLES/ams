@@ -20,6 +20,8 @@ UDID=$(xcrun simctl clone "$SOURCE" "AlbumFacesMore-$$")
 trap 'xcrun simctl delete "$UDID"; rm -rf "$WORK"' EXIT
 xcrun simctl boot "$UDID"
 xcrun simctl bootstatus "$UDID" > /dev/null
+xcrun simctl ui "$UDID" content_size large
+xcrun simctl ui "$UDID" increase_contrast disabled
 xcrun simctl install "$UDID" "$APP"
 
 RUN="python3 $HERE/run-scenario.py $UDID"

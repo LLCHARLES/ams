@@ -7,11 +7,14 @@
 
 static atomic_bool admitted;
 static dispatch_block_t admissionObserver;
-__attribute__((visibility("default"))) void SGTestSetAdmitted(bool value) { atomic_store(&admitted, value); }
+__attribute__((visibility("default"))) void SGTestSetAdmitted(bool value) {
+    if(!atomic_exchange(&admitted,value) && value)
+        [NSNotificationCenter.defaultCenter postNotificationName:@"SAPOfflineProfileReady" object:nil];
+}
 __attribute__((visibility("default"))) void SGTestSetAdmissionObserver(dispatch_block_t observer) {
     @synchronized (NSObject.class) { admissionObserver = [observer copy]; }
 }
-bool SAPRuntimeProfileAdmitted(void) {
+__attribute__((visibility("default"))) bool SAPRuntimeProfileAdmitted(void) {
     dispatch_block_t observer;
     @synchronized (NSObject.class) { observer = admissionObserver; admissionObserver = nil; }
     if (observer) observer();

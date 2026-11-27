@@ -46,6 +46,9 @@ typedef void (^SGLyricsAsk)(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
 @interface SGLyricsRequestContext : NSObject
 @property (atomic, readonly) BOOL failed;
 @property (atomic, readonly) BOOL cancelled;
+@property (atomic) BOOL definiteMiss, credentialRejected;
+@property (nonatomic) BOOL bulk;
+@property (atomic) NSTimeInterval rateLimitUntil;
 // Set only for a successful, genuinely empty name search, before matching or fetching lyrics.
 // The continuation must search by name only, never repeat an ID or ISRC lookup.
 @property (atomic, copy) SGLyricsAsk emptyNameSearch;
@@ -66,8 +69,9 @@ extern NSNotificationName const SGLyricsPinDidChangeNotification;
 // synced first then closest length when seconds > 0. Main queue; an empty array on failure, never nil.
 void SGLrcLibSearch(NSString *title, NSString *artist, NSInteger seconds, void (^done)(NSArray<NSDictionary *> *records));
 NSNumber *SGLyricsPinnedID(NSString *trackID);
-// Safe from any thread. A hook request must discard its delivery if this changes.
-NSUInteger SGLyricsPinGeneration(NSString *trackID);
+// Safe from any thread. Keep the stamp with the request until delivery; compare by value.
+typedef NSArray<NSString *> SGLyricsPinStamp;
+SGLyricsPinStamp *SGLyricsPinGeneration(NSString *trackID);
 // Main queue: a menu source pick or Automatic also invalidates in-flight hook deliveries.
 void SGLyricsInvalidateDelivery(NSString *trackID);
 // Prepare off main, then keep on main only while this selection and the track's pin generation
@@ -149,6 +153,13 @@ SGLyricsRequestContext *SGLyricsInvoke(SGLyricsProvider *provider, SGLyricsQuery
                     BOOL (^current)(void),
                     void (^done)(SGLyricsResult *result, BOOL failed));
 
+typedef NS_ENUM(NSInteger, SGBulkReply) {
+    SGBulkFound, SGBulkMiss, SGBulkTemporary, SGBulkRateLimited, SGBulkCredentialRejected, SGBulkFiltered
+};
+SGLyricsRequestContext *SGLyricsAskDownloaded(NSString *key, SGLyricsQuery *query,
+    void (^done)(SGBulkReply, SGLyricsResult *, NSTimeInterval retryAt));
+BOOL SGLyricsPlaybackRequestsActive(void);
+
 // Shared backoff for empty-source retries and provisional-answer recovery.
 static const NSTimeInterval SGLyricsHedgeDelaySeconds = 2;
 static const NSTimeInterval SGLyricsRequestTimeoutSeconds = 5;
@@ -156,10 +167,10 @@ static const NSTimeInterval SGLyricsWalkBudgetSeconds = 8;
 static const NSTimeInterval SGLyricsCredentialPauseSeconds = 600;
 static const NSTimeInterval SGLyricsRetryPause = 10, SGLyricsRetryPauseMost = 60;
 static const NSUInteger SGLyricsRecoveryTries = 4;
-// A write and its retirement serialize on this lease, including the actual disk commit.
+// Retirement and the store's final publication decision share only an in-memory flag.
 @interface SGLyricsLease : NSObject
+- (BOOL)isCurrent;
 - (void)invalidate;
-- (void)perform:(dispatch_block_t)work;
 @end
 void SGLyricsStoreSaveWithLease(NSString *track, NSArray<SGKaraokeLine *> *lines, NSString *credit, SGLyricsLease *lease);
 // A keeper retains this authority with its sheet, even after the selection cache is evicted.
@@ -340,6 +351,10 @@ static inline BOOL SGLyricsNumber(id value, double *number) {
     } else return NO;
     return isfinite(*number) && *number >= 0 && *number <= SGKaraokeMaxTimeMs;
 }
+static inline NSInteger SGLyricsSecondsToMs(id value) {
+    double seconds;
+    return SGLyricsNumber(value, &seconds) && seconds <= SGKaraokeMaxTimeMs / 1000.0 ? llround(seconds * 1000) : -1;
+}
 static inline NSString *SGLyricsDecimalID(id value) {
     NSString *text = [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()
         ? [value stringValue] : SGLyricsString(value, 20);
@@ -518,3 +533,11 @@ void SGLyricsKeepChosen(NSString *trackID, SGLyricsResult *result);
 id SGLyricsKeptAnswer(NSString *trackID);
 // Automatic: retires the picked sheet and disk entry, preserving waiters for the configured order.
 void SGLyricsRestoreKept(NSString *trackID, id kept);
+#import "SGBoundedRequest.h"
+
+static inline BOOL SGLyricsIsSpotifyTrackID(NSString *trackID) {
+    if (![trackID isKindOfClass:NSString.class] || trackID.length != 22) return NO;
+    NSCharacterSet *base62 = [NSCharacterSet characterSetWithCharactersInString:
+        @"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+    return [trackID rangeOfCharacterFromSet:base62.invertedSet].location == NSNotFound;
+}

@@ -35,7 +35,7 @@ static void connectionConfigure(void) {
     [NSUserDefaults.standardUserDefaults setObject:@"http://100.97.8.81:10100/v1" forKey:SGKeyLyricsOpenAIBaseURL];
     [NSUserDefaults.standardUserDefaults setObject:@"offline-model" forKey:SGKeyLyricsOpenAIModel];
     testKeys = [NSSet setWithObject:@"Vitrine.OpenAI"];
-    openAIKeys = [@{@"100.97.8.81": [@"connection-fixture-key" dataUsingEncoding:NSUTF8StringEncoding],
+    openAIKeys = [@{@"http://100.97.8.81:10100": [@"connection-fixture-key" dataUsingEncoding:NSUTF8StringEncoding],
                     @"other.invalid": [@"other-fixture-key" dataUsingEncoding:NSUTF8StringEncoding]} mutableCopy];
     keyReadFailure = keyWriteFailure = keyDeleteFailure = 0;
     testLanguage = @"ko";
@@ -260,7 +260,7 @@ static void checkConnection(void) {
     // An address no request can be built from is configuration too, and sends nothing.
     connectionConfigure();
     [NSUserDefaults.standardUserDefaults setObject:@"http://openrouter.ai/v1" forKey:SGKeyLyricsOpenAIBaseURL];
-    openAIKeys = [@{@"openrouter.ai": [@"other-fixture-key" dataUsingEncoding:NSUTF8StringEncoding]} mutableCopy];
+    openAIKeys = [@{@"https://openrouter.ai:443": [@"other-fixture-key" dataUsingEncoding:NSUTF8StringEncoding]} mutableCopy];
     for (NSNumber *kind in @[@(SGConnectionTestModels), @(SGConnectionTestTranslation)]) {
         NSUInteger before = connectionSends, beforeModels = connectionModelSends;
         __block SGTranslationConnectionReport *report;
@@ -348,7 +348,7 @@ static void checkConnection(void) {
         if ([change isEqual:@"cancel"]) [test cancel];
         else if ([change isEqual:@"base"]) [NSUserDefaults.standardUserDefaults setObject:@"http://100.97.8.81:10101/v2" forKey:SGKeyLyricsOpenAIBaseURL];
         else if ([change isEqual:@"model"]) [NSUserDefaults.standardUserDefaults setObject:@"different-model" forKey:SGKeyLyricsOpenAIModel];
-        else if ([change isEqual:@"key"]) openAIKeys[@"100.97.8.81"] = [@"replacement-fixture-key" dataUsingEncoding:NSUTF8StringEncoding];
+        else if ([change isEqual:@"key"]) openAIKeys[@"http://100.97.8.81:10100"] = [@"replacement-fixture-key" dataUsingEncoding:NSUTF8StringEncoding];
         else if ([change isEqual:@"target"]) testLanguage = @"ja";
         if (notify.boolValue || [change isEqual:@"redraw"]) {
             NSNotificationName name = notify.integerValue == 1 ? SGLyricsTranslationServiceSettingsDidChangeNotification : SGLyricsTranslationsDidChangeNotification;

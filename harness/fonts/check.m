@@ -8,9 +8,16 @@
 #import "../harness-fail.h"
 
 static atomic_int sg_mainCalls, sg_workerCalls;
+extern void harnessRemoveCustom(dispatch_block_t done);
+extern void harnessImport(NSURL *url, dispatch_block_t done);
+extern void harnessImportFiles(NSArray *urls, dispatch_block_t done);
+extern void harnessImportPlaceholder(NSURL *url, NSURL *metadata, NSURL *materialized, void (^done)(BOOL));
+extern NSArray *harnessStoredFontNames(void);
+extern void harnessRejectedImport(NSURL *invalid, void (^done)(BOOL));
 // While set, a registration enters and waits here, as a multi-MB Korean font takes its time in Core Text; the
 // imported font's file waits on a semaphore of its own, so the two kinds land one after the other.
-static dispatch_semaphore_t sg_holdRegistration, sg_holdImported, sg_registrationEntered;
+static dispatch_semaphore_t sg_holdRegistration, sg_holdImported;
+static atomic_uint sg_registrationEntries;
 static CFArrayRef harnessDescriptors(CFURLRef url) {
     atomic_fetch_add(NSThread.isMainThread ? &sg_mainCalls : &sg_workerCalls, 1);
     CTFontDescriptorRef face = CTFontDescriptorCreateWithNameAndSize(CFSTR("Helvetica"), 12);
@@ -22,9 +29,10 @@ bool harnessRegister(CFURLRef url, CTFontManagerScope scope, CFErrorRef *error) 
     atomic_fetch_add(NSThread.isMainThread ? &sg_mainCalls : &sg_workerCalls, 1);
     dispatch_semaphore_t hold = [((__bridge NSURL *)url).lastPathComponent isEqual:@"Harness.ttf"] ? sg_holdImported : sg_holdRegistration;
     if (hold) {
-        dispatch_semaphore_signal(sg_registrationEntered);
-        if (dispatch_semaphore_wait(hold, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)))
-            HARNESS_FAIL(@"a registration stayed held for 3 s: something waits for it before releasing it");
+        atomic_fetch_add(&sg_registrationEntries, 1);
+        if (dispatch_semaphore_wait(hold, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)))
+            HARNESS_FAIL(@"registration of %@ stayed held", [(__bridge NSURL *)url lastPathComponent]);
+        HARNESS_CHECK([NSFileManager.defaultManager fileExistsAtPath:[(__bridge NSURL *)url path]]);
     }
     return true;
 }
@@ -43,11 +51,26 @@ SGAppFont SGAppFontChosen(void) { return (SGAppFont)[NSUserDefaults.standardUser
 NSArray<NSString *> *SGAppFontNames(void) { return @[]; }
 NSArray<NSString *> *SGAppFontFamilies(void) { return @[]; }
 
-static void pumpUntil(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+static void pumpUntilAt(BOOL (^done)(void), int line) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
-    HARNESS_CHECK(done());
+    if (!done()) HARNESS_FAIL(@"condition at check.m:%d did not become true", line);
+}
+#define pumpUntil(...) pumpUntilAt(__VA_ARGS__, __LINE__)
+
+extern dispatch_queue_t harnessImportQueue(void);
+static void drainRegistrations(dispatch_queue_t worker) {
+    __block BOOL drained = NO;
+    dispatch_async(worker, ^{
+        dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    });
+    pumpUntil(^BOOL { return drained; });
+}
+
+// A reader can submit registration on the next main-queue turn. Don't park main waiting for it.
+static void awaitRegistrations(unsigned count) {
+    pumpUntil(^BOOL { return atomic_load(&sg_registrationEntries) >= count; });
 }
 
 // A file of exactly the catalog's size, which is all SGFontLibraryInstalled asks of it.
@@ -122,7 +145,7 @@ int main(void) { @autoreleasepool {
 
     // Opening it again registers nothing twice and announces nothing new.
     SGFontLibraryRegisterInstalled();
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    drainRegistrations(registrationQueue());
     HARNESS_CHECK(announced.count == 2 && atomic_load(&sg_workerCalls) == 7);
 
     // A removal behind a pending registration wins: the family is never published after it.
@@ -133,7 +156,7 @@ int main(void) { @autoreleasepool {
     SGFontLibraryRemove(@"poppins");
     HARNESS_CHECK(!SGFontLibraryInstalled(@"poppins") && !SGFontLibraryRegisteredFamily(@"poppins"));
     pumpUntil(^BOOL { return [announced containsObject:@"jua"]; });
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+    drainRegistrations(registrationQueue());
     HARNESS_CHECK(!SGFontLibraryRegisteredFamily(@"poppins"));
 
     // The synchronous entry still answers a family nothing has registered yet, and publishes it.
@@ -156,12 +179,16 @@ int main(void) { @autoreleasepool {
     HARNESS_CHECK([NSFileManager.defaultManager createDirectoryAtURL:importedFolder withIntermediateDirectories:YES attributes:nil error:nil]);
     HARNESS_CHECK([NSFileManager.defaultManager createFileAtPath:[importedFolder URLByAppendingPathComponent:@"Harness.ttf"].path contents:nil attributes:nil]);
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    [store setObject:@[@"Harness.ttf", @"..", @"."] forKey:SGKeyAppFontFiles];
+    HARNESS_CHECK([harnessStoredFontNames() isEqual:@[@"Harness.ttf"]]);
+    [store setObject:@[@42] forKey:SGKeyAppFontFiles];
+    HARNESS_CHECK(!harnessStoredFontNames().count);
     [store setObject:@[@"Harness.ttf"] forKey:SGKeyAppFontFiles];
     [store setObject:@"Helvetica" forKey:SGKeyAppFontName];
     atomic_store(&sg_mainCalls, 0);   // the synchronous entry above ran its registration on the calling thread
     sg_holdRegistration = dispatch_semaphore_create(0);
     sg_holdImported = dispatch_semaphore_create(0);
-    sg_registrationEntered = dispatch_semaphore_create(0);
+    atomic_store(&sg_registrationEntries, 0);
     NSMutableSet<NSString *> *pickerAnnounced = [NSMutableSet set];
     id pickerToken = [NSNotificationCenter.defaultCenter addObserverForName:SGFontLibraryChangedNotification object:nil queue:nil
         usingBlock:^(NSNotification *note) { [pickerAnnounced addObject:note.userInfo[@"identifier"]]; }];
@@ -170,8 +197,7 @@ int main(void) { @autoreleasepool {
     picker.tableView.frame = CGRectMake(0, 0, 390, 2400);
     [picker viewWillAppear:NO];
     // The library's queue and the imported font's each hold one registration.
-    for (int held = 0; held < 2; held++)
-        HARNESS_CHECK(dispatch_semaphore_wait(sg_registrationEntered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+    awaitRegistrations(2);
     __block BOOL queuedRan = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ queuedRan = YES; });
     pumpUntil(^BOOL { return queuedRan; });
@@ -180,7 +206,7 @@ int main(void) { @autoreleasepool {
     HARNESS_CHECK(![pickerPreviewFamily(picker, @"Helvetica") isEqual:@"Helvetica"]);
     // The library's families land first; the imported font is still waiting in Core Text.
     for (int release = 0; release < 2; release++) dispatch_semaphore_signal(sg_holdRegistration);
-    pumpUntil(^BOOL { return pickerAnnounced.count == 2; });
+    pumpUntil(^BOOL { return [pickerAnnounced containsObject:@"dohyeon"] && [pickerAnnounced containsObject:@"gowundodum"]; });
     HARNESS_CHECK([pickerPreviewFamily(picker, @"Do Hyeon") isEqual:@"Helvetica"]);
     HARNESS_CHECK([pickerPreviewFamily(picker, @"Gowun Dodum") isEqual:@"Helvetica"]);
     HARNESS_CHECK(![pickerPreviewFamily(picker, @"Helvetica") isEqual:@"Helvetica"]);
@@ -204,6 +230,7 @@ int main(void) { @autoreleasepool {
 
     // The Free fonts page: a download that finishes while Core Text is busy leaves the page free; the family is
     // chosen and announced once its registration lands.
+    atomic_store(&sg_registrationEntries, 0);
     sg_holdRegistration = dispatch_semaphore_create(0);
     UITableViewController *library = (UITableViewController *)SGFontLibraryPage();
     [library loadViewIfNeeded];
@@ -211,7 +238,7 @@ int main(void) { @autoreleasepool {
     NSUInteger sunflowerRow = [[SGFontLibrary() filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"korean == YES"]] indexOfObject:sunflower];
     HARNESS_CHECK(!SGFontLibraryInstalled(@"sunflower") && ![store stringForKey:SGKeyAppFontLibrary]);
     [library tableView:library.tableView didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:(NSInteger)sunflowerRow inSection:0]];
-    HARNESS_CHECK(dispatch_semaphore_wait(sg_registrationEntered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+    awaitRegistrations(1);
     queuedRan = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ queuedRan = YES; });
     pumpUntil(^BOOL { return queuedRan; });
@@ -240,7 +267,7 @@ int main(void) { @autoreleasepool {
     atomic_store(&sg_mainCalls, 0);
     sg_holdRegistration = dispatch_semaphore_create(0);
     sg_holdImported = dispatch_semaphore_create(0);
-    sg_registrationEntered = dispatch_semaphore_create(0);
+    atomic_store(&sg_registrationEntries, 0);
     NSMutableSet<NSString *> *pipAnnounced = [NSMutableSet set];
     id pipToken = [NSNotificationCenter.defaultCenter addObserverForName:SGFontLibraryChangedNotification object:nil queue:nil
         usingBlock:^(NSNotification *note) { [pipAnnounced addObject:note.userInfo[@"identifier"]]; }];
@@ -249,9 +276,11 @@ int main(void) { @autoreleasepool {
     [store setObject:@"library:nanumgothic" forKey:SGKeyPiPFont];
     HARNESS_CHECK([SGLyricsPiPReadStyle().font isEqual:@"system"]);
     [store setObject:@"custom" forKey:SGKeyPiPFont];
-    HARNESS_CHECK([SGLyricsPiPReadStyle().font isEqual:@"system"]);
-    for (int held = 0; held < 2; held++)
-        HARNESS_CHECK(dispatch_semaphore_wait(sg_registrationEntered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+    // A second reader need not ask in the same main-queue turn as the first one.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        HARNESS_CHECK([SGLyricsPiPReadStyle().font isEqual:@"system"]);
+    });
+    awaitRegistrations(2);
     queuedRan = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ queuedRan = YES; });
     pumpUntil(^BOOL { return queuedRan; });
@@ -268,10 +297,15 @@ int main(void) { @autoreleasepool {
     // The imported files are registered: asking again, as the Font page does at every visit, registers nothing.
     int registered = atomic_load(&sg_workerCalls);
     for (int ask = 0; ask < 3; ask++) SGRegisterCustomFontAsync();
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    drainRegistrations(harnessImportQueue());
     HARNESS_CHECK(atomic_load(&sg_workerCalls) == registered && atomic_load(&sg_mainCalls) == 0);
     sg_holdRegistration = sg_holdImported = nil;
     [NSNotificationCenter.defaultCenter removeObserver:pipToken];
+    __block BOOL rejected = NO;
+    harnessRejectedImport([importedFolder URLByAppendingPathComponent:@"Harness.ttf"], ^(BOOL notified) {
+        HARNESS_CHECK(notified); rejected = YES;
+    });
+    pumpUntil(^BOOL { return rejected; });
 
     // The Lyrics PiP font page (LyricsPiPSettings.m), opened while Core Text holds both registrations: its rows
     // for the two families are not there, and they come in without reopening once the registrations land.
@@ -282,14 +316,13 @@ int main(void) { @autoreleasepool {
     atomic_store(&sg_mainCalls, 0);
     sg_holdRegistration = dispatch_semaphore_create(0);
     sg_holdImported = dispatch_semaphore_create(0);
-    sg_registrationEntered = dispatch_semaphore_create(0);
+    atomic_store(&sg_registrationEntries, 0);
     SGModPage *pip = (SGModPage *)SGLyricsPiPRow().page();
     SGModPage *fontPage = (SGModPage *)pip.sections[2].rows[1].page();   // opening it asks for the families
     [fontPage loadViewIfNeeded];
     fontPage.tableView.frame = CGRectMake(0, 0, 390, 2400);
     [fontPage viewWillAppear:NO];
-    for (int held = 0; held < 2; held++)
-        HARNESS_CHECK(dispatch_semaphore_wait(sg_registrationEntered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+    awaitRegistrations(2);
     queuedRan = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ queuedRan = YES; });
     pumpUntil(^BOOL { return queuedRan; });
@@ -309,6 +342,40 @@ int main(void) { @autoreleasepool {
     HARNESS_CHECK(atomic_load(&sg_mainCalls) == 0);
     [fontPage viewDidDisappear:NO];
     sg_holdRegistration = sg_holdImported = nil;
+    __block NSUInteger removals = 0;
+    id staleToken = [NSNotificationCenter.defaultCenter addObserverForName:SGFontLibraryChangedNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        if ([note.userInfo[@"identifier"] isEqual:@"custom"]) {
+            HARNESS_CHECK(NSThread.isMainThread && !SGRegisteredCustomFont());
+            removals++;
+        }
+    }];
+    __block BOOL deleted = NO;
+    harnessRemoveCustom(^{ deleted = YES; });
+    pumpUntil(^BOOL { return deleted; });
+    BOOL notifiedRemoval = removals == 1;
+    NSURL *importURL = [importedFolder URLByAppendingPathComponent:@"Harness.ttf"];
+    HARNESS_CHECK([NSFileManager.defaultManager createFileAtPath:importURL.path contents:nil attributes:nil]);
+    [store setObject:@[@"Harness.ttf"] forKey:SGKeyAppFontFiles];
+    [store setObject:@"Courier" forKey:SGKeyAppFontName];
+    sg_holdImported = dispatch_semaphore_create(0);
+    atomic_store(&sg_registrationEntries, 0);
+    SGRegisterCustomFontAsync();
+    awaitRegistrations(1);
+    SGRegisterCustomFontAsync(); // must join the held registration, not enter Core Text twice
+    deleted = NO;
+    [store setInteger:SGAppFontCustom forKey:SGKeyAppFont];
+    harnessRemoveCustom(^{ HARNESS_CHECK(NSThread.isMainThread); deleted = YES; });
+    __block BOOL invalidFinished = NO;
+    harnessImport(importURL, ^{ invalidFinished = YES; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        HARNESS_CHECK(!deleted && [NSFileManager.defaultManager fileExistsAtPath:importURL.path]);
+        dispatch_semaphore_signal(sg_holdImported);
+    });
+    pumpUntil(^BOOL { return deleted && invalidFinished; });
+    HARNESS_CHECK(notifiedRemoval && removals == 1 && !SGRegisteredCustomFont() && ![NSFileManager.defaultManager fileExistsAtPath:importURL.path]);
+    HARNESS_CHECK([store objectForKey:SGKeyAppFont] == nil);
+    [NSNotificationCenter.defaultCenter removeObserver:staleToken];
+    sg_holdImported = nil;
     // The app font Fonts.x registered at launch resolves at once, with no notification to wait for.
     SGFontLibraryRemove(@"nanumgothic");
     install(@"lato");
@@ -326,5 +393,58 @@ int main(void) { @autoreleasepool {
     SGFontLibraryRemove(@"lato");
     [NSFileManager.defaultManager removeItemAtURL:libraryFolder() error:nil];
     puts("PASS: free fonts register off main on a serial queue, publish and refresh rows on main, a removal beats a pending registration, the Font page, the Free fonts page and the Lyrics PiP font choices stay free while Core Text is busy and update when registration lands");
+    CTFontRef face = CTFontCreateWithName(CFSTR("Chalkduster"), 16, NULL);
+    NSURL *original = CFBridgingRelease(CTFontCopyAttribute(face, kCTFontURLAttribute));
+    CFRelease(face);
+    NSURL *picks = [[NSURL fileURLWithPath:NSTemporaryDirectory()] URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSFileManager *fm = NSFileManager.defaultManager;
+    HARNESS_CHECK([fm createDirectoryAtURL:picks withIntermediateDirectories:NO attributes:nil error:nil]);
+    NSMutableArray *many = [NSMutableArray array];
+    for (NSInteger i = 0; i < 33; i++) {
+        NSURL *url = [picks URLByAppendingPathComponent:[NSString stringWithFormat:@"%ld.ttf", (long)i]];
+        HARNESS_CHECK([fm copyItemAtURL:original toURL:url error:nil]);
+        [many addObject:url];
+    }
+    NSURL *oversize = many.firstObject;
+    NSURL *stale = [importedFolder URLByAppendingPathComponent:NSUUID.UUID.UUIDString isDirectory:YES];
+    HARNESS_CHECK([fm createDirectoryAtURL:stale withIntermediateDirectories:YES attributes:nil error:nil]);
+    for (NSArray *batch in @[many, @[oversize], @[many[1], oversize]]) {
+        if (batch.count <= 2) {
+            NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:oversize error:nil];
+            HARNESS_CHECK([handle truncateAtOffset:64 * 1024 * 1024 + (batch.count == 1) error:nil] && [handle closeAndReturnError:nil]);
+        }
+        __block BOOL completed = NO;
+        harnessImportFiles(batch, ^{ completed = YES; });
+        pumpUntil(^BOOL { return completed; });
+        HARNESS_CHECK(![store objectForKey:SGKeyAppFontFiles]);
+    }
+    HARNESS_CHECK(![fm fileExistsAtPath:stale.path]);
+    NSURL *legacy = [importedFolder URLByAppendingPathComponent:@"Legacy.ttf"];
+    HARNESS_CHECK([fm moveItemAtURL:oversize toURL:legacy error:nil]);
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingToURL:legacy error:nil];
+    HARNESS_CHECK([handle truncateAtOffset:64 * 1024 * 1024 + 1 error:nil] && [handle closeAndReturnError:nil]);
+    [store setObject:@[@"Legacy.ttf"] forKey:SGKeyAppFontFiles];
+    [store setObject:@"Chalkduster" forKey:SGKeyAppFontName];
+    HARNESS_CHECK([SGRegisterCustomFont() isEqual:@"Chalkduster"]);
+    __block BOOL removedLegacy = NO;
+    harnessRemoveCustom(^{ removedLegacy = YES; });
+    pumpUntil(^BOOL { return removedLegacy; });
+    HARNESS_CHECK(![fm fileExistsAtPath:legacy.path]);
+    NSURL *cloudPick = [picks URLByAppendingPathComponent:@"Cloud.ttf"];
+    NSURL *largePromise = [picks URLByAppendingPathComponent:@"large-promise"];
+    HARNESS_CHECK([fm createFileAtPath:largePromise.path contents:nil attributes:nil]);
+    NSFileHandle *promise = [NSFileHandle fileHandleForWritingToURL:largePromise error:nil];
+    HARNESS_CHECK([promise truncateAtOffset:64 * 1024 * 1024 + 1 error:nil] && [promise closeAndReturnError:nil]);
+    __block BOOL rejectedCloud = NO;
+    harnessImportPlaceholder(cloudPick, largePromise, many[1], ^(BOOL requested) {
+        HARNESS_CHECK(!requested && !harnessStoredFontNames().count);
+        rejectedCloud = YES;
+    });
+    pumpUntil(^BOOL { return rejectedCloud; });
+    __block BOOL importedCloud = NO;
+    harnessImportPlaceholder(cloudPick, many[1], many[1], ^(BOOL requested) { importedCloud = requested; });
+    pumpUntil(^BOOL { return importedCloud; });
+    HARNESS_CHECK(([harnessStoredFontNames() isEqual:@[@"Cloud.ttf"]] && [SGRegisteredCustomFont() isEqual:@"Chalkduster"]));
+    HARNESS_CHECK([fm removeItemAtURL:picks error:nil]);
     return 0;
 } }

@@ -50,6 +50,8 @@ static NSUInteger metadataGets, barcodeGets;
 static BOOL appleOn = YES;
 static BOOL holdMetadata;
 static dispatch_block_t sendMetadata;
+static NSString *heldRecording;
+static dispatch_block_t sendRecording;
 BOOL SGMotionAppleMusicOn(void) { return appleOn; }
 dispatch_block_t SGSpotifyMetadataRequestAllowConstrained(NSString *path, NSData *body, BOOL allow, SGSpotifyMetadataReply done) {
     if ([path isEqual:SGSpotifyExtendedMetadataPath]) {
@@ -61,7 +63,9 @@ dispatch_block_t SGSpotifyMetadataRequestAllowConstrained(NSString *path, NSData
         NSData *track = SGPBSerialize(songsReply ? @[SGPBBytes(10, external)] : @[SGPBString(2, @"Song")]);
         NSData *any = SGPBSerialize(@[SGPBString(1, @"type.googleapis.com/spotify.metadata.Track"), SGPBBytes(2, track)]);
         NSData *entry = SGPBSerialize(@[SGPBBytes(1, SGPBSerialize(@[SGPBVarint(1, 200)])), SGPBString(2, uri), SGPBBytes(3, any)]);
-        done(SGPBSerialize(@[SGPBBytes(2, SGPBSerialize(@[SGPBBytes(3, entry)]))]), recordingStatus, nil);
+        NSData *reply = SGPBSerialize(@[SGPBBytes(2, SGPBSerialize(@[SGPBBytes(3, entry)]))]);
+        if ([uri isEqual:heldRecording]) sendRecording = ^{ done(reply, recordingStatus, nil); };
+        else done(reply, recordingStatus, nil);
         return ^{};
     }
     CHECK([path hasPrefix:@"/metadata/4/album/"] && !body && !allow && appleOn);
@@ -117,7 +121,7 @@ BOOL SGFlag(NSString *key, BOOL fallback) { return fallback; }
 NSURL *SGMotionTestAlbumAnswersFile(void) { return store; }
 
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(ready());
@@ -224,16 +228,20 @@ static NSURL *songCover(NSString *artist, NSString *album, NSString *song) {
     return result;
 }
 
-static NSURL *coverWithURI(NSString *name, NSString *song, NSString *uri) {
+static NSURL *coverForTrack(NSString *name, NSString *song, NSString *uri, NSString *track) {
     __block BOOL finished = NO;
     __block NSURL *result;
-    SGMotionRequestSongCover(@"Pink Floyd", name, song, uri, @"spotify:track:0000000000000000000002", 720, ^(NSURL *file) {
+    SGMotionRequestSongCover(@"Pink Floyd", name, song, uri, track, 720, ^(NSURL *file) {
         CHECK(NSThread.isMainThread);
         result = file;
         finished = YES;
     });
     waitFor(^BOOL { return finished; });
     return result;
+}
+
+static NSURL *coverWithURI(NSString *name, NSString *song, NSString *uri) {
+    return coverForTrack(name, song, uri, @"spotify:track:0000000000000000000002");
 }
 
 static void checkBarcode(void) {
@@ -248,11 +256,11 @@ static void checkBarcode(void) {
     SGMotionTicket *cancelled = SGMotionRequestSongCover(@"Pink Floyd", name, song, uri, @"spotify:track:0000000000000000000002", 720, ^(NSURL *file) { CHECK(NO); });
     waitFor(^BOOL { return sendMetadata != nil; });
     __block BOOL page = NO, pageAsked = NO;
-    SGMotionPageAlbumCover(@"Pink Floyd", name, 720, ^(NSURL *file, BOOL identified) {
+    SGMotionPageAlbumCover(@"Pink Floyd", name, uri, 720, ^(NSURL *file, BOOL identified) {
         CHECK(!file && !identified);
-        SGMotionAlbumRowMatcher(@"Pink Floyd", name, 720, ^(SGMotionRowMatch rows) { CHECK(!rows); }, ^(NSURL *row) {
+        SGMotionAlbumRowMatcher(@"Pink Floyd", name, uri, 720, ^(SGMotionRowMatch rows) { CHECK(!rows); }, ^(NSURL *row) {
             CHECK(!row);
-            SGMotionPageIdentifierCover(uri, name, 720, ^(NSURL *clip) {
+            SGMotionPageIdentifierCover(uri, @"Pink Floyd", name, 720, ^(NSURL *clip, SGMotionIdentifierOutcome outcome) {
                 CHECK([clip.path isEqual:@"/1665303755/clip.mp4"]); page = YES;
             });
             pageAsked = YES;
@@ -266,7 +274,8 @@ static void checkBarcode(void) {
     waitFor(^BOOL { return page; });
     CHECK([coverWithURI(name, song, uri).path isEqual:@"/1665303755/clip.mp4"]);
     CHECK(metadataGets == 1 && barcodeGets == 1);
-    CHECK(!coverWithURI(@"The Dark Side of the Moon", song, uri)); // the identified plain release is still
+    // The notes contain a still plain edition; they cannot override this URI's downloaded anniversary clip.
+    CHECK([coverWithURI(@"The Dark Side of the Moon", song, uri).path isEqual:@"/1665303755/clip.mp4"]);
     CHECK(coverWithURI(coverResults[1][@"attributes"][@"name"], song, uri));
     CHECK(metadataGets == 1 && barcodeGets == 1);
 
@@ -285,11 +294,15 @@ static void checkBarcode(void) {
     spotifyUPC = @"5054197493980"; // observed distributor UPC: neither returned album carries it
     NSDictionary *fixture = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:@"fixtures/GBN9Y2200015.json"] options:0 error:nil];
     songsReply = fixture;
+    // The previous track on `other` had no ISRC. Its album's first track has one.
+    expectedTrack = @"spotify:track:0000000000000000000001";
+    CHECK([coverForTrack(name, @"Another recording", other, expectedTrack).path isEqual:@"/1665303755/clip.mp4"]);
+    expectedTrack = @"spotify:track:0000000000000000000002";
     CHECK([coverWithURI(name, song, @"spotify:album:1ipVQZ4voJtfJxCNlR8lg4").path isEqual:@"/1665303755/clip.mp4"]);
 
     expectedTrack = @"spotify:track:0000000000000000000001"; // page uses the album's first GID, not the player
     __block BOOL firstTrack = NO;
-    SGMotionPageIdentifierCover(@"spotify:album:0000000000000000000004", name, 720, ^(NSURL *file) {
+    SGMotionPageIdentifierCover(@"spotify:album:0000000000000000000004", @"Pink Floyd", name, 720, ^(NSURL *file, SGMotionIdentifierOutcome outcome) {
         CHECK([file.path isEqual:@"/1665303755/clip.mp4"]); firstTrack = YES;
     });
     waitFor(^BOOL { return firstTrack; });
@@ -303,8 +316,48 @@ static void checkBarcode(void) {
         hit[@"relationships"] = @{@"albums": @{@"data": albums}};
         return @{@"data": @[hit]};
     };
-    songsReply = replyWithAlbums(@[record, second]);
-    CHECK(!coverWithURI(name, song, @"spotify:album:0000000000000000000005"));
+    // Two exact barcodes for November Rain; three soundtrack editions for How Far I'll Go.
+    // After delivery another track on the same URI must still consult its identifiers.
+    NSDictionary *(^candidate)(NSString *, NSString *, NSString *, NSNumber *, NSString *) =
+        ^NSDictionary *(NSString *identifier, NSString *album, NSString *upc, NSNumber *tracks, NSString *clip) {
+            NSMutableDictionary *attrs = [@{@"name":album, @"isSingle":@NO, @"trackCount":tracks, @"upc":upc} mutableCopy];
+            if (clip) attrs[@"editorialVideo"] = clipRelease(album, @"", NO, @[], clip)[@"attributes"][@"editorialVideo"];
+            return @{@"id":identifier, @"attributes":attrs};
+        };
+    NSString *rain = @"Use Your Illusion I", *moana = @"Moana (Original Motion Picture Soundtrack)";
+    NSString *rainURI = @"spotify:album:0000000000000000000031", *moanaURI = @"spotify:album:0000000000000000000032";
+    NSDictionary *savedBarcode = barcodeReply;
+    spotifyUPC = @"720642441527";
+    NSDictionary *rainA = candidate(@"114561", rain, spotifyUPC, @16, @"P359497653");
+    BOOL (^confirmedDuplicate)(NSString *, NSArray *) = ^BOOL(NSString *uri, NSArray *rows) {
+        barcodeReply = @{@"data":rows};
+        __block BOOL finished = NO, confirmed = NO;
+        SGMotionPageIdentifierCover(uri, @"Guns N' Roses", rain, 720, ^(NSURL *file, SGMotionIdentifierOutcome outcome) {
+            confirmed = outcome == SGMotionIdentifierClip && [file.path isEqual:@"/P359497653/clip.mp4"];
+            finished = YES;
+        });
+        waitFor(^BOOL { return finished; });
+        return confirmed;
+    };
+    BOOL skipStill = confirmedDuplicate(@"spotify:album:0000000000000000000033", @[candidate(@"114561", rain, spotifyUPC, @16, nil), rainA]);
+    BOOL keepFirst = confirmedDuplicate(@"spotify:album:0000000000000000000034", @[rainA, candidate(@"114561", rain, spotifyUPC, @16, @"different")]);
+    fprintf(stderr, "same UPC ID: still then video %s; first of two videos %s\n", skipStill ? "PASS" : "FAIL", keepFirst ? "PASS" : "FAIL");
+    CHECK(skipStill && keepFirst);
+    barcodeReply = @{@"data":@[rainA, candidate(@"1440896026", rain, spotifyUPC, @16, @"P359497653")]};
+    BOOL rainClip = [coverWithURI(rain, @"November Rain", rainURI).path isEqual:@"/P359497653/clip.mp4"];
+    barcodeReply = @{@"data":@[rainA, candidate(@"1440896026", rain, spotifyUPC, @16, nil)]};
+    CHECK(!coverForTrack(rain, @"Another track", rainURI, @"spotify:track:0000000000000000000001"));
+    spotifyUPC = nil;
+    NSDictionary *a = candidate(@"40", moana, @"", @40, @"P561704611"), *b = candidate(@"59", moana, @"", @59, @"P561704611");
+    songsReply = replyWithAlbums(@[a, b, candidate(@"66", moana, @"", @66, @"P561704611")]);
+    BOOL moanaClip = [coverWithURI(moana, @"How Far I'll Go", moanaURI).path isEqual:@"/P561704611/clip.mp4"];
+    songsReply = replyWithAlbums(@[a, b, candidate(@"66", moana, @"", @66, @"different")]);
+    expectedTrack = @"spotify:track:0000000000000000000001";
+    CHECK(!coverForTrack(moana, @"Another track", moanaURI, expectedTrack));
+    fprintf(stderr, "issue 67: November Rain %s; How Far I'll Go %s\n", rainClip ? "PASS" : "FAIL", moanaClip ? "PASS" : "FAIL");
+    CHECK(rainClip && moanaClip);
+    expectedTrack = @"spotify:track:0000000000000000000002";
+    barcodeReply = savedBarcode;
     NSMutableDictionary *attributes = [second[@"attributes"] mutableCopy];
     attributes[@"isSingle"] = @YES;
     second[@"attributes"] = attributes;
@@ -316,11 +369,15 @@ static void checkBarcode(void) {
     coverResults = @[@{@"attributes": @{@"name": @"Legacy still", @"artistName": @"Compilation", @"isSingle": @NO},
                        @"relationships": @{@"tracks": @{@"data": @[@{@"attributes": @{@"name": @"One", @"artistName": @"Pink Floyd"}}]}}}];
     NSUInteger before = metadataGets;
-    BOOL legacyStill = !coverWithURI(@"Legacy still", @"One", @"spotify:album:0000000000000000000007") && metadataGets == before;
+    BOOL legacyStill = [coverWithURI(@"Legacy still", @"One", @"spotify:album:0000000000000000000007").path isEqual:@"/1665303755/clip.mp4"] && metadataGets == before + 1;
     // A clip kept under the older song key is still that track's clip: no search, no identifier lookup.
     NSUInteger searched = coverSearches.count;
     legacyStill = legacyStill && [coverWithURI(@"Legacy clip", @"One", @"spotify:album:0000000000000000000012").path isEqual:@"/legacy-clip.mp4"]
-        && coverSearches.count == searched && metadataGets == before;
+        && coverSearches.count == searched && metadataGets == before + 1;
+    NSString *upgrade = @"spotify:album:0000000000000000000020";
+    CHECK([coverWithURI(@"Upgrade", @"One", upgrade).path isEqual:@"/song-seven.mp4"]);
+    CHECK(metadataGets == before + 1 && coverSearches.count == searched);
+    CHECK([coverWithURI(@"Upgrade", @"Two", upgrade).path isEqual:@"/1665303755/clip.mp4"]);
 
     coverResults = @[];
     spotifyUPC = nil;
@@ -368,6 +425,28 @@ static void checkBarcode(void) {
     BOOL leadSingleKept = !coverWithURI(@"Rich Man - The 6th Mini Album", song, @"spotify:album:0000000000000000000014");
     fprintf(stderr, "motion: recording single %s, lead single not the album %s\n", recordingSingle ? "PASS" : "FAIL", leadSingleKept ? "PASS" : "FAIL");
     CHECK(recordingSingle && leadSingleKept);
+    NSString *raceURI = @"spotify:album:0000000000000000000022", *raceAlbum = @"Concurrent editions";
+    heldRecording = expectedTrack = @"spotify:track:0000000000000000000001";
+    songsReply = nil;  // current track has no ISRC; retain its reply until the next track finishes
+    coverResults = @[clipRelease(raceAlbum, @"Pink Floyd", NO, @[], @"edition-A")];
+    NSUInteger searchesBeforeRace = coverSearches.count;
+    __block BOOL currentDone = NO, pageDone = NO;
+    __block NSURL *currentFile, *pageFile;
+    SGMotionRequestSongCover(@"Pink Floyd", raceAlbum, @"Current", raceURI, heldRecording, 720, ^(NSURL *file) {
+        currentFile = file; currentDone = YES;
+    });
+    waitFor(^BOOL { return sendRecording != nil; });
+    SGMotionPageIdentifierCover(raceURI, @"Pink Floyd", raceAlbum, 720, ^(NSURL *file, SGMotionIdentifierOutcome outcome) {
+        pageFile = file; pageDone = YES;
+    });
+    songsReply = replyWithAlbums(@[named(raceAlbum, NO)]);
+    expectedTrack = @"spotify:track:0000000000000000000002";
+    CHECK([coverForTrack(raceAlbum, @"Next", raceURI, expectedTrack).path isEqual:@"/1665303755/clip.mp4"]);
+    sendRecording(); sendRecording = nil; heldRecording = nil;
+    waitFor(^BOOL { return currentDone && pageDone; });
+    fprintf(stderr, "concurrent editions: current=%s page=%s\n", currentFile.path.UTF8String ?: "none", pageFile.path.UTF8String ?: "none");
+    CHECK([currentFile.path isEqual:@"/1665303755/clip.mp4"] && [pageFile.path isEqual:currentFile.path]);
+    CHECK(coverSearches.count == searchesBeforeRace);
     songsReply = nil;
     expectedTrack = nil;
     coverResults = nil;
@@ -405,7 +484,7 @@ static void checkSoundtrack(void) {
     coverResults = full;
     [coverSearches removeAllObjects];
     __block BOOL rowDone = NO;
-    SGMotionAlbumRowMatcher(@"Spotify soundtrack credit", page, 720, ^(SGMotionRowMatch match) {
+    SGMotionAlbumRowMatcher(@"Spotify soundtrack credit", page, nil, 720, ^(SGMotionRowMatch match) {
         CHECK(sentinelReads == 1); // catalog normalization finished before the first cell
         CHECK(match && !match(@"현지화된 이름", @"Drive"));
         CHECK(match(@"Ed Sheeran", @"Drive"));
@@ -428,7 +507,7 @@ static void checkSoundtrack(void) {
         @[@{@"attributes": @{@"name": @"Rich Man", @"artistName": @"aespa"}}])];
     BOOL epCover = songCover(@"aespa", ep, nil) != nil;
     __block BOOL epRow = NO, epRowClip = NO;
-    SGMotionAlbumRowMatcher(@"aespa", ep, 720, ^(SGMotionRowMatch match) { CHECK(!match); },
+    SGMotionAlbumRowMatcher(@"aespa", ep, nil, 720, ^(SGMotionRowMatch match) { CHECK(!match); },
         ^(NSURL *clip) { epRowClip = clip != nil; epRow = YES; });
     waitFor(^BOOL { return epRow; });
     fprintf(stderr, "motion: EP suffix cover %s, rows %s\n", epCover ? "PASS" : "FAIL", epRowClip ? "PASS" : "FAIL");
@@ -440,13 +519,13 @@ static void checkSoundtrack(void) {
     BOOL singleCover = [songCover(@"MEOVV", @"HANDS UP", nil).path isEqual:@"/single/clip.mp4"];
     BOOL singleSong = [songCover(@"MEOVV", @"HANDS UP", @"HANDS UP").path isEqual:@"/single/clip.mp4"];
     __block BOOL singleRow = NO, singleRowClip = NO;
-    SGMotionAlbumRowMatcher(@"MEOVV", @"HANDS UP", 720, ^(SGMotionRowMatch match) { CHECK(!match); },
+    SGMotionAlbumRowMatcher(@"MEOVV", @"HANDS UP", nil, 720, ^(SGMotionRowMatch match) { CHECK(!match); },
         ^(NSURL *clip) { singleRowClip = [clip.path isEqual:@"/single/clip.mp4"]; singleRow = YES; });
     waitFor(^BOOL { return singleRow; });
     coverResults = @[clipRelease(@"Whiplash - Single", @"aespa", YES, tracks, @"lead"), clipRelease(@"Whiplash", @"aespa", NO, tracks, @"album")];
     BOOL albumOverLead = [songCover(@"aespa", @"Whiplash", nil).path isEqual:@"/album/clip.mp4"];
     __block BOOL leadRow = NO, leadRowClip = NO;
-    SGMotionAlbumRowMatcher(@"aespa", @"Whiplash", 720, ^(SGMotionRowMatch match) { CHECK(!match); },
+    SGMotionAlbumRowMatcher(@"aespa", @"Whiplash", nil, 720, ^(SGMotionRowMatch match) { CHECK(!match); },
         ^(NSURL *clip) { leadRowClip = [clip.path isEqual:@"/album/clip.mp4"]; leadRow = YES; });
     waitFor(^BOOL { return leadRow; });
     coverResults = @[@{@"attributes": @{@"name": @"Still Single - Single", @"artistName": @"Artist", @"isSingle": @YES}}];
@@ -481,7 +560,7 @@ static void checkSoundtrack(void) {
                      release(hits, @"Other Band", NO, @[@{@"attributes": @{@"name": @"Theme", @"artistName": @"Artist"}}])];
     BOOL stayedStill = !songCover(@"Artist", hits, @"Theme");
     __block BOOL exactStill = NO;
-    SGMotionPageAlbumCover(@"Artist", hits, 720, ^(NSURL *file, BOOL identified) { CHECK(!file && identified); exactStill = YES; });
+    SGMotionPageAlbumCover(@"Artist", hits, nil, 720, ^(NSURL *file, BOOL identified) { CHECK(!file && identified); exactStill = YES; });
     waitFor(^BOOL { return exactStill; });
     [coverSearches removeAllObjects];
     coverResults = @[];
@@ -549,7 +628,10 @@ int main(int argc, char **argv) {
         CHECK(requested.count == 2);
         state.future = @[b]; advanceAllowed = NO; publish(state);
         CHECK(requested.count == 2);
+        // Paused, nothing is fetched ahead; playing again fetches the next track's clip.
         advanceAllowed = YES; state.isPaused = YES; publish(state);
+        CHECK(requested.count == 2);
+        state.isPaused = NO; publish(state);
         CHECK(requested.count == 3 && [requested.lastObject isEqual:b.URI]);
         old = tickets[b.URI];
         state.track = b; publish(state);
@@ -579,6 +661,8 @@ int main(int argc, char **argv) {
             @"album\n1\nartist\noriginal": @{@"url": @"https://fixture.invalid/wrong-edition.mp4", @"at": NSDate.date},
             @"album\nsong4\npink floyd\nlegacy still\none": @{@"url": @"", @"identified": @NO, @"at": NSDate.date},
             @"album\nsong4\npink floyd\nlegacy clip\none": @{@"url": @"https://fixture.invalid/legacy-clip.mp4", @"at": NSDate.date},
+            @"album\nsong7\npink floyd\nupgrade\none": @{@"url": @"https://fixture.invalid/song-seven.mp4", @"at": NSDate.date},
+            @"album\nidentifiers2\nspotify:album:0000000000000000000020": @{@"url": @"https://fixture.invalid/ambiguous.mp4", @"at": NSDate.date},
             @"album\n4\nartist\nsaved": @{@"url": @"https://fixture.invalid/saved.mp4", @"at": NSDate.date}}
             writeToURL:store atomically:YES]));
         NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
@@ -589,6 +673,14 @@ int main(int argc, char **argv) {
         CHECK([NSURLProtocol registerClass:CatalogProtocol.class]);
         if (argc == 3) {
             BOOL first = [@(argv[1]) isEqual:@"seed"];
+            NSString *name = @"The Dark Side Of The Moon (50th Anniversary) [2023 Remaster]";
+            if (!first) {
+                // Another edition was found by title after this release's clip was downloaded.
+                NSMutableDictionary *answers = [[NSDictionary dictionaryWithContentsOfURL:store] mutableCopy];
+                answers[[@"album\n5\npink floyd\n" stringByAppendingString:name.lowercaseString]] =
+                    @{@"url":@"https://fixture.invalid/another-edition.mp4", @"at":NSDate.date};
+                CHECK([answers writeToURL:store atomically:YES]);
+            }
             coverSearches = [NSMutableArray array];
             coverResults = first ? @[release(@"Ordinary", @"Solo", NO, @[@{@"attributes": @{@"name": @"One", @"artistName": @"Solo"}}])] : @[];
             CHECK(songCover(@"Solo", @"Ordinary", first ? @"One" : @"Two"));
@@ -603,7 +695,7 @@ int main(int argc, char **argv) {
             spotifyUPC = @"5054197493980";
             expectedTrack = first ? @"spotify:track:0000000000000000000002" : nil;
             songsReply = [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:@"fixtures/GBN9Y2200015.json"] options:0 error:nil];
-            CHECK([coverWithURI(@"The Dark Side Of The Moon (50th Anniversary) [2023 Remaster]", @"Speak to Me - 2023 Remaster", uri).path isEqual:@"/1665303755/clip.mp4"]);
+            CHECK([coverWithURI(name, @"Speak to Me - 2023 Remaster", uri).path isEqual:@"/1665303755/clip.mp4"]);
             if (first) {
                 CHECK(metadataGets == 1 && barcodeGets == 1 && recordingReads == 1);
                 waitFor(^BOOL {
@@ -611,7 +703,15 @@ int main(int argc, char **argv) {
                         if ([entry[@"url"] hasSuffix:@"/1665303755/clip.mp4"]) return YES;
                     return NO;
                 });
-            } else CHECK(!metadataGets && !barcodeGets && !coverSearches.count && !masterHits && !mediaHits);
+            } else {
+                __block BOOL opened = NO;
+                SGMotionPageIdentifierCover(uri, @"Pink Floyd", name, 720, ^(NSURL *file, SGMotionIdentifierOutcome outcome) {
+                    CHECK(outcome == SGMotionIdentifierClip && [file.path isEqual:@"/1665303755/clip.mp4"]);
+                    opened = YES;
+                });
+                waitFor(^BOOL { return opened; });
+                CHECK(!metadataGets && !barcodeGets && !coverSearches.count && !masterHits && !mediaHits);
+            }
             if (prior) [defaults setObject:prior forKey:tokenKey]; else [defaults removeObjectForKey:tokenKey];
             CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]);
             return 0;
@@ -624,10 +724,10 @@ int main(int argc, char **argv) {
             CHECK(album(name) != nil);
         }
         waitFor(^BOOL {
-            return [NSDictionary dictionaryWithContentsOfURL:store][@"album\n4\nartist\nalbum 200"] != nil;
+            return [NSDictionary dictionaryWithContentsOfURL:store][@"album\n5\nartist\nalbum 200"] != nil;
         });
         NSDictionary *saved = [NSDictionary dictionaryWithContentsOfURL:store];
-        CHECK(saved.count == 200 && !saved[@"album\n4\nartist\nexpired"] && !saved[@"album\n4\nartist\nalbum 0"]);
+        CHECK(saved.count == 200 && !saved[@"album\n4\nartist\nexpired"] && !saved[@"album\n5\nartist\nalbum 0"]);
         edition = @"second";
         CHECK([album(@"Album 200").absoluteString isEqual:@"https://fixture.invalid/first/Album-200/clip.mp4"]);
         CHECK([album(@"Album 0").absoluteString isEqual:@"https://fixture.invalid/second/Album-0/clip.mp4"]);
@@ -665,7 +765,7 @@ int main(int argc, char **argv) {
         [NSURLProtocol unregisterClass:CatalogProtocol.class];
         if (prior) [defaults setObject:prior forKey:tokenKey]; else [defaults removeObjectForKey:tokenKey];
         waitFor(^BOOL {
-            return [[NSDictionary dictionaryWithContentsOfURL:store][@"album\n4\nartist\nalbum 0"][@"url"]
+            return [[NSDictionary dictionaryWithContentsOfURL:store][@"album\n5\nartist\nalbum 0"][@"url"]
                 isEqual:@"https://fixture.invalid/second/Album-0/clip.mp4"];
         });
         CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]);

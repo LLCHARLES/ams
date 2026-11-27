@@ -14,6 +14,7 @@ import ssl
 import json
 import os
 import pathlib
+import plistlib
 import re
 import shutil
 import socket
@@ -244,14 +245,30 @@ def main():
         profile.chmod(0o600)
         env = dict(os.environ, CGO_ENABLED="1")
         sh(["go", "build", "-buildmode=c-archive", "-o", str(tmp / "libsgwg-macos.a"), "."], cwd=WG, env=env)
-        harness = tmp / "harness"
+        contents = tmp / "Harness.app/Contents"
+        harness = contents / "MacOS/harness"
+        engine = contents / "Frameworks/libsgwg.dylib"
+        harness.parent.mkdir(parents=True)
+        engine.parent.mkdir()
+        (contents / "Info.plist").write_bytes(plistlib.dumps({
+            "CFBundleIdentifier": "org.retrine.wireguard-harness", "CFBundlePackageType": "APPL",
+            "CFBundleExecutable": harness.name,
+            # Unlike the unbundled CLI, an app enforces ATS. Only the local
+            # fixture origin uses FixtureTrust's per-run pinned test CA.
+            "NSAppTransportSecurity": {"NSExceptionDomains": {
+                "fixture.invalid": {"NSExceptionAllowsInsecureHTTPLoads": True},
+            }},
+        }))
+        sh(["xcrun", "clang", "-dynamiclib", "-Wl,-u,_SGWGEngineV2,-exported_symbol,_SGWGEngineV2",
+            str(tmp / "libsgwg-macos.a"), "-framework", "CoreFoundation", "-framework", "Security",
+            "-lresolv", "-o", str(tmp / "libsgwg.dylib")])
         sh(["xcrun", "clang", "-fobjc-arc", "-fmodules", "-DSGWG_TESTING", "-mmacosx-version-min=14.0", "-Wall",
             "-I", str(ROOT / "tweak/Sources"),
             str(ROOT / "tweak/Sources/Shared/WireGuard/SGWGCore.m"), str(ROOT / "tweak/Sources/Shared/WireGuard/SGWGTransport.m"),
             str(ROOT / "tweak/Sources/Shared/LyricsSources/LyricsHosts.m"),
             str(ROOT / "tweak/Sources/Shared/WireGuard/SGWGNative.m"),
             str(ROOT / "tweak/Sources/Shared/WireGuard/SGWGAdmission.m"),
-            str(ROOT / "harness/wireguard/harness.m"), str(tmp / "libsgwg-macos.a"),
+            str(ROOT / "harness/wireguard/harness.m"),
             "-framework", "Foundation", "-framework", "Network", "-framework", "Security",
             "-framework", "CoreFoundation", "-lresolv", "-o", str(harness)])
 
@@ -286,14 +303,39 @@ def main():
                 results.append(name)
                 return proc.stdout
 
+            run("missing bundled engine", "loader-failure", SGWG_TEST_LOADER_ERROR="WireGuard engine unavailable")
+            # Same bundle path, separately built libraries. Never call into a
+            # table until its fixed header and all required functions validate.
+            sh(["xcrun", "clang", "-dynamiclib", "-x", "c", "/dev/null", "-o", str(engine)])
+            run("absent bridge symbol", "loader-failure", SGWG_TEST_LOADER_ERROR="WireGuard engine incompatible")
+            for field in ("version", "size", "setCallback", "start", "status", "lookup",
+                          "rebind", "stop", "inspect", "redact", "freeString"):
+                sh(["xcrun", "clang", "-dynamiclib", "-DINVALIDATE_FIELD=" + field,
+                    str(ROOT / "harness/wireguard/invalid-engine.c"), str(tmp / "libsgwg-macos.a"),
+                    "-framework", "CoreFoundation", "-framework", "Security", "-lresolv", "-o", str(engine)])
+                run("invalid bridge " + field, "loader-failure", SGWG_TEST_LOADER_ERROR="WireGuard engine incompatible")
+            (tmp / "libsgwg.dylib").replace(engine)
+            for key in ("DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
+                        "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_FALLBACK_FRAMEWORK_PATH"):
+                run("reject " + key, "loader-failure", **{key: str(tmp / "empty")},
+                    SGWG_EXPECT_UNMAPPED="1", SGWG_TEST_LOADER_ERROR="WireGuard engine blocked: loader path override")
             run("unit: Spotify delegates, ABI guards, proxy enforcement and redaction", "unit")
             run("unit: disabled -> no hooks", "unit", SGWG_TEST_ENABLED="0", SGWG_EXPECT_ACTIVE="0")
+            run("deferred slots: HTTP, WebSocket and native TCP blocked", "deferred", SGWG_TEST_DEFER_SLOTS="1")
             run("failclosed: saved opt-in on an uninspected version", "failclosed",
                 SGWG_TEST_APP_VERSION="9.1.95", SGWG_EXPECT_BLOCKED="1")
             run("failclosed: wrong build", "failclosed", SGWG_TEST_APP_BUILD="919002270", SGWG_EXPECT_BLOCKED="1")
             out = run("live Proton: handshake, US exit, HTTPS and range", "live")
             report = out[out.find("Retrine app-local WireGuard diagnostics"):]
             source = profile.read_text()
+            offline = tmp / "offline.conf"
+            changed, count = re.subn(r"(?mi)^\s*Endpoint\s*=.*$", "Endpoint = offline.invalid:1", source)
+            if count != 1:
+                raise SystemExit("Expected exactly one endpoint for bootstrap fixture")
+            offline.write_text(changed)
+            offline.chmod(0o600)
+            run("bootstrap DNS unavailable then restored on early session", "offline",
+                SGWG_TEST_PROFILE=str(offline), SGWG_TEST_RESTORED_PROFILE=str(profile))
             for name, field, replacement in [
                 ("bad endpoint", "Endpoint", "127.0.0.1:1"),
                 ("wrong peer key", "PublicKey", base64.b64encode(bytes([1]) * 32).decode()),

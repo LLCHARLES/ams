@@ -4,7 +4,10 @@
 #import <UIKit/UIKit.h>
 #include <pthread.h>
 #include <unistd.h>
+#import "../reader-handoff.h"
+#define usleep HarnessWriterSleep
 #import "SpeedPitch.m"
+#undef usleep
 
 SPTPlayerState *SGPlayerState(void) { return nil; }
 void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) {}
@@ -137,13 +140,14 @@ static void *nonowner(void *context) {
     return NULL;
 }
 
-static atomic_bool readerLoaded, releaseReader, replacementStarted, replacementFinished, renderSucceeded;
+static atomic_bool readerLoaded, replacementFinished, renderSucceeded;
+static dispatch_semaphore_t releaseReader;
 static void *retainedReader(void *context) {
     AudioUnit output = context;
     if (!SGPlayerBeginProcessing(output)) return NULL;
     SGTimePitch *unit = atomic_load(&sg_inPlace);
     atomic_store(&readerLoaded, true);
-    while (!atomic_load(&releaseReader)) {}
+    HARNESS_CHECK(!dispatch_semaphore_wait(releaseReader, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)));
     float left[1024] = {0}, right[1024] = {0};
     float *lanes[] = {left, right};
     atomic_store(&renderSucceeded, SGTimePitchProcess(unit, lanes, 1024));
@@ -151,7 +155,7 @@ static void *retainedReader(void *context) {
     return NULL;
 }
 static void *replaceUnit(void *context) {
-    atomic_store(&replacementStarted, true);
+    harnessRetiring = YES;
     SGTimePitch *unit = unitForFormat();
     atomic_store(&replacementFinished, unit && SGTimePitchSampleRate(unit) == 44100);
     return NULL;
@@ -191,7 +195,7 @@ static void runTests(void) {
 
     pthread_t noise;
     pthread_create(&noise, NULL, nonowner, (void *)(uintptr_t)2);
-    while (!atomic_load(&nonownerStarted)) usleep(100);
+    HARNESS_AWAIT(atomic_load(&nonownerStarted));
     unsigned refused = 0;
     for (unsigned i = 0; i < 1000000; ++i) {
         if (SGPlayerBeginProcessing(atomic_load(&output->unit))) SGPlayerEndProcessing();
@@ -242,15 +246,17 @@ static void runTests(void) {
     if (initial) {
         atomic_store(&sg_engaged, true);
         pthread_t reader, writer;
+        HarnessStartHandoff();
+        releaseReader = dispatch_semaphore_create(0);
         pthread_create(&reader, NULL, retainedReader, (void *)(uintptr_t)1);
-        while (!atomic_load(&readerLoaded)) usleep(100);
+        HARNESS_AWAIT(atomic_load(&readerLoaded));
         formatAt(&output->hardware, 44100);
         pthread_create(&writer, NULL, replaceUnit, NULL);
-        while (!atomic_load(&replacementStarted)) usleep(100);
-        usleep(150000);
+        HarnessWaitForHeldReader();
         expect(!atomic_load(&replacementFinished), "production format retirement waits for loaded render reader");
-        atomic_store(&releaseReader, true);
+        dispatch_semaphore_signal(releaseReader);
         pthread_join(reader, NULL);
+        dispatch_semaphore_signal(harnessResumeWriter);
         pthread_join(writer, NULL);
         expect(atomic_load(&renderSucceeded) && atomic_load(&replacementFinished),
                "old unit renders safely before replacement completes");

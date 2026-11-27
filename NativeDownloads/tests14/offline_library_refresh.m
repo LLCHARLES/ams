@@ -30,6 +30,9 @@
 - (UIViewController *)topViewController{return self.viewControllers.lastObject;}
 - (void)pushViewController:(UIViewController *)controller animated:(BOOL)animated{self.viewControllers=[self.viewControllers arrayByAddingObject:controller];controller.navigationController=self;}
 @end
+static void SAPShowPixiePage(UIViewController *owner,UIViewController *page) {
+    [owner.navigationController pushViewController:page animated:YES];
+}
 @interface UITableView:NSObject
 - (void)deselectRowAtIndexPath:(NSIndexPath *)indexPath animated:(BOOL)animated;
 @end

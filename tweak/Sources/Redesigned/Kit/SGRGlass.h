@@ -69,3 +69,8 @@ void SGRGlassBacks(UIView *shape, UIControl *control);
 // The solid shape Reduce Transparency puts in its place has no effect and fades by its own alpha. Animates
 // in the caller's animation.
 void SGRShowGlass(UIView *shape, BOOL shown);
+
+// Gives a shown glass shape its effect again, at once, for one that was on screen while a view above it faded by its
+// alpha: UIKit then leaves the material undrawn after the fade though the effect is still set, and SGRShowGlass, which
+// sets the effect only when it changes, never puts it back. Nothing for a hidden shape or a solid one.
+void SGRRefreshGlass(UIView *shape);

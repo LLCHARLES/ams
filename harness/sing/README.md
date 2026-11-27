@@ -8,7 +8,9 @@ Focused concurrency checks, without a model:
 
 This checks command snapshots under concurrent writers, stale completions preserving newer commands,
 post-command timestamps for seek/skip landings, worker wakeups after parking, and the existing quiet-start
-audio contract. `build/sing-thread commands` runs just the command cases.
+audio contract. Mock Core ML loads also check that a purge abandons prepare-ahead, the CPU fallback survives
+19 successful Neural Engine windows but is freed on the 20th, and a later failure leaves no separator
+until a new CPU copy is ready, even in background playback. `build/sing-thread commands` runs just the command cases.
 
 ## The separator and the engine on the Mac (`main.m`)
 

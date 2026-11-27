@@ -23,4 +23,5 @@
 #define SGKeyListeningStats @"spotifyglass.stats.record"
 
 SGPlayLog *SGListeningLog(void);
+NSString *SGListeningStatsSummary(void);
 UIViewController *SGListeningStatsPage(void);

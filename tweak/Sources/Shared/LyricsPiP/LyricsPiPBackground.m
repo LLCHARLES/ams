@@ -7,6 +7,9 @@
 @implementation SGLyricsPiPBackground {
     NSOperationQueue *_queue;
     NSArray *_source, *_look;
+    CGSize _size;
+    SGLyricsBackgroundStyle _style;
+    NSArray *_identity;
     NSUInteger _sourceGeneration, _renderGeneration;
 }
 
@@ -32,6 +35,15 @@ static BOOL currentSource(NSString *track, NSArray *source) {
 }
 
 - (void)refreshForTrack:(NSString *)track {
+    CGSize size = SGLyricsPiPReadStyle().raster;
+    SGLyricsBackgroundStyle style = SGLyricsPiPReadBackground();
+    [self refreshForTrack:track size:size background:style identity:@[SGLyricsBackgroundIdentity(style), [NSValue valueWithCGSize:size]]];
+}
+
+- (void)refreshForTrack:(NSString *)track size:(CGSize)size background:(SGLyricsBackgroundStyle)style identity:(NSArray *)identity {
+    _size = size;
+    _style = style;
+    _identity = identity;
     SGShownTrack *shown = SGShownTrackNow();
     NSArray *source = sourceFor(track, shown);
     if (![_source isEqual:source]) {
@@ -59,15 +71,12 @@ static BOOL currentSource(NSString *track, NSArray *source) {
                 if (!cover.CGImage) return; // keep the shared fallback; no per-tick failed-image retry
                 self->_cover = cover;
                 self->_look = nil;
-                [self refreshForTrack:track];
+                [self refreshForTrack:track size:self->_size background:self->_style identity:self->_identity];
             });
         }
     }
-    SGLyricsBackgroundStyle style = SGLyricsBackgroundRead(SGKeyLyricsPiPBackground);
-    CGSize size = SGLyricsPiPReadStyle().raster;
-    NSArray *look = @[source, SGLyricsBackgroundIdentity(style), [NSValue valueWithCGSize:size]];
-    if ([_look isEqual:look]) return;
-    _look = look;
+    if ([_look isEqual:identity]) return; // a new source or late cover already cleared _look
+    _look = identity;
     _image = nil;
     NSUInteger generation = ++_renderGeneration;
     [_queue cancelAllOperations];

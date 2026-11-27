@@ -12,8 +12,23 @@ static Class *countedClassList(unsigned int *count) {
     return objc_copyClassList(count);
 }
 #define objc_copyClassList countedClassList
+static dispatch_block_t retry;
+#define dispatch_after(deadline, queue, block) (retry = [block copy])
 #import "Settings/SGPageStyle.m"
 #undef objc_copyClassList
+#undef dispatch_after
+#import "audit.inc"
+
+@interface TransitionPresenter : UIViewController
+@property BOOL transition;
+@property UIViewController *presented;
+@end
+@implementation TransitionPresenter
+- (BOOL)isBeingPresented { return self.transition; }
+- (void)presentViewController:(UIViewController *)controller animated:(BOOL)animated completion:(dispatch_block_t)done {
+    self.presented = controller;
+}
+@end
 
 // SGForEachView reads the window's subviews once per walk, so counting that counts the walks.
 @interface CountingWindow : UIWindow
@@ -69,6 +84,19 @@ static CGFloat inset(UITableView *table) {
 static void runChecks(void) {
     @autoreleasepool {
         CountingWindow *window = [[CountingWindow alloc] initWithFrame:CGRectMake(0, 0, 400, 800)];
+        for (NSString *category in @[UIContentSizeCategoryLarge, UIContentSizeCategoryAccessibilityExtraLarge]) {
+            UITraitCollection *traits = [UITraitCollection traitCollectionWithPreferredContentSizeCategory:category];
+            [traits performAsCurrentTraitCollection:^{
+                UILabel *body = label(@"Notes", UIFontTextStyleBody, UIFontWeightRegular, UIColor.whiteColor);
+                CGFloat expected = [UIFont preferredFontForTextStyle:UIFontTextStyleBody compatibleWithTraitCollection:traits].pointSize;
+                HARNESS_CHECK(body.font.pointSize == expected);
+            }];
+        }
+        UIView *a = [UIView new], *b = [UIView new], *c = [UIView new];
+        a.frame = c.frame = CGRectMake(50, 0, 20, 20);
+        NSMutableArray *stacked = [@[a, b, c] mutableCopy];
+        sortButtons(stacked);
+        HARNESS_CHECK(([stacked isEqual:@[b, a, c]]));
         // Spotify's tree under the bars: thousands of views that a walk has to pass.
         UIView *content = [[UIView alloc] initWithFrame:window.bounds];
         [window addSubview:content];
@@ -87,6 +115,10 @@ static void runChecks(void) {
         barClass(kNowPlaying);
 
         UIView *tabBar = addBar(bars, kTabBar, CGRectMake(0, 740, 400, 60));
+        walks = 0;
+        HARNESS_CHECK(SGHasClass(window, @"CountingWindow") && !walks);
+        HARNESS_CHECK(SGHasClass(window, @"TabBarView"));
+        HARNESS_CHECK(!SGHasClass(window, @"NeverInThisTree") && !SGHasClass(nil, @"UIView"));
         walks = 0;
         EXPECT_INSET(table, 60, "first layout");
         EXPECT_WALKS(1, "first layout");
@@ -115,6 +147,14 @@ static void runChecks(void) {
         EXPECT_WALKS(1, "a bar attached mid-page");
         EXPECT_INSET(table, 160, "mid-page bar again");
         EXPECT_WALKS(0, "layouts after the attach");
+
+        ReportLayout *report = [ReportLayout new];
+        report.tableView.frame = table.frame;
+        [window addSubview:report.tableView];
+        [report viewDidLayoutSubviews];
+        HARNESS_CHECK(report.tableView.contentInset.bottom == 160);
+        [report.tableView removeFromSuperview];
+        walks = 0;
 
         // A table of a new page finds both.
         NSUInteger scansBeforeNextPage = classScans;
@@ -183,8 +223,24 @@ static void runChecks(void) {
         UITableView *loose = [[UITableView alloc] initWithFrame:CGRectMake(0, 0, 400, 800)];
         EXPECT_INSET(loose, 0, "no window");
     }
-    fprintf(stderr, "[settings-bars] ok\n");
-    exit(0);
+    TransitionPresenter *top = (id)SGTopController();
+    SGPresentInformation(top, @"Information", @"Details");
+    HARNESS_CHECK(top.presented.overrideUserInterfaceStyle == UIUserInterfaceStyleDark);
+    top.presented = nil;
+    UIView *anchor = [UIView new];
+    [top.view addSubview:anchor];
+    top.transition = YES;
+    SGPresentPopover([UIViewController new], anchor);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        HARNESS_CHECK(retry != nil && !top.presented);
+        [anchor removeFromSuperview];
+        top.transition = NO;
+        retry();
+        retry = nil;
+        HARNESS_CHECK(!top.presented);
+        fprintf(stderr, "[settings-bars] ok\n");
+        exit(0);
+    });
 }
 
 @interface CheckApp : UIResponder <UIApplicationDelegate>
@@ -197,23 +253,23 @@ static void runChecks(void) {
 @implementation SGRHarnessScene
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-    self.window.rootViewController = [UIViewController new];
+    self.window.rootViewController = [TransitionPresenter new];
     [self.window makeKeyAndVisible];
 }
 - (void)sceneDidBecomeActive:(UIScene *)scene {
+    static BOOL started;
+    if (started) return;
+    started = YES;
     dispatch_async(dispatch_get_main_queue(), ^{ runChecks(); });
 }
 @end
 
 @implementation CheckApp
-- (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        HARNESS_FAIL(@"timed out");
-    });
-    return YES;
-}
 @end
 
 int main(int argc, char **argv) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        HARNESS_FAIL(@"timed out waiting for scene activation or inset checks");
+    });
     @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(CheckApp.class)); }
 }

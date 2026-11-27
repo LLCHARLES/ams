@@ -22,6 +22,7 @@
 #import "PlayerTrace.h"
 #import "NativeErrorLog.h"
 #import "BuildIdentity.h"
+#import "TargetProfile.h"
 #import "ProcessScope.h"
 #if SAP_JAILBREAK
 #import "JailbreakSupport.h"
@@ -153,7 +154,7 @@ static NSDictionary *SAPSourceReport(void) {
     NSArray *ports = [AVAudioSession.sharedInstance.currentRoute.outputs valueForKey:@"portName"];
     NSString *route = [ports componentsJoinedByString:@", "];
     NSDictionary *report = @{
-        @"probe_version": @91,@"pixie_build":@"9.1.90-v1.4-offline-manager33-track-cache-export-build055",@"audio_export":SAPTrackExportReport(),@"pixie_revision":@SAP_BUILD_REVISION,@"retrine_source_commit":@SAP_RETRINE_SOURCE_COMMIT,
+        @"probe_version": @91,@"pixie_build":@SAP_SPOTIFY_VERSION "-v1.4-offline-manager33-track-cache-export-build055",@"audio_export":SAPTrackExportReport(),@"pixie_revision":@SAP_BUILD_REVISION,@"retrine_source_commit":@SAP_RETRINE_SOURCE_COMMIT,
         @"diagnostics_enabled":@(SAPDiagnosticsEnabled()), @"backend_ready": @(s.backendReady), @"pcm_confirmed": @(s.pcmConfirmed),
         @"au_set_calls": @(s.setPropertyCalls), @"au_callback_attempts": @(s.callbackAttempts),
         @"au_last_scope": @(s.lastCallbackScope), @"au_last_type": fourcc(s.lastComponentType),

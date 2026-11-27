@@ -78,7 +78,7 @@ subprocess.run(compiler + flags + linked + libraries + ["-o", binary], check=Tru
 PY
 }
 # The chip-record and owner scenarios inspect the driver's floating-unit snapshots.
-compile -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER="${SG_DRIVER:-1}" \
+compile -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER="${SG_DRIVER:-1}" -DSGR_FLUID_FRAME_PROBE -DSG_MEDIA_CLOCK=SGHarnessMediaTime \
     -I"$SRC" -I"$SRC/Redesigned/Player" -I"$SRC/Redesigned/Kit" -I"$SRC/Shared/Player" -I"$OUT/gen" -I"$(dirname "$0")" -isysroot "$SDK" \
     -include "$SRC/Core/SGLocalize.h" \
     -Wno-deprecated-declarations \
@@ -86,7 +86,7 @@ compile -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER="${S
     "$(dirname "$0")/stubs-automix.m" "$(dirname "$0")/automix-scenario.m" "$(dirname "$0")/share-check.m" "$(dirname "$0")/background-check.m" \
     "$(dirname "$0")/../sponsorblock/markers-check.m" "$SRC"/Shared/SponsorBlock/SponsorBlockMarkers.m \
     "$SRC"/Shared/SponsorBlock/SponsorBlockModel.m "$SRC"/Shared/SponsorBlock/SponsorBlockPrefs.m \
-    "$SRC"/Redesigned/Player/ShareCards.m "$SRC"/Redesigned/Lyrics/LyricCardPicker.m \
+    "$SRC"/Redesigned/Player/ShareCards.m "$SRC"/Core/SGImageContext.m "$SRC"/Redesigned/Lyrics/LyricCardPicker.m \
     "$SRC"/Redesigned/Player/PlayerQueue.m "$SRC"/Shared/AutoMix/AutoMixSettings.m "$SRC"/Shared/AutoMix/AutoMixPreview.m \
     "$OUT"/gen/*.m "$SRC"/Redesigned/Player/PlayerLyricFit.m "$SRC"/Redesigned/Player/PlayerProgress.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGGlass.m "$SRC"/Core/SGLocalize.m \
@@ -98,6 +98,7 @@ compile -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -DSG_DRIVER="${S
     "$SRC"/Shared/Player/AudioQualityRules.m "$SRC"/Redesigned/ContextMenu/FireControl.m \
     "$SRC"/Redesigned/Kit/SGRGlass.m "$SRC"/Settings/SGMarquee.m "$SRC"/Redesigned/Kit/SGRGlyph.m "$SRC"/Redesigned/Kit/SGRRestyle.m \
     "$SRC"/Redesigned/Kit/SGRedesign.m \
+    "$SRC"/Shared/LyricsSources/SGBoundedRequest.m \
     "$SRC"/Redesigned/Player/PlayerSettings.m "$SRC"/Redesigned/Player/PlayerVisualiser.m "$SRC"/Redesigned/Player/PlayerLyricStages.m "$SRC"/Redesigned/Player/SGRSpectrum.m "$SRC"/Redesigned/Player/PlayerVolume.m "$SRC"/Redesigned/Player/PlayerSpeedLabel.m "$SRC"/Redesigned/NowPlayingBar/NowPlayingBarSettings.m \
     $( [ -f "$SRC"/Redesigned/Player/PlayerBackdrop.m ] && echo "$SRC"/Redesigned/Player/PlayerBackdrop.m ) \
     "$SRC"/Settings/SGPage.m "$SRC"/Settings/SGPageStyle.m "$SRC"/Settings/SGModPage.m "$SRC"/Settings/SGGlowSwitch.m \

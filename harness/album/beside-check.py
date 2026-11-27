@@ -6,8 +6,8 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
-import threading
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -18,11 +18,9 @@ def run(*args, **kwargs):
 
 def scenario(device, bundle, args, reject=False, shots=None):
     process = subprocess.Popen(
-        ["xcrun", "simctl", "launch", "--console-pty", "--terminate-running-process",
+        [sys.executable, ROOT / "harness/sim-launch.py", "--live", "--timeout", "60", "--terminate-running-process",
          device, bundle, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace")
-    timer = threading.Timer(60, process.kill)
-    timer.start()
     verdict = None
     try:
         for line in process.stdout:
@@ -37,11 +35,8 @@ def scenario(device, bundle, args, reject=False, shots=None):
                 verdict = not reject
                 break
     finally:
-        timer.cancel()
-        process.kill()
+        process.terminate()
         process.wait()
-        # No terminate here: a passing app may already be gone (exit 3 on slow CI), and the next
-        # launch's --terminate-running-process and the device's shutdown stop a remaining one.
     if verdict is not True:
         raise RuntimeError("header scenario failed or produced no verdict: " + " ".join(args))
 

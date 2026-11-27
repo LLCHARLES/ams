@@ -499,7 +499,7 @@ void SGLyricsAIAskWithFormat(SGLyricsAI service, NSString *system, NSString *pro
             answer = SGGeminiReplyIn(root, status, error, count, format, &failure);
         } else {
             if (error) failure = SGL(@"settings.translation.openai.error.unreachable", @"The translation service could not be reached.");
-            else if (status == 401 || status == 403) failure = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it on the Lyrics page.");
+            else if (status == 401 || status == 403) failure = SGL(@"settings.translation.openai.error.keyinvalid", @"The translation service turned the key down. Check it in Lyrics › Translation & AI.");
             else if (status == 429 || (status >= 500 && status <= 599)) failure = SGL(@"settings.translation.openai.error.busy", @"The translation service is busy right now. Try again in a minute.");
             else if (status != 200) failure = [NSString stringWithFormat:SGL(@"settings.translation.ai.error.status", @"The AI service did not complete the request (%ld)."), (long)status];
             else answer = SGOpenAIReplyIn(root, count, format);

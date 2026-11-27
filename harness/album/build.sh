@@ -7,13 +7,13 @@ rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/AlbumHarness.app"
 
 # SGRAmoled.x: the redesign's AMOLED rule paints the page as the phone does (a low grey field shows black).
 for f in Shared/Fonts/Fonts.x Redesigned/Album/AlbumField.x Redesigned/Album/AlbumHeader.x Redesigned/Album/AlbumRows.x Redesigned/Album/AlbumSections.x \
-         Redesigned/Kit/SGRAmoled.x; do
+         Redesigned/Kit/SGRAmoled.x Redesigned/Kit/SGRHeaderAppearance.x; do
     name=$(basename "$f" .x)
     "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/$f" > "$OUT/gen/$name.m"
 done
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/Album" -I"$OUT/gen" -isysroot "$SDK" \
     -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" "$(dirname "$0")/stubs.m" \
@@ -28,7 +28,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     "$SRC"/Redesigned/Album/AlbumPlays.m "$SRC"/Redesigned/Album/AlbumPlaysText.m "$SRC"/Redesigned/Album/AlbumSpotifyCounts.m "$SRC"/Redesigned/Kit/SGRCoverViewer.m "$SRC"/Shared/ListeningStats/SGPlayLog.m \
     "$SRC"/Redesigned/Album/AlbumNotes.m "$SRC"/Shared/AnimatedArtwork/SGMotionClip.m "$SRC"/Shared/AdBlock/Protobuf.m \
     "$SRC"/Redesigned/Album/AlbumPlaysPlace.m "$SRC"/Redesigned/Kit/SGRRollingDigits.m "$SRC"/Redesigned/Kit/SGRRefinements.m \
-    "$SRC"/Redesigned/Kit/SGRCoverRead.m \
+    "$SRC"/Redesigned/Kit/SGRCoverRead.m "$SRC"/Redesigned/Kit/SGRHeaderClip.m -I"$SRC/Redesigned/Kit" \
     -framework UIKit -framework QuartzCore -framework Metal -framework CoreGraphics -framework CoreImage -framework Foundation -framework Symbols -framework CoreText -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Vision \
     "$SRC/Core/SGDataRoot.m" -o "$OUT/AlbumHarness.app/AlbumHarness"
 

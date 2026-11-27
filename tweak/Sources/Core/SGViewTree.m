@@ -1,5 +1,52 @@
 #import "SGViewTree.h"
 #import <objc/runtime.h>
+#import <mach-o/dyld.h>
+#import <os/lock.h>
+
+static NSString *fileprivateKey(const char *name) {
+    const char *marker = strstr(name, "P33_");
+    if (!marker) return nil;
+    const char *hash = marker + strlen("P33_");
+    if (strspn(hash, "0123456789abcdefABCDEF") < 32 || hash[32] < '0' || hash[32] > '9') return nil;
+    return [NSString stringWithFormat:@"%.*s%s", (int)(hash - name), name, hash + 32];
+}
+
+static BOOL inherits(Class cls, Class base) {
+    for (Class ancestor = cls; ancestor; ancestor = class_getSuperclass(ancestor))
+        if (ancestor == base) return YES;
+    return NO;
+}
+
+Class SGFileprivateViewClass(const char *exactName, Class base) {
+    Class cls = objc_lookUpClass(exactName);
+    if (cls) return inherits(cls, base) ? cls : Nil;
+    // All these Swift views live in Spotify's main executable. Do not realize the
+    // system's classes or rescan the image for each hook that needs the fallback.
+    static NSDictionary<NSString *, NSArray<NSString *> *> *index;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *names = [NSMutableDictionary dictionary];
+        unsigned count = 0;
+        const char **list = objc_copyClassNamesForImage(_dyld_get_image_name(0), &count);
+        for (unsigned i = 0; i < count; ++i) {
+            NSString *key = fileprivateKey(list[i]);
+            if (!key) continue;
+            if (!names[key]) names[key] = [NSMutableArray array];
+            [names[key] addObject:@(list[i])];
+        }
+        free(list);
+        index = names;
+    });
+    // Same-named classes can sit in other files; only one of the expected kind may stand in.
+    Class found = Nil;
+    for (NSString *name in index[fileprivateKey(exactName)]) {
+        Class candidate = objc_lookUpClass(name.UTF8String);
+        if (!inherits(candidate, base)) continue;
+        if (found) return Nil;
+        found = candidate;
+    }
+    return found;
+}
 
 void SGForEachView(UIView *view, void (^fn)(UIView *)) {
     fn(view);
@@ -58,21 +105,21 @@ BOOL SGClassNamed(Class cls, NSString *marker) {
     if (!cls || !marker) return NO;
     // Markers are literals, so the outer level goes by the pointer and never hashes the string.
     static NSMapTable<NSString *, NSMutableDictionary *> *cache;
+    static os_unfair_lock lock = OS_UNFAIR_LOCK_INIT;
+    os_unfair_lock_lock(&lock);
     if (!cache) cache = [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsOpaqueMemory | NSPointerFunctionsOpaquePersonality
                                               valueOptions:NSPointerFunctionsStrongMemory];
     NSMutableDictionary *answers = [cache objectForKey:marker];
     if (!answers) [cache setObject:(answers = [NSMutableDictionary dictionary]) forKey:marker];
     NSNumber *answer = answers[(id<NSCopying>)cls];
     if (!answer) answers[(id<NSCopying>)cls] = answer = @([NSStringFromClass(cls) containsString:marker]);
-    return answer.boolValue;
+    BOOL matches = answer.boolValue;
+    os_unfair_lock_unlock(&lock);
+    return matches;
 }
 
 BOOL SGHasClass(UIView *root, NSString *marker) {
-    __block BOOL found = NO;
-    SGForEachView(root, ^(UIView *v) {
-        if (!found && SGClassNamed(v.class, marker)) found = YES;
-    });
-    return found;
+    return firstMatch(root, ^BOOL(UIView *v) { return SGClassNamed(v.class, marker); }) != nil;
 }
 
 @interface SGWeakBox : NSObject

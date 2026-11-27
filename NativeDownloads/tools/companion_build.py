@@ -31,7 +31,7 @@ def build_companion(library, workdir, target):
     command = ["xcrun", "clang", "-dynamiclib", "-arch", "arm64", "-target", "arm64-apple-ios15.0",
                "-isysroot", sdk, "-fobjc-arc", "-std=gnu11", "-O2", "-fvisibility=hidden",
                "-Wall", "-Wextra", "-Wno-unused-parameter", "-Wno-nullability-completeness",
-               "-Werror=implicit-function-declaration", "-DSAP_RESEARCH_DUMP=0", "-DSAP_ENABLE_WAV_CAPTURE=0"]
+               "-Werror=implicit-function-declaration", "-DSAP_ENABLE_WAV_CAPTURE=0"]
     command += ["-I"+str(p) for p in include_directories(include)]
     command += [str(p) for p in sources()]
     command += ["-lm", "-lsqlite3", "-lz", *swift["link_args"]]

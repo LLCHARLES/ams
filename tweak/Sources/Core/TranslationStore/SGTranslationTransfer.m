@@ -250,36 +250,39 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
         NSUnderlyingErrorKey:failure ?: SGTranslationStorageError(@"Could not write export.")}];
     return ok ? files : nil;
 }
-+ (BOOL)readURL:(NSURL *)url consume:(BOOL (^)(NSString *, NSData *))consume error:(NSError **)error {
-    NSNumber *length = nil;
-    if (![url getResourceValue:&length forKey:NSURLFileSizeKey error:error] || length.unsignedLongLongValue > SGTranslationTransferBytes) return bad(error);
-    NSData *data = [NSData dataWithContentsOfURL:url options:NSDataReadingMappedIfSafe error:error];
-    if (!data) return NO;
-    if ([url.pathExtension.lowercaseString isEqual:@"json"]) {
-        if (data.length > SGTranslationRecordBytes) return bad(error);
-        return consume(@"record.json", data);
+static BOOL readAt(int fd, NSUInteger offset, void *bytes, NSUInteger length) {
+    for (NSUInteger at = 0; at < length;) {
+        ssize_t count = pread(fd, (uint8_t *)bytes + at, length - at, (off_t)(offset + at));
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) return NO;
+        at += count;
     }
-    const uint8_t *b = data.bytes;
-    NSUInteger n = data.length;
+    return YES;
+}
+
+static BOOL readArchive(int fd, NSUInteger n, BOOL (^consume)(NSString *, NSData *), NSError **error) {
     // Our portable subset has no archive comments, extra fields, descriptors or prepended data.
-    if (n < 22 || r32(b + n - 22) != 0x06054b50) return bad(error);
-    NSUInteger end = n - 22, start = r32(b + end + 16), cursor = start;
-    NSUInteger count = r16(b + end + 10);
-    if (!count || count > SGTranslationTransferEntries || r16(b + end + 4) || r16(b + end + 6) ||
-        r16(b + end + 8) != count || r16(b + end + 20) || !fits(start, r32(b + end + 12), end) || start + r32(b + end + 12) != end) return bad(error);
+    uint8_t footer[22];
+    if (n < sizeof(footer) || !readAt(fd, n - sizeof(footer), footer, sizeof(footer)) || r32(footer) != 0x06054b50) return bad(error);
+    NSUInteger end = n - sizeof(footer), start = r32(footer + 16), cursor = start;
+    NSUInteger count = r16(footer + 10);
+    if (!count || count > SGTranslationTransferEntries || r16(footer + 4) || r16(footer + 6) ||
+        r16(footer + 8) != count || r16(footer + 20) || !fits(start, r32(footer + 12), end) || start + r32(footer + 12) != end) return bad(error);
     NSMutableArray *entries = [NSMutableArray array];
     NSMutableSet *names = [NSMutableSet set];
     NSUInteger expanded = 0;
     for (NSUInteger i = 0; i < count; i++) {
-        if (!fits(cursor, 46, end) || r32(b + cursor) != 0x02014b50) return bad(error);
-        uint16_t flags = r16(b + cursor + 8), method = r16(b + cursor + 10), nameLength = r16(b + cursor + 28);
-        uint32_t compressed = r32(b + cursor + 20), plain = r32(b + cursor + 24), local = r32(b + cursor + 42), crc = r32(b + cursor + 16);
-        uint32_t mode = (r32(b + cursor + 38) >> 16) & 0170000;
-        if (r16(b + cursor + 6) > 20 || (flags & ~0x800) || (method != 0 && method != 8) ||
-            r16(b + cursor + 30) || r16(b + cursor + 32) || r16(b + cursor + 34) ||
-            (mode && mode != 0100000) || (r32(b + cursor + 38) & 0x10) ||
-            plain > SGTranslationRecordBytes || compressed > SGTranslationRecordBytes || !fits(cursor, 46 + nameLength, end)) return bad(error);
-        NSString *name = [[NSString alloc] initWithBytes:b + cursor + 46 length:nameLength encoding:NSUTF8StringEncoding];
+        uint8_t central[46], header[30], filename[255], localName[sizeof(filename)];
+        if (!fits(cursor, sizeof(central), end) || !readAt(fd, cursor, central, sizeof(central)) || r32(central) != 0x02014b50) return bad(error);
+        uint16_t flags = r16(central + 8), method = r16(central + 10), nameLength = r16(central + 28);
+        uint32_t compressed = r32(central + 20), plain = r32(central + 24), local = r32(central + 42), crc = r32(central + 16);
+        uint32_t mode = (r32(central + 38) >> 16) & 0170000;
+        if (r16(central + 6) > 20 || (flags & ~0x800) || (method != 0 && method != 8) ||
+            r16(central + 30) || r16(central + 32) || r16(central + 34) ||
+            (mode && mode != 0100000) || (r32(central + 38) & 0x10) ||
+            plain > SGTranslationRecordBytes || compressed > SGTranslationRecordBytes || nameLength > sizeof(filename) ||
+            !fits(cursor, sizeof(central) + nameLength, end) || !readAt(fd, cursor + sizeof(central), filename, nameLength)) return bad(error);
+        NSString *name = [[NSString alloc] initWithBytes:filename length:nameLength encoding:NSUTF8StringEncoding];
         if (!SGTranslationRecordKeyValid(name) || [name containsString:@":"] || [names containsObject:name]) return bad(error);
         [names addObject:name];
         if (plain > SGTranslationTransferBytes - expanded) {
@@ -287,15 +290,15 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
             return NO;
         }
         expanded += plain;
-        if (!fits(local, 30, start) || r32(b + local) != 0x04034b50 || r16(b + local + 4) > 20 ||
-            r16(b + local + 6) != flags || r16(b + local + 8) != method || r32(b + local + 14) != crc ||
-            r32(b + local + 18) != compressed || r32(b + local + 22) != plain ||
-            r16(b + local + 26) != nameLength || r16(b + local + 28) || !fits(local + 30, nameLength, start) ||
-            memcmp(b + local + 30, b + cursor + 46, nameLength)) return bad(error);
-        NSUInteger body = local + 30 + nameLength;
+        if (!fits(local, sizeof(header) + nameLength, start) || !readAt(fd, local, header, sizeof(header)) ||
+            r32(header) != 0x04034b50 || r16(header + 4) > 20 || r16(header + 6) != flags ||
+            r16(header + 8) != method || r32(header + 14) != crc || r32(header + 18) != compressed ||
+            r32(header + 22) != plain || r16(header + 26) != nameLength || r16(header + 28) ||
+            !readAt(fd, local + sizeof(header), localName, nameLength) || memcmp(localName, filename, nameLength)) return bad(error);
+        NSUInteger body = local + sizeof(header) + nameLength;
         if (!fits(body, compressed, start)) return bad(error);
         [entries addObject:@{@"name":name, @"local":@(local), @"offset":@(body), @"compressed":@(compressed), @"plain":@(plain), @"method":@(method), @"crc":@(crc)}];
-        cursor += 46 + nameLength;
+        cursor += sizeof(central) + nameLength;
     }
     if (cursor != end) return bad(error);
     NSArray *ordered = [entries sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *c) { return [a[@"local"] compare:c[@"local"]]; }];
@@ -313,13 +316,13 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
         NSMutableData *outputData = [NSMutableData dataWithLength:plain];
         BOOL ok = YES;
         if (![entry[@"method"] unsignedIntegerValue]) {
-            ok = compressed == plain;
-            if (ok) memcpy(outputData.mutableBytes, b + offset, plain);
+            ok = compressed == plain && readAt(fd, offset, outputData.mutableBytes, plain);
         } else {
+            NSMutableData *input = [NSMutableData dataWithLength:compressed];
             z_stream stream = {0};
-            stream.next_in = (Bytef *)(b + offset); stream.avail_in = (uInt)compressed;
+            stream.next_in = input.mutableBytes; stream.avail_in = (uInt)compressed;
             stream.next_out = outputData.mutableBytes; stream.avail_out = (uInt)plain;
-            if (inflateInit2(&stream, -MAX_WBITS) != Z_OK) ok = NO;
+            if (!readAt(fd, offset, stream.next_in, compressed) || inflateInit2(&stream, -MAX_WBITS) != Z_OK) ok = NO;
             else {
                 int result = inflate(&stream, Z_FINISH);
                 ok = result == Z_STREAM_END && stream.total_in == compressed && stream.total_out == plain;
@@ -334,6 +337,27 @@ static BOOL writeZIP(NSArray *records, NSURL *url, SGTranslationFiles *store, NS
       if (!accepted) { if (entryError && error) *error = entryError; return NO; }
     }
     return YES;
+}
++ (BOOL)readURL:(NSURL *)url consume:(BOOL (^)(NSString *, NSData *))consume error:(NSError **)error {
+    BOOL record = [url.pathExtension.lowercaseString isEqual:@"json"];
+    NSUInteger limit = record ? SGTranslationRecordBytes : SGTranslationTransferBytes;
+    if (!url.isFileURL) return bad(error);
+    int fd = open(url.fileSystemRepresentation, O_RDONLY | O_NONBLOCK | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return bad(error);
+    struct stat st;
+    BOOL ok;
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size <= 0 || (uint64_t)st.st_size > limit) {
+        ok = bad(error);
+    } else {
+        NSUInteger size = (NSUInteger)st.st_size;
+        if (record) {
+            NSMutableData *data = [NSMutableData dataWithLength:size];
+            ok = readAt(fd, 0, data.mutableBytes, size) ? consume(@"record.json", data) : bad(error);
+        } else ok = readArchive(fd, size, consume, error);
+        if (ok && (fstat(fd, &st) != 0 || st.st_size != (off_t)size)) ok = bad(error);
+    }
+    close(fd);
+    return ok;
 }
 + (NSDictionary *)stageURL:(NSURL *)url store:(SGTranslationFiles *)store error:(NSError **)error {
     if (![store prepare:error]) return nil;

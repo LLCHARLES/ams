@@ -102,7 +102,8 @@ static NSString *songArtists(SPTPlayerTrack *track, NSDictionary *metadata) {
     });
 }
 
-// The next track's clip, fetched into the store once, so a skip finds it there.
+// The next track's clip, fetched into the store once, so a skip finds it there. Paused, none is started (one under
+// way for the same track finishes); playing again looks once more (playerStateDidChange).
 - (void)fetchAhead {
     SPTPlayerState *state = SGPlayerState();
     SPTPlayerTrack *track = SGPlayerUpNextIn(state);
@@ -112,7 +113,7 @@ static NSString *songArtists(SPTPlayerTrack *track, NSDictionary *metadata) {
     [_aheadTicket cancel];
     _aheadTicket = nil;
     _ahead = nil;
-    if (!allowed) return;
+    if (!allowed || state.isPaused) return;
     _ahead = uri;
     NSDictionary *metadata = [track.metadata isKindOfClass:NSDictionary.class] ? track.metadata : nil;
     _aheadTicket = SGMotionRequestAlbumSongClip(uri, SGMotionCanvasIn(metadata), songArtists(track, metadata), metadata[@"album_title"], track.trackTitle, metadata[@"album_uri"], SGMotionPixels(),

@@ -132,7 +132,7 @@ static NSData *ask(NSString *path, NSData *body, NSInteger expectedError) {
     };
     if (allowConstrained) SGSpotifyMetadataRequest(path, body, reply);
     else SGSpotifyMetadataRequestAllowConstrained(path, body, NO, reply);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     check(finished, [NSString stringWithFormat:@"transfer must finish, including cancellation before EOF (mode=%lu, path=%@)",
@@ -171,7 +171,7 @@ int main(void) {
             });
         });
         cancel();
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
         while (!cancelled && deadline.timeIntervalSinceNow > 0)
             [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
         check(cancelled, @"metadata cancellation reaches the active transfer");

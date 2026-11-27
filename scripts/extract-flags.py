@@ -7,7 +7,7 @@ enumValueForId:values:defaultValue:. The keys are cstrings, the defaults are imm
 initializer (or in the small outlined helpers it calls), so a linear walk over the arm64 code with
 the leaf calls inlined recovers key, type and default for nearly every flag.
 
-    scripts/extract-flags.py ipa/com.spotify.client-9.1.78-Decrypted.ipa
+    scripts/extract-flags.py ipa/Spotify-9.2.0.ipa
 """
 import plistlib, re, struct, subprocess, sys, tempfile, zipfile
 from pathlib import Path

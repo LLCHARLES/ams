@@ -350,7 +350,10 @@ static UIColor *cardTint(NSUInteger index) {
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
-    _fill.frame = CGRectMake(0, 0, round(self.bounds.size.width * _progress * self.traitCollection.displayScale) / MAX(1, self.traitCollection.displayScale), self.bounds.size.height);
+    CGFloat filled = round(self.bounds.size.width * _progress * self.traitCollection.displayScale) / MAX(1, self.traitCollection.displayScale);
+    // From the bar's leading end: the right one, right to left.
+    BOOL rtl = self.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    _fill.frame = CGRectMake(rtl ? self.bounds.size.width - filled : 0, 0, filled, self.bounds.size.height);
 }
 @end
 
@@ -412,6 +415,7 @@ static UIColor *cardTint(NSUInteger index) {
 
 - (NSUInteger)count { return _cards.count; }
 - (BOOL)prefersStatusBarHidden { return YES; }
+- (BOOL)mirrored { return self.view.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft; }
 
 static UIButton *storyButton(NSString *symbol, NSString *label) {
     UIButtonConfiguration *look = [UIButtonConfiguration filledButtonConfiguration];
@@ -587,6 +591,8 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
     self.view.accessibilityElements = @[_title, _strip, card, _share, _close];
     if (!old) return;
     BOOL still = UIAccessibilityIsReduceMotionEnabled();
+    // The next card comes in from the trailing side: the left, right to left.
+    if (self.mirrored) direction = -direction;
     if (!still && direction) card.transform = CGAffineTransformMakeTranslation(direction * _host.bounds.size.width * 0.25, 0);
     card.alpha = 0;
     [card arrive:YES];
@@ -618,7 +624,10 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
 
 - (BOOL)accessibilityScroll:(UIAccessibilityScrollDirection)direction {
     if (direction != UIAccessibilityScrollDirectionLeft && direction != UIAccessibilityScrollDirectionRight) return NO;
-    [self step:direction == UIAccessibilityScrollDirectionLeft ? 1 : -1];
+    // Toward the next card, which lies to the left right to left, as for a tap.
+    BOOL next = direction == UIAccessibilityScrollDirectionLeft;
+    if (self.mirrored) next = !next;
+    [self step:next ? 1 : -1];
     UIAccessibilityPostNotification(UIAccessibilityPageScrolledNotification, _strip.accessibilityValue);
     return YES;
 }
@@ -641,8 +650,9 @@ static UIButton *storyButton(NSString *symbol, NSString *label) {
 }
 
 - (void)tapped:(UITapGestureRecognizer *)tap {
-    BOOL back = [tap locationInView:_host].x < _host.bounds.size.width / 3;
-    if (self.view.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft) back = !back;
+    // The leading third goes back: the left one, or the right one right to left.
+    CGFloat x = [tap locationInView:_host].x, third = _host.bounds.size.width / 3;
+    BOOL back = self.mirrored ? x > _host.bounds.size.width - third : x < third;
     [self step:back ? -1 : 1];
 }
 

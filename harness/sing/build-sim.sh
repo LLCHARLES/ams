@@ -8,16 +8,26 @@ set -e
 cd "$(dirname "$0")"
 SRC=../../tweak/Sources
 SING=$SRC/Shared/Sing
-OUT=build/sim
-rm -rf "$OUT"
+if [ -z "${OUT:-}" ]; then
+    OUT=build/sim
+    rm -rf build/sim
+fi
 mkdir -p "$OUT/gen" "$OUT/SingHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Player/SpeedPitch.x" > "$OUT/gen/SpeedPitch.m"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SING/Sing.x" > "$OUT/gen/Sing.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios18.0-simulator -fobjc-arc -g -O1 -isysroot "$SDK" -Wno-deprecated-declarations \
+ENGINE="$SING/SGSingEngine.m"
+CONTROL="$OUT/gen/Sing.m"
+EXTRA=
+if [ "$1" = battery ]; then
+    CONTROL=sim/battery.m
+    ENGINE=
+    EXTRA="-DSING_BATTERY -I$OUT/gen"
+fi
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios18.0-simulator -fobjc-arc -g -O1 -isysroot "$SDK" -Wno-deprecated-declarations \
     -I"$SRC" -I"$SING" -I"$SRC/Shared/Player" \
-    sim/main.m ../scene.m "$OUT/gen/SpeedPitch.m" "$OUT/gen/Sing.m" "$SRC/Shared/Player/SGTimePitch.m" \
-    "$SING/SGSingModel.m" "$SING/SGSingLoader.m" "$SING/SGSingSeparator.m" "$SING/SGSingEngine.m" "$SING/SGSingCommands.m" "$SRC/Shared/AudioEffects/SGDSPReverb.m" "$SRC/Core/SGFileHash.m" \
+    $EXTRA sim/main.m ../scene.m "$OUT/gen/SpeedPitch.m" "$CONTROL" "$SRC/Shared/Player/SGTimePitch.m" \
+    "$SING/SGSingModel.m" "$SING/SGSingLoader.m" "$SING/SGSingSeparator.m" $ENGINE "$SING/SGSingCommands.m" "$SRC/Shared/AudioEffects/SGDSPReverb.m" "$SRC/Core/SGFileHash.m" \
     "$SRC/Core/SGRebind.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGFlagForce.m" "$SRC/Core/SGLocalize.m" \
     -framework UIKit -framework QuartzCore -framework MediaPlayer -framework AudioToolbox -framework AVFoundation -framework Accelerate -framework CoreML -framework Foundation \
     "$SRC/Core/SGDataRoot.m" -o "$OUT/SingHarness.app/SingHarness"

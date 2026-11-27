@@ -211,6 +211,12 @@ static NSArray<UIImageView *> *facesShown(UIView *info, NSArray<UIImage *> *pale
 
 // What the spec says of a line showing `expected` (in order) before `names`; nothing for none.
 static void facesExpect(NSString *what, UIView *info, NSArray<UIImage *> *palette, NSArray<UIImage *> *expected, NSString *names) {
+    if (!HarnessRunUntil(^BOOL {
+        BOOL named = NO;
+        for (UILabel *label in info.subviews)
+            if ([label isKindOfClass:UILabel.class] && [label.text isEqual:names]) named = YES;
+        return named && [facesShown(info, palette) count] == expected.count;
+    })) HARNESS_FAIL(@"%@: waiting for %@ and %lu faces", what, names, (unsigned long)expected.count);
     [info layoutIfNeeded];
     UILabel *name = facesName(info, names);
     NSArray<UIImageView *> *shown = facesShown(info, palette);
@@ -260,6 +266,18 @@ static void facesExpect(NSString *what, UIView *info, NSArray<UIImage *> *palett
 // drawn; a little further in, the next one's colour; just inside the one before, its own.
 static void facesExpectRing(NSString *what, UIView *info, NSArray<UIImage *> *palette, NSArray<UIColor *> *colours) {
     NSArray<UIImageView *> *shown = facesShown(info, palette);
+    // sgr_setFaces: fades the pile and animates layout of the creator line.
+    // Its centres can already have the right colours while a moving face or
+    // label still covers the narrow gap measured in final layout coordinates.
+    [info layoutIfNeeded];
+    [CATransaction flush];
+    if (!HarnessRunUntil(^BOOL {
+        for (UIView *child in info.subviews)
+            if (child.layer.animationKeys.count) return NO;
+        for (UIImageView *face in shown)
+            if (face.layer.animationKeys.count || face.layer.mask.animationKeys.count) return NO;
+        return YES;
+    })) HARNESS_FAIL(@"%@: creator-line layout or face fade did not finish", what);
     UIImage *drawn = checkRender(info);
     CGFloat direction = facesRTL(info) ? -1 : 1;
     for (NSUInteger i = 1; i < shown.count; i++) {
@@ -308,12 +326,12 @@ static void facesRun(UIView *root, UIControl *row) {
             sources = facesRow(row, 1, @"Ada", NO, NO, decoy, YES);
             fill(1);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"one artist", info, palette, first(1), @"Ada");
             sources = facesRow(row, 2, @"Ada, Ben", NO, NO, decoy, YES);
             fill(2);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"two artists", info, palette, first(2), @"Ada, Ben");
             facesExpectRing(@"two artists", info, palette, colours);
             UILabel *name = facesName(info, @"Ada, Ben");
@@ -327,87 +345,87 @@ static void facesRun(UIView *root, UIControl *row) {
             [info performSelector:NSSelectorFromString(@"sgr_creatorTapped")];
 #pragma clang diagnostic pop
             if (fired != 1) HARNESS_FAIL(@"the artist line fired Spotify's row %lu times", (unsigned long)fired);
-            NSLog(@"[harness] SHOT album-faces-two-on");
-        }, @1.5, ^{
+            checkShot(@"album-faces-two-on");
+        }, ^{
             [defaults setBool:NO forKey:kFacesKey];
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"two artists, Artist picture off", info, palette, @[], @"Ada, Ben");
             UILabel *name = facesName(info, @"Ada, Ben");
             if (!(name.accessibilityTraits & UIAccessibilityTraitButton) || [info hitTest:CGPointMake(CGRectGetMidX(name.frame), CGRectGetMidY(name.frame)) withEvent:nil] != name)
                 HARNESS_FAIL(@"with Artist picture off the artist line lost its button");
-            NSLog(@"[harness] SHOT album-faces-two-off");
-        }, @1.5, ^{
+            checkShot(@"album-faces-two-off");
+        }, ^{
             [defaults removeObjectForKey:kFacesKey];
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"two artists, Artist picture on again", info, palette, first(2), @"Ada, Ben");
             sources = facesRow(row, 3, @"Ada, Ben, Cy", NO, NO, decoy, YES);
             fill(3);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"three artists", info, palette, first(3), @"Ada, Ben, Cy");
             // The rows the phone showed one face for: initials in the avatars ahead of the names, and the last picture
             // wider than the avatar that clips it.
             sources = facesDeviceRow(row, @[@"D", @"L", @"E"], kFacesTrio);
             fill(3);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"the phone's Trio row", info, palette, first(3), kFacesTrio);
             facesExpectRing(@"the phone's Trio row", info, palette, colours);
-            NSLog(@"[harness] SHOT album-faces-trio");
-        }, @1.5, ^{
+            checkShot(@"album-faces-trio");
+        }, ^{
             // Dolly's picture hidden while her initial still shows: the initial is still not the name, and the two
             // pictures left are the faces. Then the same with the square that clips it hidden instead.
             sources[0].hidden = YES;
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"the phone's Trio row, Dolly's picture hidden", info, palette, @[pictures[1], pictures[2]], kFacesTrio);
             sources[0].hidden = NO;
             sources[0].superview.hidden = YES;
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"the phone's Trio row, Dolly's clip hidden", info, palette, @[pictures[1], pictures[2]], kFacesTrio);
             sources = facesDeviceRow(row, @[@"T", @"L"], @"Tony Bennett • Lady Gaga");
             fill(2);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"the phone's Love for Sale row", info, palette, first(2), @"Tony Bennett • Lady Gaga");
             sources = facesDeviceRow(row, @[@"A"], @"Adele");
             fill(1);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"the phone's 21 row, one artist", info, palette, first(1), @"Adele");
             sources = facesRow(row, 4, @"Ada, Ben, Cy, Dee", NO, NO, decoy, YES);
             fill(4);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"four artists", info, palette, first(3), @"Ada, Ben, Cy, Dee");
             facesExpectRing(@"four artists", info, palette, colours);
             sources = facesRow(row, 2, @"Ada and Ben", YES, YES, decoy, YES);
             fill(2);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"two shown, two hidden, a badge after the names", info, palette, first(2), @"Ada and Ben");
             // Pictures that land after the header's pass, together: the faces follow without another pass.
             sources = facesRow(row, 2, @"Eve, Fay", NO, NO, decoy, YES);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"two artists before their pictures", info, palette, @[], @"Eve, Fay");
             fill(2);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"two artists, pictures landed late", info, palette, first(2), @"Eve, Fay");
             for (UIImageView *source in sources) source.image = nil;
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"the same line's pictures emptied", info, palette, first(2), @"Eve, Fay");
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"the same line's pictures emptied, laid out again", info, palette, first(2), @"Eve, Fay");
             // The header reused for another album: its line, the same view, says someone else.
             sources = facesRow(row, 1, @"Gus", NO, NO, decoy, YES);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"another album before its picture", info, palette, @[], @"Gus");
             fill(1);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"another album", info, palette, first(1), @"Gus");
             // Pictures landing in views hidden since the header's pass, one itself and one under a hidden view.
             sources = facesRow(row, 3, @"Hal, Ida, Jo", NO, NO, decoy, YES);
@@ -417,32 +435,32 @@ static void facesRun(UIView *root, UIControl *row) {
             [under addSubview:sources[2]];
             hiddenUnder = under;
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"three artists before their pictures", info, palette, @[], @"Hal, Ida, Jo");
             sources[1].hidden = YES;
             hiddenUnder.hidden = YES;
             fill(3);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"hidden before their pictures landed", info, palette, first(1), @"Hal, Ida, Jo");
             // The one shown emptied: it waits for its picture, and the face stays.
             sources[0].image = nil;
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"the one shown emptied, the others hidden", info, palette, first(1), @"Hal, Ida, Jo");
             // Hidden too, then given its picture: no view shown is waiting, so nothing is kept.
             sources[0].hidden = YES;
             sources[0].image = pictures[0];
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"every face hidden", info, palette, @[], @"Hal, Ida, Jo");
             // The name only in the row's accessibility label, a square badge where the name would be drawn.
             sources = facesRow(row, 2, @"Kim", NO, YES, decoy, NO);
             fill(2);
             facesPass(row, root);
-        }, @0.1, ^{
+        }, ^{
             facesExpect(@"no name label, a square badge after the faces", info, palette, @[], @"Kim");
             sources = facesRow(row, 3, @"Lu, Mo, Ny", NO, NO, decoy, YES);
             fill(3);
             facesPass(row, root);
-        }, @0.6, ^{
+        }, ^{
             facesExpect(@"three artists again", info, palette, first(3), @"Lu, Mo, Ny");
             // Laid out again and again with nothing changed: the cut rings are the ones already made.
             NSArray<UIImageView *> *shown = facesShown(info, palette);

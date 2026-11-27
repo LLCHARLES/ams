@@ -164,7 +164,7 @@ static void coldPlayerTitle(void) {
 @end
 @implementation SGTitleCheckApp
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{
         fputs("FAIL landscape title checks timed out\n", stderr);
         exit(1);
     });

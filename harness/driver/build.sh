@@ -9,13 +9,13 @@ mkdir -p "$OUT/gen" "$OUT/DriverHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Diagnostics/Diagnostics.x" > "$OUT/gen/Diagnostics.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.4-simulator -fobjc-arc -g -O0 -DSG_DRIVER=1 -DSG_TREE_PORT=${PORT:-8095} \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.4-simulator -fobjc-arc -g -O0 -DSG_DRIVER=1 -DSG_TREE_PORT=${PORT:-8095} \
     -I"$SRC" -I"$SRC/Diagnostics" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/stubs.m" "$(dirname "$0")/../scene.m" "$OUT"/gen/*.m "$SRC"/Diagnostics/Driver.m \
     "$SRC"/Shared/LyricsPiP/LyricsPiPFrame.m "$SRC"/Shared/LyricsPiP/LyricsPiPStyle.m \
     "$SRC"/Shared/LyricsBackground/LyricsBackground.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGPrefs.m "$SRC"/Diagnostics/SGDriverAuth.m \
-    -framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreText -framework ImageIO -framework Foundation -framework Accelerate \
+    -framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreText -framework ImageIO -framework Foundation -framework Accelerate -framework Security \
     -o "$OUT/DriverHarness.app/DriverHarness"
 
 cat > "$OUT/DriverHarness.app/Info.plist" <<'PLIST'

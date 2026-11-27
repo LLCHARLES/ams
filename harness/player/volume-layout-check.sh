@@ -19,9 +19,16 @@ source = (Path(sys.argv[1]) / "PlayerVolume.m").read_text()
 constants = source[source.index("static const CGFloat kRowHeight"):source.index("// The slider is drawn as the progress bar")]
 placement = source[source.index("static char kVolumeKey"):]
 (Path(sys.argv[2]) / "volume-placement-production.inc").write_text(constants + "\n" + placement)
+source = (Path(sys.argv[1]) / "PlayerArtwork.x").read_text()
+top = source.index("static const CGFloat kCoverTopUnderSafeArea")
+lift = source[source.index("// The header rows taking touches in a player"):source.index("static void layOutCoversIn(")]
+(Path(sys.argv[2]) / "volume-cover-production.inc").write_text(source[top:source.index("\n", top)] + "\n" + lift)
 PY
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$OUT" \
     "$HERE/volume-layout-check.m" -framework UIKit -framework Foundation -framework CoreGraphics -o "$OUT/volume-layout-check"
 "$OUT/volume-layout-check"
+# Issue #71: the Volume switch is read once per launch, so the cover is measured with it on, then with it off.
+on=$("$OUT/volume-layout-check" cover)
+HARNESS_VOLUME=0 "$OUT/volume-layout-check" cover $on

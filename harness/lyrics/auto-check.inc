@@ -1,4 +1,6 @@
 #import "Redesigned/Lyrics/TranslationStatusView.h"
+#import "scheduled-work.h"
+#import "../harness-wait.h"
 // Included by translation-check.m: real view, real automatic scheduler and provider chain, offline services.
 extern NSString *SGHarnessPlayingTrack;
 extern void (^SGHarnessOpenAI)(NSArray<SGKaraokeLine *> *, SGHarnessDone);
@@ -8,11 +10,16 @@ static UIView *autoPlayerHost, *autoPageHost;
 static NSUInteger googleCalls, bingCalls;
 static void autoTick(SGRKaraokeView *view);
 static void pump(void) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.55];
-    while (until.timeIntervalSinceNow > 0) {
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-        autoTick(autoPlayer); autoTick(autoPage);
+    autoTick(autoPlayer); autoTick(autoPage);
+    // A display tick publishes the asynchronously measured rows. Running the
+    // debounce before that tick would test a hidden page instead of this song.
+    for (SGRKaraokeView *view in @[autoPlayer, autoPage]) {
+        if (!view.window) continue;
+        HARNESS_AWAIT(([view valueForKey:@"tops"] != nil && [[view valueForKey:@"languageReady"] boolValue]));
+        autoTick(view);
+        HARNESS_AWAIT(!view.hidden && view.alpha >= 0.01);
     }
+    HarnessDrainLyricsWork();
 }
 static void autoTick(SGRKaraokeView *view) {
     ((void (*)(id, SEL))objc_msgSend)(view, NSSelectorFromString(@"tick"));
@@ -40,6 +47,7 @@ static void autoSetup(BOOL enabled) {
     SGHarnessBing = ^(NSArray *lines, SGHarnessDone done) { bingCalls++; done(markAll(lines, @"B: "), nil); };
 }
 static void autoCheck(UIWindow *window) {
+    HarnessBeginLyricsWork();
     NSUserDefaults *args = NSUserDefaults.standardUserDefaults;
     UIViewController *root = [UIViewController new]; window.rootViewController = root;
     [window makeKeyAndVisible];
@@ -244,4 +252,5 @@ static void autoCheck(UIWindow *window) {
     [args setBool:NO forKey:SGRKeyLyricsAutoTranslation]; SGRAutoTranslationSettingsChanged();
     [autoPlayer removeFromSuperview]; [autoPage removeFromSuperview]; autoPlayer = autoPage = nil;
     SGHarnessPlayingTrack = nil;
+    HarnessEndLyricsWork();
 }

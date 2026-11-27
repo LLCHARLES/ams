@@ -86,8 +86,10 @@ static void pressLine(SGRKaraokeView *view, UIView *line) {
 // The configuration the page last asked to present: the interaction's own -presentEditMenuWithConfiguration: is
 // taken over here, since there is no UIKit presentation in this check, and the delegate is asked about it by hand.
 static UIEditMenuConfiguration *sg_presented;
+static UIEditMenuInteraction *sg_presenter;
 
 static void recordPresented(id self, SEL _cmd, UIEditMenuConfiguration *configuration) {
+    sg_presenter = self;
     sg_presented = configuration;
 }
 
@@ -99,8 +101,8 @@ static UIMenu *menuFor(SGRKaraokeView *view, UIEditMenuConfiguration *configurat
 }
 
 static CGRect targetOf(SGRKaraokeView *view, UIEditMenuConfiguration *configuration) {
-    return ((CGRect (*)(id, SEL, id, id))objc_msgSend)(view,
-        NSSelectorFromString(@"editMenuInteraction:targetRectForConfiguration:"), nil, configuration);
+    return [(id<UIEditMenuInteractionDelegate>)view editMenuInteraction:sg_presenter
+                                             targetRectForConfiguration:configuration];
 }
 
 // A menu going away, as UIKit tells the delegate it is.

@@ -48,8 +48,16 @@
 
 static const CGFloat kThumbSide = 72;          // the cover once the lyrics are up
 static const CGFloat kThumbGap = 16;           // between the thumbnail and the title beside it
-static const CGFloat kThumbTop = 8;            // below the top of the artwork band
+static const CGFloat kThumbTop = 8;            // inset below the header-aware content top
+// The Music app's collapsed artwork, as its player lays it out: the grabber 7 pt under the content's top (the safe
+// area's top over 20) and 4 pt tall, and the artwork 22 pt under it, 72 pt square, at the content's leading margin. PlayerHeader.x draws the grabber at the same 7 pt under the safe area.
+static const CGFloat kGrabberTopSpacing = 7, kGrabberHeight = 4, kArtworkToGrabberSpacing = 22;
+// Carried by the queue's list, the artwork and the title go up at most the artwork's 72 and 32 more, as
+// the Music app's stop, so they leave and stay gone.
+static const CGFloat kRideMostUp = 72 + 32;
 static const CGFloat kLyricsTop = 20;          // between the title row and the first line
+static const CGFloat kQueueTop = 16;           // between the thumbnail and the queue page's toggles (the Music app's)
+static const CGFloat kQueueRideFade = 40;      // the thumbnail and title fade over this much as the list carries them off
 static const CGFloat kLyricsBottom = 8;        // above the progress bar
 // The lines are a surface arriving, not something moving: they come up from just under full size as the
 // room for them opens, and go at once when it closes. An exit the eye waits through reads as a stall.
@@ -62,7 +70,14 @@ static const NSTimeInterval kLyricsGrace = 3;
 // Below this the player has not laid out yet and nothing can be measured from it.
 static const CGFloat kLivingHeight = 200;
 // The lines on their own: the controls under them fade after this long without a touch.
-static const NSTimeInterval kRest = 4;
+static const NSTimeInterval kRest = 4, kRestSinging = 5;
+// Keeping the title, the lines alone the way the Music app's are (its player on an iPhone 17 Pro, 2026-11-25): the
+// cover, the title row and its ⋯ rise 22 pt together, the title then 12 pt from the cover rather than kThumbGap, and
+// the lines start 16 pt under them and run down the whole safe area, its mic gone with the controls.
+static const CGFloat kAloneRise = 22, kAloneTitleGap = 12, kAloneLinesTop = 16;
+// There the sung line's view stands this far from the top of the player (its first line's capitals 246 pt down on
+// the Music app's), where the lines would otherwise rest at a share of their height, well lower.
+static const CGFloat kAloneLineTop = 238;
 // The two columns: the leading one never narrower than the narrowest iPhone Spotify lays its controls out for, the
 // side one never narrower than this, this far apart, so a player is wide enough for both from their sum on. The
 // leading column takes this share of the safe width: half on a window taller than wide, less on its side, where the
@@ -73,8 +88,17 @@ static const CGFloat kColumnCoverInset = 16;
 // The mini player's lyrics button asks for the lyrics of a player that is about to open: the ask holds this long.
 static const NSTimeInterval kLyricsOnOpenWindow = 3;
 
-static char kOverlayKey, kPlateKey, kTitleKey, kStackKey, kQueueKey;
+static char kOverlayKey, kPlateKey, kTitleKey, kStackKey, kQueueKey, kQueuePageKey, kSliderKey;
+// The Music app's lyrics view ends 3 pt over its time control's bar (measured on its player, 402 x 874 pt, 2026-11-25).
+// Its lyrics view starts at the collapsed artwork's bottom (its content layout guide), and its lines' scroll view is
+// inset so the sung line's top stands 12% of the player's height down, less the font's ascent, against the
+// whole player's height.
+static const CGFloat kLyricsOverBar = 3, kSungLineShare = 0.12;
+// The page over the cover is up: in the one column with the lines or the queue, in the two columns the lines picked.
 static BOOL sg_open;
+// The one column's page shows the queue (SGRKeyPlayerQueueStyle's Apple Music style) rather than the lines: the same
+// thumbnail, title row and stage, the queue page (PlayerQueue.m) in the stage. Never set in the two columns.
+static BOOL sg_queuePage;
 static __weak UIView *sg_dismissingPage;
 static BOOL sg_moving;                      // the transition is in flight, so no layout pass may re-place it
 static NSUInteger sg_openGeneration;        // only the latest accepted transition may settle
@@ -82,10 +106,17 @@ static __weak UIView *sg_host;              // SPTNowPlayingView
 static __weak UIViewController *sg_info, *sg_duration, *sg_floating, *sg_header;
 static __weak UIView *sg_titleElement;      // the arranged element view holding the title and the artist
 static __weak UIViewController *sg_player;  // NowPlayingViewController, whose units the controls are
+BOOL SGRPlayerInteractiveMorph(void) {
+    return sg_player.traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassCompact &&
+        sg_player.transitionCoordinator.initiallyInteractive;
+}
 static BOOL sg_alone;                       // the lines have the player to themselves
 static BOOL sg_touching;                    // a finger is on the player, which holds the clock (SGRPlayerTouchWatcher)
 static NSTimer *sg_rest;
 static __weak UIGestureRecognizer *sg_wake; // on the player, on while alone: the tap that brings the controls back
+// A flick on through the lines put them on their own, and they have not gone back to the song yet: until then a tap
+// under them brings nothing back, only a flick back does (as in the Music app).
+static BOOL sg_flickedAlone;
 // The two column player: up, the footer's last pick of its side column (kept while the player stays open), and the
 // mini player's ask for the lyrics, until when it holds.
 typedef NS_ENUM(NSInteger, SGRSidePick) { SGRSidePickNone, SGRSidePickLyrics, SGRSidePickQueue };
@@ -94,6 +125,8 @@ static SGRSidePick sg_sidePick;
 static CFTimeInterval sg_lyricsOnOpenUntil;
 static BOOL sg_orderedForVoiceOver;         // the player's accessibilityElements are this file's
 static __weak UIView *sg_replacedCoverList;
+static void setOpen(BOOL open, BOOL animated);
+static void forgetPreview(void);
 
 // Issue #33: the pixels alone can't distinguish a narrower native tilt from
 // a smaller image inside it. Capture the still-open page on app resign, not
@@ -339,13 +372,32 @@ static BOOL keepsTitle(void) {
     _stage = [[UIView alloc] initWithFrame:CGRectZero];
     [self addSubview:_stage];
     [self addSubview:_thumb];
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateRendering)
+                                               name:SGRPlayerVisibilityDidChangeNotification object:nil];
     return self;
+}
+
+- (void)updateRendering {
+    _lyrics.renderingSuspended = self.hidden || SGRPlayerLandscapeCovers(self.window);
+}
+
+- (void)setHidden:(BOOL)hidden {
+    [super setHidden:hidden];
+    [self updateRendering];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self updateRendering];
 }
 
 - (void)sgr_thumbTapped {
     // Left on screen while the lines are alone (keepsTitle), a tap on it only wakes the controls (SGRPlayerWake). In the
     // two columns it is the player's cover, and the player is already all there.
-    if (SGRPlayerLyricsOpen() && !sg_moving && !sg_alone && !sg_wide) SGRPlayerToggleLyrics();
+    if (sg_open && !sg_moving && !sg_alone && !sg_wide) {
+        forgetPreview();
+        setOpen(NO, YES);
+    }
 }
 
 - (UIView *)thumb { return _thumb; }
@@ -362,9 +414,18 @@ static BOOL keepsTitle(void) {
 // directly, the row answers for where it is drawn. Not while the lines are alone, unless the title is kept: the
 // row is faded then, and a tap where its add button was is the player's, which brings everything back.
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    // The queue page's list reaches up behind the title row it carries: the row's buttons (add, ⋯) keep their taps, and
+    // anywhere else there scrolls the list.
+    UIView *carried = sg_open && sg_queuePage ? sg_info.viewIfLoaded : nil;
+    if (carried && carried.alpha > 0.01) {
+        UIView *inRow = [carried hitTest:[carried convertPoint:point fromView:self] withEvent:event];
+        for (UIView *v = inRow; v && v != carried; v = v.superview) {
+            if ([v isKindOfClass:UIControl.class]) return inRow;
+        }
+    }
     UIView *hit = [super hitTest:point withEvent:event];
     if (hit != self) return hit;
-    UIView *row = SGRPlayerLyricsOpen() && (!sg_alone || keepsTitle()) ? sg_info.viewIfLoaded : nil;
+    UIView *row = sg_open && (!sg_alone || keepsTitle()) ? sg_info.viewIfLoaded : nil;
     UIView *inRow = row ? [row hitTest:[row convertPoint:point fromView:self] withEvent:event] : nil;
     return inRow == row ? nil : inRow;
 }
@@ -377,8 +438,10 @@ static BOOL keepsTitle(void) {
         _lyrics = [[SGRKaraokeView alloc] initWithFrame:_stage.bounds];
         _lyrics.sizePlace = SGRLyricsPlacePlayer;
         _lyrics.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-        // Sing's mic stays while the lines are on their own, moving down with them (setAlone).
+        // Sing's mic goes with the controls when the lines are on their own unless Keep the mic is on or Sing is
+        // (setAlone sets it each time).
         _lyrics.keepsSing = YES;
+        [self updateRendering];
     }
     if (_lyrics.superview != _stage) [_stage addSubview:_lyrics];
     _lyrics.frame = _stage.bounds;
@@ -402,6 +465,11 @@ static SGRPlayerLyricsOverlay *overlayIn(UIView *host) {
     return overlay;
 }
 
+void SGRPlayerPreparePortraitLyricsForReveal(void) {
+    SGRPlayerLyricsOverlay *overlay = objc_getAssociatedObject(sg_host, &kOverlayKey);
+    [overlay updateRendering];
+}
+
 #pragma mark - the measurements
 
 typedef struct {
@@ -412,6 +480,8 @@ typedef struct {
     CGRect stage;     // where the lines go
     CGFloat lift;     // how far the title row rises
     CGFloat shift;    // how far the title slides right to clear the thumbnail, 0 when it sits under it
+    CGFloat head;     // the queue page: the room from the stage's top down to its toggles, the thumbnail and title in it
+    CGFloat clear;    // how far up the thumbnail and title can go before a live header row's bottom; CGFLOAT_MAX with none
 } SGRLyricsLayout;
 
 // What a view's frame would be with the translation this file put on it left out.
@@ -430,6 +500,8 @@ static SGRLyricsLayout layoutIn(UIView *host, BOOL wide) {
     UIView *header = sg_header.viewIfLoaded;
     CGFloat contentTop = CGRectGetMinY(area);
     if ([header isDescendantOfView:host]) contentTop = MAX(contentTop, CGRectGetMaxY(SGFrameIn(header, host)));
+    // During a resize the artwork band can extend behind the stationary header.
+    BOOL bandBehindHeader = contentTop > CGRectGetMinY(area);
     if (host.window) contentTop = MAX(contentTop, CGRectGetMinY(SGRPlayerVisibleSafeArea(host)));
     CGRect row = untransformed(info, host), bar = untransformed(duration, host);
     if (wide) {
@@ -460,17 +532,54 @@ static SGRLyricsLayout layoutIn(UIView *host, BOOL wide) {
     CGRect titleFrame = title ? untransformed(title, host) : CGRectInset(area, SGRSideMargin, 0);
     CGFloat leading = rtl ? CGRectGetMaxX(titleFrame) - kThumbSide : CGRectGetMinX(titleFrame);
     l.cover = cover;
-    l.thumb = CGRectMake(leading, contentTop + kThumbTop, kThumbSide, kThumbSide);
+    CGFloat thumbTop = contentTop + kThumbTop;
+    if (host.window) {
+        CGFloat headerAwareTop = thumbTop;
+        thumbTop = CGRectGetMinY(SGRPlayerVisibleSafeArea(host)) + kGrabberTopSpacing + kGrabberHeight + kArtworkToGrabberSpacing;
+        if (bandBehindHeader) thumbTop = MAX(thumbTop, headerAwareTop);
+    }
+    // A header row whose controls stay on show (the AI DJ's buttons, an arrow kept to close by) keeps them clear: the
+    // thumbnail stands under it, as the cover does.
+    CGFloat rowBottom = SGRPlayerLiveRowBottomIn(host), underRow = rowBottom + kThumbTop;
+    thumbTop = MAX(thumbTop, underRow);
+    l.thumb = CGRectMake(leading, thumbTop, kThumbSide, kThumbSide);
     // Beside the thumbnail when the title can be moved clear of it, under it when it cannot be found.
     CGFloat top = title ? CGRectGetMidY(l.thumb) - row.size.height / 2 : CGRectGetMaxY(l.thumb) + SGRGrid;
     l.lift = top - CGRectGetMinY(row);
     l.shift = title ? (rtl ? -1 : 1) * (kThumbSide + kThumbGap) : 0;
-    CGFloat lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + kLyricsTop;
+    // The Music app's content (its lyrics, its queue) starts at the collapsed artwork's bottom. The lines fade
+    // in under it on their own (SGRKaraokeView's edge fade); the queue's toggles stand kQueueTop under it.
+    CGFloat lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + (sg_queuePage ? kQueueTop : 0);
+    if (sg_alone && keepsTitle()) {
+        // The header stays with the title, so the rise stops under a live row.
+        CGFloat rise = MAX(0, MIN(kAloneRise, CGRectGetMinY(l.thumb) - underRow));
+        l.thumb.origin.y -= rise;
+        top -= rise;
+        l.lift = top - CGRectGetMinY(row);
+        if (title) l.shift = (rtl ? -1 : 1) * (kThumbSide + kAloneTitleGap);
+        lines = MAX(CGRectGetMaxY(l.thumb), top + row.size.height) + kAloneLinesTop;
+    }
+    l.clear = rowBottom == -CGFLOAT_MAX ? CGFLOAT_MAX : MIN(CGRectGetMinY(l.thumb), top) - rowBottom;
     // The artwork band belongs to a paging cell: on a skip its x can still be between pages.
     // Only its vertical room belongs to the lyrics. The lyric viewport and its controls belong
     // to the stationary player, not the outgoing or incoming cover.
-    l.stage = CGRectMake(CGRectGetMinX(host.bounds), lines, host.bounds.size.width, CGRectGetMinY(bar) - kLyricsBottom - lines);
-    l.ok = l.stage.size.height > kLivingHeight / 2 && l.lift < 0;
+    // The queue page starts at the thumbnail's top: the thumbnail and the title stand in the room over its toggles and
+    // ride with its list (the Music app's playing header is the first item of its queue).
+    CGFloat stageTop = lines;
+    if (sg_queuePage) {
+        stageTop = CGRectGetMinY(l.thumb);
+        l.head = lines - stageTop;
+    }
+    // The page reaches down to just over the bar itself, the slider inside the duration unit, as the Music app's lyrics
+    // reach its time control; without the slider, kLyricsBottom over the unit.
+    CGFloat bottom = CGRectGetMinY(bar) - kLyricsBottom;
+    UIView *slider = SGRFindByIdentifier(duration, @"SPTNowPlayingSliderV2", &kSliderKey);
+    if (slider.window && slider.bounds.size.height >= 1) {
+        CGRect drawn = SGFrameIn(slider, host);
+        bottom = CGRectGetMinY(drawn) - duration.transform.ty - kLyricsOverBar;
+    }
+    l.stage = CGRectMake(CGRectGetMinX(host.bounds), stageTop, host.bounds.size.width, bottom - stageTop);
+    l.ok = l.stage.size.height - l.head > kLivingHeight / 2 && l.lift < 0;
     return l;
 }
 
@@ -478,13 +587,23 @@ static SGRLyricsLayout layoutIn(UIView *host, BOOL wide) {
 
 // The unit's row lays its arranged views out after the unit's own pass, so the transforms go on after it. The title
 // moved beside the thumbnail would run into the controls it moved toward, so PlayerTitle.x narrows it by as much.
+// How far the queue page's list has moved from rest (positive up): the thumbnail and the title row ride with it.
+static CGFloat sg_pageShift;
+
+static CGFloat pageShift(void) {
+    return sg_open && sg_queuePage && !sg_wide ? MIN(sg_pageShift, kRideMostUp) : 0;
+}
+
 static void placeTitleRow(SGRLyricsLayout l) {
     UIView *info = sg_info.viewIfLoaded;
     if (!info) return;
     [SGRowIn(info) layoutIfNeeded];
-    CGFloat lift = sg_open ? l.lift : 0, shift = sg_open ? l.shift : 0;
+    CGFloat lift = sg_open ? l.lift - pageShift() : 0, shift = sg_open ? l.shift : 0;
     SGRShownTitleSlide(sg_titleElement ? fabs(round(shift)) : 0);
-    CGAffineTransform rise = CGAffineTransformMakeTranslation(0, round(lift));
+    // To the pixel, not the point: riding with the queue page's list, a whole point at a time stepped against rows that
+    // move by the pixel, and the title looked to scroll at a lower rate than the list.
+    CGFloat pixels = info.traitCollection.displayScale ?: UIScreen.mainScreen.scale;
+    CGAffineTransform rise = CGAffineTransformMakeTranslation(0, round(lift * pixels) / pixels);
     if (!CGAffineTransformEqualToTransform(info.transform, rise)) info.transform = rise;
     UIView *title = sg_titleElement;
     if (!title) return;
@@ -500,7 +619,15 @@ BOOL SGRPlayerLyricsAvailable(void) {
 }
 
 BOOL SGRPlayerLyricsOpen(void) {
+    return sg_open && !sg_queuePage;
+}
+
+BOOL SGRPlayerPageOpen(void) {
     return sg_open;
+}
+
+BOOL SGRPlayerQueueShown(void) {
+    return sg_wide ? !sg_open : sg_open && sg_queuePage;
 }
 
 // Puts the overlay's own views where the measurements say, without animating. The thumbnail is laid out
@@ -529,6 +656,26 @@ static CGAffineTransform thumbTransform(SGRLyricsLayout l) {
     return CGAffineTransformConcat(CGAffineTransformMakeScale(scale, scale), move);
 }
 
+// The thumbnail where it stands while the page is up: moved with the queue page's list.
+static CGAffineTransform pageThumbTransform(SGRLyricsLayout l) {
+    return CGAffineTransformConcat(thumbTransform(l), CGAffineTransformMakeTranslation(0, -pageShift()));
+}
+
+// The thumbnail and the title row fade as the list carries them out of the page: up past its top, or down toward the
+// progress bar, where the Music app's list fades them under its edges. They stand at the page's very top, and the Music
+// app's list (whose first item they are) clips them there, so going up they are gone within kQueueRideFade rather than
+// drawn over the grabber and the status bar. Under a live header row (PlayerArtwork.x) they are gone as they reach its
+// bottom, sooner when there is less room, rather than drawn over its controls.
+static CGFloat pageRideAlpha(SGRLyricsLayout l) {
+    CGFloat shift = pageShift();
+    if (shift > 0) {
+        CGFloat fade = MIN(kQueueRideFade, l.clear);
+        return fade > 0 ? MAX(0, MIN(1, 1 - shift / fade)) : 0;
+    }
+    CGFloat room = l.stage.size.height - l.head - kQueueRideFade;
+    return MAX(0, MIN(1, 1 - (-shift - room) / kQueueRideFade));
+}
+
 // The corners as they will be drawn: a radius under a scale is drawn scaled, so the thumbnail asks for
 // the radius it wants divided by the shrink, and the two ends of the animation are 12pt and 8pt corners.
 static CGFloat thumbRadius(SGRLyricsLayout l, BOOL open) {
@@ -539,18 +686,20 @@ static CGFloat thumbRadius(SGRLyricsLayout l, BOOL open) {
 
 #pragma mark - the lines on their own
 
-// After kRest without a touch while the song plays, everything but the lines fades -- the header row, the
-// thumbnail, the title row and the controls -- and the lines grow up and down into the whole safe area, the
-// way the Music app leaves its lyrics alone. The lines scroll as they always do and leave the rest hidden; a
-// tap anywhere brings it all back and is not a seek. A pause brings it back and keeps it; VoiceOver, a sheet
-// over the player and the app in the background keep it up. A scroll through the lines hides it at once.
-// Sing's mic stays with the lines, and a touch on it is the mic's: it does not bring the rest back.
+// After kRest without a touch while the song plays (kRestSinging while Sing is on), everything but the lines fades
+// -- the header row, the thumbnail, the title row and the controls -- and the lines grow up and down into the whole
+// safe area, the way the Music app leaves its lyrics alone. What brings it back or sends it away is as in the Music
+// app: a tap on a line seeks there and changes
+// nothing; a tap under the lines, where the controls were, brings it all back; a scroll decides as the finger lifts,
+// a flick on toward the lines to come sending the controls away at once and a flick back bringing them back, while
+// a scroll that stops dead changes nothing. A pause brings it back and keeps it; VoiceOver, a sheet over the
+// player and the app in the background keep it up.
+// Sing's mic stays with the lines only with Keep the mic or while Sing is on, and a touch on it is the mic's.
 //
 // The tap is a recognizer on the player that recognizes with any other, and a button takes its own tap:
 // UIKit gives a control its tap over a tap recognizer above it. A faded view takes no touch (UIKit's hit
-// test skips it), so a tap where the thumbnail or a button was only wakes. A drag or a second finger fails
-// it. The lines' own tap, the one that seeks, is off while they are alone, which holds whichever of the two
-// would have finished first.
+// test skips it), so a tap where a button was only wakes. A drag or a second finger fails it, and so does a touch
+// over the lines' own place or on a line, which is the lines' own tap to seek with (SGRKaraokeView's touchIsOnLine:).
 
 // What fades: every view of Spotify's bottom stack but the chips (gone while the lines are up), which is the
 // title row, the progress bar, the buttons, the footer and a volume row where the phone has one; the header
@@ -629,20 +778,23 @@ static CGRect aloneStage(UIView *host, SGRLyricsLayout l) {
     return CGRectMake(CGRectGetMinX(l.stage), top, l.stage.size.width, CGRectGetMaxY(safe) - kLyricsBottom - top);
 }
 
-// The lines' tap seeks, so it is off while they are alone. Back on a turn of the run loop later: the tap
-// that brought the controls back is still being handed round, and must not reach it.
+// The lines' tap seeks alone or not: a tap on a line is the lines', never the wake's (SGRPlayerWake).
 static void letLinesSeek(SGRPlayerLyricsOverlay *overlay, BOOL seek) {
-    void (^apply)(void) = ^{
-        if (seek == sg_alone) return;   // alone again since
-        for (UIGestureRecognizer *recognizer in overlay.lyrics.gestureRecognizers) {
-            if ([recognizer isKindOfClass:UITapGestureRecognizer.class]) recognizer.enabled = seek;
-        }
-    };
-    if (seek) dispatch_async(dispatch_get_main_queue(), apply);
-    else apply();
+    for (UIGestureRecognizer *recognizer in overlay.lyrics.gestureRecognizers) {
+        if ([recognizer isKindOfClass:UITapGestureRecognizer.class]) recognizer.enabled = seek;
+    }
 }
 
 static void setAlone(BOOL alone, BOOL animated);
+
+// Keeping the title, the lines alone rest their sung line where the Music app's does (kAloneLineTop); otherwise at
+// their own share of the height.
+static void anchorLines(SGRPlayerLyricsOverlay *overlay, SGRLyricsLayout l) {
+    BOOL fixed = sg_alone && keepsTitle() && !l.wide;
+    UIView *player = overlay.superview ?: overlay.lyrics.window;
+    CGFloat sung = MAX(1, round(player.bounds.size.height * kSungLineShare - overlay.lyrics.lineAscent));
+    overlay.lyrics.anchorTop = fixed ? MAX(1, kAloneLineTop - CGRectGetMinY(l.stage)) : l.wide || sg_alone ? 0 : sung;
+}
 
 // A sheet, a menu or an alert over the player: the top controller on screen is not one the player is drawn
 // in. The queue, devices and ⋯ sheets can be presented from the player's topmost parent rather than the
@@ -662,7 +814,7 @@ static BOOL coveredBySheet(void) {
 static BOOL mayCount(void) {
     SPTPlayerState *state = SGPlayerState();
     UIView *host = sg_host;
-    return !sg_wide && SGRLyricsHideMode() != SGRLyricsHideOff && sg_open && !sg_alone && !sg_touching && host.window && state && !state.isPaused
+    return !sg_wide && SGRLyricsHideMode() != SGRLyricsHideOff && sg_open && !sg_queuePage && !sg_alone && !sg_touching && host.window && state && !state.isPaused
         && !UIAccessibilityIsVoiceOverRunning()
         && UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
 }
@@ -674,15 +826,42 @@ static BOOL mayRest(void) {
 
 // The clock starts again at every touch. Run out while something keeps the controls up (a sheet, Sing getting
 // ready, lines still being measured), it starts over, so they fade once that has gone.
-static void restartRest(void) {
+static void restartRestAfter(NSTimeInterval wait) {
     [sg_rest invalidate];
     sg_rest = nil;
     if (!mayCount()) return;
-    sg_rest = [NSTimer scheduledTimerWithTimeInterval:kRest repeats:NO block:^(NSTimer *timer) {
+    sg_rest = [NSTimer scheduledTimerWithTimeInterval:wait repeats:NO block:^(NSTimer *timer) {
         sg_rest = nil;
         if (mayRest()) setAlone(YES, YES);
-        if (!sg_alone) restartRest();
+        if (!sg_alone) restartRestAfter(kRest);
     }];
+}
+
+static void restartRest(void) {
+    restartRestAfter(kRest);
+}
+
+// Sing on, the vocals down: the Music app gives the controls a second longer when the song starts playing again.
+static BOOL singing(void) {
+    SGSingState sing = SGSingCurrentState();
+    return sing >= SGSingStateWaiting && sing <= SGSingStateHot;
+}
+
+// A scroll through the lines decides as the finger lifts. Going on toward the lines to come, the controls go at once
+// (whether the song plays or not, as the Music app's do) and stay gone until a flick back or the lines go back to the
+// song; going back, they come back and the clock starts again.
+static void linesFlicked(CGFloat velocity) {
+    if (velocity > 0) {
+        if (sg_flickedAlone) return;
+        sg_flickedAlone = YES;
+        if (sg_wide || SGRLyricsHideMode() == SGRLyricsHideOff || !sg_open || UIAccessibilityIsVoiceOverRunning() || coveredBySheet()
+            || SGSingCurrentState() == SGSingStatePreparing) return;
+        setAlone(YES, YES);
+    } else if (velocity < 0) {
+        sg_flickedAlone = NO;
+        setAlone(NO, YES);
+        restartRest();
+    }
 }
 
 @interface SGRPlayerTouchWatcher : UIGestureRecognizer <UIGestureRecognizerDelegate>
@@ -771,14 +950,27 @@ static void forgetPreview(void) {
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldRecognizeSimultaneouslyWithGestureRecognizer:(UIGestureRecognizer *)other {
     return YES;
 }
-// Sing's mic and its slider stay while the lines are alone, and a touch on them is theirs alone.
+// Sing's mic and its slider stay while the lines are alone, and a touch on them is theirs alone. So is a tap on a
+// line: it seeks there and the lines stay alone. As in the Music app, only
+// a tap under the lines' place with the controls up, where the controls were, brings them back, and not while a
+// flick on sent them away (sg_flickedAlone).
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)recognizer shouldReceiveTouch:(UITouch *)touch {
+    UIView *host = sg_host;
+    if (!host) return NO;
     for (UIView *v = touch.view; v; v = v.superview) {
         if ([v isKindOfClass:SGRSingButton.class]) return NO;
     }
+    SGRPlayerLyricsOverlay *overlay = objc_getAssociatedObject(host, &kOverlayKey);
+    // Plain text never seeks or resumes following the song after a flick.
+    if (overlay.lyrics.untimed) return YES;
+    if (sg_flickedAlone) return NO;
+    if (overlay.superview && [overlay.lyrics touchIsOnLine:touch]) return NO;
+    SGRLyricsLayout l = layoutIn(host, sg_wide);
+    if (l.ok && [touch locationInView:host].y <= CGRectGetMaxY(l.stage)) return NO;
     return YES;
 }
 - (void)sgr_woke {
+    sg_flickedAlone = NO;
     setAlone(NO, YES);
     restartRest();
 }
@@ -788,7 +980,7 @@ static void setAlone(BOOL alone, BOOL animated) {
     UIView *host = sg_host;
     // The two columns deliberately keep the cover and controls beside the lines, even while browsing.
     if (alone && sg_wide) return;
-    if (alone == sg_alone || !host || (alone && !sg_open)) return;
+    if (alone == sg_alone || !host || (alone && (!sg_open || sg_queuePage))) return;
     SGRLyricsLayout l = layoutIn(host, sg_wide);
     // Going alone needs somewhere to put the lines. Coming back never waits for it: the controls and the
     // lines' tap are given back even when the player can no longer be measured.
@@ -796,6 +988,11 @@ static void setAlone(BOOL alone, BOOL animated) {
     static NSUInteger fadeGeneration;
     NSUInteger generation = ++fadeGeneration;
     sg_alone = alone;
+    // Keeping the title, the header itself moves as the lines go alone (layoutIn), so it is measured again.
+    if (keepsTitle()) {
+        SGRLyricsLayout moved = layoutIn(host, sg_wide);
+        if (moved.ok) l = moved;
+    }
     if (!alone) SGRProgressControlsFaded(NO);
     if (alone) {
         [sg_rest invalidate];
@@ -806,18 +1003,26 @@ static void setAlone(BOOL alone, BOOL animated) {
     // Layout and opacity have their own timing; Reduce Motion dissolves the layout in place.
     void (^move)(void) = ^{
         if (!overlay.superview || !l.ok) return;
+        if (keepsTitle()) placeTitleRow(l);
         place(overlay, host, l);
+        anchorLines(overlay, l);
         overlay.thumb.transform = thumbTransform(l);
         // The lines take the new height in this same spring, so the sung line rides with the stage rather than
         // springing to the new anchor at the next line (SGRKaraokeView's layoutSubviews).
         [overlay.lyrics layoutIfNeeded];
     };
     void (^fade)(void) = ^{
-        if (overlay.superview) overlay.lyrics.extrasHidden = alone;
+        if (overlay.superview) {
+            // The mic goes with the controls as the Music app's does, unless it is to stay or Sing is on.
+            SGSingState sing = SGSingCurrentState();
+            overlay.lyrics.keepsSing = SGFlag(SGRKeyLyricsKeepMic, YES) || sing >= SGSingStateWaiting;
+            overlay.lyrics.extrasHidden = alone;
+        }
         fadeControls(alone);
     };
     sg_wake.enabled = alone;
-    if (overlay) letLinesSeek(overlay, !alone);
+    // The lines' tap seeks whether or not they are alone (SGRPlayerWake leaves a tap on a line to them).
+    if (overlay) letLinesSeek(overlay, YES);
     if (animated) {
         SGRAnimateLayout(host, move, nil);
         // Going, the controls take their time, since nobody waits on them; coming back at a touch, they answer at
@@ -831,6 +1036,134 @@ static void setAlone(BOOL alone, BOOL animated) {
         if (alone) SGRProgressControlsFaded(YES);
     }
     SGLog(@"redesign player: the lines %@", alone ? @"on their own" : @"with the controls");
+}
+
+#pragma mark - the lines or the queue
+
+// The queue page shares nothing with the two columns' list: it is the Music app's (PlayerQueue.m), with its toggles and
+// rows of its own. Contained by the player that shows it, so UIKit hands it traits and its appearance.
+static UIViewController *queuePageOf(SGRPlayerLyricsOverlay *overlay) {
+    UIViewController *page = objc_getAssociatedObject(overlay, &kQueuePageKey);
+    if (!page) {
+        page = SGRPlayerQueuePage();
+        page.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+        objc_setAssociatedObject(overlay, &kQueuePageKey, page, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    UIViewController *player = sg_player;
+    if (player && page.parentViewController != player) {
+        if (page.parentViewController) {
+            [page willMoveToParentViewController:nil];
+            [page removeFromParentViewController];
+        }
+        [player addChildViewController:page];
+        [page didMoveToParentViewController:player];
+    }
+    return page;
+}
+
+// The lines' handlers, set each time they come into the stage: a scroll decides by its flick as the finger lifts
+// (linesFlicked); once the lines follow the song again, a tap under them can bring the controls back.
+static void armLines(SGRPlayerLyricsOverlay *overlay) {
+    sg_flickedAlone = NO;
+    overlay.lyrics.browsingBegan = nil;
+    overlay.lyrics.browsingFlicked = ^(CGFloat velocity) { linesFlicked(velocity); };
+    overlay.lyrics.browsingEnded = ^{ sg_flickedAlone = NO; };
+}
+
+// The one column's stage shows the lines or the queue page, crossfading when animated. The one going leaves the stage,
+// so the lines' display link stops while the queue shows and the queue's list stops asking for covers.
+static void fillStage(SGRPlayerLyricsOverlay *overlay, BOOL queue, BOOL animated) {
+    // Made the first time the queue is asked for; the lines alone never make it.
+    UIView *page = queue ? queuePageOf(overlay).view : ((UIViewController *)objc_getAssociatedObject(overlay, &kQueuePageKey)).viewIfLoaded;
+    UIView *lines = overlay.madeLyrics;
+    BOOL wasIn = queue ? page.superview == overlay.stage : lines.superview == overlay.stage;
+    UIView *going = queue ? lines : page;
+    BOOL fades = animated && going.superview == overlay.stage;
+    UIView *showing = queue ? page : overlay.lyrics;   // the lines' getter puts them in the stage
+    if (queue && !wasIn) [overlay.stage addSubview:page];
+    if (!wasIn) showing.alpha = fades ? 0 : 1;
+    showing.frame = overlay.stage.bounds;
+    showing.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    if (!queue) armLines(overlay);
+    void (^swap)(void) = ^{
+        showing.alpha = 1;
+        going.alpha = 0;
+    };
+    void (^gone)(BOOL) = ^(BOOL finished) {
+        // The lines faded back in by their alpha: their corner buttons' glass drawn again (SGRRefreshGlass).
+        if (fades && !queue && sg_open && !sg_queuePage) [overlay.madeLyrics refreshGlass];
+        // Shown again before the fade ended: it stays.
+        if (sg_open && !sg_wide && sg_queuePage == (going == page)) return;
+        if (going.superview == overlay.stage) [going removeFromSuperview];
+        going.alpha = 1;
+    };
+    if (fades) SGRAnimate(SGRMotionFade, swap, gone);
+    else {
+        swap();
+        gone(YES);
+    }
+}
+
+// The layout the queue page was last placed with, for moving the thumbnail and the title row as its list scrolls.
+static SGRLyricsLayout sg_pageLayout;
+
+static void ridePage(void) {
+    SGRPlayerLyricsOverlay *overlay = objc_getAssociatedObject(sg_host, &kOverlayKey);
+    SGRLyricsLayout l = sg_pageLayout;
+    if (!overlay.superview || sg_moving || !l.ok || !sg_open || !sg_queuePage) return;
+    overlay.thumb.transform = pageThumbTransform(l);
+    placeTitleRow(l);
+    CGFloat alpha = pageRideAlpha(l);
+    if (overlay.thumb.alpha != alpha) overlay.thumb.alpha = alpha;
+    UIView *info = sg_info.viewIfLoaded;
+    if (info && info.alpha != alpha) info.alpha = alpha;
+}
+
+// The queue page told the room over its toggles, and given the way to move the thumbnail and title with its list.
+static void configurePage(SGRPlayerLyricsOverlay *overlay, SGRLyricsLayout l) {
+    sg_pageLayout = l;
+    SGRPlayerQueuePageConfigure(queuePageOf(overlay), l.head, ^(CGFloat shift) {
+        // Every pixel of the list's move (PlayerQueue.m reports it to the pixel), not every half point.
+        if (fabs(shift - sg_pageShift) < 0.01) return;
+        sg_pageShift = shift;
+        ridePage();
+    });
+}
+
+// Back to rest, the thumbnail and the title row seen whole.
+static void stopRiding(void) {
+    sg_pageShift = 0;
+    SGRPlayerLyricsOverlay *overlay = objc_getAssociatedObject(sg_host, &kOverlayKey);
+    if (overlay.thumb.alpha < 1 && !sg_alone) overlay.thumb.alpha = 1;
+    UIView *info = sg_info.viewIfLoaded;
+    if (info && info.alpha < 1 && !sg_alone) info.alpha = 1;
+}
+
+// The open page turns from the lines to the queue or back, the thumbnail and the title row staying where they are.
+static void switchPage(BOOL queue) {
+    SGRPlayerLyricsOverlay *overlay = objc_getAssociatedObject(sg_host, &kOverlayKey);
+    if (!sg_open || sg_wide || sg_queuePage == queue || !overlay.superview) return;
+    setAlone(NO, NO);
+    stopRiding();
+    sg_queuePage = queue;
+    // The queue's stage starts at the thumbnail's top, the lines' under the title row.
+    SGRLyricsLayout l = layoutIn(sg_host, NO);
+    if (l.ok) {
+        place(overlay, sg_host, l);
+        overlay.thumb.transform = thumbTransform(l);
+        placeTitleRow(l);
+    }
+    fillStage(overlay, queue, YES);
+    if (queue && l.ok) configurePage(overlay, l);
+    if (queue) {
+        [sg_rest invalidate];
+        sg_rest = nil;
+    } else {
+        if (l.ok) anchorLines(overlay, l);
+        restartRest();
+    }
+    SGRPlayerLyricsChanged();
+    SGLog(@"redesign player: the page shows the %@", queue ? @"queue" : @"lyrics");
 }
 
 static void setOpen(BOOL open, BOOL animated) {
@@ -854,6 +1187,9 @@ static void setOpen(BOOL open, BOOL animated) {
     }
     NSUInteger generation = ++sg_openGeneration;
     if (!open) setAlone(NO, NO);
+    // Closing from a scrolled queue page, the thumbnail flies home from where the list carried it.
+    CGFloat riding = pageShift();
+    stopRiding();
     sg_open = open;
     SGRPlayerLyricsChanged();
 
@@ -864,7 +1200,8 @@ static void setOpen(BOOL open, BOOL animated) {
     // to or from an empty slot.
     BOOL fades = SGRPlayerMotionShowing();
     // The state it starts from, so the animation has both ends of every value and nothing jumps into it.
-    overlay.thumb.transform = open && !fades ? CGAffineTransformIdentity : away;
+    overlay.thumb.transform = open && !fades ? CGAffineTransformIdentity
+                            : CGAffineTransformConcat(away, CGAffineTransformMakeTranslation(0, open ? 0 : -riding));
     overlay.thumb.alpha = open && fades ? 0 : 1;
     overlay.cover.layer.cornerRadius = thumbRadius(l, fades || !open);
     // Under Reduce Motion the lines only fade, without growing.
@@ -873,10 +1210,8 @@ static void setOpen(BOOL open, BOOL animated) {
         overlay.cover.image = SGRNowPlayingArtwork(NULL, NULL);
         overlay.stage.alpha = 0;
         overlay.stage.transform = entering;
-        // Not under VoiceOver, which keeps the controls up, nor under a sheet.
-        overlay.lyrics.browsingBegan = ^{
-            if (!UIAccessibilityIsVoiceOverRunning() && !coveredBySheet()) setAlone(YES, YES);
-        };
+        fillStage(overlay, sg_queuePage, NO);
+        if (sg_queuePage) configurePage(overlay, l);
         // Spotify's cover goes the moment the redesign's own takes its place: the same picture at the
         // same size with the same corners, so there is nothing to see in the swap. Coming back it waits
         // for the thumbnail to land on it, or the two would be on screen at once, one of them half size.
@@ -901,8 +1236,14 @@ static void setOpen(BOOL open, BOOL animated) {
     void (^settled)(BOOL) = ^(BOOL finished) {
         if (generation != sg_openGeneration) return;
         sg_moving = NO;
+        // The stage faded in by its alpha, which can leave the corner buttons' glass undrawn (SGRRefreshGlass).
+        if (sg_open && !sg_queuePage) [overlay.madeLyrics refreshGlass];
         if (sg_open) return;   // opened again while it was going away
         replaceCoverList(NO);
+        // The queue page leaves the stage with the page, and the next one opens on the lines unless it is asked for.
+        UIViewController *queuePage = objc_getAssociatedObject(overlay, &kQueuePageKey);
+        if (queuePage.viewIfLoaded.superview == overlay.stage) [queuePage.view removeFromSuperview];
+        sg_queuePage = NO;
         // Detaching the karaoke view resets its browsing position. Keep it in the window, invisible,
         // until UIKit commits the interactive dismissal.
         if (overlay == sg_dismissingPage) overlay.hidden = YES;
@@ -935,8 +1276,8 @@ static void setOpen(BOOL open, BOOL animated) {
         [sg_rest invalidate];
         sg_rest = nil;
     }
-    SGLog(@"redesign player: lyrics %@, thumbnail %.0fx%.0f at %.0f,%.0f, title row up %.0f and right %.0f, lines %.0fx%.0f",
-          open ? @"up" : @"away", l.thumb.size.width, l.thumb.size.height, l.thumb.origin.x, l.thumb.origin.y,
+    SGLog(@"redesign player: %@ %@, thumbnail %.0fx%.0f at %.0f,%.0f, title row up %.0f and right %.0f, stage %.0fx%.0f",
+          sg_queuePage ? @"queue" : @"lyrics", open ? @"up" : @"away", l.thumb.size.width, l.thumb.size.height, l.thumb.origin.x, l.thumb.origin.y,
           -l.lift, l.shift, l.stage.size.width, l.stage.size.height);
 }
 
@@ -988,6 +1329,7 @@ static void showSide(SGRPlayerLyricsOverlay *overlay, BOOL lyrics, BOOL animated
         going.alpha = 0;
     };
     void (^gone)(BOOL) = ^(BOOL finished) {
+        if (animated && lyrics && sg_open) [overlay.madeLyrics refreshGlass];
         // Shown again before the fade ended: it stays.
         if (sg_wide && (going == queue ? !sg_open : sg_open)) return;
         [going removeFromSuperview];
@@ -1098,22 +1440,57 @@ void SGRPlayerToggleLyrics(void) {
         pickSide(SGRSidePickLyrics);
         return;
     }
+    if (sg_open && sg_queuePage) {
+        if (SGRPlayerLyricsAvailable()) switchPage(NO);
+        return;
+    }
     if (!sg_open && !SGRPlayerLyricsAvailable()) return;
+    if (!sg_open) sg_queuePage = NO;
     setOpen(!sg_open, YES);
+}
+
+// Up with the lines in the one column: the page turns to them, or opens on them.
+static void openLines(BOOL animated) {
+    if (sg_open) {
+        switchPage(NO);
+        return;
+    }
+    sg_queuePage = NO;
+    setOpen(YES, animated);
+}
+
+void SGRPlayerToggleQueuePage(void) {
+    forgetPreview();
+    if (sg_wide) {
+        pickSide(SGRSidePickQueue);
+        return;
+    }
+    if (sg_open && sg_queuePage) {
+        setOpen(NO, YES);
+        return;
+    }
+    if (sg_open) {
+        switchPage(YES);
+        return;
+    }
+    sg_queuePage = YES;
+    setOpen(YES, YES);
+    // Nowhere to put it yet (the player not laid out, no cover read): the next page opens on the lines again.
+    if (!sg_open) sg_queuePage = NO;
 }
 
 static void answerPreview(void) {
     if (!sg_pendingPreview || ![sg_pendingPreview.track isEqual:SGKaraokePlayingTrack()]) return;
-    if (!sg_open && sg_host.window && SGRPlayerLyricsAvailable() && !coveredBySheet()) {
+    if (!SGRPlayerLyricsOpen() && sg_host.window && SGRPlayerLyricsAvailable() && !coveredBySheet()) {
         if (sg_wide) pickSide(SGRSidePickLyrics);
-        else setOpen(YES, YES);
+        else openLines(YES);
     }
-    if (sg_open) forgetPreview();
+    if (SGRPlayerLyricsOpen()) forgetPreview();
 }
 
 void SGRPlayerOpenPreviewLyrics(UIView *preview) {
     NSString *track = SGKaraokePlayingTrack();
-    if (sg_open || !track || !preview.window || ![preview isDescendantOfView:sg_host]) return;
+    if (SGRPlayerLyricsOpen() || !track || !preview.window || ![preview isDescendantOfView:sg_host]) return;
     forgetPreview();
     sg_pendingPreview = [[SGRPendingPreview alloc] initWithTarget:nil action:nil];
     sg_pendingPreview.delegate = sg_pendingPreview;
@@ -1143,7 +1520,7 @@ static void answerLyricsOnOpen(UIView *host) {
     }
     // After this pass: the lines open with an animation of their own.
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!sg_open && !sg_wide && SGRPlayerLyricsAvailable()) setOpen(YES, YES);
+        if (!SGRPlayerLyricsOpen() && !sg_wide && SGRPlayerLyricsAvailable()) openLines(YES);
     });
 }
 
@@ -1174,9 +1551,21 @@ static void replace(void) {
         fadeControls(YES);
     }
     place(overlay, host, l);
-    overlay.thumb.transform = thumbTransform(l);
+    overlay.thumb.transform = pageThumbTransform(l);
     overlay.cover.layer.cornerRadius = thumbRadius(l, YES);
-    overlay.lyrics.frame = overlay.stage.bounds;
+    // The lines' getter would put them back in the stage: with the queue up, only the queue is laid out.
+    if (sg_queuePage) {
+        UIView *page = queuePageOf(overlay).view;
+        if (page.superview == overlay.stage) page.frame = overlay.stage.bounds;
+        if (!sg_moving) {
+            if (fabs(sg_pageLayout.head - l.head) >= 0.5 || !sg_pageLayout.ok) configurePage(overlay, l);
+            sg_pageLayout = l;
+            ridePage();
+        }
+    } else {
+        anchorLines(overlay, l);
+        overlay.lyrics.frame = overlay.stage.bounds;
+    }
     replaceCoverList(YES);
 }
 
@@ -1208,6 +1597,7 @@ static void replace(void) {
 - (void)viewWillDisappear:(BOOL)animated {
     forgetPreview();
     if (sg_open && !sg_wide) {
+        BOOL queuePage = sg_queuePage;
         UIViewController *player = (UIViewController *)self;
         id<UIViewControllerTransitionCoordinator> coordinator = player.transitionCoordinator;
         UIView *host = player.viewIfLoaded;
@@ -1220,8 +1610,14 @@ static void replace(void) {
             if (![coordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
                 if (sg_dismissingPage != page) return;
                 sg_dismissingPage = nil;
-                page.hidden = NO;
-                if (context.isCancelled && sg_host == host && !sg_wide && host.bounds.size.height > host.bounds.size.width &&
+                // Shown again only at the end (below), so the held page stays suspended until the restore is placed.
+                if (context.isCancelled && sg_host == host && !sg_wide && host.bounds.size.height > host.bounds.size.width && queuePage) {
+                    [UIView performWithoutAnimation:^{
+                        sg_queuePage = YES;
+                        setOpen(YES, NO);
+                        if (!sg_open) sg_queuePage = NO;
+                    }];
+                } else if (context.isCancelled && sg_host == host && !sg_wide && host.bounds.size.height > host.bounds.size.width &&
                     [track isEqual:SGURIString(SGPlayerState().track.URI)] && SGKaraokeLinesForTrack(SGKaraokePlayingTrack()).count) {
                     [UIView performWithoutAnimation:^{
                         setOpen(YES, NO);
@@ -1229,6 +1625,7 @@ static void replace(void) {
                     }];
                 }
                 if (page.superview != sg_host || !sg_open) [page removeFromSuperview];
+                page.hidden = NO;
             }]) sg_dismissingPage = nil;
         }
         setOpen(NO, NO);
@@ -1409,7 +1806,7 @@ static void durationUnitLaidOut(UIViewController *unit) {
 
 // The lines go once the grace is over and nothing is looking for the track's own any more.
 - (void)closeIfNone {
-    if (!sg_open || ![self none]) return;
+    if (!sg_open || sg_queuePage || ![self none]) return;
     if (sg_wide) {
         SGLog(@"redesign player: no lyrics for the track that came on, the queue is beside it");
         refreshSide(YES);
@@ -1440,13 +1837,13 @@ static void durationUnitLaidOut(UIViewController *unit) {
 }
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
-    // A pause brings the controls back and keeps them; playing again starts the clock.
+    // A pause brings the controls back and keeps them; playing again starts the clock, a second longer with Sing on.
     if (state.isPaused) {
         setAlone(NO, YES);
         [sg_rest invalidate];
         sg_rest = nil;
     } else if (!sg_rest && !sg_alone) {
-        restartRest();
+        restartRestAfter(singing() ? kRestSinging : kRest);
     }
     NSString *track = SGURIString(state.track.URI);
     if (sg_pendingPreview && ![track isEqualToString:_track]) forgetPreview();

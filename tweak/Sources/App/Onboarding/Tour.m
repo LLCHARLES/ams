@@ -8,6 +8,13 @@
 
 static const CGFloat kMargin = 24;
 static const CGFloat kCardRadius = 22;
+// The button and the line under it stay on screen over the scrolling page, so they grow only this far.
+#define kBarLargestTextSize UIContentSizeCategoryAccessibilityMedium
+
+// The tour's type at its size for the default text size, grown with Dynamic Type through the accessibility sizes.
+static UIFont *tourFont(UIFontTextStyle style, CGFloat size, UIFontWeight weight) {
+    return [[UIFontMetrics metricsForTextStyle:style] scaledFontForFont:[UIFont systemFontOfSize:size weight:weight]];
+}
 
 #pragma mark - glass
 
@@ -41,6 +48,30 @@ UIButton *SGOnboardingButton(NSString *title) {
 
 #pragma mark - the choice
 
+// A card's row across, or at the accessibility text sizes a column, so its words have the card's whole width and its
+// name may wrap; below them the name keeps to one line. Set again whenever the text size changes.
+@interface SGTourRow : UIStackView
+@property (nonatomic, strong) UILabel *name;
+@property (nonatomic, strong) NSLayoutConstraint *fullWidth;   // the words as wide as the column
+@property (nonatomic) BOOL centered;   // across, with an accessory: centered rather than to the top
+- (void)fitTextSize;
+@end
+
+@implementation SGTourRow
+- (void)fitTextSize {
+    BOOL stacked = SGAccessibilityTextSize();
+    self.axis = stacked ? UILayoutConstraintAxisVertical : UILayoutConstraintAxisHorizontal;
+    self.alignment = stacked ? UIStackViewAlignmentLeading : self.centered ? UIStackViewAlignmentCenter : UIStackViewAlignmentTop;
+    self.fullWidth.active = stacked;
+    self.name.numberOfLines = stacked ? 0 : 1;
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (![previous.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]) [self fitTextSize];
+}
+@end
+
 // A card's row: a symbol on a dim square, a name over a line of small gray text, and an accessory at the end.
 static UIStackView *cardRow(NSString *symbol, NSString *title, NSString *subtitle, UIView *accessory) {
     UIImageView *icon = SGSymbolView(symbol, 17, UIImageSymbolWeightSemibold, 36);
@@ -51,19 +82,22 @@ static UIStackView *cardRow(NSString *symbol, NSString *title, NSString *subtitl
 
     UILabel *name = [UILabel new];
     name.text = title;
-    name.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    name.font = tourFont(UIFontTextStyleBody, 17, UIFontWeightSemibold);
+    name.adjustsFontForContentSizeCategory = YES;
     name.textColor = UIColor.whiteColor;
     UILabel *line = [UILabel new];
     line.text = subtitle;
-    line.font = [UIFont systemFontOfSize:13];
+    line.font = tourFont(UIFontTextStyleFootnote, 13, UIFontWeightRegular);
+    line.adjustsFontForContentSizeCategory = YES;
     line.textColor = SGGrey();
     line.numberOfLines = 0;
     UIStackView *text = [[UIStackView alloc] initWithArrangedSubviews:@[name, line]];
     text.axis = UILayoutConstraintAxisVertical;
     text.spacing = 2;
 
-    UIStackView *row = [[UIStackView alloc] initWithArrangedSubviews:accessory ? @[icon, text, accessory] : @[icon, text]];
-    row.alignment = accessory ? UIStackViewAlignmentCenter : UIStackViewAlignmentTop;
+    SGTourRow *row = [[SGTourRow alloc] initWithArrangedSubviews:accessory ? @[icon, text, accessory] : @[icon, text]];
+    row.name = name;
+    row.centered = accessory != nil;
     row.spacing = 14;
     [text setContentHuggingPriority:UILayoutPriorityDefaultLow - 1 forAxis:UILayoutConstraintAxisHorizontal];
     [text setContentCompressionResistancePriority:UILayoutPriorityDefaultHigh - 1 forAxis:UILayoutConstraintAxisHorizontal];
@@ -71,6 +105,8 @@ static UIStackView *cardRow(NSString *symbol, NSString *title, NSString *subtitl
         [icon.widthAnchor constraintEqualToConstant:36],
         [icon.heightAnchor constraintEqualToConstant:36],
     ]];
+    row.fullWidth = [text.widthAnchor constraintEqualToAnchor:row.widthAnchor];
+    [row fitTextSize];
     return row;
 }
 
@@ -315,7 +351,8 @@ static const CGFloat kLogoRadius = 22;
 
 // A symbol and a line of small gray text, the note under a card.
 static UIStackView *noteLine(UIImageView *icon, UILabel *text) {
-    text.font = [UIFont systemFontOfSize:13];
+    text.font = tourFont(UIFontTextStyleFootnote, 13, UIFontWeightRegular);
+    text.adjustsFontForContentSizeCategory = YES;
     text.textColor = SGGrey();
     text.numberOfLines = 0;
     [text setContentHuggingPriority:UILayoutPriorityDefaultLow - 1 forAxis:UILayoutConstraintAxisHorizontal];
@@ -347,6 +384,7 @@ static BOOL adFree(void) {
     UILabel *_noteText;
     UIButton *_report;
     UIButton *_primary;
+    UILabel *_footer;
     NSArray<UIView *> *_page;   // what comes in under the logo, in order
     BOOL _landed;
 }
@@ -369,8 +407,8 @@ static BOOL adFree(void) {
     UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
     config.contentInsets = NSDirectionalEdgeInsetsMake(4, 32, 4, 0);
     config.baseForegroundColor = SGGreen();
-    config.attributedTitle = [[NSAttributedString alloc] initWithString:SGL(@"settings.onboarding.report_bug", @"Report a bug") attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold]}];
-    _report = [UIButton buttonWithConfiguration:config primaryAction:[UIAction actionWithHandler:^(UIAction *action) {
+    config.attributedTitle = [[NSAttributedString alloc] initWithString:SGL(@"settings.onboarding.report_bug", @"Report a bug") attributes:@{NSFontAttributeName: tourFont(UIFontTextStyleFootnote, 13, UIFontWeightSemibold)}];
+    _report =[UIButton buttonWithConfiguration:config primaryAction:[UIAction actionWithHandler:^(UIAction *action) {
         SGOpenURL([SGRepoURL stringByAppendingString:@"/issues"]);
     }]];
     _report.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeading;
@@ -404,14 +442,14 @@ static BOOL adFree(void) {
     // The tips of the picked look: Split Tabs is the redesign's bar's, and the lyrics preview the redesign's page's.
     _splitTip.hidden = !_redesigned.selected;
     _lyricsTip.text = _redesigned.selected
-        ? SGL(@"settings.onboarding.tips.lyrics.redesigned", @"A live preview of the look, your choice of sources, and lyrics even where Spotify has none.\nMod Settings > Lyrics")
-        : SGL(@"settings.onboarding.tips.lyrics.native", @"Your choice of sources, and lyrics even where Spotify has none.\nMod Settings > Lyrics");
+        ? SGL(@"settings.onboarding.tips.lyrics.redesigned", @"A live preview of the look, your choice of sources, and lyrics even where Spotify has none.\nScreens › Lyrics")
+        : SGL(@"settings.onboarding.tips.lyrics.native", @"Your choice of sources, and lyrics even where Spotify has none.\nScreens › Lyrics");
 }
 
 // What people miss in Mod Settings, as pointers only: the tour has no way into a page but holding Home.
 - (UIView *)tipsView {
     UIStackView *split = cardRow(@"rectangle.split.2x1", SGL(@"settings.onboarding.split_tabs.title", @"Split Tabs"),
-                                 SGL(@"settings.onboarding.split_tabs.subtitle", @"Any tab, Queue for one, on a bar of its own at the trailing end.\nMod Settings > Tab bar > Split Tabs"), nil);
+                                 SGL(@"settings.onboarding.split_tabs.subtitle", @"Any tab, Queue for one, on a bar of its own at the trailing end.\nLook & navigation › Tab bar › Split Tabs"), nil);
     _splitTip = split;
     UIStackView *lyrics = cardRow(@"quote.bubble", SGL(@"settings.main.lyrics.title", @"Lyrics"), @"", nil);
     // The row's text stack is its last arranged view, the gray line that stack's; updateNote writes the look's.
@@ -422,9 +460,9 @@ static BOOL adFree(void) {
                                    liveActivity ? SGL(@"settings.onboarding.tips.airpods.title_live", @"AirPods gestures, Live Activity")
                                                 : SGL(@"settings.onboarding.tips.airpods.title", @"AirPods gestures"),
                                    liveActivity ? SGL(@"settings.onboarding.tips.airpods.text_live", @"Nod twice or shake your head to control the music, with a chime; and the track on the "
-                                                                                                       @"lock screen. Either look.\nMod Settings > AirPods gestures, Live Activity")
+                                                                                                       @"lock screen. Either look.\nOutside Spotify & devices › AirPods gestures, Live Activity")
                                                 : SGL(@"settings.onboarding.tips.airpods.text", @"Nod twice or shake your head to control the music, with a chime. Either look."
-                                                                                                  @"\nMod Settings > AirPods gestures"), nil);
+                                                                                                  @"\nOutside Spotify & devices › AirPods gestures"), nil);
     return tipsCard(@[split, lyrics, airPods]);
 }
 
@@ -441,7 +479,8 @@ static BOOL adFree(void) {
     BOOL glass = SGRedesignAvailable();
     UILabel *heading = [UILabel new];
     heading.text = SGL(@"settings.onboarding.look.heading", @"Pick your look.");
-    heading.font = [UIFont systemFontOfSize:30 weight:UIFontWeightBold];
+    heading.font = tourFont(UIFontTextStyleTitle1, 30, UIFontWeightBold);
+    heading.adjustsFontForContentSizeCategory = YES;
     heading.textColor = UIColor.whiteColor;
     heading.numberOfLines = 0;
 
@@ -493,14 +532,16 @@ static BOOL adFree(void) {
     _sponsorCard.accessibilityValue = _sponsor.on ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off");
     _sponsorCard.accessibilityTraits = _adsCard.accessibilityTraits;
     UILabel *sponsorText = [UILabel new];
-    sponsorText.text = [NSString stringWithFormat:SGL(@"settings.onboarding.sponsorblock.note", @"Sends a five-digit episode hash prefix and selected categories to %@. Change the server and categories in Mod Settings > Premium, ads & privacy > SponsorBlock."), SGSponsorBlockServer()];
+    sponsorText.text = [NSString stringWithFormat:SGL(@"settings.onboarding.sponsorblock.note", @"Sends a five-digit episode hash prefix and selected categories to %@. Change the server and categories under Privacy, network & downloads › Premium, ads & privacy › SponsorBlock."), SGSponsorBlockServer()];
     UIStackView *sponsorNote = noteLine(SGSymbolView(@"info.circle.fill", 15, UIImageSymbolWeightSemibold, 22), sponsorText);
     sponsorNote.arrangedSubviews.firstObject.tintColor = SGGrey();
 
     UILabel *tipsHeading = [UILabel new];
     tipsHeading.text = SGL(@"settings.onboarding.tips.heading", @"Easy to miss");
-    tipsHeading.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    tipsHeading.font = tourFont(UIFontTextStyleHeadline, 17, UIFontWeightSemibold);
+    tipsHeading.adjustsFontForContentSizeCategory = YES;
     tipsHeading.textColor = UIColor.whiteColor;
+    tipsHeading.numberOfLines = 0;
     UIView *tips = [self tipsView];
 
     _column = [[UIStackView alloc] initWithArrangedSubviews:@[strip, heading, _redesigned, _legacy, _note, _adsCard, adsNote, _sponsorCard, sponsorNote, tipsHeading, tips]];
@@ -525,20 +566,22 @@ static BOOL adFree(void) {
     _primary = SGOnboardingButton(SGL(@"settings.onboarding.start", @"Start listening"));
     [_primary addTarget:self action:@selector(finish) forControlEvents:UIControlEventTouchUpInside];
     UILabel *footer = [UILabel new];
+    _footer = footer;
     footer.text = SGL(@"settings.onboarding.settings_hint", @"Hold Home to open settings.");
-    footer.font = [UIFont systemFontOfSize:13];
     footer.textColor = SGGrey();
+    footer.numberOfLines = 0;
     footer.textAlignment = NSTextAlignmentCenter;
     footer.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:_primary];
     [self.view addSubview:footer];
 
+    // Inside the safe area on every side, so in landscape nothing goes under the sensor housing.
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
     UILayoutGuide *frame = scroll.frameLayoutGuide, *content = scroll.contentLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
         [scroll.topAnchor constraintEqualToAnchor:safe.topAnchor],
-        [scroll.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
-        [scroll.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
+        [scroll.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+        [scroll.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
         [scroll.bottomAnchor constraintEqualToAnchor:_primary.topAnchor constant:-12],
         [column.topAnchor constraintEqualToAnchor:content.topAnchor constant:48],
         [column.bottomAnchor constraintEqualToAnchor:content.bottomAnchor constant:-24],
@@ -550,11 +593,11 @@ static BOOL adFree(void) {
         [_logo.bottomAnchor constraintEqualToAnchor:strip.bottomAnchor],
         [_logo.widthAnchor constraintEqualToConstant:88],
         [_logo.heightAnchor constraintEqualToConstant:88],
-        [_primary.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:kMargin],
-        [_primary.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-kMargin],
+        [_primary.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:kMargin],
+        [_primary.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-kMargin],
         [_primary.bottomAnchor constraintEqualToAnchor:footer.topAnchor constant:-12],
-        [footer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:kMargin],
-        [footer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-kMargin],
+        [footer.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:kMargin],
+        [footer.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-kMargin],
         [footer.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-8],
     ]];
     [self refresh];
@@ -616,11 +659,18 @@ static BOOL adFree(void) {
     [self refresh];
 }
 
+// The button's title for the choices made, and the button's and the line's type for the text size.
 - (void)refresh {
     UIButtonConfiguration *config = _primary.configuration;
     NSString *title = self.needsRestart ? SGL(@"settings.onboarding.restart", @"Restart Spotify") : SGL(@"settings.onboarding.start", @"Start listening");
-    config.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold]}];
+    config.attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:@{NSFontAttributeName: SGCategoryCappedFont(UIFontTextStyleBody, UIFontWeightSemibold, kBarLargestTextSize)}];
     _primary.configuration = config;
+    _footer.font = SGCategoryCappedFont(UIFontTextStyleFootnote, UIFontWeightRegular, kBarLargestTextSize);
+}
+
+- (void)traitCollectionDidChange:(UITraitCollection *)previous {
+    [super traitCollectionDidChange:previous];
+    if (![previous.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]) [self refresh];
 }
 
 // Below iOS 26 the note above the button has said what the redesign risks there, so picking it and

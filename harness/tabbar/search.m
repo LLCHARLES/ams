@@ -1,7 +1,7 @@
 // `search` (README): Search, the last of five tabs, on the minimized bar's trailing circle beside the now playing card,
 // as the Music app keeps it (issue #34). TabBar.x knows Search by the page Spotify's list of tabs names for it
 // (SGRNavbarStockURIs), which Navbar.x reads off Spotify and the harness hands it here as 9.2.0 (`spotify:search`) or,
-// with `find`, 9.1.78 to 9.1.90 (`spotify:find`) name it. Every frame of each move is sampled: one Search glyph on
+// with `find`, 9.1.90 (`spotify:find`) name it. Every frame of each move is sampled: one Search glyph on
 // screen throughout, moving no more than a spring does, the circle coming out of Search's place in the row, and no
 // glass partly faded. `splitcreate` makes Create a split tab, `nosearch` hides Search, and `own` hides it and adds a tab
 // of the mod's own named Search after it: the minimized bar as it was, the last split tab or nothing on the trailing

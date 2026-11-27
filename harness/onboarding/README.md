@@ -18,5 +18,7 @@ both in one alert about five seconds in.
 
 `sh harness/onboarding/sponsorblock-check.sh` builds into a temporary directory and runs
 the environment check and the English/Korean SponsorBlock screens on its own simulator.
+With the normal IPA plist, the check expects no rows for 9.1.90, 9.2.0 and 9.2.2 and only the
+generic version warning for either dropped version or an unrelated unsupported version.
 It renders the settings and category rows, checks the welcome switch layout and default,
 and finishes the tour to verify the opt-in is persisted separately from Premium.

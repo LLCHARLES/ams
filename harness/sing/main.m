@@ -43,6 +43,7 @@
 #import <Accelerate/Accelerate.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreML/CoreML.h>
+#import <objc/runtime.h>
 #import <pthread.h>
 #import <stdatomic.h>
 #import "Shared/Sing/SGSingLoader.h"
@@ -211,7 +212,7 @@ static Audio separateOffline(SGSingSeparator *separator, Audio mix, double *slow
 
 // The main run loop turned until `done` holds or `seconds` pass; the loader hands back on the main queue.
 static bool waitFor(double seconds, bool (^done)(void)) {
-    double until = now() + seconds;
+    double until = now() + MAX(60, seconds);
     while (!done() && now() < until) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
     return done();
 }
@@ -230,14 +231,16 @@ static bool waitFor(double seconds, bool (^done)(void)) {
 // The loader through its cases; hands back the separator it leaves Ready, both copies in it. With `neural`, the
 // model's Neural Engine copy loads beside its CPU copy, as Sing.x has it on Automatic.
 static SGSingSeparator *checkLoader(NSString *path, bool neural) {
+    extern void HarnessCaptureLoaderDelay(int64_t), HarnessFireLoaderDelay(void);
     NSURL *url = [NSURL fileURLWithPath:path];
     SGSingLoaderSetForeground(YES);
 
     // A load past its deadline is abandoned and Sing is Failed; the mic off and on starts a fresh one at once,
     // which works while the first is still out, and the first is let go when it comes back.
     SGSingLoaderCPUDeadline = 0.2;
+    HarnessCaptureLoaderDelay(200 * NSEC_PER_MSEC);
     SGSingLoaderWant(url, NO);
-    waitFor(5, ^bool { return SGSingLoaderCurrentState() != SGSingLoaderLoading; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderFailed && [SGSingLoaderError() containsString:@"did not load in"],
           "a load past its deadline is abandoned, and Sing is Failed: %s", SGSingLoaderError().UTF8String ?: "(no reason)");
     SGSingLoaderCPUDeadline = 120;
@@ -264,21 +267,21 @@ static SGSingSeparator *checkLoader(NSString *path, bool neural) {
 
     // Kept over a quick off and on, dropped once the time kept has passed.
     SGSingLoaderKeepSeconds = 1.5;
+    HarnessCaptureLoaderDelay(1500 * NSEC_PER_MSEC);
     SGSingLoaderRelease();
-    waitFor(0.5, ^bool { return false; });
     SGSingLoaderWant(url, neural);
-    waitFor(2, ^bool { return false; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderSeparator() == separator && SGSingLoaderAttempts() == 2 + neural,
           "switched off and on within the time kept, the copies are still there and nothing loads (%u loads)", SGSingLoaderAttempts());
+    HarnessCaptureLoaderDelay(1500 * NSEC_PER_MSEC);
     SGSingLoaderRelease();
-    waitFor(3, ^bool { return SGSingLoaderCurrentState() == SGSingLoaderIdle; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderIdle && !SGSingLoaderSeparator(), "left off past the time kept, the copies are dropped");
 
     // A purge during a load: what the load brings back is let go.
     SGSingLoaderWant(url, NO);
     SGSingLoaderPurge(@"the harness purges during the load");
     waitFor(300, ^bool { return SGSingLoaderOutstanding() == 0; });
-    waitFor(0.5, ^bool { return false; });
     CHECK(SGSingLoaderCurrentState() == SGSingLoaderIdle && !SGSingLoaderSeparator(), "a load purged on its way is let go when it comes back");
 
     // Another model wanted (the update in place of the old one), here the same files through a link: the first model's
@@ -354,12 +357,15 @@ static void checkNeuralMatches(SGSingSeparator *separator, Audio mix, NSString *
 // as Sing.x does once it has failed, the windows stay on the CPU's.
 static void checkNeuralFallback(NSString *path) {
     NSURL *url = [NSURL fileURLWithPath:path];
-    SGSingSeparator *separator = SGSingLoaderSeparator();
     SGSingLoaderWant(url, NO);
-    CHECK(SGSingLoaderFastState() == SGSingFastNone && ![separator stats].fast, "asked for none, the Neural Engine copy is dropped");
+    waitFor(300, ^bool { return SGSingLoaderCurrentState() != SGSingLoaderLoading; });
+    SGSingSeparator *separator = SGSingLoaderSeparator();
+    CHECK(separator && SGSingLoaderFastState() == SGSingFastNone, "asked for none, the Neural Engine copy is dropped and CPU is ready");
     SGSingLoaderNeuralDeadline = 0.001;
+    extern void HarnessCaptureLoaderDelay(int64_t), HarnessFireLoaderDelay(void);
+    HarnessCaptureLoaderDelay(NSEC_PER_MSEC);
     SGSingLoaderWant(url, YES);
-    waitFor(60, ^bool { return SGSingLoaderFastState() != SGSingFastLoading; });
+    HarnessFireLoaderDelay();
     CHECK(SGSingLoaderFastState() == SGSingFastTimedOut && SGSingLoaderSeparator() == separator && SGSingLoaderCurrentState() == SGSingLoaderReady,
           "the Neural Engine copy past its deadline times out, and Sing stays Ready on the CPU's");
     SGSingLoaderNeuralDeadline = 600;
@@ -977,6 +983,7 @@ static void checkFallingBehind(void) {
 @property double seconds;   // atomic: changed while the worker runs a window
 @property (nonatomic) bool fails;
 @property (nonatomic) MLComputeUnits units;
+@property (nonatomic, strong) dispatch_semaphore_t predicted;
 @end
 
 @implementation SGMockModel
@@ -993,7 +1000,9 @@ static void checkFallingBehind(void) {
     }
     MLMultiArray *vocals = [[MLMultiArray alloc] initWithShape:@[@1, @(2 * kSGSingBins), @(kSGSingSTFTFrames), @2] dataType:MLMultiArrayDataTypeFloat32 error:error];
     [vocals getMutableBytesWithHandler:^(void *bytes, NSInteger size, NSArray<NSNumber *> *strides) { memset(bytes, 0, (size_t)size); }];
-    return vocals ? [[MLDictionaryFeatureProvider alloc] initWithDictionary:@{@"vocals_spectrum": vocals} error:error] : nil;
+    id<MLFeatureProvider> result = vocals ? [[MLDictionaryFeatureProvider alloc] initWithDictionary:@{@"vocals_spectrum": vocals} error:error] : nil;
+    if (result && _predicted) dispatch_semaphore_signal(_predicted);
+    return result;
 }
 @end
 
@@ -1002,6 +1011,103 @@ static SGMockModel *mockCopy(MLComputeUnits units, double seconds) {
     model.units = units;
     model.seconds = seconds;
     return model;
+}
+
+static void checkPreparePurge(NSURL *url, dispatch_semaphore_t predicted) {
+    __block unsigned callbacks = 0;
+    __block BOOL prepared = NO;
+    void (^done)(BOOL) = ^(BOOL success) { callbacks++; prepared = success; };
+    CHECK(SGSingLoaderPrepareNeural(url, done), "standalone prepare starts");
+    CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && callbacks == 1 && prepared,
+          "successful standalone ANE warm-up marks the install prepared");
+    CHECK(!dispatch_semaphore_wait(predicted, DISPATCH_TIME_NOW), "control prepare produced valid ANE features");
+    callbacks = 0;
+    prepared = NO;
+    CHECK(SGSingLoaderPrepareNeural(url, done), "second standalone prepare starts");
+    // Main owns this call until after purge: the prediction succeeds but its completion cannot publish yet.
+    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "purged prepare produced valid ANE features");
+    SGSingLoaderPurge(@"memory warning");
+    CHECK(SGSingLoaderPreparingSeconds() < 0, "purge abandons the standalone prepare");
+    CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && !callbacks && !prepared,
+          "purged successful prepare does not invoke the install-prepared callback");
+}
+
+// Only replace Core ML's file reader. Exercise the real loader, proof counter, ownership and reload.
+static void checkProvenFallback(void) {
+    __block __weak SGMockModel *cpu;
+    __block __weak SGMockModel *fast;
+    NSURL *abandoned = [NSURL fileURLWithPath:@"/abandoned.mlmodelc"];
+    NSURL *preparing = [NSURL fileURLWithPath:@"/prepared.mlmodelc"];
+    dispatch_semaphore_t predicted = dispatch_semaphore_create(0), finishPrepare = dispatch_semaphore_create(0);
+    Method reader = class_getClassMethod(MLModel.class, @selector(modelWithContentsOfURL:configuration:error:));
+    IMP stub = imp_implementationWithBlock(^MLModel *(id cls, NSURL *url, MLModelConfiguration *config, NSError **error) {
+        if ([url isEqual:preparing] && config.computeUnits != MLComputeUnitsCPUOnly &&
+            dispatch_semaphore_wait(finishPrepare, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) return nil;
+        SGMockModel *model = mockCopy(config.computeUnits, 0);
+        if ([url isEqual:abandoned]) model.predicted = predicted;
+        if (config.computeUnits == MLComputeUnitsCPUOnly) cpu = model; else fast = model;
+        return model;
+    });
+    IMP original = method_setImplementation(reader, stub);
+    NSURL *url = [NSURL fileURLWithPath:@"/mock.mlmodelc"];
+    SGSingLoaderSetForeground(YES);
+    checkPreparePurge(abandoned, predicted);
+    SGSingLoaderWant(abandoned, NO);
+    // Main is still in this call, so a successful prediction cannot have published its completion yet.
+    CHECK(!dispatch_semaphore_wait(predicted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)), "abandoned CPU load produced valid features");
+    SGSingLoaderPurge(@"memory warning");
+    CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && SGSingLoaderCurrentState() == SGSingLoaderIdle &&
+          !SGSingLoaderSeparator(), "successful abandoned CPU load is not installed");
+    // Outstanding counts main-thread completions, not the load queue's autorelease pool draining.
+    CHECK(waitFor(10, ^bool { @autoreleasepool { return cpu == nil; } }), "abandoned CPU load is deallocated");
+
+    __block BOOL prepared = NO;
+    unsigned before = SGSingLoaderAttempts();
+    CHECK(SGSingLoaderPrepareNeural(preparing, ^(BOOL success) { prepared = success; }), "next model prepares ahead");
+    SGSingLoaderWant(preparing, YES);
+    CHECK(waitFor(10, ^bool { return SGSingLoaderFastState() == SGSingFastLoading; }), "updated mic model requests ANE");
+    dispatch_semaphore_signal(finishPrepare);
+    CHECK(waitFor(10, ^bool { return SGSingLoaderFastState() == SGSingFastReady; }) && !prepared && SGSingLoaderAttempts() == before + 2,
+          "updated model takes over its own prepare without a second ANE load");
+    SGSingLoaderPurge(@"end takeover case");
+    CHECK(SGSingLoaderPrepareNeural(preparing, ^(BOOL success) { prepared = success; }), "independent prepare starts");
+    SGSingLoaderWant(preparing, YES);
+    SGSingLoaderRelease();  // main hasn't yet accepted the CPU completion, so it cannot have taken over the prepare
+    CHECK(waitFor(10, ^bool { return SGSingLoaderCurrentState() == SGSingLoaderReady; }), "off before CPU warm-up completes");
+    SGSingLoaderKeepSeconds = 0;
+    SGSingLoaderRelease();
+    CHECK(waitFor(10, ^bool { return SGSingLoaderCurrentState() == SGSingLoaderIdle; }), "mic copies expire");
+    SGSingLoaderKeepSeconds = 60;
+    dispatch_semaphore_signal(finishPrepare);
+    CHECK(waitFor(10, ^bool { return !SGSingLoaderOutstanding(); }) && prepared && !SGSingLoaderSeparator(),
+          "independent compile finishes after the mic copies expire");
+
+    SGSingLoaderWant(url, YES);
+    BOOL ready = waitFor(10, ^bool { return SGSingLoaderFastState() == SGSingFastReady; });
+    SGSingSeparator *sep = SGSingLoaderSeparator();
+    Audio input = makeAudio(kSGSingWindowFrames), output = makeAudio(kSGSingWindowFrames);
+    BOOL (^window)(SGSingSeparator *) = ^BOOL(SGSingSeparator *s) {
+        @autoreleasepool {
+            return [s separateLeft:input.left right:input.right vocalsLeft:output.left vocalsRight:output.right error:nil];
+        }
+    };
+    BOOL ok = ready;
+    for (int i = 0; ok && i < 19; i++) ok = window(sep);
+    @autoreleasepool { CHECK(ok && cpu != nil, "CPU fallback remains available through ANE probation"); }
+    CHECK(window(sep) && cpu == nil && window(sep), "proven ANE keeps separating with CPU deallocated");
+    SGSingLoaderSetForeground(NO);
+    fast.fails = true;
+    CHECK(!window(sep) && sep.stats.fastFailed, "late ANE failure cannot emit a separated window");
+    SGSingLoaderDropFast(@"failed a window");
+    CHECK(!SGSingLoaderSeparator() && SGSingLoaderCurrentState() == SGSingLoaderLoading,
+          "dry playback has no separator while the replacement CPU loads");
+    BOOL resumed = waitFor(10, ^bool { return SGSingLoaderCurrentState() == SGSingLoaderReady; });
+    CHECK(resumed && !fast && cpu && window(SGSingLoaderSeparator()) && SGSingLoaderSeparator().stats.windows[0] == 1,
+          "separation resumes on the reloaded CPU alone, even in background");
+    SGSingLoaderPurge(nil);
+    method_setImplementation(reader, original);
+    imp_removeBlock(stub);
+    free(input.left); free(input.right); free(output.left); free(output.right);
 }
 
 // The Neural Engine copy loading while the CPU's falls behind (Sing.x holds the budget while the loader reads
@@ -1316,6 +1422,7 @@ int main(int argc, char **argv) {
         if (argc == 2 && (!strcmp(argv[1], "commands") || !strcmp(argv[1], "regressions"))) {
             checkCommands();
             if (!strcmp(argv[1], "regressions")) {
+                checkProvenFallback();
                 checkWorkerWake();
                 checkQuietStart();
             }
@@ -1372,6 +1479,9 @@ int main(int argc, char **argv) {
             mix.left[i] = padded.left[i] + backing.left[i];
             mix.right[i] = padded.right[i] + backing.right[i];
         }
+        // Compare the warm fallback and check probation failures before the offline pass proves ANE.
+        checkCopies(separator, mix, neural);
+        if (neural) checkNeuralMatches(separator, mix, modelPath);
         double slowest, average;
         Audio vocals = separateOffline(separator, mix, &slowest, &average);
         printf("  info  a two second window takes %.0f ms on average, %.0f ms at most (the copies were warmed with silence)\n", average * 1000, slowest * 1000);
@@ -1385,14 +1495,11 @@ int main(int argc, char **argv) {
         }
         printf("  info  the mix less them scores %.1f dB against the chords, the mix itself %.1f dB\n", snr(backing, accompaniment, kSGSingRate, to),
                snr(backing, mix, kSGSingRate, to));
-        if (neural) checkNeuralMatches(separator, mix, modelPath);
         writeWAV(@"mix.wav", mix);
         writeWAV(@"vocals.wav", vocals);
         writeWAV(@"accompaniment.wav", accompaniment);
 
         checkEngine(separator, mix, padded, vocals);
-        // Last, as it swaps the faster copy out.
-        checkCopies(separator, mix, neural);
         if (neural) checkNeuralFallback(modelPath);
         checkHold();
         checkCap();

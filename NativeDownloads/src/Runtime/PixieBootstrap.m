@@ -7,7 +7,6 @@
 #import <AVFAudio/AVFAudio.h>
 #import <dlfcn.h>
 #import "AudioProbe.h"
-#import "SourceGraph.h"
 #import "OfflineFlags.h"
 #import "TrackDownload.h"
 #import "OfflineConfig.h"
@@ -31,6 +30,7 @@
 
 // Install the host backend once, preserving the original initialization order.
 __attribute__((constructor)) static void SAPLoad(void) {
+    SAPObserveProfileImages();
     if(!SAPRuntimeProfileAdmitted())return;
     @autoreleasepool {
         NSBundle *host=NSBundle.mainBundle;
@@ -56,7 +56,11 @@ __attribute__((constructor)) static void SAPLoad(void) {
         SAPSetOfflineKeySuccessObserver(SAPExportObserveOfflineSuccess);
         }
         SAP_TRACE("startup","pixie_hooks_installed",0,@{@"offline_flags":SAPOfflineFlagsReport(),@"offline_config":SAPOfflineConfigReport(),@"native_offline":SAPNativeOfflineReport(),@"transport":SAPTrackDownloadReport(),@"hooks":SAPTraceHookManifest()});
-        dispatch_async(dispatch_get_main_queue(), ^{ SAPInstallDownloadSettings();SAPInstallNativeShareHooks(); });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // The companion's dyld add-image event can precede its constructor.
+            [NSNotificationCenter.defaultCenter postNotificationName:@"SAPOfflineProfileReady" object:nil];
+            SAPInstallDownloadSettings();SAPInstallNativeShareHooks();
+        });
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidFinishLaunchingNotification object:nil queue:nil usingBlock:^(NSNotification *note){dispatch_async(dispatch_get_main_queue(),^{SAPInstallDownloadSettings();});}];
     }
 }

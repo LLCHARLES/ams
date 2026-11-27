@@ -2,6 +2,9 @@
 #import "Settings/SGPageStyle.h"
 #import "About.h"
 #import "App/Onboarding/Onboarding.h"
+#import "App/Pages.h"
+#import "Shared/AnimatedArtwork/AnimatedArtwork.h"
+#import "Shared/ListeningStats/ListeningStats.h"
 #import "Shared/AutoMix/AutoMix.h"
 #import "Shared/Flags/Flags.h"
 #import "Shared/Navigation/Links.h"
@@ -9,6 +12,10 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
+#import "Shared/WireGuard/SGWGCredentials.h"
+#if SG_WIREGUARD
+#import "Shared/WireGuard/SGWGCore.h"
+#endif
 
 // Every key of the mod's is under one prefix, so a reset is a sweep of the defaults with the stock
 // marker of SGPrefs.h left behind; the hooks read them at launch, so it ends in a restart.
@@ -34,6 +41,7 @@ static void confirmReset(void) {
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.mod.reset.action.reset_and_restart", @"Reset and restart") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) { resetAll(); }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -41,7 +49,7 @@ static void confirmReset(void) {
 // by each service's own name, and keeps the settings.
 static void confirmClearKeychain(void) {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.mod.keychain.alert.title", @"Clear Keychain?")
-                                                                  message:SGL(@"settings.mod.keychain.alert.message", @"The Gemini, Claude, OpenAI-compatible and DeepL API keys, the Spicy Lyrics key and the Deezer ARL are removed from this iPhone. Settings stay as they are.")
+                                                                  message:SGL(@"settings.mod.keychain.alert.message", @"Removes lyrics and translation keys, the Deezer ARL, and the WireGuard profile and proxy credentials. WireGuard and proxy settings are cleared. Spotify restarts if either connection is active.")
                                                            preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.mod.keychain.action.clear", @"Clear Keychain") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         // Every service is asked even after one refuses, so a locked Keychain leaves as little as possible behind.
@@ -52,6 +60,12 @@ static void confirmClearKeychain(void) {
         cleared &= SGDeepLForgetKey();
         cleared &= SGSpicyLyricsForgetKey();
         cleared &= SGDeezerForgetKey();
+        BOOL networkCleared = SGWGForgetAllCredentials();
+        cleared &= networkCleared;
+        BOOL restart = NO;
+#if SG_WIREGUARD
+        restart = networkCleared && SGWGActiveThisLaunch();
+#endif
         // The translators' rows, their pages and the lyrics menu follow this notification, as their own
         // Remove does. The lyrics sources read their key at each ask; their rows and the lyrics view hear
         // the sources' own change, so the track playing is announced reloaded and builds its lines again.
@@ -60,21 +74,50 @@ static void confirmClearKeychain(void) {
         if (playing.length) [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsDidReloadNotification object:playing];
         if (cleared) {
             SGLog(@"reset: keychain cleared");
+            if (restart) SGRestartSpotify();
             return;
         }
         SGLog(@"reset: keychain not cleared, the Keychain refused a delete");
         UIAlertController *failed = [UIAlertController alertControllerWithTitle:SGL(@"settings.mod.keychain.failed.title", @"Keychain not cleared")
                                                                         message:SGL(@"settings.mod.keychain.failed.message", @"The Keychain could not remove every key, so some are still stored on this iPhone. Please try again.")
                                                                  preferredStyle:UIAlertControllerStyleAlert];
-        [failed addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:nil]];
+        [failed addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+            if (restart) SGRestartSpotify();
+        }]];
+        SGPresentDark(failed);
         [SGTopController() presentViewController:failed animated:YES completion:nil];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
-// Which build this is, whether GitHub has a newer release, and where to reach the mod: without these
-// rows a build that is already installed has no way of telling its user that anything moved on.
+static void showStorageAction(SGModPage *page, NSString *title) {
+    [page revealRowTitled:title];
+    SGShowPage(SGTopController(), page);
+}
+
+static UIViewController *storagePage(void) {
+    SGModRow *cacheLimit = SGSwitchRow(SGL(@"settings.mod.storage.limit", @"Show cache size limit"), SGRestartNote, SGKeyShowCacheLimit);
+    SGModRow *storage = SGActionRow(SGL(@"settings.mod.storage.open", @"Open Spotify storage settings"), nil, ^{
+        SGOpenSpotifyURI([NSURL URLWithString:@"spotify:config:storage"]);
+    });
+    storage.searchIdentifier = @"action.spotifyStorage";
+    SGModRow *lyrics = SGDeleteSavedLyricsRow(^{
+        showStorageAction((SGModPage *)SGLyricsSettingsPage(), SGL(@"settings.lyrics.offline.delete", @"Delete saved lyrics"));
+    });
+    NSString *erase = SGL(@"settings.stats.action.erase", @"Erase listening history");
+    SGModRow *history = SGActionRow(erase, nil, ^{
+        showStorageAction((SGModPage *)SGListeningStatsPage(), erase);
+    });
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.mod.storage.title", @"Storage") intro:nil sections:@[
+        SGNotedSection(@"Spotify", @[cacheLimit, storage],
+            SGL(@"settings.mod.storage.footer", @"Spotify trims its cache to the size you choose and keeps your downloads. With a small cache, Pixie may need to download a streamed track before exporting it.")),
+        SGSection(@"Retrine", @[SGSearchIdentified(SGArtworkCacheRow(), @"action.artwork.clear"), lyrics,
+            SGSavedTranslationsRow(), SGSearchIdentified(history, @"action.stats.history")]),
+    ] footer:nil];
+}
+
 UIViewController *SGAboutPage(void) {
     __block __weak SGModPage *owner = nil;
     SGModRow *language = SGChoiceRow(SGL(@"settings.mod.language.title", @"Language"), nil, SGKeyLanguage,
@@ -83,11 +126,6 @@ UIViewController *SGAboutPage(void) {
           SGL(@"settings.mod.language.korean", @"한국어"),
           SGL(@"settings.mod.language.chinese", @"简体中文")], 0);
     language.choiceFooter = SGL(@"settings.mod.language.footer", @"Applies after you restart Spotify.");
-    SGModRow *cacheLimit = SGSwitchRow(SGL(@"settings.mod.storage.limit", @"Show cache size limit"), SGRestartNote, SGKeyShowCacheLimit);
-    SGModRow *storage = SGActionRow(SGL(@"settings.mod.storage.open", @"Open Spotify storage settings"), nil, ^{
-        SGOpenSpotifyURI([NSURL URLWithString:@"spotify:config:storage"]);
-    });
-    storage.searchIdentifier = @"action.spotifyStorage";
     SGModRow *reset = SGWithSymbol(SGActionRow(SGL(@"settings.mod.reset.title", @"Reset all settings"), nil, ^{ confirmReset(); }), @"trash");
     reset.color = SGRed();
     // Reset all removes the settings; the keys live in the Keychain, which it leaves alone, so this takes them.
@@ -99,11 +137,7 @@ UIViewController *SGAboutPage(void) {
     // The row reads out where the build stands and opens the changelog of everything newer than it.
     SGModRow *updates = SGPageRow(SGL(@"settings.mod.updates.title", @"Updates"), ^UIViewController *{ return SGUpdatePage(); });
     updates.value = ^NSString *{ return SGUpdateStatus(); };
-    // A release build can opt into betas; a beta build starts opted in. Either way a check follows at
-    // once, since the stored list only holds what counted at the last one.
-    SGModRow *betas = SGSwitchRow(SGL(@"settings.mod.include_betas.title", @"Include betas"), SGL(@"settings.mod.include_betas.subtitle", @"Offer test builds ahead of each release"), SGKeyUpdateBetas);
-    betas.defaultOn = SGBuildIsBeta();
-    betas.changed = ^(BOOL on) { SGCheckForUpdate(YES); };
+    updates.searchIdentifier = @"page.mod.updates";
     NSMutableArray<SGModRow *> *links = [NSMutableArray array];
     if (SGRepoURL) [links addObject:SGWithSymbol(SGLinkRow(@"GitHub", nil, SGRepoURL), @"chevron.left.forwardslash.chevron.right")];
     [links addObjectsFromArray:@[
@@ -111,7 +145,7 @@ UIViewController *SGAboutPage(void) {
         SGWithSymbol(SGActionRow(SGL(@"settings.mod.tour.title", @"Welcome tour"), nil, ^{ SGShowOnboarding(); }), @"map"),
     ]];
     if (SGWhatsNewChanges().count) [links insertObject:SGWithSymbol(SGActionRow(SGL(@"settings.mod.whats_new.title", @"What's New"), nil, ^{ SGShowWhatsNew(); }), @"sparkles") atIndex:links.count - 1];
-    NSMutableArray<SGModRow *> *build = [NSMutableArray arrayWithObjects:updates, betas,
+    NSMutableArray<SGModRow *> *build = [NSMutableArray arrayWithObjects:updates,
         SGStatRow(SGL(@"settings.mod.version.title", @"Version"), ^NSString *{ return @(SG_VERSION); }),
         SGStatRow(@"Spotify", ^NSString *{ return spotify; }), nil];
     SGModRow *signedUntil = SGSigningExpiryRow();
@@ -120,11 +154,12 @@ UIViewController *SGAboutPage(void) {
         SGSection(nil, build),
         SGSection(nil, links),
         SGNotedSection(nil, @[language], language.choiceFooter),
-        SGNotedSection(SGL(@"settings.mod.storage.title", @"Storage"), @[cacheLimit, storage],
-            SGL(@"settings.mod.storage.footer", @"Spotify trims its cache to the size you choose and keeps your downloads. With a small cache, Pixie may need to download a streamed track before exporting it.")),
+        SGSection(nil, @[SGSearchIdentified(SGPageRow(SGL(@"settings.mod.storage.title", @"Storage"), ^UIViewController *{ return storagePage(); }), @"page.mod.storage")]),
         SGSection(nil, @[
             SGWithSymbol(SGActionRow(SGL(@"settings.mod.export_settings.title", @"Export settings"), nil, ^{ SGExportSettings(); }), @"square.and.arrow.up"),
             SGWithSymbol(SGActionRow(SGL(@"settings.mod.import_settings.title", @"Import settings"), nil, ^{ SGImportSettings(owner); }), @"square.and.arrow.down"),
+        ]),
+        SGSection(SGL(@"settings.mod.support", @"Support & diagnostics"), @[
             SGWithSymbol(SGActionRow(SGL(@"settings.mod.share_diagnostics.title", @"Share diagnostics"), SGL(@"settings.mod.share_diagnostics.subtitle", @"For a bug report: versions, ad counts, this launch's log and Spotify's config. Song names can show."),
                                    ^{ SGShareDiagnostics(owner); }), @"stethoscope"),
             SGWithNew(SGWithSymbol(SGPageRow(SGL(@"settings.mod.report.title", @"Report a problem"), ^UIViewController *{ return SGReportListPage(); }), @"exclamationmark.bubble"), @"reportProblem"),

@@ -106,7 +106,7 @@ SGLyricsAsk SGGeniusAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
         if (empty) query.requestContext.emptyNameSearch = SGGeniusAsk;
         NSNumber *song = SGGeniusSongIn(response, query.title, query.artist);
         if (!song) {
-            SGLog(@"genius: no song for %@ by %@", query.title, query.artist);
+            SGLog(@"genius: no matching song");
             done(nil);
             return;
         }
@@ -115,11 +115,11 @@ SGLyricsAsk SGGeniusAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
             NSArray<NSString *> *rows = SGGeniusEmbedRows(js);
             if (!rows) {
                 if (js) [query.requestContext noteFailure:YES];
-                SGLog(@"genius: %@ by %@ is song %@, no lines in its embed", query.title, query.artist, song);
+                SGLog(@"genius: no lines in the embed");
                 done(nil);
                 return;
             }
-            SGLog(@"genius: %@ by %@ is song %@, %lu untimed lines", query.title, query.artist, song, (unsigned long)rows.count);
+            SGLog(@"genius: %lu untimed lines", (unsigned long)rows.count);
             done(SGLyricsPlainResult(rows));
         });
     });

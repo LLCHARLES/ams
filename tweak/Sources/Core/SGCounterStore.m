@@ -24,10 +24,9 @@ static const int64_t kCounterSaveDelayNs = 30 * NSEC_PER_SEC;
         snapshot = [_counts copy];
         _unsaved = NO;
     }
-    // Defaults notifies observers synchronously: neither a counter lock nor a request thread
-    // may surround the write. Snapshot now, so an earlier timer cannot resurrect reset counts.
-    if (snapshot.count) [NSUserDefaults.standardUserDefaults setObject:snapshot forKey:_key];
-    else [NSUserDefaults.standardUserDefaults removeObjectForKey:_key];
+    // Same app-domain keys for settings and backup, without NSUserDefaults' change broadcast.
+    CFPreferencesSetAppValue((__bridge CFStringRef)_key, snapshot.count ? (__bridge CFDictionaryRef)snapshot : NULL,
+                             kCFPreferencesCurrentApplication);
 }
 
 // Called under the lock. One timer covers all increments in this window, including after a reset.

@@ -1,3 +1,4 @@
+#import "Shared/SGMediaClock.h"
 // PlayerMix.h says what this is for.
 //
 // The facts are read again on their notification and on every player report (reconcile). The last facts with known
@@ -374,7 +375,7 @@ static BOOL seen(UIView *view) {
 
 // What holds the stage back, cheap enough to ask on every frame: `view` is the stage or the cover.
 static BOOL heldBack(UIView *view) {
-    return !sg_artworkOn || !seen(view) || SGRReduceMotion() || SGRPlayerIsTransitioning() || SGRPlayerLyricsOpen()
+    return !sg_artworkOn || !seen(view) || SGRReduceMotion() || SGRPlayerIsTransitioning() || SGRPlayerPageOpen()
         || SGRPlayerCoverHidden() || UIApplication.sharedApplication.applicationState != UIApplicationStateActive || wideLayout(view.traitCollection);
 }
 
@@ -563,7 +564,7 @@ static BOOL stateHolds(SPTPlayerState *state) {
             [self stop:@"done" done:YES];
             return;
         }
-        CFTimeInterval now = CACurrentMediaTime();
+        CFTimeInterval now = SG_MEDIA_CLOCK();
         if (!_overdueSince) _overdueSince = now;
         if (now - _overdueSince > kArrivalWait) {
             [self stop:@"the next song did not come" done:YES];

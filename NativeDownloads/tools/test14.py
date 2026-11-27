@@ -33,6 +33,7 @@ SCRIPTED = {
         "packaging_admission", "track_api_binary", "profile_runtime",
         "runtime_effects", "native_admission", "package_publication")},
     "native_share_defaults": ("export", ROOT/"tests/native_share_notifications.py"),
+    "offline_delegate_admission": ("admission", ROOT/"tests/offline_delegate_admission.py"),
 }
 
 
@@ -68,7 +69,7 @@ FIXTURES = (
     Fixture("offline_library_catalog", "library", ("OfflineLibraryCatalog.m", "WireProto.m", "offline_library_catalog.m")),
     Fixture("offline_catalog_transport", "transport", ("OfflineLibraryCatalog.m", "SpotifyTransportRegistry.m", "SpotifyServiceCalls.m", "SpotifyTransportHooks.m", "WireProto.m", "offline_catalog_transport.m"), scenarios=tuple((s,) for s in ("candidate_churn", "service_route", "stream_route", "method_route", "slow_route", "cancel_reopen", "cancel_late_route", "service_isolation", "invalid_proof", "weak_route", "bridge_last", "late_reply", "cancel_before_send", "exhaustion", "stream_once", "persisted_route", "persisted_invalid"))),
     Fixture("spotify_cache_clear", "library", ("SpotifyCacheClear.m", "WireProto.m", "spotify_cache_clear.m"), scenarios=tuple((s,) for s in ("normal", "stats_unreadable", "error", "not_invoked", "busy"))),
-    Fixture("offline_library_delete", "library", ("OfflineLibraryDelete.m", "AlbumMetadata.m", "WireProto.m", "offline_library_delete.m")),
+    Fixture("offline_library_delete", "library", ("OfflineLibraryDelete.m", "WireProto.m", "offline_library_delete.m")),
     Fixture("offline_library_export", "library", ("OfflineLibraryExport.m", "export_status_stub.m", "offline_library_export.m")),
     Fixture("artist_catalog_append", "catalog", ("artist_catalog_append.m",)),
     Fixture("export_refresh_policy", "export", ("export_refresh_policy.m",)),
@@ -105,7 +106,6 @@ FIXTURES = (
     Fixture("retrine_track_download", "transport", ("PlayerTrace.m", "WireProto.m", "tests/track_download.m"), groups=("manual_download",), diagnostics=True),
     Fixture("artist_session", "session", ("WireProto.m", "artist_session.m"), groups=("artist_session",)),
     Fixture("artist_metadata", "catalog", ("ArtistMetadata.m", "WireProto.m", "artist_metadata.m")),
-    Fixture("album_metadata", "catalog", ("AlbumMetadata.m", "WireProto.m", "album_metadata.m")),
     Fixture("playlist_downloads", "playlists", ("WireProto.m", "playlist_downloads.m"), groups=("playlists",)),
     Fixture("playlist_streaming", "playlists", ("WireProto.m", "playlist_streaming.m"), groups=("playlists",)),
     Fixture("download_compatibility", "devices", ("OfflineCompatibilityChecks.m", "WireProto.m", "download_compatibility.m"), diagnostics=True),

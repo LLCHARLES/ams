@@ -40,7 +40,7 @@ PROTECTED = {
 
 # Explicitly checked 9.1.90 exceptions, not a blanket exemption for missing methods.
 # These classes have no Objective-C -load. Never substitute dependency injection or
-# an initializer for it. Existing legacy targets remain guarded for older versions.
+# an initializer for it.
 NO_LOAD = {
     "_TtC19Upsells_ServiceImpl18UpsellsServiceImpl",
     "_TtC42AdsEmbedded_AdsSponsoredPlaylistHeaderImpl37AdsSponsoredPlaylistHeaderServiceImpl",
@@ -132,8 +132,8 @@ def binary_classes(ipa):
         info = plistlib.loads(transport.bounded_member(
             archive, "Payload/Spotify.app/Info.plist", transport.MAX_PLIST_BYTES))
         version = info.get("CFBundleShortVersionString")
-        if version not in ("9.1.90", "9.2.0") or info.get("CFBundleIdentifier") != "com.spotify.client":
-            raise ValueError("This audit requires the original Spotify 9.1.90 or 9.2.0 IPA")
+        if version not in ("9.1.90", "9.2.0", "9.2.2") or info.get("CFBundleIdentifier") != "com.spotify.client":
+            raise ValueError("This audit requires the original Spotify 9.1.90, 9.2.0 or 9.2.2 IPA")
         expected = transport.INSPECTED_UUIDS[version]
         if info.get("CFBundleVersion") != expected["build"]:
             raise ValueError(f"Spotify build differs from the inspected {version} IPA")
@@ -204,8 +204,8 @@ def audit(classes, hooked):
         elif name in NO_LOAD:
             if "load" in methods:
                 errors.append(f"Stale no-load exemption: {name}")
-            if name in hooked and hooked[name][0] != "load":
-                errors.append(f"Unverified alternate hook on no-load service: {name}")
+            if name in hooked:
+                errors.append(f"Unverified hook on no-load service: {name}")
             exempt.append(f"{name}: no Objective-C -load (not silenced)")
         elif name in hooked and compatible(hooked[name][0], methods.get(hooked[name][0])) and EXPECTED_GATES.get(name) == hooked[name][1]:
             covered.append(f"{name} -{hooked[name][0]}")
@@ -215,7 +215,7 @@ def audit(classes, hooked):
         if name not in classes:
             if name not in ADS_BASE_OWNERS or not ADS_BASE_OWNERS.intersection(classes):
                 errors.append(f"Hook class absent from inspected IPA: {name}")
-        elif selector not in selectors(classes, name) and not (name in NO_LOAD and selector == "load"):
+        elif selector not in selectors(classes, name):
             errors.append(f"Hook selector absent from inspected IPA: {name} -{selector}")
         elif selector in selectors(classes, name) and not compatible(selector, selectors(classes, name)[selector]):
             errors.append(f"Incompatible or unproven hook ABI: {name} -{selector}: {selectors(classes, name)[selector]}")

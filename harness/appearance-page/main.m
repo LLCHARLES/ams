@@ -37,15 +37,11 @@ static NSInteger hex(NSString *text) {
 
 @implementation AppDelegate
 
-// SGAppearancePage's sections, the Redesigned UI switch standing in for either first row.
+// Exercise the production look-specific sections and the shared font controls.
 - (UIViewController *)appearancePage {
-    SGModRow *look = SGOptionRow(@"Redesigned UI", nil, SGKeyRedesign);
-    look.glows = YES;
-    return [[SGModPage alloc] initWithTitle:@"Appearance" intro:SGRestartNote sections:@[
-        SGSection(nil, @[SGWithSymbol(look, @"sparkles")]),
-        SGSection(nil, SGFlag(SGKeyRedesign, NO) ? SGRAppearanceRows() : SGNativeAppearanceRows()),
-        SGSection(nil, SGAppFontRows()),
-    ] footer:nil];
+    NSArray *sections = SGFlag(SGKeyRedesign, NO) ? SGRAppearanceSections() : SGNativeAppearanceSections();
+    return [[SGModPage alloc] initWithTitle:@"Appearance" intro:SGRestartNote
+        sections:[sections arrayByAddingObject:SGSection(@"Font & app icon", SGAppFontRows())] footer:nil];
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {

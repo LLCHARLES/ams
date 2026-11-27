@@ -11,14 +11,21 @@ the exact short version, bundle build, main UUID and SpotifyShared UUID.
 | --- | --- | --- | --- |
 | 9.1.90 | 919002269 | Enabled | Verified old target |
 | 9.2.0 | 920002054 | Primary IPA enabled | Runtime admitted using pinned Eevee layout and static setter proofs below |
+| 9.2.2 | 920202587 | Compatibility IPA enabled | Runtime admitted using pinned Eevee `8c08046` layout (field shift 136, tail-padding caves) and static setter proofs; downloads, persistence, offline play, export and deletion checked on a phone |
 
-IPA packaging may patch a 9.2.0 executable. Jailbreak remains 9.1.90-only.
+IPA packaging may patch a 9.2.0 or 9.2.2 executable. Jailbreak remains 9.1.90-only.
 Changing the profile's enabled flag is not runtime-layout verification.
+
+**Minimum companion for Retrine’s offline delegates:** the bundled Pixie 1.4
+build that exports `SAPRuntimeProfileAdmitted` and an offline attribute
+transformer. The ABI matters: older builds can also identify as 1.4. A
+transformer alone does not enable the delegates, even on a supported Spotify
+version. Install the matching tweak and companion together, as shipped in the IPA.
 
 IPA builds include Pixie by default and require an enabled exact profile.
 The primary 9.2.0 artifact is
-`out/retrine-<version>-pixie.ipa`; the compatibility artifact is
-`out/retrine-<version>-pixie-spotify-9.1.90.ipa`. Make's Pixie default input follows
+`out/retrine-<version>-pixie.ipa`; the compatibility artifacts are
+`out/retrine-<version>-pixie-spotify-9.1.90.ipa` and `-spotify-9.2.2.ipa`. Make's Pixie default input follows
 the JSON primary target if present, then the first `ipa/*.ipa`; an explicit `IPA` overrides discovery.
 An unsupported version, build or UUID is fatal when Pixie is requested.
 `PIXIE=0` / `--no-pixie` explicitly excludes it. WireGuard admission is independent

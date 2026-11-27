@@ -25,6 +25,7 @@ static void ask(NSString *title, NSString *message, NSString *action, BOOL destr
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:action style:destructive ? UIAlertActionStyleDestructive : UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *a) { then(); }]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -258,6 +259,8 @@ UIViewController *SGSingSettingsPage(void) {
     other.color = SGRed();
     other.visible = ^BOOL { return SGSingOtherModelBytes() > 0; };
     SGModRow *spatial = SGPageRow(SGL(@"settings.spatial.title", @"Spatial voice"), ^UIViewController *{ return SGSpatialVoiceSettingsPage(); });
+    SGSearchIdentified(spatial, @"page.spatialvoice");
+    SGSearchKeywords(spatial, SGL(@"settings.search.spatial_voice.keywords", @"spatial audio surround head tracking headphone motion"));
     spatial.subtitle = SGL(@"settings.spatial.subtitle", @"With AirPods, the voice stays in front of you as you turn your head");
     spatial.value = ^NSString *{ return SGSingSpatial() ? SGL(@"common.on", @"On") : SGL(@"common.off", @"Off"); };
     // Facts about the iPhone, which do not change while the page shows.

@@ -8,7 +8,7 @@ OUT=${OUT:-$HERE/build}
 mkdir -p "$OUT"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Player/SpeedPitchMenu.x" > "$OUT/SpeedPitchMenu.m"
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -g -Wall \
     -I"$SRC" -I"$SRC/Shared/Player" -I"$OUT" \
     "$HERE/main.m" "$SRC/Shared/LyricsPiP/LyricsPiPText.m" "$SRC/Shared/LyricsPiP/LyricsPiPFrame.m" \

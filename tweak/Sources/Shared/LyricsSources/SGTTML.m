@@ -23,7 +23,7 @@
 // with a unit after it ("1.5s", "500ms"). Negative on a value that is none of these.
 static NSInteger msOfClock(NSString *clock) {
     NSString *text = [clock stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (!text.length) return -1;
+    if (!text.length || text.length > 64) return -1;
     double scale = 1000;
     if ([text hasSuffix:@"ms"]) {
         scale = 1;
@@ -36,9 +36,12 @@ static NSInteger msOfClock(NSString *clock) {
     if (parts.count > 3) return -1;
     for (NSString *part in parts) {
         if (!part.length || [part rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"0123456789."].invertedSet].location != NSNotFound) return -1;
-        total = total * 60 + part.doubleValue;
+        double component;
+        if (!SGLyricsNumber(part, &component)) return -1;
+        total = total * 60 + component;
     }
-    return (NSInteger)llround(total * (parts.count > 1 ? 1000 : scale));
+    double ms = total * (parts.count > 1 ? 1000 : scale);
+    return ms <= SGKaraokeMaxTimeMs ? (NSInteger)llround(ms) : -1;
 }
 
 // The words of one container: a <p>, or the x-bg span inside it.
@@ -73,6 +76,7 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
 };
 
 @interface SGTTMLReader : NSObject <NSXMLParserDelegate>
+@property (nonatomic) BOOL exhausted;
 @property (nonatomic, strong) NSMutableArray<SGKaraokeLine *> *lines;
 @property (nonatomic, strong) NSMutableArray *keys;   // each line's itunes:key, NSNull where it has none
 // By language, in the order the document lists them, then by the key of the line.
@@ -91,7 +95,7 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
     NSMutableString *_plain;                     // every character of the line, for a line-timed <p>
     NSMutableString *_word;                      // the characters of the span being read
     NSInteger _wordStart, _wordEnd;
-    NSUInteger _spanDepth, _bgDepth, _wordDepth, _elementDepth;
+    NSUInteger _spanDepth, _bgDepth, _wordDepth, _elementDepth, _elements;
     BOOL _byModel;
 }
 
@@ -123,7 +127,11 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
 
 - (void)parser:(NSXMLParser *)parser didStartElement:(NSString *)element namespaceURI:(NSString *)uri
  qualifiedName:(NSString *)qualified attributes:(NSDictionary<NSString *, NSString *> *)attributes {
-    _elementDepth++;
+    if (++_elementDepth > 64 || ++_elements > 65536) {
+        self.exhausted = YES;
+        [parser abortParsing];
+        return;
+    }
     if (_elementDepth == 1 && [element isEqualToString:@"tt"]) {
         for (NSString *name in attributes) {
             if (([name isEqualToString:@"byModel"] || [name hasSuffix:@":byModel"]) &&
@@ -173,6 +181,11 @@ typedef NS_ENUM(NSInteger, SGTTMLPart) {
 
 - (void)parser:(NSXMLParser *)parser foundCharacters:(NSString *)characters {
     if (!_stack.count) return;
+    if (characters.length > 16384 - _plain.length) {
+        self.exhausted = YES;
+        [parser abortParsing];
+        return;
+    }
     [_plain appendString:characters];
     if (_word) {
         [_word appendString:characters];
@@ -365,7 +378,11 @@ static void addHead(SGTTMLReader *reader) {
 }
 
 NSArray<SGKaraokeLine *> *SGTTMLLines(NSString *xml) {
-    if (![xml isKindOfClass:NSString.class] || !xml.length) return nil;
+    const NSUInteger maxBytes = 4 * 1024 * 1024;
+    if (![xml isKindOfClass:NSString.class] || !xml.length || xml.length > maxBytes ||
+        [xml lengthOfBytesUsingEncoding:NSUTF8StringEncoding] > maxBytes ||
+        [xml rangeOfString:@"<!DOCTYPE" options:NSLiteralSearch].location != NSNotFound ||
+        [xml rangeOfString:@"\0" options:NSLiteralSearch].location != NSNotFound) return nil;
     NSData *data = [xml dataUsingEncoding:NSUTF8StringEncoding];
     if (!data) return nil;
     SGTTMLReader *reader = [SGTTMLReader new];
@@ -374,7 +391,8 @@ NSArray<SGKaraokeLine *> *SGTTMLLines(NSString *xml) {
     // The TTML namespaces carry nothing the reader needs, and the prefixes it matches on
     // ("ttm:agent") only survive while they are left alone.
     parser.shouldProcessNamespaces = NO;
-    if (![parser parse]) return nil;
+    parser.shouldResolveExternalEntities = NO;
+    if (![parser parse] || reader.exhausted) return nil;
     if (!reader.lines.count) return nil;
     SGKaraokeAlignVoices(reader.lines);
     addHead(reader);

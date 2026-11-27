@@ -8,6 +8,7 @@
 // it. pinned-check.sh builds and runs it; exits nonzero on the first failure (../harness-fail.h).
 #import <UIKit/UIKit.h>
 #import "../harness-fail.h"
+#import "../album/motion-player-double.h"
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRActionRow.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
@@ -86,6 +87,24 @@ static void runCheck(UIWindow *window) {
     SGRMirrorButton *more = SGRPinnedMore(page, &key, spotify);
     if (!more.window || more.hidden) HARNESS_FAIL(@"the pinned ⋯ is not on the page");
 
+    SGRMirrorButton *state = [[SGRMirrorButton alloc] initWithFrame:CGRectMake(0, 0, 44, 44)];
+    __block NSUInteger reads = 0;
+    state.readState = ^BOOL(BOOL *on) { reads++; *on = NO; return YES; };
+    state.stateOffSymbol = @"plus";
+    state.stateOnSymbol = @"checkmark";
+    [page addSubview:state];
+    [state feedFrom:spotify];
+    NSTimer *timer = [state valueForKey:@"downloadTimer"];
+    HARNESS_CHECK(timer.valid && timer.timeInterval == 2);
+    harnessSettledPlayerField = page;
+    [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerVisibilityDidChangeNotification object:nil];
+    HARNESS_CHECK(!timer.valid && ![state valueForKey:@"downloadTimer"]);
+    NSUInteger before = reads;
+    harnessSettledPlayerField = nil;
+    [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerVisibilityDidChangeNotification object:nil];
+    HARNESS_CHECK(reads == before + 1 && [[state valueForKey:@"downloadTimer"] isValid]);
+    [state removeFromSuperview];
+
     // A finger pressed on the ⋯, dragged off it and lifted: UIKit sends the touch down, then a touch up outside.
     [more sendActionsForControlEvents:UIControlEventTouchDown];
     [more sendActionsForControlEvents:UIControlEventTouchUpOutside];
@@ -146,11 +165,11 @@ static void runCheck(UIWindow *window) {
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     self.window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 390, 844)];
     self.window.rootViewController = [UIViewController new];
-    // Once SGRHarnessScene has put the window in its scene and made it key.
-    __block id key = [NSNotificationCenter.defaultCenter addObserverForName:UIWindowDidBecomeKeyNotification
-        object:self.window queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+    // A key window during launch is not yet active for page polling.
+    __block id key = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
         [NSNotificationCenter.defaultCenter removeObserver:key];
-        runCheck(self.window);
+        dispatch_async(dispatch_get_main_queue(), ^{ runCheck(self.window); });
     }];
     return YES;
 }

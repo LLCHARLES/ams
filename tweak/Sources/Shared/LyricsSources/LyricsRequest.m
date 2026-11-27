@@ -68,6 +68,23 @@ BOOL SGLyricsReplyFailed(NSURLResponse *response, NSError *error) {
     NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
     if (error || (status && (status < 200 || status >= 300) && status != 404))
         @synchronized (self) { _nameSearchFailed = YES; }
+    if (!error && status == 429) {
+        NSString *value = [(NSHTTPURLResponse *)response valueForHTTPHeaderField:@"Retry-After"];
+        NSTimeInterval now = NSDate.date.timeIntervalSince1970, deadline = now + 60;
+        if (value.length) {
+            NSScanner *scanner = [NSScanner scannerWithString:value];
+            long long seconds;
+            if ([scanner scanLongLong:&seconds] && scanner.isAtEnd && seconds >= 0) deadline = now + seconds;
+            else {
+                NSDateFormatter *format = NSDateFormatter.new;
+                format.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+                format.dateFormat = @"EEE, dd MMM yyyy HH:mm:ss zzz";
+                NSDate *date = [format dateFromString:value];
+                if (date) deadline = date.timeIntervalSince1970;
+            }
+        }
+        self.rateLimitUntil = MAX(now + 1, deadline);
+    }
 }
 @end
 
@@ -75,5 +92,5 @@ BOOL SGLyricsReplyFailed(NSURLResponse *response, NSError *error) {
     BOOL _retired;
 }
 - (void)invalidate { @synchronized (self) { _retired = YES; } }
-- (void)perform:(dispatch_block_t)work { @synchronized (self) { if (!_retired) work(); } }
+- (BOOL)isCurrent { @synchronized (self) { return !_retired; } }
 @end

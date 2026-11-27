@@ -101,6 +101,8 @@ NSArray<SGKaraokeLine *> *SGRLyricsSampleLines(void) {
             sampleLine(@[@[@"we", @7500, @7800], @[@"sing", @7800, @8300], @[@"it", @8300, @8500], @[@"louder", @8500, @9500]]),
             sampleLine(@[@[@"all", @9800, @10100], @[@"the", @10100, @10300], @[@"way", @10300, @10700], @[@"home", @10700, @12000]]),
         ];
+        ((SGKaraokeLine *)lines[1]).align = SGKaraokeAlignTrailing;
+        ((SGKaraokeLine *)lines[3]).align = SGKaraokeAlignTrailing;
     });
     return lines;
 }

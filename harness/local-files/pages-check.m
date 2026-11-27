@@ -46,7 +46,8 @@ int main(void) {
         SGLocalMusicSong *edited = song(@"edited.mp3", @{@"title": @"Original", @"album": @"Old", @"artist": @"Old Artist"},
             @{@"title": @"My Title", @"artist": @"My Artist", @"album": @"My Album"});
         HARNESS_CHECK([edited.title isEqual:@"My Title"] && [edited.artist isEqual:@"My Artist"] && [edited.album isEqual:@"My Album"]);
-        HARNESS_CHECK(SGLocalMusicSupportsVersion(@"9.1.90"));
+        HARNESS_CHECK(SGLocalMusicSupportsVersion(@"9.1.90") && SGLocalMusicSupportsVersion(@"9.2.0"));
+        HARNESS_CHECK(!SGLocalMusicSupportsVersion(@"9.2.1"));
         HARNESS_CHECK(!SGLocalMusicSupportsVersion(@"9.1.78") && !SGLocalMusicSupportsVersion(@"9.1.88"));
         NSError *free = [NSError errorWithDomain:@"com.spotify.SPTPlayer" code:101
             userInfo:@{@"kSPTPlayerErrorDisallowReasonsKey": [NSSet setWithObject:@"mft_disallow"]}];

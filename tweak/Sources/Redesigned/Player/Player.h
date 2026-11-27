@@ -112,7 +112,7 @@ static const CGFloat SGRPlayerSideMargin = 32;
 void SGRPlayerHoldMargin(UIView *view, CGFloat contentX);
 // The Music app's gap from the volume row's middle to the footer row's middle: the footer's rhythm makes the room for it
 // (PlayerFooter.x) and the volume row stands this far over the footer where the room allows (PlayerVolume.m).
-static const CGFloat SGRPlayerVolumeToRow = 48;
+static const CGFloat SGRPlayerVolumeToRow = 50;
 
 #pragma mark - the cover (PlayerArtwork.x)
 
@@ -137,6 +137,12 @@ void SGRPlayerSetCoverHidden(BOOL hidden);
 // player's own view holding it, or nil: the cover, lifted to the Music app's top, stays under every live row in its own
 // player, wherever the row is moved in it.
 void SGRPlayerCoverUnderRow(UIView *row, BOOL live, UIView *player);
+// The lowest bottom, in `view`'s coordinates, of those live rows in the player holding `view`, where each is now;
+// -CGFLOAT_MAX when there is none. The cover stays under it, and so does the lyrics' thumbnail (PlayerLyrics.x).
+CGFloat SGRPlayerLiveRowBottomIn(UIView *view);
+// The footer's rhythm holds `player`'s bottom stack without the volume row's room, the title row SGRPlayerVolumeToRow
+// lower (`without`), or no longer (PlayerFooter.x): the covers in `player` lay out again, taking half of that room.
+void SGRPlayerStackWithoutVolume(UIView *player, BOOL without);
 // A header row in `view`'s window shows something to read besides the grabber: where it plays from, Spotify's live
 // arrow, the AI DJ's buttons (the rows SGRPlayerCoverUnderRow is told are live). The clip's dim covers it
 // (PlayerMotion.x), which hears of each change through SGRPlayerMotionHeaderChanged.
@@ -195,6 +201,20 @@ BOOL SGRPlayerTwoColumns(void);
 BOOL SGRPlayerQueueSideShown(void);
 // The footer's queue glyph selects the queue in the side column.
 void SGRPlayerToggleQueueSide(void);
+// How the footer's queue button shows the queue (Player > Controls > Queue): 0, Spotify's own queue screen; 1, the
+// Music app's, in the player itself, the cover a thumbnail over it as for the lyrics (PlayerLyrics.x, PlayerQueue.m).
+// Read at launch. In two columns either choice selects the side column's queue.
+#define SGRKeyPlayerQueueStyle @"spotifyglass.redesign.player.queueStyle"
+typedef NS_ENUM(NSInteger, SGRPlayerQueueStyleKind) { SGRPlayerQueueStyleSpotify, SGRPlayerQueueStyleMusic };
+SGRPlayerQueueStyleKind SGRPlayerQueueStyle(void);
+// The one column's queue page: opens it, turns the page from the lines to it, or puts the cover back while it shows.
+// In the two columns it picks the side column's queue.
+void SGRPlayerToggleQueuePage(void);
+// Whether the player shows the queue: the side column's, or the one column's page.
+BOOL SGRPlayerQueueShown(void);
+// Whether the page over the cover is up in the one column, with the lines or the queue: what the cover's thumbnail and
+// the title beside it follow. In the two columns, whether the side column shows the lines.
+BOOL SGRPlayerPageOpen(void);
 // The mini player's lyrics button: the player, opened next, shows the lyrics once it is up (both layouts; nothing for
 // a track without lyrics). Called before the player is asked to open.
 void SGRPlayerShowLyricsOnOpen(void);
@@ -203,7 +223,7 @@ void SGRPlayerShowLyricsOnOpen(void);
 BOOL SGRPlayerLyricsAvailable(void);
 // Whether the playing track has none: its grace is over and nothing is looking for them any more.
 BOOL SGRPlayerLyricsNone(void);
-// Whether the player is showing them.
+// Whether the player is showing them (not the queue page in their place).
 BOOL SGRPlayerLyricsOpen(void);
 // Hides a control without room or while lyrics are alone; only fitting controls return when they wake.
 BOOL SGRPlayerLyricsFadeView(UIView *view, BOOL fits);
@@ -235,6 +255,11 @@ SGRLyricsHide SGRLyricsHideMode(void);
 @class SGModRow;
 // The Lyrics page's choice of it (PlayerSettings.m).
 SGModRow *SGRLyricsHideRow(void);
+// Whether Sing's mic stays while the lyrics are on their own under either Hide the controls choice; off, it goes with
+// the controls, as the Music app's does (it always stays while Sing is on). On until switched off, as before the
+// switch existed; applies at once.
+#define SGRKeyLyricsKeepMic @"spotifyglass.redesign.lyrics.keepMic"
+SGModRow *SGRLyricsKeepMicRow(void);
 
 // A volume slider under the controls (PlayerVolume.m), the system's: this iPhone's, or the Connect device's.
 // On until switched off. Placed by the footer's layout, between the controls (`controls`) and the footer row
@@ -248,6 +273,10 @@ BOOL SGRPlayerVolumeOn(void);
 // under Increase Contrast.
 UIColor *SGRPlayerBarFill(BOOL lit);
 UIColor *SGRPlayerBarTrack(void);
+// The same over `view`'s backdrop: the alpha that lands where the Music app's white, added to it, does (PlayerControls.x);
+// `volume` for the volume row's fill, which the Music app draws brighter than the progress bar's.
+UIColor *SGRPlayerBarFillOver(UIView *view, BOOL lit, BOOL volume);
+UIColor *SGRPlayerBarTrackOver(UIView *view);
 // Both bars are drawn the one way, the Music app's: default-style sliders with an empty thumb, as Spotify's progress bar
 // is, whose tracks are capsule images (SGRPlayerBarImage) `height` tall in the bar's colors. Such a slider draws its fill
 // up to the thumb's middle and cuts it there, so the fill ends square inside the round track. Spotify's track images are
@@ -304,6 +333,9 @@ void SGRPlayerLookChanged(void);
 #define SGRKeyPlayerLandscape @"spotifyglass.redesign.player.landscape"
 // Goes up only over the player on screen, in its scene.
 void SGRPlayerShowLandscape(BOOL show);
+BOOL SGRPlayerLandscapeCovers(UIWindow *window);
+void SGRPlayerPreparePortraitLyricsForReveal(void);
+BOOL SGRPlayerInteractiveMorph(void);
 // The playing track's lines came in, or turned out to be none: the landscape screen lays out for it.
 void SGRPlayerLandscapeLinesChanged(void);
 
@@ -319,6 +351,9 @@ void SGRPlayerStillChanged(void);
 // it on switches the full-screen cover off (the last one switched on wins); the open player follows at once.
 #define SGRKeyPlayerAnimatedVisualiser @"spotifyglass.redesign.player.animatedVisualizer"
 BOOL SGRPlayerAnimatedVisualiserOn(void);
+#define SGRKeyPlayerHoldNoClip @"spotifyglass.redesign.player.holdNoClip"
+BOOL SGRPlayerNoClipHoldEnabled(void);
+BOOL SGRPlayerTrackHasNoClip(void);
 void SGRPlayerAnimatedVisualiserChanged(void);
 // With both switches saved on, the full-screen cover stays and the Visualizer switch goes off. Called at start and on
 // every pass of SGRPlayerVisualiserUpdate; the fallback is never wanted while the cover is on.
@@ -360,9 +395,9 @@ BOOL SGRPlayerCoverHidden(void);
 // for the Player page's showcase. It plays only in a window, like the player's. While the player has no clip
 // it is the playing track's, which the page looks up itself, by the player's sources and Low Data Mode, into
 // the store the player reads too: nil until it is in, and with `arrived` given the lookup starts, and
-// `arrived` runs once on the main queue when a call would return it (never when nothing is found, or the
-// track changed). Without `arrived` it only answers with a clip already in.
-UIView *SGRPlayerMotionPreview(void (^arrived)(void));
+// `arrived` reports a ready clip or a confirmed miss on main, never for a superseded request.
+// Without it the preview only answers with a clip already in.
+UIView *SGRPlayerMotionPreview(void (^arrived)(BOOL found));
 // End the page's preview only: cancel its lookup, invalidate late posters, and release its decoder.
 // Shared transfers still needed by the real player are not cancelled.
 void SGRPlayerMotionPreviewStop(void);

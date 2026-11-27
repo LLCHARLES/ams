@@ -50,6 +50,20 @@ final class ShelfFeedGeneration: NSObject {
 final class ShelfFeedFixture: NSObject {
     @objc static func renderer() -> NSObject { Renderer() }
 
+    @objc static func rejectsScalarRenderer() -> Bool {
+        final class ChangedPage: NSObject {
+            let collectionViewRenderer: UInt
+            init(_ renderer: Renderer) {
+                collectionViewRenderer = UInt(bitPattern: Unmanaged.passUnretained(renderer).toOpaque())
+            }
+        }
+        // Use bits of a live renderer so an unchecked read returns a snapshot, not a crash.
+        let renderer = Renderer()
+        return withExtendedLifetime(renderer) {
+            SGRHomeFeed.sections(of: ChangedPage(renderer)) == nil
+        }
+    }
+
     @objc(generation:)
     static func generation(_ phase: Int) -> ShelfFeedGeneration {
         let ids = Array(0..<12)

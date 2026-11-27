@@ -17,10 +17,12 @@
 //
 // It moves only while it is in a window, Spotify is in front, the player is not opening or closing, Low Power
 // Mode is off and the song plays; a pause lets the hills settle and the link stops, and nothing is read from
-// the sound while it is stopped. The link asks for the screen's full rate; the hills draw at most 60 frames a
-// second, 30 while the lyrics, which have a link of their own, are open and the hills are blurred behind them,
-// and with Reduce Motion 15, with every band easing over seconds, the ticks between skipped. While the player
-// opens or closes the link is down, and comes back only once the animation is over.
+// the sound while it is stopped. The link asks for the rate the view draws at (-drawRate): 60 frames a second
+// (Bars and Halo 120 on a ProMotion screen), 30 while the lyrics, which have a link of their own, are open and
+// the hills are blurred behind them, and with Reduce Motion 15, with every band easing over seconds. Its range
+// reaches up to the screen's rate, so the system may run it faster for another request, and the ticks between
+// draws are then skipped. While the player opens or closes the link is down, and comes back only once the
+// animation is over.
 //
 // ponytail: the hills follow what the output is handed, which a Bluetooth headset plays a fifth of a second or
 // so later. Music Haptics schedules for the output latency; do the same here if the beat looks early on AirPods.
@@ -909,10 +911,11 @@ static UIColor *lit(UIColor *color, CGFloat luminance) {
             [_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             _last = 0;
         }
-        // The link asks for the screen's full rate whatever is drawn: a link below it drags the player's 120 Hz
-        // transitions and the lyrics' own link down. How often the hills draw is tick:'s business.
-        float screenRate = (float)self.window.screen.maximumFramesPerSecond;
-        _link.preferredFrameRateRange = CAFrameRateRangeMake(screenRate / 2, screenRate, screenRate);
+        // The link asks for the rate the view draws at, so a calmer one lets a ProMotion screen come down. Its
+        // maximum stays the screen's: the player's transitions and the lyrics' own link may run the screen faster,
+        // and tick: skips the extra ticks.
+        float rate = [self drawRate];
+        _link.preferredFrameRateRange = CAFrameRateRangeMake(rate, (float)self.window.screen.maximumFramesPerSecond, rate);
     } else if (_link) {
         [_link invalidate];
         _link = nil;
@@ -945,8 +948,8 @@ static float ease(float value, float target, double dt, double up, double down) 
     // Poster's and Cut's words change as a word's start passes, whatever rate the hills draw at.
     if (_stage) [self readLine];
     CFTimeInterval now = link.timestamp;
-    // The link ticks at the screen's rate; a tick less than a frame short of the wanted interval is skipped, and
-    // the next one that draws takes the time since the last draw.
+    // The link may tick faster than the draw rate when another request runs the screen faster; a tick less than a
+    // frame short of the wanted interval is skipped, and the next one that draws takes the time since the last draw.
     if (_last && now - _last < 1 / [self drawRate] - link.duration / 2) return;
     double dt = _last ? MIN(now - _last, 0.1) : link.duration;
     _last = now;
@@ -1302,13 +1305,13 @@ void SGRPlayerVisualiserUpdate(void) {
     [sg_view layOutStage];
     if (made) {
         sg_view.ownsCover = YES;
-        [sg_view setBlurred:SGRPlayerLyricsOpen() animated:NO];
+        [sg_view setBlurred:SGRPlayerPageOpen() animated:NO];
         [sg_view appear:field.window != nil];
         SGRPlayerHoldField();
         SGLog(@"redesign player: visualizer on the field");
         [sg_shuffle viewMade];
     } else {
-        BOOL open = SGRPlayerLyricsOpen();
+        BOOL open = SGRPlayerPageOpen();
         if (open != sg_view.blurred) [sg_view setBlurred:open animated:sg_view.window != nil];
     }
 }

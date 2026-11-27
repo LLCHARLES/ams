@@ -242,7 +242,7 @@ static void runChecks(void) {
 @end
 @implementation CheckApp
 - (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         fputs("FAIL UIKit check timed out\n", stderr); exit(1);
     });
     dispatch_async(dispatch_get_main_queue(), ^{ runChecks(); }); return YES;

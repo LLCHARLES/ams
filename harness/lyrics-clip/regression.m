@@ -8,6 +8,35 @@
 
 static int failures;
 static BOOL renderingOnly;
+static NSUInteger backgrounds;
+// Only instrument the synchronous injected call, not other renderer work.
+static _Thread_local NSUInteger refusedAllocationIndex;
+static _Thread_local BOOL watchingOverlay;
+static _Thread_local NSInteger liveBuffers;
+static _Thread_local CGImageRef liveWords;
+void *SGLyricsHarnessMalloc(size_t size) {
+    if (refusedAllocationIndex && !--refusedAllocationIndex) return NULL;
+    void *buffer = malloc(size);
+    if (watchingOverlay && buffer) liveBuffers++;
+    return buffer;
+}
+void SGLyricsHarnessFree(void *buffer) {
+    if (watchingOverlay && buffer) liveBuffers--;
+    free(buffer);
+}
+CGImageRef SGLyricsHarnessCrop(CGImageRef image, CGRect rect) {
+    CGImageRef crop = CGImageCreateWithImageInRect(image, rect);
+    if (watchingOverlay) liveWords = crop;
+    return crop;
+}
+void SGLyricsHarnessRelease(CGImageRef image) {
+    if (watchingOverlay && image == liveWords) liveWords = NULL;
+    CGImageRelease(image);
+}
+CGImageRef SGLyricsHarnessBackground(CGImageRef cover, CGSize size, SGLyricsBackgroundStyle style) {
+    backgrounds++;
+    return SGLyricsBackgroundCreate(cover, size, style);
+}
 static NSUInteger refusedContextIndex;
 CGContextRef SGLyricsHarnessCreateContext(void *data, size_t width, size_t height, size_t bits, size_t stride,
                                          CGColorSpaceRef space, uint32_t info) {
@@ -105,7 +134,7 @@ static double linear(double v) { return v <= .04045 ? v / 12.92 : pow((v + .055)
 
 int main(int argc, char **argv) {
     @autoreleasepool {
-        if (argc != 2) return 2;
+        if (argc != 3) return 2;
         renderingOnly = getenv("REVIEW_ONLY") != NULL;
         if (renderingOnly) puts("Reference rendering only; no regression checks run.");
         NSString *dir = [NSString stringWithUTF8String:argv[1]];
@@ -117,6 +146,30 @@ int main(int argc, char **argv) {
         CGImageRef black = solid(0), white = solid(1), cover = newCover();
         CGImageRef backdrop = SGLyricsClipBackdrop(cover, size);
         if (!renderingOnly) {
+            backgrounds = 0;
+            CGImageRef dim = SGLyricsClipDimmedArtwork(cover, size);
+            check(dim && backgrounds == 1, @"dimmed artwork needs only one blur");
+            CGImageRef again = SGLyricsClipDimmedArtwork(cover, size);
+            check(again == dim && backgrounds == 1, @"another demand reuses the final dimmed pixels");
+            CGImageRelease(again);
+            CGImageRelease(dim);
+            // An asymmetric dark cover needs only the minimum dim, independent of the contrast search.
+            CGContextRef dark = context(size);
+            CGContextDrawImage(dark, (CGRect){CGPointZero, size}, cover);
+            CGContextSetRGBFillColor(dark, 0, 0, 0, .95);
+            CGContextFillRect(dark, (CGRect){CGPointZero, size});
+            CGImageRef source = CGBitmapContextCreateImage(dark);
+            CGContextRelease(dark);
+            CGImageRef reference = SGLyricsBackgroundCreate(source, size, (SGLyricsBackgroundStyle){SGLyricsBackgroundBlur, 77 / 256., 20, 0});
+            dim = SGLyricsClipDimmedArtwork(source, size);
+            NSData *expected = pixels(reference), *actual = pixels(dim);
+            const uint8_t *a = actual.bytes, *b = expected.bytes;
+            int difference = 0;
+            for (NSUInteger i = 0; i < actual.length; i++) difference = MAX(difference, abs(a[i] - b[i]));
+            check(difference <= 1, @"single-pass dim keeps reference pixels and orientation within rounding");
+            CGImageRelease(reference); CGImageRelease(dim); CGImageRelease(source);
+            refusedContextIndex = 1;
+            check(!SGLyricsClipDimmedArtwork(cover, CGSizeMake(64, 64)), @"new raster with missing measurement context returns no dimmed image");
             for (NSUInteger index = 1; index <= 2; index++) {
                 refusedContextIndex = index;
                 CGImageRef frame = render(backdrop, cover, nil, @"Line", nil, size, SGLyricsClipCentered);
@@ -170,6 +223,37 @@ int main(int argc, char **argv) {
         if (motion) {
             save(motion, dir, @"motion-left-phone.png", YES);
         }
+#ifndef SG_BASELINE
+        if (!renderingOnly && written) {
+            NSURL *leased = [NSURL fileURLWithPath:@(argv[2])];
+            NSData *original = [@"leased clip" dataUsingEncoding:NSUTF8StringEncoding];
+            check([original writeToURL:leased atomically:YES], @"existing clip seeded");
+            BOOL replaced = SGLyricsClipWriteOverMotion(leased, video, nil, line, nil, nil, 0, 2, SGLyricsClipLeft, nil);
+            check(!replaced && [[NSData dataWithContentsOfURL:leased] isEqual:original] &&
+                  ![NSFileManager.defaultManager fileExistsAtPath:[leased URLByAppendingPathExtension:@"partial"].path],
+                  @"motion publish collision preserves the leased file and discards the partial");
+            [NSFileManager.defaultManager removeItemAtURL:leased error:nil];
+            for (NSNumber *layout in @[@(SGLyricsClipLeft), @(SGLyricsClipOverArtwork)]) {
+                for (NSUInteger index = 1; index <= 3; index++) {
+                    refusedAllocationIndex = index;
+                    watchingOverlay = YES;
+                    CGImageRef preview = SGLyricsClipMotionFrame(video, nil, line, nil, nil, 0, 2, layout.integerValue);
+                    watchingOverlay = NO;
+                    check(!liveWords && liveBuffers == 0, @"failed preview releases the words image and overlay buffers");
+                    check(!preview && !refusedAllocationIndex, @"missing overlay buffer yields no motion preview");
+                    CGImageRelease(preview);
+                    refusedAllocationIndex = index;
+                    watchingOverlay = YES;
+                    BOOL encoded = SGLyricsClipWriteOverMotion(leased, video, nil, line, nil, nil, 0, 2, layout.integerValue, nil);
+                    watchingOverlay = NO;
+                    check(!liveWords && liveBuffers == 0, @"failed encode releases the words image and overlay buffers");
+                    check(!encoded && !refusedAllocationIndex && ![NSFileManager.defaultManager fileExistsAtPath:leased.path] &&
+                          ![NSFileManager.defaultManager fileExistsAtPath:[leased URLByAppendingPathExtension:@"partial"].path],
+                          @"missing overlay buffer yields no motion clip or partial");
+                }
+            }
+        }
+#endif
         [NSFileManager.defaultManager removeItemAtURL:video error:nil];
 #ifndef SG_BASELINE
         check(SGLyricsClipOverArtwork == 5, @"new stored layout is appended at index 5");

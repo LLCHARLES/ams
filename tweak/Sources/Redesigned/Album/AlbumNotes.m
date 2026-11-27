@@ -449,15 +449,21 @@ void SGRAlbumNotesObserveCell(UICollectionViewCell *cell) {
 }
 
 CGFloat SGRAlbumNotesFooterHeight(UICollectionViewCell *cell, CGFloat width) {
-    SGRAlbumNotesForgetFooter(cell);
-    if (SGRAlbumNotesWhere() != SGRAlbumNotesUnderTracks ||
-        !SGRFindByIdentifier(cell.contentView, @"Album.Copyright", NULL)) return 0;
-    SGRAlbumNotesState *state = objc_getAssociatedObject(SGRAlbumPageOf(cell), &kNotesKey);
-    if (!state.view.notes) return 0;
-    noteDiagnostic(state, @"footer-attached", @"display: Under tracks attached to Album.Copyright");
-    [cell addSubview:state.view];
-    objc_setAssociatedObject(cell, &kFooterNoteKey, state.view, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    return [state.view heightForWidth:width];
+    SGRAlbumNotesState *state = nil;
+    if (SGRAlbumNotesWhere() == SGRAlbumNotesUnderTracks &&
+        SGRFindByIdentifier(cell.contentView, @"Album.Copyright", NULL))
+        state = objc_getAssociatedObject(SGRAlbumPageOf(cell), &kNotesKey);
+    SGRAlbumNoteView *note = state.view.notes ? state.view : nil;
+    if (objc_getAssociatedObject(cell, &kFooterNoteKey) != note) {
+        SGRAlbumNotesForgetFooter(cell);
+        objc_setAssociatedObject(cell, &kFooterNoteKey, note, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (!note) return 0;
+    if (note.superview != cell) {
+        noteDiagnostic(state, @"footer-attached", @"display: Under tracks attached to Album.Copyright");
+        [cell addSubview:note];
+    }
+    return [note heightForWidth:width];
 }
 
 void SGRAlbumNotesLayoutFooter(UICollectionViewCell *cell) {

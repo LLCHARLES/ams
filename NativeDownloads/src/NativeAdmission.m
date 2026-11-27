@@ -81,9 +81,12 @@ void SAPTestRemoveImage(const struct mach_header *header) {profileImageRemoved(h
 
 // Dyld owns image lifetimes during callbacks; readers never walk an unloadable
 // header or an indexed image list. Registration replays already-loaded images.
-__attribute__((constructor)) static void observeProfileImages(void) {
-    _dyld_register_func_for_remove_image(profileImageRemoved);
-    _dyld_register_func_for_add_image(profileImageAdded);
+void SAPObserveProfileImages(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once,^{
+        _dyld_register_func_for_remove_image(profileImageRemoved);
+        _dyld_register_func_for_add_image(profileImageAdded);
+    });
 }
 
 bool SAPRuntimeProfileAdmitted(void) {

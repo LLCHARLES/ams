@@ -28,6 +28,17 @@ static const CGFloat kBareInfoWidth = 300, kBareControlsWidth = 200;
 static const NSTimeInterval kLandscapeRest = 4;
 
 static UIWindow *sg_window;
+static __weak UIWindow *sg_opaqueWindow;
+
+BOOL SGRPlayerLandscapeCovers(UIWindow *window) {
+    return sg_opaqueWindow && window && sg_opaqueWindow.windowScene == window.windowScene && window.windowLevel < sg_opaqueWindow.windowLevel;
+}
+
+static void didReveal(UIWindow *window) {
+    if (!window || window != sg_window || window == sg_opaqueWindow) return;
+    sg_opaqueWindow = window;
+    [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerVisibilityDidChangeNotification object:nil];
+}
 // Shut from the screen: turning the phone again does not reopen it until it has stood upright.
 static BOOL sg_shut;
 // Spotify's player (NowPlayingViewController) once laid out in a window, until it goes: the screen goes up in its
@@ -169,6 +180,10 @@ static UIButton *controlButton(NSString *symbol, CGFloat size, NSString *label, 
     [_rest invalidate];
 }
 
+- (void)retireLyrics {
+    _lyrics.renderingSuspended = YES;
+}
+
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     CGRect safe = UIEdgeInsetsInsetRect(self.view.bounds, self.view.safeAreaInsets);
@@ -216,7 +231,9 @@ static UIButton *controlButton(NSString *symbol, CGFloat size, NSString *label, 
     if (!window || window != sg_window || size.width <= size.height) return;
     [coordinator animateAlongsideTransition:^(id<UIViewControllerTransitionCoordinatorContext> context) {
         window.alpha = 1;
-    } completion:nil];
+    } completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+        if (!context.isCancelled) didReveal(window);
+    }];
 }
 
 - (void)artworkChanged {
@@ -399,7 +416,8 @@ static void answerForOrientations(void) {
 
 // A landscape window still clear when no turn is coming to fade it in.
 static void reveal(UIWindow *window) {
-    if (window && window == sg_window && window.alpha < 1) SGRAnimate(SGRMotionFade, ^{ window.alpha = 1; }, nil);
+    if (window && window == sg_window && window.alpha < 1)
+        SGRAnimate(SGRMotionFade, ^{ window.alpha = 1; }, ^(BOOL finished) { if (finished) didReveal(window); });
 }
 
 static void requestOrientations(UIWindowScene *scene, UIInterfaceOrientationMask mask) {
@@ -445,6 +463,11 @@ void SGRPlayerShowLandscape(BOOL show) {
     } else if (!show && sg_window) {
         UIWindow *window = sg_window;
         sg_window = nil;
+        sg_opaqueWindow = nil;
+        // The portrait field and progress clocks are seen through the fade, and a scene that never turned has no
+        // layout to wake them: they resume now, the landscape page only once its fade is done.
+        [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerVisibilityDidChangeNotification object:nil];
+        SGRPlayerPreparePortraitLyricsForReveal();
         window.userInteractionEnabled = NO;
         // A sheet up over the lines (a line's meanings) goes with them, or it would be left on a hidden window.
         [window.rootViewController dismissViewControllerAnimated:NO completion:nil];
@@ -453,7 +476,9 @@ void SGRPlayerShowLandscape(BOOL show) {
         // Faded out as the scene turns back; the player is key again once it is gone, unless the lines came
         // back meanwhile.
         SGRAnimate(SGRMotionFade, ^{ window.alpha = 0; }, ^(BOOL finished) {
+            [(SGRLandscapeLyricsController *)window.rootViewController retireLyrics];
             window.hidden = YES;
+            [NSNotificationCenter.defaultCenter postNotificationName:SGRPlayerVisibilityDidChangeNotification object:nil];
             if (sg_window) return;
             for (UIWindow *other in scene.windows) {
                 if (other != window && !other.hidden && other.windowLevel == UIWindowLevelNormal) {

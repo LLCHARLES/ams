@@ -7,6 +7,7 @@ xcrun clang -dynamiclib "$ROOT/harness/wireguard/chain-shared.c" -o "$WORK/Spoti
 xcrun clang -fobjc-arc -O2 -Wall -Werror -I "$ROOT/tweak/Sources" \
   "$ROOT/harness/wireguard/connect-chain.m" "$ROOT/tweak/Sources/Core/SGRebind.m" \
   "$ROOT/tweak/Sources/Shared/WireGuard/SGWGNative.m" \
+  "$ROOT/tweak/Sources/Shared/WireGuard/SGWGAdmission.m" \
   "$ROOT/tweak/Sources/Shared/Connect/SGMDNS.m" "$ROOT/tweak/Sources/Shared/Connect/SGConnectRelay.m" \
   -framework Foundation -framework Network -o "$WORK/Spotify"
 "$WORK/Spotify" connect-first "$WORK/SpotifyShared"

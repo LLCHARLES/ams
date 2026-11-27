@@ -20,9 +20,8 @@ UIViewController *SGHomeGradientPage(void) {
     ] footer:nil];
 }
 
-static UIViewController *libraryPage(void) {
-    return [[SGModPage alloc] initWithTitle:SGL(@"settings.home.library.title", @"Library") intro:SGRestartNote sections:@[
-        SGSection(SGL(@"settings.home.library.header", @"Library"), @[
+SGModSection *SGNativeLibrarySection(void) {
+    return SGSection(SGL(@"settings.home.library.header", @"Library"), @[
             SGFlagRow(SGL(@"settings.home.library.denser_rows.title", @"Denser rows"), @"ios-feature-yourlibaryx.denser_rows_enabled"),
             SGFlagRow(SGL(@"settings.home.library.sort_playlists_recent.title", @"Sort playlists by recently updated"), @"ios-feature-yourlibaryx.recently_updated_playlists_sort_enabled"),
             SGFlagRow(SGL(@"settings.home.library.sort_artists_recent.title", @"Sort artists by recently updated"), @"ios-feature-yourlibaryx.recently_updated_artists_sort_enabled"),
@@ -30,8 +29,7 @@ static UIViewController *libraryPage(void) {
             SGFlagRow(SGL(@"settings.home.library.recents_sort_order.title", @"Recents sort order"), @"ios-feature-yourlibaryx.recents_sort_order_enabled"),
             SGFlagRow(SGL(@"settings.home.library.library_settings.title", @"Library settings"), @"ios-feature-yourlibaryx.library_settings_enabled"),
             SGFlagRow(SGL(@"settings.home.library.library_pro.title", @"Library Pro"), @"ios-feature-yourlibaryx.your_library_pro_enabled"),
-        ]),
-    ] footer:nil];
+    ]);
 }
 
 UIViewController *SGHomeSettingsPage(void) {
@@ -43,9 +41,6 @@ UIViewController *SGHomeSettingsPage(void) {
     };
 
     NSArray<SGModSection *> *sections = @[
-        SGSection(nil, @[
-            SGWithSymbol(SGPageRow(SGL(@"settings.home.library.row.title", @"Library"), ^UIViewController *{ return libraryPage(); }), @"books.vertical"),
-        ]),
         SGSection(SGL(@"settings.home.header", @"Home"), @[
             SGWithSymbol(gradient, @"rectangle.tophalf.inset.filled"),
             SGFlagRow(SGL(@"settings.home.pull_to_refresh.title", @"Pull to refresh"), @"ios-home-evopage-impl.pull_to_refresh_enabled"),
@@ -60,5 +55,5 @@ UIViewController *SGHomeSettingsPage(void) {
             SGKillRow(SGL(@"settings.home.hide.dj_beta_badge.title", @"DJ beta badge"), @"ios-home-evopage-impl.dj_mdc_beta_badge_enabled"),
         ]),
     ];
-    return [[SGModPage alloc] initWithTitle:SGL(@"settings.home.home_and_library.title", @"Home & Library") intro:SGRestartNote sections:sections footer:nil];
+    return [[SGModPage alloc] initWithTitle:SGL(@"settings.main.home.title", @"Home") intro:SGRestartNote sections:sections footer:nil];
 }

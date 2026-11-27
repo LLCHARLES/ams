@@ -21,6 +21,8 @@
 // so it follows the app's language.
 #import "Core/SGCore.h"
 #import "Redesigned/Kit/SGRKit.h"
+#import "Redesigned/Kit/SGRMotionBudget.h"
+#import "Redesigned/Player/Player.h"
 #import "Home.h"
 
 // Tries at finding the tab's name before settling for the English one: a miss walks the window.
@@ -223,10 +225,15 @@ static SGRHomePillButtons *buttonsIn(UIView *header) {
     return buttons;
 }
 
+@interface SGRHomeGlassHolder : UIView
+@property BOOL resigning;
+- (void)ringPolicyChanged:(NSNotification *)note;
+@end
+
 static UIView *glassIn(UIView *header) {
     UIView *glass = objc_getAssociatedObject(header, &kGlassKey);
     if (!glass) {
-        glass = [UIView new];
+        glass = [SGRHomeGlassHolder new];
         glass.userInteractionEnabled = NO;
         objc_setAssociatedObject(header, &kGlassKey, glass, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -263,8 +270,6 @@ static void place(UIView *view, CGRect frame) {
 // pill's material as the title row scrolls away (riseGlass); the next layout after midnight hides it, and Reduce Motion
 // stops its turn as soon as it goes on. A turn of 6 s needs no more than 30 frames a second.
 static char kFridayKey;
-// The pill's ring, for the Reduce Motion observer: Home has one header at a time (sg_header).
-static __weak CALayer *sg_ring;
 static const CGFloat kFridayRing = 1.5;
 static const CFTimeInterval kFridayTurn = 6;
 static const float kFridayMinFPS = 10, kFridayMaxFPS = 30;
@@ -283,7 +288,11 @@ static BOOL isFriday(void) {
 static void turnRing(CALayer *ring) {
     CALayer *colors = ring.sublayers.firstObject;
     if (!colors) return;
-    if (ring.hidden || !sg_glassShown || !isFriday() || SGRReduceMotion()) {
+    SGRHomeGlassHolder *holder = (id)ring.superlayer.delegate;
+    UIWindow *window = holder.window;
+    if (!window || holder.resigning || UIApplication.sharedApplication.applicationState != UIApplicationStateActive ||
+        CGRectContainsRect(SGRSettledPlayerRect(window), [holder convertRect:holder.bounds toView:window]) ||
+        ring.hidden || !sg_glassShown || !isFriday() || SGRReduceMotion() || SGRMotionHeldForPowerOrHeat()) {
         [colors removeAnimationForKey:@"turn"];
         return;
     }
@@ -298,18 +307,22 @@ static void turnRing(CALayer *ring) {
     [colors addAnimation:turn forKey:@"turn"];
 }
 
-// Reduce Motion switched while the ring is up stops or resumes its turn at once, not at the next layout. One observer
-// for the process, added with the first ring.
-static void watchReduceMotion(void) {
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        [NSNotificationCenter.defaultCenter addObserverForName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil
-            queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
-            CALayer *ring = sg_ring;
-            if (ring) turnRing(ring);
-        }];
-    });
+@implementation SGRHomeGlassHolder
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    turnRing(objc_getAssociatedObject(self, &kFridayKey));
 }
+- (void)ringPolicyChanged:(NSNotification *)note {
+    if (!NSThread.isMainThread) {
+        dispatch_async(dispatch_get_main_queue(), ^{ [self ringPolicyChanged:note]; });
+        return;
+    }
+    if ([note.name isEqual:UIApplicationDidBecomeActiveNotification]) self.resigning = NO;
+    else if ([note.name isEqual:UIApplicationWillResignActiveNotification] ||
+             [note.name isEqual:UIApplicationDidEnterBackgroundNotification]) self.resigning = YES;
+    turnRing(objc_getAssociatedObject(self, &kFridayKey));
+}
+@end
 
 static void layoutFriday(UIView *holder, CGSize size) {
     CALayer *ring = objc_getAssociatedObject(holder, &kFridayKey);
@@ -338,8 +351,11 @@ static void layoutFriday(UIView *holder, CGSize size) {
         ring.zPosition = 101;
         ring.opacity = sg_glassShown ? 1 : 0;
         objc_setAssociatedObject(holder, &kFridayKey, ring, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        sg_ring = ring;
-        watchReduceMotion();
+        for (NSNotificationName name in @[UIAccessibilityReduceMotionStatusDidChangeNotification,
+                 NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
+                 UIApplicationWillResignActiveNotification, UIApplicationDidEnterBackgroundNotification,
+                 UIApplicationDidBecomeActiveNotification, SGRPlayerVisibilityDidChangeNotification])
+            [NSNotificationCenter.defaultCenter addObserver:holder selector:@selector(ringPolicyChanged:) name:name object:nil];
     }
     colors = (CAGradientLayer *)ring.sublayers.firstObject;
     if (ring.superlayer != holder.layer) [holder.layer addSublayer:ring];
@@ -427,18 +443,35 @@ static void layoutTint(UIView *page) {
     }
 }
 
+static UIStackView *stackIn(UIView *header) {
+    UIStackView *stack = nil;
+    for (UIView *sub in header.subviews) {
+        if ([sub isKindOfClass:UIStackView.class]) stack = (UIStackView *)sub;
+    }
+    return stack;
+}
+
+// The class of Spotify's header view, so a layout pass can tell a header apart without a lookup on every view.
+static Class sg_headerClass;
+
+// The page's header, its stack and scrim are published together, only once the header has a stack: the globals never pair
+// one page's header with another page's stack.
 static BOOL findHeader(UIView *view) {
-    if (sg_stack && [sg_stack isDescendantOfView:view]) return YES;
+    if (sg_stack && sg_stack.superview == sg_header && [sg_stack isDescendantOfView:view]) return YES;
+    UIView *scrim = nil;
     for (UIView *wrapper in view.subviews) {
-        UIView *scrim = SGRChildNamed(wrapper, @"GradientView");
-        if (scrim) sg_scrim = scrim;
+        UIView *found = SGRChildNamed(wrapper, @"GradientView");
+        if (found) scrim = found;
     }
     UIView *header = SGRChildNamed(SGRChildNamed(view, @"HomeHeaderElement"), @"HomeHeaderView");
-    for (UIView *sub in header.subviews) {
-        if ([sub isKindOfClass:UIStackView.class]) sg_stack = (UIStackView *)sub;
+    UIStackView *stack = stackIn(header);
+    if (stack) {
+        sg_header = header;
+        sg_stack = stack;
+        sg_scrim = scrim;
+        sg_headerClass = header.class;
+        return YES;
     }
-    sg_header = header;
-    if (sg_stack) return YES;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"redesign home: header stack not found, header left as Spotify's"); });
     return NO;
@@ -561,6 +594,33 @@ static void follow(UIView *view) {
 
 static void layoutHeader(UIViewController *page);
 
+// The title row around the avatar where the stack has laid it out. With the Home look off, the avatar stands alone in
+// the stack and the title ends before it; it rises and fades with the title either way.
+static void placeRow(UIView *header, UIStackView *stack, UIView *face, UILabel *title) {
+    CGFloat pillLeading = face ? CGRectGetMinX(facePlace(stack, face)) : header.bounds.size.width - SGRSideMargin + SGRGrid;
+    if (SGRHomeLook()) pillLeading = layoutPill(header, stack, face);
+    CGFloat trailing = pillLeading - SGRGrid;
+    CGFloat height = ceil(title.font.lineHeight);
+    place(title, CGRectMake(SGRSideMargin, round(CGRectGetMidY(untransformed(stack)) - height / 2), MAX(0, trailing - SGRSideMargin), height));
+}
+
+static UIView *faceIn(UIStackView *stack) {
+    for (UIView *part in stack.arrangedSubviews) {
+        if (SGRIsAvatar(part)) return part;
+    }
+    return nil;
+}
+
+// After a pass of a header layoutHeader has placed (its title marks it), or of its stack: the row follows that header's
+// own avatar, wherever its page is in the order of passes. The page's pass runs before its header's, and on a turn or a
+// resize the stack lays the avatar out in its own pass after the page's, or the header moves the stack in its pass without
+// the stack laying out again, with no pass of the page after either.
+static void followStack(UIView *header, UIStackView *stack) {
+    if (!stack || ![header isKindOfClass:sg_headerClass]) return;
+    UILabel *title = objc_getAssociatedObject(header, &kTitleKey);
+    if (title) placeRow(header, stack, faceIn(stack), title);
+}
+
 // The page's own pass can run before Spotify has sized its header at all (the header's view 0 by 0, its stack still
 // a width to the left and centered on the origin: seen on a 440pt phone, with no pass of the page after, which
 // left the pill beside the title). While the header has no size, this comes back a little later, for a few seconds
@@ -595,10 +655,9 @@ static void layoutHeader(UIViewController *page) {
     syncPodcastChips(stack);
     layoutHeaderOnceSized(page, header);
 
-    UIView *face = nil;
+    UIView *face = faceIn(stack);
     for (UIView *part in stack.arrangedSubviews) {
-        if (SGRIsAvatar(part) && !face) face = part;
-        else SGRVanish(part);
+        if (part != face) SGRVanish(part);
     }
     // A face that stopped being the avatar drops the scroll's transform and fade.
     if (sg_face && sg_face != face) rise(sg_face, CGAffineTransformIdentity, 1);
@@ -613,15 +672,6 @@ static void layoutHeader(UIViewController *page) {
         stack.semanticContentAttribute = UISemanticContentAttributeForceRightToLeft;
         [stack setNeedsLayout];
     }
-    // The page's pass runs before its header's: on a turn or a resize the header still has its old width here, its
-    // stack the new one about the old center, and the header's own pass that puts the stack right comes after this
-    // one with no pass of the page after it, which left the pill half the change in width away from the avatar. Laid
-    // out from what holds it, the header, its stack and the avatar in it take the page's new size before they are read.
-    [header.superview layoutIfNeeded];
-    // With the Home look off, the avatar stands alone in the stack and the title ends before it; it rises and fades
-    // with the title either way.
-    CGFloat pillLeading = face ? CGRectGetMinX(facePlace(stack, face)) : header.bounds.size.width - SGRSideMargin + SGRGrid;
-    if (SGRHomeLook()) pillLeading = layoutPill(header, stack, face);
 
     UILabel *title = SGRLargeTitleIn(header, &kTitleKey);
     NSString *text = tabName(header.window);
@@ -631,20 +681,31 @@ static void layoutHeader(UIViewController *page) {
     }
     UIFont *font = SGCategoryCappedFont(UIFontTextStyleLargeTitle, UIFontWeightBold, UIContentSizeCategoryLarge);
     if (![title.font isEqual:font]) title.font = font;
-
-    CGFloat trailing = pillLeading - SGRGrid;
-    CGFloat height = ceil(font.lineHeight);
-    CGRect frame = CGRectMake(SGRSideMargin, round(CGRectGetMidY(untransformed(stack)) - height / 2), MAX(0, trailing - SGRSideMargin), height);
-    place(title, frame);
+    placeRow(header, stack, face, title);
     follow(view);
 
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         SGLog(@"redesign home: header %@, avatar %@ in the stack %@, title %@, scrim %@", NSStringFromCGRect(header.frame),
-              face ? NSStringFromCGRect(face.frame) : @"not found", NSStringFromCGRect(stack.frame), NSStringFromCGRect(frame),
+              face ? NSStringFromCGRect(face.frame) : @"not found", NSStringFromCGRect(stack.frame), NSStringFromCGRect(untransformed(title)),
               sg_scrim ? @"found" : @"not found");
     });
 }
+
+%hook UIStackView
+- (void)layoutSubviews {
+    %orig;
+    followStack(self.superview, (UIStackView *)self);
+}
+%end
+
+// The header's pass as a whole, after whatever its subclass does in layoutSubviews.
+%hook UIView
+- (void)layoutSublayersOfLayer:(CALayer *)layer {
+    %orig;
+    if ([self isKindOfClass:sg_headerClass]) followStack(self, stackIn(self));
+}
+%end
 
 // The feed can come after the header's last pass (its page loads while the header is laid out, a few seconds on
 // a slow account), and the page's view has no pass of its own after; a feed that replaces another (a filter) comes
@@ -681,6 +742,11 @@ static void layoutHeader(UIViewController *page) {
 
 %ctor {
     if (!SGRedesignedUI()) return;
+    // The filter pill needs the mod's strings on its first layout. Start reading on
+    // the first main turn (outside dyld); an earlier caller still gets its own language.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ SGLanguage(); });
+    });
     %init;
     SGRequireClasses(@[
         @"_TtC19Home_FunkisPageImpl20FunkisViewController",

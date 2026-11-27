@@ -4,6 +4,7 @@
 #import <Network/Network.h>
 #import <arpa/inet.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
 #import <fcntl.h>
 #import <sys/socket.h>
 #import "../../tweak/Sources/Shared/WireGuard/SGWGCore.h"
@@ -121,10 +122,28 @@ static void NativeDenialChecks(void) {
     puts("PASS remote BSD TCP and DNS UDP denied; short sockaddr rejected; O_NONBLOCK preserved");
 }
 
+static BOOL GoImageMapped(void) {
+    for (uint32_t i = 0; i < _dyld_image_count(); i++)
+        if ([@(_dyld_get_image_name(i)).lastPathComponent isEqualToString:@"libsgwg.dylib"]) return YES;
+    return NO;
+}
+
+static void LoaderFailureChecks(void) {
+    NSString *expected = Env(@"SGWG_TEST_LOADER_ERROR");
+    NSString *reason;
+    CHECK(!SGWGInspectProfile(@"private input", &reason) && [reason isEqualToString:expected], "profile admission");
+    CHECK([SGWGRedactText(@"private input") isEqualToString:expected], "unsafe redaction fallback");
+    CHECK([SGWGDiagnosticsReport(@{@"country": @"private input"}) isEqualToString:expected], "unsafe report fallback");
+    CHECK(!SGWGReady() && SGWGGuardsInstalled() && [SGWGEngineStatus()[@"error"] isEqualToString:expected],
+          "engine not guarded on loader failure");
+    if (getenv("SGWG_EXPECT_UNMAPPED")) CHECK(!GoImageMapped(), "loaded despite override");
+}
+
 static void UnitChecks(void) {
     BOOL enabled = [Env(@"SGWG_EXPECT_ACTIVE") boolValue];
     CHECK(SGWGActiveThisLaunch() == enabled, "armed state");
     if (!enabled) {
+        CHECK(!GoImageMapped(), "disabled launch mapped the Go runtime");
         CHECK([[NSURLSessionConfiguration.ephemeralSessionConfiguration valueForKey:@"proxyConfigurations"] count] == 0,
               "proxy applied while disabled");
         puts("PASS disabled: no proxy");
@@ -153,8 +172,12 @@ static void UnitChecks(void) {
     task.fixtureResponse = [[NSHTTPURLResponse alloc] initWithURL:task.fixtureRequest.URL statusCode:403 HTTPVersion:@"HTTP/1.1" headerFields:nil];
     SPTCoreURLSessionDataDelegate *events = [SPTCoreURLSessionDataDelegate new];
     [events URLSession:nil dataTask:task didReceiveData:[NSMutableData dataWithLength:12]];
+    [events URLSession:nil dataTask:task didReceiveData:[NSMutableData dataWithLength:13]];
+    task.fixtureRequest = [NSURLRequest requestWithURL:[NSURL URLWithString:@"https://api.spotify.com/test"]];
+    [events URLSession:nil dataTask:task didReceiveData:[NSMutableData dataWithLength:7]];
+    CHECK([SGWGTransportReportLines() containsObject:@"spotify.received-bytes: media 25 api 7"], "in-flight byte accounting");
     [events URLSession:nil task:task didCompleteWithError:[NSError errorWithDomain:NSURLErrorDomain code:-1005 userInfo:nil]];
-    CHECK(events.calls == 1 && events.bytes == 12, "delegate forwarding");
+    CHECK(events.calls == 1 && events.bytes == 32, "delegate forwarding");
     SPTDataLoaderService *wrong = [SPTDataLoaderService new];
     CHECK([wrong URLSession:nil task:task didCompleteWithError:nil] == 73 && wrong.calls == 1, "wrong observer ABI changed");
     NSString *report = SGWGDiagnosticsReport(@{});
@@ -220,6 +243,53 @@ static void LiveChecks(void) {
     printf("%s\n", SGWGDiagnosticsReport(@{@"country": country, @"exitDiffers": @"yes"}).UTF8String);
 }
 
+static void DeferredGuardChecks(void) {
+    // Capture the session while it refers to the reservation. The proxy will
+    // subsequently accept connections, but must not resolve or dial for them.
+    NSURLSession *session = NSURLSession.sharedSession;
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:10];
+    while (![SGWGEngineStatus()[@"running"] boolValue] && limit.timeIntervalSinceNow > 0) usleep(10000);
+    CHECK([SGWGEngineStatus()[@"running"] boolValue] && !SGWGReady(), "expected running but unadmitted engine");
+    NativeDenialChecks();
+    NSString *url = Env(@"SGWG_TEST_DIRECT_URL");
+    NSURLComponents *parts = [NSURLComponents componentsWithString:url];
+    CHECK(!SGWGNativeTestNWCreate(nw_endpoint_create_host(parts.host.UTF8String, parts.port.stringValue.UTF8String),
+          nw_parameters_create_secure_tcp(NW_PARAMETERS_DISABLE_PROTOCOL, NW_PARAMETERS_DEFAULT_CONFIGURATION)),
+          "native TCP connection created while blocked");
+    CHECK(Get(session, url, nil).error, "covered HTTP not blocked");
+    parts.scheme = @"ws";
+    NSURLSessionWebSocketTask *task = [session webSocketTaskWithURL:parts.URL];
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    __block BOOL failed = NO;
+    [task resume];
+    [task receiveMessageWithCompletionHandler:^(NSURLSessionWebSocketMessage *message, NSError *error) {
+        failed = error != nil;
+        dispatch_semaphore_signal(done);
+    }];
+    CHECK(!dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 15*NSEC_PER_SEC)) && failed,
+          "blocked WebSocket did not fail");
+    NSDictionary *connections = SGWGEngineStatus()[@"connections"];
+    CHECK([connections[@"total"] isEqual:@0], "unadmitted engine attempted a destination");
+    puts("PASS running but unadmitted: HTTP, WebSocket and native TCP blocked");
+}
+
+static void OfflineBootstrapChecks(void) {
+    NSURLSession *early = NSURLSession.sharedSession;
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:15];
+    while (SGWGCurrentState() != SGWGStateFailed && limit.timeIntervalSinceNow > 0) usleep(10000);
+    CHECK(SGWGCurrentState() == SGWGStateFailed && !SGWGReady() &&
+          ![SGWGEngineStatus()[@"running"] boolValue], "bootstrap failure not retriable");
+    // Substitute reachable bootstrap data in the private copy, not the user's
+    // profile or the system resolver. Use the real path-trigger entry point.
+    NSData *restored = [NSData dataWithContentsOfFile:Env(@"SGWG_TEST_RESTORED_PROFILE")];
+    CHECK([restored writeToFile:Env(@"SGWG_TEST_PROFILE") atomically:YES], "fixture restore failed");
+    SGWGRequestRebind(@"path");
+    WaitForEngine();
+    CHECK(Get(early, @"https://www.google.com/generate_204", nil).status == 204,
+          "early session failed after bootstrap recovery");
+    puts("PASS hostname bootstrap failure followed by recovery on early session");
+}
+
 static void ExternalChecks(void) {
     WaitForEngine();
     NSString *kind = Env(@"SGWG_TEST_KIND");
@@ -241,7 +311,10 @@ int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSString *mode = argc > 1 ? @(argv[1]) : @"unit";
         if ([mode isEqualToString:@"unit"]) UnitChecks();
+        else if ([mode isEqualToString:@"loader-failure"]) LoaderFailureChecks();
         else if ([mode isEqualToString:@"live"]) LiveChecks();
+        else if ([mode isEqualToString:@"deferred"]) DeferredGuardChecks();
+        else if ([mode isEqualToString:@"offline"]) OfflineBootstrapChecks();
         else if ([mode isEqualToString:@"failclosed"]) FailClosedChecks();
         else if ([mode isEqualToString:@"external"]) ExternalChecks();
         else CHECK(NO, "unknown harness mode");

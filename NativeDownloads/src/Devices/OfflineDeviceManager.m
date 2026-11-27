@@ -50,8 +50,9 @@ static NSMutableSet<SAPSlotRequest *> *slotRequests;
     if(self.deadline){dispatch_source_cancel(self.deadline);self.deadline=nil;}
     [self.session invalidateAndCancel];self.session=nil;self.headers=nil;
     slotOperationActive=NO;
-    SAP_TRACE("offline_devices","operation_finished",self.traceOperation,@{@"error":error?:@"",@"result":result?:@{},@"released_cache_ids":self.released?:@[]});
-    SAP_JOURNAL_ACTION(@"offline_slot_operation_finished",@{@"error":error?:@"",@"result":result?:@{},@"released_cache_ids":self.released?:@[]});
+    NSDictionary *facts=@{@"status":result[@"status"]?:@"unavailable",@"failed":@(error!=nil),@"released_count":@(self.released.count)};
+    SAP_TRACE("offline_devices","operation_finished",self.traceOperation,facts);
+    SAP_JOURNAL_ACTION(@"offline_slot_operation_finished",facts);
     if(self.native&&(!result||(!self.selected&&[result[@"status"]isEqual:@"unconfirmed"])))result=deviceSnapshot(nil,self.native,error,self.timedOut);
     void (^done)(NSDictionary *,NSString *)=self.completion;self.completion=nil;
     [slotRequests removeObject:self];if(done)done(result,error);
@@ -68,15 +69,16 @@ static NSMutableSet<SAPSlotRequest *> *slotRequests;
     [request setValue:@"application/x-protobuf" forHTTPHeaderField:@"Accept"];
     [request setValue:@"no-cache" forHTTPHeaderField:@"Cache-Control"];
     if([method isEqual:@"POST"]){request.HTTPBody=NSData.data;[request setValue:@"application/x-protobuf" forHTTPHeaderField:@"Content-Type"];}
-    SAP_JOURNAL_ACTION(@"offline_slot_http_sent",@{@"method":method,@"path":path});
+    NSString *route=[method isEqual:@"POST"]?@"offline/v1/devices/:device/cache/:cache/disable":path;
+    SAP_JOURNAL_ACTION(@"offline_slot_http_sent",@{@"method":method,@"path":route});
     __block SAPTraceID trace=0;
-    SAPTraceWithOperation(self.traceOperation,^{if(SAPTraceIsActive())trace=SAPTraceBegin(@"management_https_request",@"pixie",@{@"method":method,@"host":@"spclient.wg.spotify.com",@"path":path,@"mutating":@([method isEqual:@"POST"]),@"automatic_replay":@NO});});
+    SAPTraceWithOperation(self.traceOperation,^{if(SAPTraceIsActive())trace=SAPTraceBegin(@"management_https_request",@"pixie",@{@"method":method,@"host":@"spclient.wg.spotify.com",@"path":route,@"mutating":@([method isEqual:@"POST"]),@"automatic_replay":@NO});});
     __weak SAPSlotRequest *weakSelf=self;
     [[self.session dataTaskWithRequest:request completionHandler:^(NSData *data,NSURLResponse *response,NSError *error){
         dispatch_async(dispatch_get_main_queue(),^{
             SAPSlotRequest *self=weakSelf;if(!self||self.finished)return;
             NSInteger status=[response isKindOfClass:NSHTTPURLResponse.class]?[(NSHTTPURLResponse *)response statusCode]:0;
-            SAP_JOURNAL_ACTION(@"offline_slot_http_reply",@{@"method":method,@"path":path,@"http_status":@(status),@"bytes":@(data.length),@"error_domain":error.domain?:@"",@"error_code":@(error.code)});
+            SAP_JOURNAL_ACTION(@"offline_slot_http_reply",@{@"method":method,@"path":route,@"http_status":@(status),@"bytes":@(data.length),@"error_domain":error.domain?:@"",@"error_code":@(error.code)});
             SAP_TRACE("http","management_completion",trace,@{@"http_status":@(status),@"bytes":@(data.length),@"error_domain":error.domain?:@"",@"error_code":@(error.code),@"authenticated_headers_logged":@NO});
             if(error || status<200 || status>=300 || data.length>8*1024*1024) {
                 self.timedOut=[error.domain isEqual:NSURLErrorDomain]&&error.code==NSURLErrorTimedOut;
@@ -168,7 +170,8 @@ static void readRegistry(SAPSlotRequest *op,void (^reply)(NSDictionary *,NSStrin
             }
             if(!deviceKeys(devices)){reply(nil,SAPL(@"settings.pixie.devices.error.invalid_identities",@"The direct device response has duplicate or invalid identities; the current state cannot be confirmed."));return;}
             NSDictionary *value=@{@"max_licenses":@(maximum),@"free_licenses":@(free),@"devices":devices,@"observed_at":@(NSDate.date.timeIntervalSince1970),@"source":@"direct_https_response"};
-            SAP_JOURNAL_ACTION(@"offline_slot_registry_read",value);SAP_TRACE("offline_devices","registry_readback",op.traceOperation,value);reply(value,nil);
+            NSDictionary *facts=@{@"max_licenses":@(maximum),@"free_licenses":@(free),@"device_count":@(devices.count)};
+            SAP_JOURNAL_ACTION(@"offline_slot_registry_read",facts);SAP_TRACE("offline_devices","registry_readback",op.traceOperation,facts);reply(value,nil);
         }];
     }];
 }
@@ -274,7 +277,7 @@ static void releaseSelection(NSString *planID,NSArray<NSString *> *cacheIDs,BOOL
     for(NSDictionary *device in plan[@"active_devices"])if(![device[@"synthetic_record"]boolValue]&&[cacheIDs containsObject:device[tokens?@"selection_token":@"cache_id"]])[selected addObject:device];
     if(selected.count!=cacheIDs.count){if(completion)completion(nil,SAPL(@"settings.pixie.devices.error.selection_not_in_plan",@"The selected registrations were not in the reviewed list. Nothing was changed."));return;}
     SAPSlotRequest *op=beginSlots(completion);if(!op)return;op.plan=plan;op.selected=selected;
-    SAP_JOURNAL_ACTION(@"offline_slot_release_confirmed",@{@"plan_id":planID,@"selected_cache_ids":cacheIDs});
+    SAP_JOURNAL_ACTION(@"offline_slot_release_confirmed",@{@"selected_count":@(selected.count)});
     // Authenticate afresh and compare with the reviewed snapshot before any POST.
     SAPRefreshDownloadCompatibility(^(NSDictionary *native){
         if(op.finished)return;op.native=native;
@@ -319,7 +322,7 @@ void SAPEnableOfflineOnCurrentDevice(void (^completion)(NSDictionary *,NSString 
                     BOOL registered=!readError&&registryMatchesNative(registry,after)&&
                         [deviceKey(local)isEqual:deviceKey(observed)]&&[observed[@"offline_enabled"]boolValue]&&
                         [after[@"sources"][@"playback"][@"read_status"]isEqual:@"received"]&&[after[@"sources"][@"playback"][@"allowed"]boolValue];
-                    SAP_JOURNAL_ACTION(@"offline_current_device_enable_result",@{@"registration_observed":@(registered),@"check":after,@"audio_playback_tested":@NO});
+                    SAP_JOURNAL_ACTION(@"offline_current_device_enable_result",@{@"registration_observed":@(registered),@"audio_playback_tested":@NO});
                     [request finish:after error:registered?nil:readError?:SAPL(@"settings.pixie.devices.error.enable_pending",@"Spotify acknowledged the command, but this exact device's offline registration is not confirmed. Refresh; no command is automatically repeated.")];
                 });});
             });

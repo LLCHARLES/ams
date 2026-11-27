@@ -126,7 +126,6 @@ id<SGLinkCancellation> SGResolveSpotifyPublicLink(NSURL *url, SGLinkResolved com
 
 BOOL SGSupportsSpotifyLinkDispatch(Class dispatcherClass, Class reasonClass) {
     if (![dispatcherClass instancesRespondToSelector:NSSelectorFromString(@"setMainUILoaded:")]) return NO;
-    return [dispatcherClass instancesRespondToSelector:NSSelectorFromString(@"navigateToURI:options:interactionID:")] ||
-           ([dispatcherClass instancesRespondToSelector:NSSelectorFromString(@"navigateToURI:options:reason:completionHandler:resultHandler:")] &&
-            [reasonClass instancesRespondToSelector:NSSelectorFromString(@"initWithSourceApplication:interactionID:")]);
+    return [dispatcherClass instancesRespondToSelector:NSSelectorFromString(@"navigateToURI:options:reason:completionHandler:resultHandler:")] &&
+           [reasonClass instancesRespondToSelector:NSSelectorFromString(@"initWithSourceApplication:interactionID:")];
 }

@@ -17,6 +17,7 @@
 #import "Navbar.h"
 #import "Shared/Navigation/Links.h"
 #import "Shared/Navigation/TabIcons.h"
+#import "Shared/WireGuard/SGWGABI.h"
 #import <objc/message.h>
 
 static const CGFloat kIconSize = 24;
@@ -321,11 +322,20 @@ void SGRefreshTabBar(void) {
 // Whether Spotify reads its own item list through this ObjC bridge decides whether the bar can be
 // composed at the model level, where the order, the taps and the widths would all follow by
 // themselves, instead of by moving views about. Silence in the log says it cannot.
+%group SGStockItems
 %hook _TtC28NavigationUI_TabBarItemsImpl29TabBarItemsNavigationListImpl
 - (NSArray *)items {
     NSArray *items = %orig;
+    if (![items isKindOfClass:NSArray.class]) return items;
     NSMutableString *out = [NSMutableString stringWithFormat:@"list read, %lu items", (unsigned long)items.count];
-    for (id item in items) [out appendFormat:@"\n  %@ · %@", [item valueForKey:@"title"], [item valueForKey:@"viewURI"]];
+    for (id item in items) {
+        if (![item respondsToSelector:@selector(title)] || ![item respondsToSelector:NSSelectorFromString(@"viewURI")]) {
+            static dispatch_once_t once;
+            dispatch_once(&once, ^{ SGLog(@"navbar: item title or viewURI unavailable"); });
+            continue;
+        }
+        [out appendFormat:@"\n  %@ · %@", [item valueForKey:@"title"], [item valueForKey:@"viewURI"]];
+    }
     static NSString *last;
     if (![out isEqualToString:last]) {
         last = [out copy];
@@ -334,10 +344,17 @@ void SGRefreshTabBar(void) {
     return items;
 }
 %end
+%end
 
 %ctor {
     if (!SGNativeUI()) return;
     %init;
+    Class list = NSClassFromString(@"_TtC28NavigationUI_TabBarItemsImpl29TabBarItemsNavigationListImpl");
+    if (SGWGMethodMatches(class_getInstanceMethod(list, @selector(items)), "@", @[])) {
+        %init(SGStockItems);
+    } else {
+        SGLog(@"navbar: stock items getter unavailable");
+    }
     SGRequireClasses(@[
         @"SPTEncoreIcon",
         @"SPTEncoreIconView",

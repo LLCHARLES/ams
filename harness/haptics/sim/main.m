@@ -40,10 +40,12 @@ void SGSpeedPitchSongValuesChanged(NSString *control) {}
 
 static atomic_uint_fast64_t sg_frame;
 static atomic_bool sg_mute;
+static atomic_bool sg_steadyBass;
 static double sg_generatorRate;
 
 // A kick (a falling sine, 120 to 50 Hz) on each whole second, a snare (noise and 190 Hz) on each half.
 static float beatAt(uint64_t frame, double rate) {
+    if (atomic_load(&sg_steadyBass)) return 0.25 * sin(2 * M_PI * 60 * frame / rate);
     double t = frame / rate, beat = fmod(t, 1.0), half = fmod(t, 0.5);
     float out = 0;
     if (beat < 0.25) {
@@ -222,6 +224,98 @@ static int sg_failures;
     [self.window makeKeyAndVisible];
     [AVAudioSession.sharedInstance setCategory:AVAudioSessionCategoryPlayback error:nil];
     [AVAudioSession.sharedInstance setActive:YES error:nil];
+#ifndef BEFORE
+    extern void HarnessEmitLevel(float);
+    extern unsigned HarnessPlayerWakes(void);
+    NSArray *args = NSProcessInfo.processInfo.arguments;
+    BOOL missedBeat = [args containsObject:@"quick-beat"];
+    if (missedBeat || [args containsObject:@"grace-teardown"]) {
+        extern void HarnessBetweenPlayerTurns(void (^body)(void));
+        [self after:0.5 do:^{
+            HarnessBetweenPlayerTurns(^{ HarnessEmitLevel(0.4f); });
+            HarnessBetweenPlayerTurns(^{
+                HARNESS_CHECK(FakeHapticsTake().rumbling);
+                if (missedBeat) {
+                    HarnessEmitLevel(0.4f); // queued under the old mode, still unread
+                    SGSetInt(SGKeyMusicFollows, SGMusicFollowsBeat);
+                    SGMusicHapticsSettingsChanged();
+                    SGSetInt(SGKeyMusicFollows, SGMusicFollowsBass);
+                    SGMusicHapticsSettingsChanged();
+                }
+                HarnessEmitLevel(0);
+            });
+            HarnessBetweenPlayerTurns(^{
+                FakeHaptics c = FakeHapticsTake();
+                if (missedBeat) {
+                    HARNESS_CHECK(!c.rumbling && c.rumbleStops == 1 && !c.rumbleStarts);
+                    puts("PASS queued pre-Beat bass cannot restart the stopped rumble");
+                    exit(0);
+                }
+                HARNESS_CHECK(c.rumbling && c.levels && c.levelMax == 0);
+                FakeHapticsBeginTeardownFailure(); // first engine stop returns a retryable error
+                SGSetEnabled(SGKeyMusicHaptics, NO);
+                [NSNotificationCenter.defaultCenter postNotificationName:SGMusicHapticsSwitchesChangedNotification object:nil];
+            });
+            [self after:0.5 do:^{
+                HARNESS_CHECK(FakeHapticsTake().running);
+                unsigned before = HarnessPlayerWakes();
+                [self after:0.25 do:^{
+                    unsigned wakes = HarnessPlayerWakes() - before;
+                    NSLog(@"[harness] %u player wakes during 250 ms of stop retry backoff", wakes);
+                    HARNESS_CHECK(wakes == 0);
+                }];
+            }];
+            [self after:2.6 do:^{
+                HARNESS_CHECK(!FakeHapticsTake().running);
+                puts("PASS disabled engine sleeps through backoff then retries teardown");
+                exit(0);
+            }];
+        }];
+        return YES;
+    }
+    if ([args containsObject:@"rumble-gap"] || [args containsObject:@"beat-silence"]) {
+        [self after:0.5 do:^{
+            HarnessEmitLevel(0.4f);
+            [self after:0.05 do:^{
+                HARNESS_CHECK(FakeHapticsTake().rumbling);
+                if ([args containsObject:@"rumble-gap"]) {
+                    HarnessEmitLevel(0);
+                    [self after:0.18 do:^{
+                        HarnessEmitLevel(0.03f); // cannot start a new player
+                    }];
+                    [self after:0.23 do:^{
+                        FakeHaptics c = FakeHapticsTake();
+                        HARNESS_CHECK(c.rumbling && !c.rumbleStops && fabs(c.levelMax - 0.03f) < 0.001f);
+                        HarnessEmitLevel(0);
+                    }];
+                    [self after:0.44 do:^{ HARNESS_CHECK(FakeHapticsTake().rumbling); }];
+                    [self after:0.64 do:^{
+                        FakeHaptics c = FakeHapticsTake();
+                        HARNESS_CHECK(!c.rumbling && c.rumbleStops == 1 && c.running);
+                        puts("PASS sub-start bass continues through a short zero; sustained zero stops the rumble");
+                        exit(0);
+                    }];
+                } else {
+                    SGSetInt(SGKeyMusicFollows, SGMusicFollowsBeat);
+                    SGMusicHapticsSettingsChanged();
+                    // No level callbacks at all in Beat (e.g. flagged silence).
+                    [self after:6 do:^{
+                        HARNESS_CHECK(!FakeHapticsTake().running);
+                        SGSetInt(SGKeyMusicFollows, SGMusicFollowsBass);
+                        SGMusicHapticsSettingsChanged();
+                        HarnessEmitLevel(0);
+                    }];
+                    [self after:6.3 do:^{
+                        HARNESS_CHECK(!FakeHapticsTake().running);
+                        puts("PASS Beat to Bass in silence leaves the engine stopped");
+                        exit(0);
+                    }];
+                }
+            }];
+        }];
+        return YES;
+    }
+#endif
     if ([NSProcessInfo.processInfo.arguments containsObject:@"output-lifecycle"]) {
         extern BOOL HarnessCheckStoppedOutput;
         extern _Atomic(AudioUnit) HarnessHapticsAttachedOutput;
@@ -263,7 +357,39 @@ static int sg_failures;
         SGSetInt(SGKeyMusicStrength, strength);
         SGMusicHapticsSettingsChanged();
     };
+    __block unsigned wakesBefore;
+    __block uint64_t framesBefore;
+    void (^measureIdle)(void) = ^{
+        [self after:6.5 do:^{
+            HARNESS_CHECK(!FakeHapticsTake().running);
+            wakesBefore = HarnessPlayerWakes();
+            framesBefore = atomic_load(&sg_frame);
+        }];
+    };
+    void (^checkIdle)(void) = ^{
+        unsigned wakes = HarnessPlayerWakes() - wakesBefore;
+        uint64_t frames = atomic_load(&sg_frame) - framesBefore;
+        NSLog(@"[harness] idle haptics: %u player wakes over %llu rendered frames", wakes, frames);
+        HARNESS_CHECK(frames > 0 && wakes == 0);
+    };
     [steps addObjectsFromArray:@[
+        @[@"unflagged silence", ^{ atomic_store(&sg_mute, true); measureIdle(); }, ^(double s) {
+            FakeHaptics c = FakeHapticsTake();
+            HARNESS_CHECK(!c.running && !c.rumbling);
+            checkIdle();
+        }, @9],
+        @[@"Beat ignores sustained bass", ^{
+            set(SGMusicFollowsBeat, 100);
+            atomic_store(&sg_steadyBass, true);
+            atomic_store(&sg_mute, false);
+            SGMusicHapticsPreview();
+            measureIdle();
+        }, ^(double s) {
+            HARNESS_CHECK(!FakeHapticsTake().running);
+            checkIdle();
+            atomic_store(&sg_steadyBass, false);
+            set(SGMusicFollowsEverything, 100);
+        }, @9],
         @[@"engine stopped: drain stops and recovers", ^{
             FakeHapticsBeginRecovery();
             [self after:8 do:^{

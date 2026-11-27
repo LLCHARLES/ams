@@ -14,6 +14,8 @@
 #import "Shared/Player/PlayerSettings.h"
 #import "NowPlaying.h"
 
+extern BOOL SGGestureHandlesTap(UIView *cover);
+
 #pragma mark - hold to play faster
 
 // Holding either side of the cover plays at the chosen hold speed (Shared/Gestures/GestureHold.h) until the finger
@@ -122,17 +124,21 @@ static const NSTimeInterval kBadgeEnter = 0.2, kBadgeExit = 0.15;
 
 static void watchHold(UIView *tilt) {
     SGCoverHold *existing = objc_getAssociatedObject(tilt, &kHoldKey);
-    if (existing) {
-        existing.enabled = SGGestureHoldEnabled();
-        return;
+    SGCoverHold *hold = existing.view == tilt ? existing : nil;
+    for (SGCoverHold *attached in tilt.gestureRecognizers) {
+        if (![attached isKindOfClass:SGCoverHold.class]) continue;
+        if (!hold) hold = attached;
+        else if (attached != hold) [tilt removeGestureRecognizer:attached];
     }
-    if (tilt.bounds.size.width < kCoverMinWidth || !SGInPlayerCover(tilt)) return;
-    SGCoverHold *hold = [[SGCoverHold alloc] initWithTarget:nil action:nil];
+    if (!hold) {
+        if (tilt.bounds.size.width < kCoverMinWidth || !SGInPlayerCover(tilt)) return;
+        hold = [[SGCoverHold alloc] initWithTarget:nil action:nil];
+        [hold addTarget:hold action:@selector(sg_held)];
+        hold.minimumPressDuration = 0.35;
+        [tilt addGestureRecognizer:hold];
+    }
     hold.enabled = SGGestureHoldEnabled();
-    [hold addTarget:hold action:@selector(sg_held)];
-    hold.minimumPressDuration = 0.35;
-    [tilt addGestureRecognizer:hold];
-    objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_ASSIGN);
+    if (existing != hold) objc_setAssociatedObject(tilt, &kHoldKey, hold, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     static dispatch_once_t once;
     dispatch_once(&once, ^{ SGLog(@"native player: hold to play faster on the cover (%@)", NSStringFromClass(tilt.superview.class)); });
 }
@@ -145,7 +151,7 @@ static void watchHold(UIView *tilt) {
 // (SGKeyHideFullScreenCover) keeps it from Spotify too.
 %hook _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView
 - (void)handleTap {
-    if ((SGFlag(SGKeyGestures, NO) || SGHidden(SGKeyHideFullScreenCover)) && SGInPlayerCover((UIView *)self)) return;
+    if ((SGGestureHandlesTap((UIView *)self) || SGHidden(SGKeyHideFullScreenCover)) && SGInPlayerCover((UIView *)self)) return;
     %orig;
 }
 - (void)layoutSubviews {

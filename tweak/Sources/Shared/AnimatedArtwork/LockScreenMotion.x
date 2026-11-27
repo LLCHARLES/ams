@@ -16,7 +16,9 @@
 #import <MediaPlayer/MediaPlayer.h>
 #import <stdatomic.h>
 #import "Core/SGCore.h"
+#import <CommonCrypto/CommonDigest.h>
 #import "AnimatedArtwork.h"
+#import "SGLockArtworkStart.h"
 #import "SGFluidClip.h"
 #import "SGMotionClip.h"
 #import "Shared/LockScreenLyrics/LockScreenLyrics.h"
@@ -199,8 +201,8 @@ static BOOL currentCoverRequest(NSUInteger request, SGShownTrack *track) {
 }
 
 static void setFallbackCover(UIImage *cover) {
+    if (sg_fallbackCover.CGImage != cover.CGImage) sg_coverRevision++;
     sg_fallbackCover = cover;
-    sg_coverRevision++;
     sg_pendingPicture = sg_fallbackPicture;
 }
 
@@ -243,6 +245,44 @@ static void refreshCover(void) {
     });
 }
 
+// Fingerprint canonical pixels, not a native wrapper or the track that supplied it.
+// The worker retains only the last revision's digest, never an encoded full-size cover.
+static NSString *coverSource(CGImageRef cover, NSUInteger revision) {
+    if (!cover) return @"no-cover";
+    static NSUInteger lastRevision;
+    static NSString *digest;
+    if (digest && lastRevision == revision) return digest;
+    // Hash every pixel (including small edits a thumbnail could miss) in fixed-size tiles.
+    enum { side = 128 };
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef ctx = CGBitmapContextCreate(NULL, side, side, 8, side * 4, space,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(space);
+    if (!ctx) return nil;
+    size_t width = CGImageGetWidth(cover), height = CGImageGetHeight(cover);
+    CC_SHA256_CTX hash;
+    CC_SHA256_Init(&hash);
+    CGContextSetBlendMode(ctx, kCGBlendModeCopy);
+    for (size_t y = 0; y < height; y += side) {
+        for (size_t x = 0; x < width; x += side) {
+            size_t w = MIN(side, width - x), h = MIN(side, height - y);
+            CGImageRef tile = CGImageCreateWithImageInRect(cover, CGRectMake(x, y, w, h));
+            if (!tile) { CGContextRelease(ctx); return nil; }
+            CGContextClearRect(ctx, CGRectMake(0, 0, side, side));
+            CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), tile);
+            CGImageRelease(tile);
+            CC_SHA256_Update(&hash, CGBitmapContextGetData(ctx), side * side * 4);
+        }
+    }
+    CGContextRelease(ctx);
+    unsigned char bytes[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(bytes, &hash);
+    digest = [NSString stringWithFormat:@"%zux%zu:%@", width, height,
+              [[NSData dataWithBytes:bytes length:sizeof bytes] base64EncodedStringWithOptions:0]];
+    lastRevision = revision;
+    return digest;
+}
+
 API_AVAILABLE(ios(26.0))
 static void offerCover(void) {
     if (![MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys containsObject:MPNowPlayingInfoProperty3x4AnimatedArtwork]) return;
@@ -259,11 +299,11 @@ static void offerCover(void) {
     NSString *title = sg_title;
     dispatch_async(sg_queue, ^{
         if (token.cancelled) return;
-        NSString *source = cover ? [UIImagePNGRepresentation(cover) base64EncodedStringWithOptions:0] : @"no-cover";
-        NSURL *file = SGMotionMadeFile([NSString stringWithFormat:@"background\n%@\n%@\n%gx%g\n%@",
-                                      picture, SGLyricsBackgroundIdentity(background), size.width, size.height, source]);
+        NSString *source = coverSource(cover.CGImage, revision);
+        NSURL *file = source ? SGMotionMadeFile([NSString stringWithFormat:@"background\n%@\n%@\n%gx%g\n%@",
+                                      picture, SGLyricsBackgroundIdentity(background), size.width, size.height, source]) : nil;
         BOOL unchanged = [file.lastPathComponent isEqual:publishedID];
-        CGImageRef rendered = unchanged ? nil : SGLyricsBackgroundCreate(cover.CGImage, size, background);
+        CGImageRef rendered = !file || unchanged ? nil : SGLyricsBackgroundCreate(cover.CGImage, size, background);
         UIImage *backdrop = rendered ? [UIImage imageWithCGImage:rendered] : nil;
         CGImageRelease(rendered);
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -335,7 +375,7 @@ static void retryPresentation(void) {
 }
 @end
 
-%ctor {
+static void startLockMotion(void) {
     if (@available(iOS 26.0, *)) {
         sg_choice = SGLockScreenArtwork();
         if (sg_choice != SGLockArtworkOff) sg_background = SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background");
@@ -410,7 +450,11 @@ static void retryPresentation(void) {
                 [sg_follower restart];
             });
         }];
-        SGLog(@"lock motion: %@, the lock screen takes %@", motionOn(sg_choice) ? (sg_choice == SGLockArtworkEverySong ? @"on for every song" : @"on") : @"off",
-              MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys);
+    }
+}
+
+%ctor {
+    if (@available(iOS 26.0, *)) {
+        SGLockArtworkStartWhen(^BOOL { return motionOn(SGLockScreenArtwork()); }, ^(BOOL replay) { startLockMotion(); });
     }
 }

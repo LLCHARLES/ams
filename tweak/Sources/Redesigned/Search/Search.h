@@ -20,7 +20,9 @@
 #define SGRKeySearchHideOther @"spotifyglass.redesign.search.hide.other"
 // SearchCards.x: the category cards on tinted glass; off, they are Spotify's own.
 #define SGRKeySearchGlassCards @"spotifyglass.redesign.search.glassCards"
-UIViewController *SGRSearchSettingsPage(void);
+@class SGRPagePreview, SGModSection;
+SGRPagePreview *SGRSearchPreview(void);
+NSArray<SGModSection *> *SGRSearchSections(void);
 
 // The page's list (trees/clean/search/01.txt:24).
 extern NSString *const SGRSearchListIdentifier;

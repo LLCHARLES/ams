@@ -9,7 +9,90 @@ import Translation
 import UIKit
 import os
 
+// Cancellation is cooperative. Wait for normal teardown, but retire a stalled
+// session at its deadline even if the framework never returns.
+@available(iOS 26.0, *)
+@MainActor
+final class SGModelLane {
+    typealias Result = ([String]?, String?)
+    typealias Work = (@escaping ([String]) -> Void) async -> Result
+    private final class Job {
+        var work: Work?
+        var done: ((Result) -> Void)?
+        var progress: (([String]) -> Void)?
+        var deadline: Task<Void, Never>?
+        init(_ work: @escaping Work, _ progress: @escaping ([String]) -> Void, _ done: @escaping (Result) -> Void) {
+            self.work = work; self.progress = progress; self.done = done
+        }
+        func finish(_ result: Result) {
+            let callback = done
+            done = nil; progress = nil; work = nil
+            callback?(result)
+        }
+    }
+    private let timeout: Duration
+    private var running: Task<Void, Never>?
+    private var current: Job?, waiting: Job?
+    init(timeout: Duration = .seconds(120)) { self.timeout = timeout }
+
+    func submit(_ work: @escaping Work, progress: @escaping ([String]) -> Void, done: @escaping (Result) -> Void) {
+        let job = Job(work, progress, done)
+        let replaced = waiting
+        waiting = job
+        running?.cancel()
+        current?.finish((nil, nil))
+        replaced?.finish((nil, nil))
+        startNext()
+    }
+    private func arm(_ job: Job) {
+        job.deadline?.cancel()
+        job.deadline = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            guard current === job else { return }
+            running?.cancel()
+            current = nil; running = nil
+            job.deadline = nil
+            job.finish((nil, "Apple Intelligence timed out."))
+            startNext()
+        }
+    }
+    private func startNext() {
+        guard current == nil, let job = waiting, let work = job.work else { return }
+        waiting = nil; current = job
+        arm(job)
+        running = Task {
+            let result: Result
+            if Task.isCancelled { result = (nil, nil) }
+            else {
+                result = await work { lines in
+                    DispatchQueue.main.async {
+                        guard job.done != nil else { return }
+                        self.arm(job)
+                        job.progress?(lines)
+                    }
+                }
+            }
+            guard current === job else { return }
+            job.deadline?.cancel(); job.deadline = nil
+            current = nil; running = nil
+            job.finish(result)
+            startNext()
+        }
+    }
+}
+
 // Apple's sheet that downloads the song's languages: Translation shows it only from a SwiftUI view.
+@MainActor
+func SGAfterTransition(register: (@escaping () -> Void) -> Bool, run: @escaping () -> Void) {
+    var pending: (() -> Void)? = run
+    let once = {
+        let action = pending
+        pending = nil
+        action?()
+    }
+    if !register(once) { once() }
+}
+
 @available(iOS 26.0, *)
 private struct SGPrepareTranslationView: View {
     let configuration: TranslationSession.Configuration
@@ -42,8 +125,8 @@ public final class SGOnDeviceTranslation: NSObject {
     }
 
     // A line's language when the recognizer is sure of it; short lines ("yeah") guess wildly otherwise.
-    private static func languageOf(_ line: String) -> Locale.Language? {
-        let recognizer = NLLanguageRecognizer()
+    private static func languageOf(_ line: String, using recognizer: NLLanguageRecognizer) -> Locale.Language? {
+        recognizer.reset()
         recognizer.processString(line)
         guard let (found, chance) = recognizer.languageHypotheses(withMaximum: 1).first, chance >= 0.8 else { return nil }
         return Locale.Language(identifier: found.rawValue)
@@ -53,13 +136,14 @@ public final class SGOnDeviceTranslation: NSObject {
     // half in English is Korean; else the whole song's.
     private static func sourceLanguage(_ lines: [String], target: Locale.Language) -> Locale.Language? {
         var counts: [String: (Locale.Language, Int)] = [:]
+        let recognizer = NLLanguageRecognizer()
         // Each line once, so a repeated chorus does not outvote the verses.
         for line in Set(lines.map { $0.lowercased() }) where !line.isEmpty {
-            guard let language = languageOf(line), !same(language, target), let code = language.languageCode?.identifier else { continue }
+            guard let language = languageOf(line, using: recognizer), !same(language, target), let code = language.languageCode?.identifier else { continue }
             counts[code] = (counts[code]?.0 ?? language, (counts[code]?.1 ?? 0) + 1)
         }
         if let most = counts.values.max(by: { $0.1 < $1.1 }) { return most.0 }
-        let recognizer = NLLanguageRecognizer()
+        recognizer.reset()
         recognizer.processString(Set(lines).joined(separator: "\n"))
         guard let found = recognizer.dominantLanguage, found != .undetermined else { return nil }
         return Locale.Language(identifier: found.rawValue)
@@ -79,11 +163,13 @@ public final class SGOnDeviceTranslation: NSObject {
     private static func prepareLanguageDownload(source: Locale.Language, target: Locale.Language, from view: UIView) async {
         await withCheckedContinuation { continuation in
             var finished = false
-            var controller: UIViewController?
+            weak var controller: UIViewController?
             // Run now, or after the transition under way: UIKit drops a present or dismiss made during one.
             let afterTransition = { (of: UIViewController, run: @escaping () -> Void) in
-                if let transition = of.transitionCoordinator ?? of.presentedViewController?.transitionCoordinator,
-                   transition.animate(alongsideTransition: nil, completion: { _ in run() }) {} else { run() }
+                SGAfterTransition(register: { once in
+                    let transition = of.transitionCoordinator ?? of.presentedViewController?.transitionCoordinator
+                    return transition?.animate(alongsideTransition: nil, completion: { _ in once() }) ?? false
+                }, run: run)
             }
             let finish = {
                 guard !finished else { return }
@@ -104,6 +190,9 @@ public final class SGOnDeviceTranslation: NSObject {
                 host.overrideUserInterfaceStyle = .dark
                 host.presentationController?.overrideTraitCollection = UITraitCollection(userInterfaceStyle: .dark)
                 top.present(host, animated: false)
+                // UIKit may decline a presentation (e.g. if the presenter left the window).
+                // In that case neither SwiftUI lifecycle callback will ever run.
+                if host.presentingViewController == nil { finish() }
             }
         }
     }
@@ -161,9 +250,10 @@ public final class SGOnDeviceTranslation: NSObject {
             }
             // Lines already in the target language are left as they are, not run through the other language.
             var kept = [String](repeating: "", count: lines.count)
+            let recognizer = NLLanguageRecognizer()
             let requests: [TranslationSession.Request] = lines.enumerated().compactMap { index, line in
                 if line.trimmingCharacters(in: .whitespaces).isEmpty || line == "♪" { return nil }
-                if languageOf(line).map({ same($0, target) }) == true {
+                if languageOf(line, using: recognizer).map({ same($0, target) }) == true {
                     kept[index] = line
                     return nil
                 }
@@ -192,6 +282,9 @@ public final class SGOnDeviceTranslation: NSObject {
     // MARK: Apple Intelligence
 
     @available(iOS 26.0, *)
+    @MainActor private static let modelLane = SGModelLane()
+
+    @available(iOS 26.0, *)
     private static var model: SystemLanguageModel {
         // Lyrics are often explicit: the guardrails for changing text the user already has, not for writing new.
         SystemLanguageModel(useCase: .general, guardrails: .permissiveContentTransformations)
@@ -211,13 +304,17 @@ public final class SGOnDeviceTranslation: NSObject {
         // the model refuses is asked again in halves (translateSplitting), and one that fails is left out while
         // the rest go on, so an explicit line costs only itself.
         let wanted = lines.indices.filter { !lines[$0].isEmpty }
-        Task {
+        DispatchQueue.main.async {
+            modelLane.submit(runModel, progress: progress) { done($0.0, $0.1) }
+        }
+        func runModel(_ report: @escaping ([String]) -> Void) async -> SGModelLane.Result {
             var out = [String](repeating: "", count: lines.count)
             var before: [(String, String)] = []   // the batch just done, lines and translations, for the next one's sense
             var failure: Error?
             var translated = 0
             let started = Date()
             for first in stride(from: 0, to: wanted.count, by: chunkLines) {
+                if Task.isCancelled { return (nil, nil) }
                 let indices = Array(wanted[first..<min(first + chunkLines, wanted.count)])
                 let chunkStarted = Date()
                 do {
@@ -234,12 +331,12 @@ public final class SGOnDeviceTranslation: NSObject {
                     before = []
                     log.error("intelligence: lines \(first + 1)-\(first + indices.count) of \(wanted.count) failed: \(String(describing: error), privacy: .public)")
                 }
-                if first + chunkLines < wanted.count { let soFar = out; DispatchQueue.main.async { progress(soFar) } }
+                if first + chunkLines < wanted.count { report(out) }
             }
             log.notice("intelligence: \(translated) of \(wanted.count) lines into \(languageTag, privacy: .public) in \(Date().timeIntervalSince(started), format: .fixed(precision: 1)) s")
-            if translated == 0, let failure { return finish(done, nil, problem(failure)) }
+            if translated == 0, let failure { return (nil, problem(failure)) }
             let left = wanted.count - translated
-            finish(done, out, left == 0 ? nil
+            return (out, left == 0 ? nil
                 : "Apple Intelligence left \(left) of the song's \(wanted.count) lines untranslated. Ask again to try those lines once more.")
         }
     }
@@ -249,6 +346,7 @@ public final class SGOnDeviceTranslation: NSObject {
     @available(iOS 26.0, *)
     private static func translateSplitting(_ lines: [String], into language: String, song: String?, before: [(String, String)],
                                            failure: inout Error?) async throws -> [String?] {
+        try Task.checkCancellation()
         do {
             return try await translateChunk(lines, into: language, song: song, before: before)
         } catch where refused(error) {

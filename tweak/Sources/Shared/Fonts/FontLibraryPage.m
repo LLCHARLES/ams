@@ -225,6 +225,7 @@ static void choose(SGLibraryFont *font) {
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.font.library.action.stop", @"Stop") style:UIAlertActionStyleDestructive handler:^(UIAlertAction *action) {
         SGFontLibraryCancel();
     }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 
@@ -234,6 +235,7 @@ static void choose(SGLibraryFont *font) {
         preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.later", @"Later") style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"settings.font.action.restart_now", @"Restart now") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) { SGRestartSpotify(); }]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

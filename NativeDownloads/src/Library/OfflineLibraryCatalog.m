@@ -124,6 +124,7 @@ void SAPOfflineLibraryStoreFlushForTesting(void) {dispatch_sync(snapshotQueue(),
 @property(nonatomic,copy)void(^progress)(NSUInteger,NSUInteger);
 @property(nonatomic,copy)void(^completion)(NSArray *,NSString *);
 @property(nonatomic)BOOL stopped;
+@property(nonatomic)BOOL identitiesOnly;
 @property(nonatomic,strong)NSMutableDictionary<NSString *,dispatch_block_t> *reads;
 @property(nonatomic,strong)NSMutableOrderedSet<NSString *> *candidates;
 @property(nonatomic,strong)NSMutableArray<NSString *> *downloaded;
@@ -146,7 +147,7 @@ void SAPOfflineLibraryStoreFlushForTesting(void) {dispatch_sync(snapshotQueue(),
  for(dispatch_block_t cancel in self.reads.allValues)cancel();[self.reads removeAllObjects];[self.metadataWaiters removeAllObjects];
  // Errors/cancellation never replace the previous display snapshot. A later
  // scan or a verified deletion supersedes this writer.
- if(rows && self.snapshotGeneration==cacheGeneration){cachedTracks=[rows copy];persistSnapshot(cachedTracks);}
+ if(rows && !self.identitiesOnly && self.snapshotGeneration==cacheGeneration){cachedTracks=[rows copy];persistSnapshot(cachedTracks);}
  void(^callback)(NSArray *,NSString *)=self.completion;self.completion=nil;self.progress=nil;if(callback)callback(rows,error);
 }
 - (void)read:(NSString *)service method:(NSString *)method payload:(NSData *)payload reply:(void(^)(NSData *,NSString *))reply{
@@ -170,36 +171,48 @@ void SAPOfflineLibraryStoreFlushForTesting(void) {dispatch_sync(snapshotQueue(),
 }
 - (void)begin{
  if([self isStopped])return;
- loadPersistedSnapshot();
- self.snapshotGeneration=++cacheGeneration;
- NSMutableDictionary *previous=NSMutableDictionary.dictionary;
- for(NSDictionary *row in cachedTracks)if([row[@"metadata_complete"]isEqual:@YES] && validURI(row[@"uri"],@"track"))previous[row[@"uri"]]=row;
- self.previousRows=previous;
+ if(!self.identitiesOnly){
+  loadPersistedSnapshot();self.snapshotGeneration=++cacheGeneration;
+  NSMutableDictionary *previous=NSMutableDictionary.dictionary;
+  for(NSDictionary *row in cachedTracks)if([row[@"metadata_complete"]isEqual:@YES] && validURI(row[@"uri"],@"track"))previous[row[@"uri"]]=row;
+  self.previousRows=previous;
+ }
  self.reads=NSMutableDictionary.dictionary;self.candidates=NSMutableOrderedSet.orderedSet;
  self.downloaded=NSMutableArray.array;self.rows=NSMutableDictionary.dictionary;self.metadataCache=NSMutableDictionary.dictionary;self.metadataWaiters=NSMutableDictionary.dictionary;
  // Descriptor at executable offset 0xa4a60e0: no pagination fields exist.
  // No device, URI list or item filter => request the complete local context set.
  [self read:OfflineService method:@"GetContexts" payload:SAPProtoBytes(1,SAPProtoInteger(1,1)) reply:^(NSData *data,NSString *error){
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+  NSMutableOrderedSet *candidates=NSMutableOrderedSet.orderedSet;
+  void (^fail)(NSString *)=^(NSString *reason){dispatch_async(dispatch_get_main_queue(),^{[self finish:reason rows:nil];});};
   NSArray *fields=SAPProtoFields(data),*contexts=messages(fields,1);NSUInteger itemCount=0;
-  if(error || !fields || !contexts || SAPProtoNumber(fields,2,0)){[self finish:error?:SAPL(@"settings.pixie.library.enumeration_failed",@"Native offline context enumeration failed") rows:nil];return;}
+  if(error || !fields || !contexts || SAPProtoNumber(fields,2,0)){fail(error?:SAPL(@"settings.pixie.library.enumeration_failed",@"Native offline context enumeration failed"));return;}
   for(NSArray *info in contexts){
    NSArray *context=SAPProtoFields(SAPProtoData(info,1)),*items=messages(info,2);
-   if(!context || !items){[self finish:SAPL(@"settings.pixie.library.invalid_context",@"Malformed native offline context") rows:nil];return;}
+   if(!context || !items){fail(SAPL(@"settings.pixie.library.invalid_context",@"Malformed native offline context"));return;}
    NSString *contextURI=SAPProtoString(context,1);
-   if(!contextURI.length){[self finish:SAPL(@"settings.pixie.library.missing_context_identity",@"Native offline context identity missing") rows:nil];return;}
-   if(validURI(contextURI,@"track"))[self.candidates addObject:contextURI];
+   if(!contextURI.length){fail(SAPL(@"settings.pixie.library.missing_context_identity",@"Native offline context identity missing"));return;}
+   if(validURI(contextURI,@"track"))[candidates addObject:contextURI];
    for(NSArray *item in items){itemCount++;NSString *uri=SAPProtoString(item,1);
-    if(!uri.length || ([uri hasPrefix:@"spotify:track:"] && !validURI(uri,@"track"))){[self finish:SAPL(@"settings.pixie.library.invalid_item_identity",@"Malformed native offline item identity") rows:nil];return;}
-    if(validURI(uri,@"track") && SAPProtoNumber(item,2,0)==3)[self.candidates addObject:uri];
+    if(!uri.length || ([uri hasPrefix:@"spotify:track:"] && !validURI(uri,@"track"))){fail(SAPL(@"settings.pixie.library.invalid_item_identity",@"Malformed native offline item identity"));return;}
+    if(validURI(uri,@"track") && SAPProtoNumber(item,2,0)==3)[candidates addObject:uri];
    }
   }
-  SAP_TRACE("offline_library","native_contexts_loaded",0,(@{@"context_count":@(contexts.count),@"item_count":@(itemCount),@"candidate_tracks":@(self.candidates.count),@"unfiltered_contexts":@YES,@"scope_runtime_verified":@NO,@"pagination_contract":@"none_in_native_descriptor"}));
-  [self validateNext];
+  NSUInteger count=contexts.count;
+  dispatch_async(dispatch_get_main_queue(),^{
+   if([self isStopped])return;
+   self.candidates=candidates;
+   SAP_TRACE("offline_library","native_contexts_loaded",0,(@{@"context_count":@(count),@"item_count":@(itemCount),@"candidate_tracks":@(candidates.count),@"unfiltered_contexts":@YES,@"scope_runtime_verified":@NO,@"pagination_contract":@"none_in_native_descriptor"}));
+   [self validateNext];
+  });
+  });
  }];
 }
 - (void)validateNext{
  if([self isStopped])return;
- if(self.validationOffset==self.candidates.count){if(self.progress)self.progress(0,self.downloaded.count);[self hydrateNext];return;}
+ if(self.validationOffset==self.candidates.count){
+  if(self.identitiesOnly){[self finish:nil rows:self.downloaded.copy];return;}
+  if(self.progress)self.progress(0,self.downloaded.count);[self hydrateNext];return;}
  NSUInteger count=MIN((NSUInteger)128,self.candidates.count-self.validationOffset);
  NSArray *batch=[self.candidates.array subarrayWithRange:NSMakeRange(self.validationOffset,count)];
  NSMutableData *payload=NSMutableData.data;for(NSString *uri in batch)[payload appendData:SAPProtoBytes(1,[uri dataUsingEncoding:NSUTF8StringEncoding])];
@@ -271,4 +284,30 @@ void SAPOfflineLibraryStoreFlushForTesting(void) {dispatch_sync(snapshotQueue(),
 dispatch_block_t SAPFetchOfflineLibrary(void(^progress)(NSUInteger,NSUInteger),void(^completion)(NSArray *,NSString *)){
  SAPOfflineLibraryFetch *fetch=SAPOfflineLibraryFetch.new;fetch.progress=progress;fetch.completion=completion;
  dispatch_async(dispatch_get_main_queue(),^{[fetch begin];});return ^{[fetch cancel];};
+}
+
+dispatch_block_t SAPFetchDownloadedTrackURIs(void (^completion)(NSArray<NSString *> *,NSString *)){
+ SAPOfflineLibraryFetch *fetch=SAPOfflineLibraryFetch.new;fetch.identitiesOnly=YES;fetch.completion=completion;
+ dispatch_async(dispatch_get_main_queue(),^{[fetch begin];});return ^{[fetch cancel];};
+}
+
+dispatch_block_t SAPFetchDownloadedTrackMetadata(NSString *uri,void (^completion)(NSDictionary *)){
+ if(!validURI(uri,@"track")){dispatch_async(dispatch_get_main_queue(),^{completion(nil);});return ^{};}
+ SAPOfflineLibraryFetch *fetch=SAPOfflineLibraryFetch.new;fetch.reads=NSMutableDictionary.dictionary;
+ NSData *idField=SAPProtoBytes(1,[uri dataUsingEncoding:NSUTF8StringEncoding]);
+ [fetch read:OfflineService method:@"GetItems" payload:idField reply:^(NSData *data,NSString *error){
+  NSArray *items=error?nil:messages(SAPProtoFields(data),1);
+  if(items.count!=1 || ![SAPProtoString(items.firstObject,1)isEqual:uri]){completion(nil);return;}
+  uint64_t state=SAPProtoNumber(items.firstObject,2,0);
+  if(!state){completion(@{@"uri":uri,@"removed":@YES});return;}
+  if(state!=3){completion(nil);return;} // Waiting/expired is not proof of removal.
+  [fetch read:MetadataService method:@"GetEntity" payload:idField reply:^(NSData *data,NSString *error){
+   NSArray *track=error?nil:entity(data,4,uri,@"track");
+   completion(track?@{@"uri":uri,@"name":SAPProtoString(track,2)?:@"",
+    @"artist_name":SAPProtoString(messages(track,4).firstObject,2)?:@"",
+    @"album_name":SAPProtoString(SAPProtoFields(SAPProtoData(track,3)),2)?:@"",
+    @"duration_ms":@(SAPProtoSInt(track,7,0))}:@{@"uri":uri,@"unavailable":@YES});
+  }];
+ }];
+ return ^{[fetch cancel];};
 }

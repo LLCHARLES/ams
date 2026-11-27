@@ -53,7 +53,8 @@ static unsigned long long neuralRoom(NSURL *url) {
 @property (nonatomic, copy) NSString *name;   // the copy's, for the log
 @property (nonatomic, copy) NSURL *url;
 @property (nonatomic) CFAbsoluteTime began;
-@property (nonatomic) BOOL finished, abandoned;
+@property (nonatomic) BOOL finished;
+@property (atomic) BOOL abandoned;   // the load queue checks before warming
 @end
 
 @implementation SGSingLoad
@@ -121,19 +122,21 @@ static SGSingLoad *startLoad(NSURL *url, BOOL neural, double deadline, void (^do
           url.lastPathComponent, sg_foreground ? @"active" : @"not active", SGSingThermalName(), memoryText(), SGSingMemoryText(), sg_outstanding);
     NSString *name = [NSString stringWithFormat:@"spotifyglass.sing.load.%u", load.number];
     dispatch_queue_t queue = dispatch_queue_create(name.UTF8String, dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0));
-    dispatch_async(queue, ^{
+    dispatch_async(queue, ^{ @autoreleasepool {
         MLModelConfiguration *configuration = [MLModelConfiguration new];
         configuration.computeUnits = neural ? MLComputeUnitsCPUAndNeuralEngine : MLComputeUnitsCPUOnly;
         NSError *error;
         MLModel *model = [MLModel modelWithContentsOfURL:url configuration:configuration error:&error];
         double loaded = CFAbsoluteTimeGetCurrent() - load.began;
         NSString *loadedMemory = SGSingMemoryText();
-        double warm = model ? [SGSingSeparator warmUp:model error:&error] : -1;
+        double warm = model && !load.abandoned ? [SGSingSeparator warmUp:model error:&error] : -1;
         NSString *warmMemory = SGSingMemoryText();
+        if (load.abandoned) model = nil;
         dispatch_async(dispatch_get_main_queue(), ^{
             sg_outstanding--;
             load.finished = YES;
-            NSString *outcome = !model ? [NSString stringWithFormat:@"did not load after %.1f s: %@", loaded, error.localizedDescription]
+            NSString *outcome = load.abandoned ? @"returned after abandonment"
+                              : !model ? [NSString stringWithFormat:@"did not load after %.1f s: %@", loaded, error.localizedDescription]
                               : warm < 0 ? [NSString stringWithFormat:@"loaded in %.1f s, and its warm-up failed: %@", loaded, error.localizedDescription]
                                          : [NSString stringWithFormat:@"loaded in %.1f s, and its warm-up window of silence took %.1f s", loaded, warm];
             SGLog(@"sing: load %u, the %@ copy, %@ (memory loaded: %@; warm: %@)%@", load.number, load.name, outcome, loadedMemory, warmMemory,
@@ -141,7 +144,7 @@ static SGSingLoad *startLoad(NSURL *url, BOOL neural, double deadline, void (^do
             if (load.abandoned) return;
             done(warm >= 0 ? model : nil, error);
         });
-    });
+    }});
     still(load, 0);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(deadline * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (load.finished || load.abandoned) return;
@@ -253,18 +256,29 @@ void SGSingLoaderSetChanged(void (^block)(void)) {
 void SGSingLoaderDropFast(NSString *why) {
     BOOL had = sg_fastState == SGSingFastLoading || sg_fastState == SGSingFastReady;
     abandon(sg_fastLoad);
+    if (sg_prepareLoad == sg_fastLoad) sg_prepareLoad = nil;
     sg_fastLoad = nil;
-    [sg_separator setFastModel:nil named:nil];
+    BOOL needsCPU = sg_separator && ![sg_separator setFastModel:nil named:nil];
     sg_fastState = SGSingFastNone;
+    sg_neural = NO;
+    if (needsCPU) {
+        // The fast copy ran alone. Unpublish the empty separator so the engine plays dry while
+        // the ordinary CPU load warms a replacement; purge and mic-off must not start one.
+        sg_separator = nil;
+        sg_state = SGSingLoaderIdle;
+        if (sg_wanted) startCPU();
+    }
     if (!had) return;
     if (why) SGLog(@"sing: the Neural Engine copy is dropped: %@", why);
     changed();
 }
 
+static void purge(NSString *why, BOOL dropIndependentPrepare);
+
 void SGSingLoaderWant(NSURL *url, BOOL neural) {
     // Another model (its update in): the copies of the one before go, a failure with them, and this one loads.
     if (sg_url && url && ![url isEqual:sg_url]) {
-        SGSingLoaderPurge([NSString stringWithFormat:@"the model is now %@", url.lastPathComponent]);
+        purge([NSString stringWithFormat:@"the model is now %@", url.lastPathComponent], ![sg_prepareLoad.url isEqual:url]);
         sg_state = SGSingLoaderIdle;
         sg_error = nil;
     }
@@ -277,10 +291,14 @@ void SGSingLoaderWant(NSURL *url, BOOL neural) {
     else startFast();
 }
 
-void SGSingLoaderPurge(NSString *why) {
+static void purge(NSString *why, BOOL dropIndependentPrepare) {
     sg_keepToken++;
     sg_wanted = NO;
-    BOOL had = sg_separator || sg_cpuLoad || sg_fastLoad;
+    BOOL had = sg_separator || sg_cpuLoad || sg_fastLoad || (sg_prepareLoad && dropIndependentPrepare);
+    if (dropIndependentPrepare) {
+        abandon(sg_prepareLoad);
+        sg_prepareLoad = nil;
+    }
     abandon(sg_cpuLoad);
     sg_cpuLoad = nil;
     SGSingLoaderDropFast(nil);
@@ -291,6 +309,10 @@ void SGSingLoaderPurge(NSString *why) {
     changed();
 }
 
+void SGSingLoaderPurge(NSString *why) {
+    purge(why, YES);
+}
+
 void SGSingLoaderRelease(void) {
     NSUInteger token = ++sg_keepToken;
     sg_wanted = NO;
@@ -299,7 +321,8 @@ void SGSingLoaderRelease(void) {
         sg_error = nil;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(SGSingLoaderKeepSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if (token == sg_keepToken) SGSingLoaderPurge([NSString stringWithFormat:@"the mic has been off for %.0f s", SGSingLoaderKeepSeconds]);
+        if (token == sg_keepToken && (sg_separator || sg_cpuLoad || sg_fastLoad))
+            purge([NSString stringWithFormat:@"the mic has been off for %.0f s", SGSingLoaderKeepSeconds], NO);
     });
 }
 

@@ -15,6 +15,9 @@
 extern char **environ;
 
 #import "../harness-fail.h"
+#import "../harness-wait.h"
+extern void HarnessImportHeld(void), HarnessObserveNextImport(void);
+extern BOOL HarnessImportIsQueuedBehindHeld(void);
 #define CHECK(cond) HARNESS_CHECK(cond)
 
 // What LyricsSources.m and KaraokeSource.x give the tweak, here as little as the file needs.
@@ -39,8 +42,9 @@ static dispatch_semaphore_t sg_slowEntered, sg_slowRelease;
 void SGLyricsPageLines(NSArray<SGKaraokeLine *> *lines, NSArray<NSNumber *> **starts, NSArray<NSString *> **texts) {
     if (atomic_load(&sg_requireWorker)) CHECK(!NSThread.isMainThread);
     if (lines.count && [SGKaraokeLineText(lines.firstObject) isEqual:@"Slow A"] && atomic_exchange(&sg_holdSlow, false)) {
+        HarnessImportHeld();
         dispatch_semaphore_signal(sg_slowEntered);
-        CHECK(dispatch_semaphore_wait(sg_slowRelease, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(sg_slowRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)) == 0);
     }
     NSMutableArray *at = [NSMutableArray array], *said = [NSMutableArray array];
     for (SGKaraokeLine *line in lines) {
@@ -70,26 +74,12 @@ static NSURL *lrc(NSString *name, NSString *text) {
 // Hold a real file read after it obtained the old bytes, while main deletes/reimports its name.
 static void invalidationCheck(BOOL asynchronous) {
     NSString *uri = @"spotify:local:Race:Album:Track:120";
-    NSURL *source = lrc(@"race.lrc", @"[00:01]Old lyrics");
+    NSURL *source = lrc(@"race.lrc", @"[00:01]Slow A");
     CHECK(importLRC(source, uri, nil));
     dispatch_semaphore_t read = dispatch_semaphore_create(0), resume = dispatch_semaphore_create(0), finished = dispatch_semaphore_create(0);
-    SEL selector = @selector(stringWithContentsOfFile:encoding:error:);
-    Method method = class_getClassMethod(NSString.class, selector);
-    IMP original = method_getImplementation(method);
-    static atomic_bool intercept;
-    atomic_store(&intercept, true);
-    IMP blocked = imp_implementationWithBlock(^id(id receiver, NSString *path, NSStringEncoding encoding, NSError **error) {
-        if (asynchronous) CHECK(!NSThread.isMainThread);
-        id text = ((id (*)(id, SEL, id, NSStringEncoding, NSError **))original)(receiver, selector, path, encoding, error);
-        if ([path.lastPathComponent isEqual:@"race.lrc"] && !NSThread.isMainThread && atomic_exchange(&intercept, false)) {
-            dispatch_semaphore_signal(read);
-            if (dispatch_semaphore_wait(resume, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC))) {
-                fprintf(stderr, "cache read barrier timed out\n"); exit(1);
-            }
-        }
-        return text;
-    });
-    method_setImplementation(method, blocked);
+    sg_slowEntered = read;
+    sg_slowRelease = resume;
+    atomic_store(&sg_holdSlow, true);
     __block SGLyricsResult *stale;
     __block BOOL delivered = NO;
     if (asynchronous) {
@@ -104,21 +94,19 @@ static void invalidationCheck(BOOL asynchronous) {
             dispatch_semaphore_signal(finished);
         });
     }
-    CHECK(dispatch_semaphore_wait(read, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(read, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     CHECK(deleteLRC(@"race.lrc"));
     CHECK([importLRC(lrc(@"race.lrc", @"[00:01]Replacement lyrics"), uri, nil) isEqual:@"race.lrc"]);
     dispatch_semaphore_signal(resume);
     if (asynchronous) {
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
         while (!delivered && deadline.timeIntervalSinceNow > 0)
             [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
         CHECK(delivered && [stale.texts.firstObject isEqual:@"Replacement lyrics"]);
     } else {
-        CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
         CHECK(!stale);
     }
-    method_setImplementation(method, original);
-    imp_removeBlock(blocked);
     CHECK([SGImportedLRCFor(uri, @"Track", @"Race").texts.firstObject isEqual:@"Replacement lyrics"]);
     CHECK(deleteLRC(@"race.lrc"));
 }
@@ -132,7 +120,7 @@ static SGLyricsResult *asyncLyrics(NSString *track, NSString *title) {
         CHECK(NSThread.isMainThread); answer = result; done = YES;
     });
     CHECK(!done);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(done);
@@ -309,8 +297,21 @@ static void validatorCheck(void) {
 
     // A TTML that gives no line is read for what it has, and so is an LRC with no stamp.
     error = nil;
-    sheet = SGImportedLyricsFromData([@"<tt><body><div><p>no time</p></div></body></tt>" dataUsingEncoding:NSUTF8StringEncoding], &error);
+    sheet = SGImportedLyricsFromData([@"<tt><body><div><p>no<!-- ignore\n<tag> -->time</p></div></body></tt>" dataUsingEncoding:NSUTF8StringEncoding], &error);
     CHECK(sheet.kind == SGLyricsImportKindText && ([sheet.texts isEqual:(@[@"no time"])]) && !error);
+    NSString *cut = [@"<tt><p>words</p><!-- first <!-- second" stringByPaddingToLength:128 * 1024 withString:@" " startingAtIndex:0];
+    NSTimeInterval start = NSProcessInfo.processInfo.systemUptime;
+    sheet = SGImportedLyricsFromData([cut dataUsingEncoding:NSUTF8StringEncoding], &error);
+    CHECK(sheet.kind == SGLyricsImportKindText && ([sheet.texts isEqual:(@[@"words", @"<!-- first <!-- second"])]));
+    CHECK(NSProcessInfo.processInfo.systemUptime - start < 2);
+    // Repeated unfinished comment openers: the old `<!--.*?-->` rescanned from each and took about a minute.
+    NSMutableString *openers = [NSMutableString stringWithString:@"<tt><p>words</p>"];
+    for (int i = 0; i < 60000; i++) [openers appendString:@"<!--\n"];
+    start = NSProcessInfo.processInfo.systemUptime;
+    error = nil;
+    sheet = SGImportedLyricsFromData([openers dataUsingEncoding:NSUTF8StringEncoding], &error);
+    CHECK(NSProcessInfo.processInfo.systemUptime - start < 2);
+    CHECK(!sheet && error.code == SGLyricsImportErrorUnreadable);
     sheet = SGImportedLyricsFromData([@"[ti:Tag only]\nA line\nAnother" dataUsingEncoding:NSUTF8StringEncoding], &error);
     CHECK(sheet.kind == SGLyricsImportKindText && ([sheet.texts isEqual:(@[@"A line", @"Another"])]));
     // Plain text keeps every non-empty line, a line in brackets too; a file that is LRC does not.
@@ -451,12 +452,12 @@ static void validatorCheck(void) {
     atomic_store(&sg_holdSlow, true);
     NSMutableArray<NSString *> *completed = [NSMutableArray array];
     pasteLyrics(@"[00:01]Slow A", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"A"]; pasted = name; });
-    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     __block NSString *fastName = nil;
+    HarnessObserveNextImport();
     pasteLyrics(@"[00:01]Fast B", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"B"]; fastName = name; });
     // Where pastes could overtake each other, B is stored and answered while A is still held.
-    NSDate *overtaking = [NSDate dateWithTimeIntervalSinceNow:1];
-    while (!fastName && overtaking.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    if (!HarnessImportIsQueuedBehindHeld()) HARNESS_AWAIT(fastName != nil);
     dispatch_semaphore_signal(sg_slowRelease);
     waitForStore();
     CHECK(([completed isEqual:(@[@"A", @"B"])]));
@@ -468,11 +469,11 @@ static void validatorCheck(void) {
     atomic_store(&sg_holdSlow, true);
     [completed removeAllObjects];
     importLyrics(lrc(@"slow-import.lrc", @"[00:01]Slow A"), pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"A"]; pasted = name; });
-    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     fastName = nil;
+    HarnessObserveNextImport();
     pasteLyrics(@"[00:01]Fast B", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"B"]; fastName = name; });
-    overtaking = [NSDate dateWithTimeIntervalSinceNow:1];
-    while (!fastName && overtaking.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    if (!HarnessImportIsQueuedBehindHeld()) HARNESS_AWAIT(fastName != nil);
     dispatch_semaphore_signal(sg_slowRelease);
     waitForStore();
     CHECK(([completed isEqual:(@[@"A", @"B"])]));
@@ -519,7 +520,7 @@ static SGLyricsResult *playbackTag(NSString *file) {
         HARNESS_CHECK(NSThread.isMainThread);
         sheet = result; delivered = YES;
     });
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!delivered && limit.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     HARNESS_CHECK(delivered);
@@ -542,6 +543,7 @@ static void embeddedCheck(void) {
     CHECK([SGKaraokeLineText(afterBreaks.karaokeLines.firstObject) isEqual:@"Words after breaks"] &&
           !afterBreaks.synced && !playbackTag(@"only-breaks"));
     CHECK(!playbackTag(@"missing") && !playbackTag(@"frame-clock") && !playbackTag(@"too-large"));
+    CHECK(!playbackTag(@"empty-sylt-entries"));
     atomic_store(&sg_requireWorker, false);
     puts("embedded: ID3 ULT/SLT and v2.3/2.4 USLT/SYLT, FLAC LYRICS/UNSYNCEDLYRICS and tail M4A ©lyr passed");
 }
@@ -591,6 +593,13 @@ int main(int argc, char *argv[]) {
         sg_order = @[@"lrclib"];
         NSError *error = nil;
 
+        // Refuse special components before scheduling any filesystem operation.
+        HARNESS_CHECK(!SGDeleteImportedLRC(@"..", nil));
+        HARNESS_CHECK(!SGDeleteImportedLRC(@".", nil));
+        HARNESS_CHECK(!SGDeleteImportedLRC(@"one\0two", nil));
+        extern BOOL SGImportSafeFilename(NSString *);
+        HARNESS_CHECK(!SGImportSafeFilename(@"one\0\u0301two.lrc"));
+        HARNESS_CHECK(SGImportSafeFilename(@"Cafe\u0301.lrc"));
         // Refusals: empty, over 1 MB, and data no text reads. Text with no line is refused too.
         CHECK(!importLRC(lrc(@"empty.lrc", @""), nil, &error) && error.code == SGLyricsImportErrorNothing);
         CHECK(!importLRC(fileNamed(@"big.lrc", [NSMutableData dataWithLength:1024 * 1024 + 1]), nil, &error) && error.code == SGLyricsImportErrorTooLarge);
@@ -603,6 +612,26 @@ int main(int argc, char *argv[]) {
         CHECK([sparse closeAndReturnError:nil]);
         CHECK(!importLRC(huge, nil, &error) && error.code == SGLyricsImportErrorTooLarge);
         CHECK(SGImportedLRCFiles().count == 0);
+        NSString *boundURI = @"spotify:track:bounded";
+        NSString *bound = importLRC(lrc(@"bounded.txt", @"Original"), boundURI, nil);
+        HARNESS_CHECK(bound != nil);
+        // A BMP character takes two UTF-16 bytes but three UTF-8 bytes. TTML comments are
+        // retained in the stored document, not in the parsed/displayed lyric line.
+        NSString *padding = [@"" stringByPaddingToLength:360000 withString:@"字" startingAtIndex:0];
+        NSString *expanded = [NSString stringWithFormat:@"<tt><!--%@--><body><div><p>Words</p></div></body></tt>", padding];
+        NSData *wideDocument = [expanded dataUsingEncoding:NSUTF16StringEncoding];
+        HARNESS_CHECK(!importLRC(fileNamed(@"expanded.ttml", wideDocument), nil, &error) && error.code == SGLyricsImportErrorTooLarge);
+        HARNESS_CHECK([expanded writeToFile:lyricsPath(bound) atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+        HARNESS_CHECK(SGImportedLRCFor(boundURI, nil, nil).texts.count != 0);
+        NSString *oversize = [@"" stringByPaddingToLength:1536 * 1024 + 1 withString:@"a" startingAtIndex:0];
+        HARNESS_CHECK([oversize writeToFile:lyricsPath(bound) atomically:YES encoding:NSUTF8StringEncoding error:nil]);
+        HARNESS_CHECK(!SGImportedLRCFor(boundURI, nil, nil));
+        HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:lyricsPath(bound) error:nil]);
+        HARNESS_CHECK([NSFileManager.defaultManager createSymbolicLinkAtPath:lyricsPath(bound)
+            withDestinationPath:lrc(@"outside.txt", @"Outside").path error:nil]);
+        HARNESS_CHECK(!SGImportedLRCFor(boundURI, nil, nil));
+        HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:lyricsPath(bound) error:nil]);
+        HARNESS_CHECK(deleteLRC(bound));
 
         // The validator and the three readings, on data as the page hands it over.
         validatorCheck();

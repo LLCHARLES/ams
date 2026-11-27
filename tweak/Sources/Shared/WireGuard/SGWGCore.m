@@ -1,5 +1,7 @@
 #import "SGWGCore.h"
 #import "SGWGBridge.h"
+#import "SGWGLoaderPolicy.h"
+#import <crt_externs.h>
 #import "SGWGABI.h"
 #import "Shared/LyricsSources/LyricsHosts.h"
 #import <Network/Network.h>
@@ -7,11 +9,13 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <fcntl.h>
 #import <netinet/in.h>
 #import <os/lock.h>
 #import <stdatomic.h>
 #import <stdlib.h>
 #import <sys/socket.h>
+#import <sys/stat.h>
 #import <sys/utsname.h>
 #import <unistd.h>
 #import <arpa/inet.h>
@@ -19,9 +23,10 @@
 
 NSString *const SGWGVersion = @"1.0";
 
-static NSString *const kDefaultsKey = @"spotifyglass.wireguard";
+#import "SGWGCredentials.h"
+static NSString *const kDefaultsKey = SGWGDefaultsKey;
 // Stable Keychain service for existing profiles, including deletion.
-static NSString *const kKeychainService = @"Vitrine.WireGuard";
+static NSString *const kKeychainService = SGWGKeychainService;
 static NSString *const kKeychainAccount = @"profile";
 static NSString *const kKeychainProxyAccount = @"proxy-password";
 
@@ -34,16 +39,33 @@ NSString *const SGWGKindSOCKS5 = @"socks5";
 
 static atomic_int gState = SGWGStateOff;
 static atomic_bool gActive;       // armed before checking any capability
-static atomic_bool gReady, gGuardsReady, gEngineReady;
-static atomic_bool gEngineRecoverable;
+static atomic_bool gReady, gGuardsReady, gNativeGuardsReady, gEngineReady;
+static atomic_bool gHandedOff;
+// Start ownership and retry tickets belong to gQueue.
+static BOOL gStarting, gRetryStart, gProfileChangedDuringStart;
+static unsigned gStartRetries;
+enum { MaxStartRetries = 5 };
+static uint64_t gRetryTicket;
 static os_unfair_lock gReadinessLock = OS_UNFAIR_LOCK_INIT;
 static uint64_t gReadinessGeneration;
+static BOOL gImageRefreshPending; // protected by gReadinessLock
+static atomic_bool gRegisteringImages;
+static uint64_t gOutage = 1, gPresentedOutage; // protected by gReadinessLock
 static BOOL gEngineAvailable;    // unvalidated engine event, protected by gReadinessLock
 static BOOL gSessionGuards;
 static int gPort = -1;            // fixed before session hooks are installed
-static int gListenerFD = -1;      // reserved socket handed to Go on start
+static int gListenerFD = -1;      // process-lifetime reservation once published
+static BOOL gPortPublished;       // serialized with definitive refusal
 static char gUser[33], gPass[33]; // per-launch random proxy credentials
 static dispatch_queue_t gQueue;
+static char kQueueKey;
+static dispatch_source_t gRecovery;  // timer state belongs exclusively to gQueue
+static BOOL gAppActive;
+static dispatch_time_t gRecoveryWake, gRepairDeadline;
+static unsigned gRecoveryDelay;
+enum { InitialRecoverySeconds = 5, MaxRecoverySeconds = 60 };
+static atomic_bool gAdmissionPending;
+static void CredentialsChanged(NSString *kind);
 
 static atomic_uint gConfigsProxied, gSessionsProxied, gBackgroundConfigs, gSharedReplaced;
 static atomic_uint gProxyFailures, gBlockedRequests, gHTTP3Cleared, gDataURLFetches;
@@ -243,9 +265,28 @@ static NSURLSessionConfiguration *CopyRoutingConfiguration(NSURLSessionConfigura
     return copy;
 }
 
+static NSURLSession *LyricsDirectSession(void) {
+    static NSURLSession *session;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        objc_setAssociatedObject(config, &kLyricsDirectConfiguration, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        config.connectionProxyDictionary = @{};
+        config.HTTPCookieStorage = nil;
+        config.URLCredentialStorage = nil;
+        config.URLCache = nil;
+        config.HTTPShouldSetCookies = NO;
+        if (sSetProxyConfigurations)
+            ((void (*)(id, SEL, id))objc_msgSend)(config, sSetProxyConfigurations, @[]);
+        config.protocolClasses = @[];
+        session = [NSURLSession sessionWithConfiguration:config delegate:nil delegateQueue:nil];
+    });
+    return session;
+}
+
 @interface SGWGLyricsDirectProtocol : NSURLProtocol <NSURLSessionDataDelegate>
-@property (nonatomic, strong) NSURLSession *session;
 @property (nonatomic, strong) NSURLSessionDataTask *task;
+@property (nonatomic, strong) dispatch_source_t deadline;
 @property (nonatomic) BOOL stopped;
 @end
 @implementation SGWGLyricsDirectProtocol
@@ -259,20 +300,21 @@ static NSURLSessionConfiguration *CopyRoutingConfiguration(NSURLSessionConfigura
             [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]];
             return;
         }
-            NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-            objc_setAssociatedObject(config, &kLyricsDirectConfiguration, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            config.connectionProxyDictionary = @{};
-            config.HTTPCookieStorage = nil;
-            config.URLCredentialStorage = nil;
-            config.URLCache = nil;
-            config.HTTPShouldSetCookies = NO;
-            config.timeoutIntervalForRequest = self.request.timeoutInterval;
-            config.timeoutIntervalForResource = self.request.timeoutInterval;
-            if (sSetProxyConfigurations)
-                ((void (*)(id, SEL, id))objc_msgSend)(config, sSetProxyConfigurations, @[]);
-            config.protocolClasses = @[];
-            self.session = [NSURLSession sessionWithConfiguration:config delegate:self delegateQueue:nil];
-        self.task = [self.session dataTaskWithRequest:self.request];
+        self.task = [LyricsDirectSession() dataTaskWithRequest:self.request];
+        self.task.delegate = self;
+        // The request carries its inactivity timeout. Preserve its former
+        // resource deadline too, even if a slow origin keeps sending bytes.
+        self.deadline = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+        dispatch_source_set_timer(self.deadline, dispatch_time(DISPATCH_TIME_NOW, self.request.timeoutInterval * NSEC_PER_SEC),
+                                  DISPATCH_TIME_FOREVER, 0);
+        dispatch_source_set_event_handler(self.deadline, ^{
+            @synchronized (self) {
+                if (self.stopped) return;
+                [self stopLoading];
+                [self.client URLProtocol:self didFailWithError:[NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorTimedOut userInfo:nil]];
+            }
+        });
+        dispatch_resume(self.deadline);
         [self.task resume];
     }
 }
@@ -280,9 +322,9 @@ static NSURLSessionConfiguration *CopyRoutingConfiguration(NSURLSessionConfigura
     @synchronized (self) {
         self.stopped = YES;
         [self.task cancel];
-        [self.session invalidateAndCancel];
+        if (self.deadline) dispatch_source_cancel(self.deadline);
+        self.deadline = nil;
         self.task = nil;
-        self.session = nil;
     }
 }
 - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)task
@@ -333,17 +375,23 @@ static id CreateProxyConfig(void) {
     if (!SGWGIsSupportedOS()) return nil;
     // WebSocket tasks do not use NSURLProtocol. Give an invalid configuration
     // a real, fail-closed proxy too, so those tasks cannot use a direct route.
-    if (gBlockAll || (![gKind isEqualToString:SGWGKindWireGuard] && !atomic_load(&gEngineReady))) {
-        nw_endpoint_t endpoint = nw_endpoint_create_host("127.0.0.1", "1");
-        return endpoint ? (__bridge_transfer id)pCreateSocks((__bridge void *)endpoint) : nil;
-    }
-    if ([gKind isEqualToString:SGWGKindWireGuard]) {
+    BOOL tunnel = [gKind isEqualToString:SGWGKindWireGuard];
+    if (tunnel && !gBlockAll) {
         char port[8];
         snprintf(port, sizeof(port), "%d", gPort);
         nw_endpoint_t endpoint = nw_endpoint_create_host("127.0.0.1", port);
         id proxy = endpoint ? (__bridge_transfer id)pCreateSocks((__bridge void *)endpoint) : nil;
-        if (proxy) pSetUserPass((__bridge void *)proxy, gUser, gPass);
-        return proxy;
+        if (!proxy) return nil;
+        pSetUserPass((__bridge void *)proxy, gUser, gPass);
+        os_unfair_lock_lock(&gReadinessLock);
+        BOOL publish = !gBlockAll;
+        if (publish) gPortPublished = YES;
+        os_unfair_lock_unlock(&gReadinessLock);
+        if (publish) return proxy;
+    }
+    if (gBlockAll || !atomic_load(&gEngineReady)) {
+        nw_endpoint_t endpoint = nw_endpoint_create_host("127.0.0.1", "1");
+        return endpoint ? (__bridge_transfer id)pCreateSocks((__bridge void *)endpoint) : nil;
     }
     nw_endpoint_t endpoint = nw_endpoint_create_host(gProxyHost, gProxyPort);
     if (!endpoint) return nil;
@@ -659,6 +707,11 @@ static NSArray *ProxyIdentity(NSString *kind, NSString *host, NSString *port, NS
     return @[kind ?: @"", host.lowercaseString ?: @"", @(port.integerValue).stringValue, user ?: @""];
 }
 
+static BOOL ValidProxyCredential(NSString *value) {
+    return [value isKindOfClass:NSString.class] && [value lengthOfBytesUsingEncoding:NSUTF8StringEncoding] <= 255 &&
+        [value rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location == NSNotFound;
+}
+
 static NSString *ReadProxyPassword(OSStatus *outStatus) {
 #ifdef SGWG_TESTING
     if (TestEnv(@"SGWG_TEST_HOST")) {
@@ -678,7 +731,7 @@ static NSString *ReadProxyPassword(OSStatus *outStatus) {
     NSDictionary *settings = SGWGSettingExternalProxy();
     NSArray *identity = ProxyIdentity(SGWGSettingKind(), settings[@"host"], settings[@"port"], settings[@"username"]);
     if (![value isKindOfClass:NSDictionary.class] || ![value[@"identity"] isEqual:identity] ||
-        ![value[@"password"] isKindOfClass:NSString.class] || ![value[@"password"] length]) {
+        !ValidProxyCredential(value[@"password"]) || ![value[@"password"] length]) {
         if (outStatus) *outStatus = errSecDecode;
         return nil;
     }
@@ -700,7 +753,7 @@ static BOOL ValidateExternal(NSString *kind, NSString *host, NSString *port, NSS
              [port rangeOfCharacterFromSet:NSCharacterSet.decimalDigitCharacterSet.invertedSet].location != NSNotFound ||
              port.integerValue < 1 || port.integerValue > 65535)
         failure = @"port must be a number from 1 to 65535";
-    else if (username.length > 255 || [username rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound)
+    else if (!ValidProxyCredential(username ?: @""))
         failure = @"invalid user name";
     if (reason) *reason = failure;
     return failure == nil;
@@ -726,6 +779,10 @@ BOOL SGWGSaveConnection(NSString *kind, NSString *host, NSString *port, NSString
     port = [port stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] ?: @"";
     username = username ?: @"";
     if (!ValidateExternal(kind, host, port, username, reason)) return NO;
+    if (password && !ValidProxyCredential(password)) {
+        if (reason) *reason = @"password must fit in 255 UTF-8 bytes and contain no control characters";
+        return NO;
+    }
     NSDictionary *previous = SGWGSettingExternalProxy();
     NSArray *identity = ProxyIdentity(kind, host, port, username);
     if (![identity isEqual:ProxyIdentity(SGWGSettingKind(), previous[@"host"], previous[@"port"], previous[@"username"])]) {
@@ -748,6 +805,7 @@ BOOL SGWGSaveConnection(NSString *kind, NSString *host, NSString *port, NSString
     NSMutableDictionary *d = [SettingsDict() mutableCopy];
     [d addEntriesFromDictionary:@{@"kind": kind, @"host": host, @"port": port, @"username": username}];
     [[NSUserDefaults standardUserDefaults] setObject:d forKey:kDefaultsKey];
+    CredentialsChanged(kind);
     return YES;
 }
 
@@ -771,16 +829,59 @@ static NSString *ReadProfile(OSStatus *outStatus) {
 
 BOOL SGWGHasProfile(void) { return ReadProfile(NULL).length > 0; }
 
+static BOOL ValidEngineAPI(const struct SGWGAPI *api) {
+    return api && api->version == SGWGEngineABIVersion && api->size >= sizeof(*api)
+        && api->inspect && api->start && api->setCallback && api->status && api->rebind
+        && api->lookup && api->stop && api->redact && api->freeString;
+}
+
+static BOOL gEnginePathOverridesAtLaunch;
+static NSString *gEngineLoadError = @"WireGuard engine unavailable";
+
+static const struct SGWGAPI *EngineAPI(void) {
+    static const struct SGWGAPI *api;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+#ifdef SGWG_TEST_STATIC_ENGINE
+        const struct SGWGAPI *candidate = &SGWGEngineV2;
+#else
+        // dyld can override even an absolute install path. Reject before
+        // dlopen, not after a substitute's initializers would have run.
+        if (gEnginePathOverridesAtLaunch || SGWGProcessOverrides() || SGWGHostOverrides(_NSGetMachExecuteHeader())) {
+            gEngineLoadError = @"WireGuard engine blocked: loader path override";
+            return;
+        }
+        NSString *frameworks = NSBundle.mainBundle.privateFrameworksPath;
+        NSString *path = [frameworks stringByAppendingPathComponent:@"libsgwg.dylib"];
+        struct stat st;
+        if (!path.isAbsolutePath || lstat(frameworks.fileSystemRepresentation, &st) || !S_ISDIR(st.st_mode)
+            || lstat(path.fileSystemRepresentation, &st) || !S_ISREG(st.st_mode)) return;
+        // The Go runtime is process-lifetime and cannot safely be unloaded.
+        void *lib = dlopen(path.fileSystemRepresentation, RTLD_LOCAL | RTLD_NOW | RTLD_FIRST);
+        if (!lib) return;
+        const struct SGWGAPI *candidate = dlsym(lib, "SGWGEngineV2");
+#endif
+        if (ValidEngineAPI(candidate)) api = candidate;
+        else gEngineLoadError = @"WireGuard engine incompatible";
+    });
+    return api;
+}
+
 static NSDictionary *JSONFromGo(char *raw) {
     if (!raw) return nil;
     NSData *data = [NSData dataWithBytes:raw length:strlen(raw)];
-    SGWGFree(raw);
+    EngineAPI()->freeString(raw);
     id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     return [obj isKindOfClass:NSDictionary.class] ? obj : nil;
 }
 
 NSDictionary *SGWGInspectProfile(NSString *text, NSString **reason) {
-    NSDictionary *summary = JSONFromGo(SGWGInspect((char *)text.UTF8String));
+    const struct SGWGAPI *api = EngineAPI();
+    if (!api) {
+        if (reason) *reason = gEngineLoadError;
+        return nil;
+    }
+    NSDictionary *summary = JSONFromGo(api->inspect((char *)text.UTF8String));
     if (![summary[@"ok"] boolValue]) {
         if (reason) *reason = [summary[@"error"] isKindOfClass:NSString.class] ? summary[@"error"] : @"invalid profile";
         return nil;
@@ -800,6 +901,7 @@ BOOL SGWGImportProfile(NSString *text, NSString **reason) {
         if (reason) *reason = [NSString stringWithFormat:@"Keychain error %d", (int)status];
         return NO;
     }
+    CredentialsChanged(SGWGKindWireGuard);
     return YES;
 }
 
@@ -817,7 +919,17 @@ BOOL SGWGDeleteProfile(NSString **reason) {
 
 NSDictionary *SGWGEngineStatus(void) {
     if (!gActive || ![gKind isEqualToString:SGWGKindWireGuard]) return @{@"running": @NO};
-    return JSONFromGo(SGWGStatus()) ?: @{@"running": @NO};
+    const struct SGWGAPI *api = EngineAPI();
+    return api ? JSONFromGo(api->status()) : @{@"running": @NO, @"error": gEngineLoadError};
+}
+
+static void RefuseListener(void);
+
+static uint64_t PendingRecoveryNotice(void) {
+    os_unfair_lock_lock(&gReadinessLock);
+    uint64_t outage = !SGWGReady() && gPresentedOutage != gOutage ? gOutage : 0;
+    os_unfair_lock_unlock(&gReadinessLock);
+    return outage;
 }
 
 static void EngineChanged(int state) {
@@ -826,56 +938,161 @@ static void EngineChanged(int state) {
     os_unfair_lock_lock(&gReadinessLock);
     gReadinessGeneration++;
     gEngineAvailable = available;
-    atomic_store(&gEngineRecoverable, state == SGWGEngineUnavailable || available);
     atomic_store(&gEngineReady, false);
     atomic_store_explicit(&gReady, false, memory_order_release);
-    atomic_store(&gState, available ? SGWGStateRunning : SGWGStateFailed);
+    if (gHandedOff && !gBlockAll)
+        atomic_store(&gState, available ? SGWGStateRunning : SGWGStateFailed);
+    if (state == SGWGEngineStopped) gHandedOff = false;
     os_unfair_lock_unlock(&gReadinessLock);
-    // Rebind may still occupy gQueue. Revoke admission before returning to Go, not behind that work.
-    if (!available) SGWGNotifyRecovery();
-    dispatch_async(gQueue, ^{ SGWGRefreshReadiness(); });
+    if (!available && !gBlockAll && PendingRecoveryNotice()) SGWGNotifyRecovery();
+    dispatch_async(gQueue, ^{
+        if (state == SGWGEngineStopped && !gBlockAll && gListenerFD >= 0) RefuseListener();
+        SGWGRefreshReadiness();
+    });
+}
+
+// Never leave a reusable port in a configuration retained by Foundation.
+// If even listen/accept is defunct, the bound descriptor still stays owned.
+static void SinkListener(int fd) {
+    static dispatch_source_t sink;
+    if (sink || listen(fd, SOMAXCONN) || fcntl(fd, F_SETFL, O_NONBLOCK) < 0) return;
+    dispatch_queue_t queue = dispatch_queue_create("retrine.wireguard.refuse", DISPATCH_QUEUE_SERIAL);
+    sink = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, fd, 0, queue);
+    dispatch_source_set_event_handler(sink, ^{
+        int client = accept(fd, NULL, NULL);
+        if (client >= 0) close(client);
+        else if (errno == EMFILE || errno == ENFILE || errno == ENOBUFS || errno == ENOMEM) {
+            dispatch_suspend(sink);
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), queue, ^{ dispatch_resume(sink); });
+        } else if (errno != EAGAIN && errno != EINTR && errno != ECONNABORTED) {
+            dispatch_source_cancel(sink);
+        }
+    });
+    dispatch_resume(sink);
 }
 
 static void RefuseListener(void) {
+    os_unfair_lock_lock(&gReadinessLock);
     gBlockAll = YES;
-    if (gListenerFD >= 0) {
+    gReadinessGeneration++;
+    gReady = false;
+    atomic_store(&gState, SGWGStateBlocked);
+    BOOL stop = atomic_exchange(&gHandedOff, false);
+    BOOL published = gPortPublished;
+    os_unfair_lock_unlock(&gReadinessLock);
+    if (stop) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ EngineAPI()->stop(); });
+    if (published) SinkListener(gListenerFD);
+    else if (gListenerFD >= 0) {
         close(gListenerFD);
         gListenerFD = -1;
     }
 }
-static void StartEngine(void) {
-    dispatch_async(gQueue, ^{
-        SGWGState state = SGWGCurrentState();
-        if (atomic_load(&gEngineReady) || state == SGWGStateFailed || gBlockAll) return;
-        OSStatus status = errSecSuccess;
-        NSString *profile = ReadProfile(&status);
-        if (!profile.length) {
-            atomic_store(&gCredentialStatus, status);
-            BOOL retryable = status == errSecInteractionNotAllowed || status == errSecNotAvailable;
-            if (!retryable) RefuseListener();
-            atomic_store(&gState, retryable ? SGWGStateWaitingProfile : SGWGStateBlocked);
-            return;
-        }
-        atomic_store(&gCredentialStatus, errSecSuccess);
-        if (gListenerFD < 0) return; // already handed to Go or definitively refused
-        atomic_store(&gState, SGWGStateStarting);
-        int fd = gListenerFD;
-        gListenerFD = -1; // ownership moves to Go
-        SGWGSetStateCallback((uintptr_t)EngineChanged);
-        int port = SGWGStart((char *)profile.UTF8String, gUser, gPass, fd, gPort);
-        if (port != gPort) EngineChanged(SGWGEngineStopped);
-        SGWGRefreshReadiness();
+
+static int ProxyAdmitted(void) { return SGWGReady(); }
+static void StartEngine(void);
+static void StartExternalProxy(void);
+static void ObservePath(void);
+
+static BOOL PrepareStart(void) {
+    if (gBlockAll) return NO;
+    BOOL pending = NO;
+    if (!SGWGCheckAdmission(&pending)) {
+        if (!pending) RefuseListener();
+        atomic_store(&gState, SGWGStateBlocked);
+        return NO;
+    }
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        SGWGInstallTransportPatches();
+        if ([gKind isEqualToString:SGWGKindWireGuard]) ObservePath();
     });
+    return YES;
+}
+
+static void RetryBootstrap(void);
+
+static void FinishStart(enum SGWGStartResult result) {
+    BOOL profileChanged = gProfileChangedDuringStart;
+    gProfileChangedDuringStart = NO;
+    gStarting = NO;
+    if (gBlockAll) {
+        if (result == SGWGStarted) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ EngineAPI()->stop(); });
+        return;
+    }
+    if (result == SGWGStarted) {
+        // A successful handoff follows the normal running-route import policy:
+        // the importer offers a restart; never hot-swap an admitted listener.
+        os_unfair_lock_lock(&gReadinessLock);
+        gReadinessGeneration++;
+        gHandedOff = true;
+        atomic_store(&gState, gEngineAvailable ? SGWGStateRunning : SGWGStateFailed);
+        os_unfair_lock_unlock(&gReadinessLock);
+        SGWGRefreshReadiness();
+    } else if (profileChanged) {
+        RetryBootstrap();
+    } else if (result == SGWGStartNetworkUnavailable) {
+        atomic_store(&gState, SGWGStateFailed);
+        gRetryStart = YES;
+        if (gStartRetries++ < MaxStartRetries) {
+            int seconds = 1 << (gStartRetries - 1);
+            uint64_t ticket = ++gRetryTicket;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, seconds * (int64_t)NSEC_PER_SEC), gQueue, ^{
+                if (ticket == gRetryTicket && gRetryStart) StartEngine();
+            });
+        }
+    } else RefuseListener();
+}
+
+// On gQueue. A failed attempt consumes only a dup, never the reservation
+// that existing session configurations refer to.
+static void StartEngine(void) {
+    if (gStarting || gHandedOff || gListenerFD < 0 || !PrepareStart()) return;
+    gRetryStart = NO;
+    OSStatus status = errSecSuccess;
+    NSString *profile = ReadProfile(&status);
+    if (!profile.length) {
+        atomic_store(&gCredentialStatus, status);
+        BOOL retryable = status == errSecInteractionNotAllowed || status == errSecNotAvailable;
+        if (!retryable) RefuseListener();
+        atomic_store(&gState, retryable ? SGWGStateWaitingProfile : SGWGStateBlocked);
+        return;
+    }
+    atomic_store(&gCredentialStatus, errSecSuccess);
+    int fd = dup(gListenerFD);
+    if (fd < 0) {
+        FinishStart(errno == EMFILE || errno == ENFILE ? SGWGStartNetworkUnavailable : SGWGStartRefused);
+        return;
+    }
+    gStarting = YES;
+    atomic_store(&gState, SGWGStateStarting);
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        const struct SGWGAPI *api = EngineAPI();
+        enum SGWGStartResult result = SGWGStartRefused;
+        if (api) {
+            api->setCallback((uintptr_t)EngineChanged, (uintptr_t)ProxyAdmitted);
+            result = api->start((char *)profile.UTF8String, gUser, gPass, fd);
+        } else close(fd);
+        dispatch_async(gQueue, ^{ FinishStart(result); });
+    });
+}
+
+static void RetryBootstrap(void) {
+    gStartRetries = 0;
+    ++gRetryTicket;
+    StartEngine();
 }
 
 void SGWGRequestRebind(NSString *reason) {
     if (!gActive) return;
     dispatch_async(gQueue, ^{
-        SGWGState state = SGWGCurrentState();
-        if (state == SGWGStateWaitingProfile) {
-            StartEngine();
-        } else if (state == SGWGStateRunning || (state == SGWGStateFailed && atomic_load(&gEngineRecoverable))) {
-            SGWGRebind();
+        if (gBlockAll || ![gKind isEqualToString:SGWGKindWireGuard]) return;
+        if (gStarting) {
+            // A trigger can race the final, still-offline DNS result.
+            gStartRetries = 0;
+        } else if (gRetryStart) {
+            RetryBootstrap();
+        } else if (gHandedOff && SGWGAdmissionReady()) {
+            EngineAPI()->rebind();
             atomic_fetch_add(&gRebinds, 1);
         }
     });
@@ -883,7 +1100,8 @@ void SGWGRequestRebind(NSString *reason) {
 
 void SGWGLookupInTunnel(NSString *host, void (^completion)(NSDictionary *)) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSDictionary *result = gActive && [gKind isEqualToString:SGWGKindWireGuard] ? JSONFromGo(SGWGLookup((char *)host.UTF8String)) : nil;
+        const struct SGWGAPI *api = gActive && [gKind isEqualToString:SGWGKindWireGuard] ? EngineAPI() : NULL;
+        NSDictionary *result = api ? JSONFromGo(api->lookup((char *)host.UTF8String)) : nil;
         dispatch_async(dispatch_get_main_queue(), ^{ completion(result ?: @{@"ok": @NO, @"error": @"tunnel not active"}); });
     });
 }
@@ -902,14 +1120,12 @@ NSURLSession *SGWGTunnelSession(id<NSURLSessionDelegate> delegate) {
 static BOOL ReserveListener(void) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return NO;
-    int one = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
     struct sockaddr_in addr = {0};
     addr.sin_len = sizeof(addr);
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     socklen_t len = sizeof(addr);
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) || listen(fd, 256) ||
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) ||
         getsockname(fd, (struct sockaddr *)&addr, &len)) {
         close(fd);
         return NO;
@@ -925,29 +1141,72 @@ static void RandomHex(char out[33]) {
     for (int i = 0; i < 16; i++) snprintf(out + i * 2, 3, "%02x", bytes[i]);
 }
 
+static void PathUpdated(NSString *signature, BOOL satisfied) {
+    static NSString *lastSignature;
+    BOOL changed = lastSignature && ![signature isEqualToString:lastSignature];
+    BOOL exhausted = gRetryStart && gStartRetries > MaxStartRetries;
+    if (satisfied && (changed || exhausted)) SGWGRequestRebind(@"path");
+    lastSignature = signature;
+}
+
+static void RetryPendingStart(BOOL credentialsChanged) {
+    SGWGState state = SGWGCurrentState();
+    if (credentialsChanged && state == SGWGStateFailed && gRetryStart) {
+        RetryBootstrap();
+        return;
+    }
+    if (state != SGWGStateWaitingProfile &&
+        !(state == SGWGStateBlocked && !gBlockAll && !gEngineReady &&
+          (credentialsChanged || !gCredentialStatus) && SGWGIsSupportedOS())) return;
+    if ([gKind isEqualToString:SGWGKindWireGuard]) StartEngine();
+    else StartExternalProxy();
+}
+
+static void CredentialsChanged(NSString *kind) {
+    if (!gActive) return;
+    dispatch_async(gQueue, ^{
+        // Saved settings do not hot-swap a running route or undo a refusal.
+        if (gBlockAll || ![kind isEqual:gKind] || ![SGWGSettingKind() isEqual:gKind]) return;
+        if (gStarting) gProfileChangedDuringStart = YES;
+        else RetryPendingStart(YES);
+    });
+}
+
+static void UpdateRecoveryTimer(void);
+
 static void ObserveLifecycle(void) {
     // UIKit notification names as strings: this file is Foundation-only so the
     // same core also runs in the macOS test harness.
     // Rebind only after real backgrounding (iOS may have defuncted the sockets),
     // not after Control Center or a notification banner, to avoid needless
     // interruptions of a playing stream.
-    static CFAbsoluteTime backgroundSince;
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    [center addObserverForName:@"UIApplicationDidEnterBackgroundNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
-        backgroundSince = CFAbsoluteTimeGetCurrent();
-    }];
-    [center addObserverForName:@"UIApplicationWillEnterForegroundNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
-        if (backgroundSince > 0 && CFAbsoluteTimeGetCurrent() - backgroundSince > 15) SGWGRequestRebind(@"foreground");
-        backgroundSince = 0;
-    }];
-    for (NSString *name in @[@"UIApplicationDidBecomeActiveNotification", @"UIApplicationProtectedDataDidBecomeAvailable"]) {
+    BOOL tunnel = [gKind isEqualToString:SGWGKindWireGuard];
+    for (NSString *name in @[@"UIApplicationDidBecomeActiveNotification", @"UIApplicationWillResignActiveNotification"]) {
         [center addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
-            // Starts the engine if the Keychain was locked at launch; no rebind.
-            if (SGWGCurrentState() == SGWGStateWaitingProfile) SGWGRequestRebind(name);
+            dispatch_async(gQueue, ^{
+                gAppActive = [note.name isEqual:@"UIApplicationDidBecomeActiveNotification"];
+                UpdateRecoveryTimer();
+            });
         }];
     }
+    [center addObserverForName:@"UIApplicationProtectedDataDidBecomeAvailable" object:nil queue:nil usingBlock:^(NSNotification *note) {
+        dispatch_async(gQueue, ^{
+            if (SGWGCurrentState() == SGWGStateWaitingProfile) RetryPendingStart(NO);
+        });
+    }];
+    [center addObserverForName:@"UIApplicationWillEnterForegroundNotification" object:nil queue:nil usingBlock:^(NSNotification *note) {
+        dispatch_async(gQueue, ^{
+            if (SGWGCurrentState() == SGWGStateWaitingProfile || SGWGCurrentState() == SGWGStateBlocked)
+                RetryPendingStart(NO);
+            else if (tunnel) SGWGRequestRebind(@"foreground");
+            if (!gNativeGuardsReady || gAdmissionPending) SGWGRefreshReadiness();
+        });
+    }];
+}
+
+static void ObservePath(void) {
     static nw_path_monitor_t monitor;
-    static NSString *lastSignature;
     monitor = nw_path_monitor_create();
     nw_path_monitor_set_queue(monitor, gQueue);
     nw_path_monitor_set_update_handler(monitor, ^(nw_path_t path) {
@@ -955,9 +1214,7 @@ static void ObserveLifecycle(void) {
             nw_path_uses_interface_type(path, nw_interface_type_wifi), nw_path_uses_interface_type(path, nw_interface_type_cellular),
             nw_path_uses_interface_type(path, nw_interface_type_wired)];
         // Wi-Fi <-> cellular: reopen the WireGuard UDP socket on the new path.
-        if (lastSignature && ![signature isEqualToString:lastSignature] && nw_path_get_status(path) == nw_path_status_satisfied)
-            SGWGRequestRebind(@"path");
-        lastSignature = signature;
+        PathUpdated(signature, nw_path_get_status(path) == nw_path_status_satisfied);
     });
     nw_path_monitor_start(monitor);
 }
@@ -966,7 +1223,7 @@ static void ObserveLifecycle(void) {
 // HTTP / HTTPS / SOCKS5 server chosen by the user. No local engine runs; the
 // same URLSession hooks apply an nw_proxy_config with failover disabled.
 static void StartExternalProxy(void) {
-    gActive = YES;
+    if (!PrepareStart()) return;
     NSDictionary *cfg = SGWGSettingExternalProxy();
     NSString *host = cfg[@"host"], *port = cfg[@"port"], *user = cfg[@"username"], *pass = nil;
     if (!ValidateExternal(gKind, host, port, user, NULL)) gBlockAll = YES;
@@ -998,36 +1255,121 @@ static void StartExternalProxy(void) {
     SGWGRefreshReadiness();
 }
 
+// A one-shot source with no deadline does not wake the queue. While unready,
+// keep retrying the notice too: UIKit may not yet have an eligible presenter.
+static void UpdateRecoveryTimer(void) {
+    if (!gRecovery) return;
+    if (SGWGReady()) {
+        if (gRecoveryWake)
+            dispatch_source_set_timer(gRecovery, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
+        gRecoveryWake = gRepairDeadline = 0;
+        gRecoveryDelay = InitialRecoverySeconds;
+    } else {
+        if (!gRepairDeadline) gRepairDeadline = dispatch_time(DISPATCH_TIME_NOW, gRecoveryDelay * (int64_t)NSEC_PER_SEC);
+        dispatch_time_t wake = gRepairDeadline;
+        if (gAppActive && PendingRecoveryNotice()) {
+            // Retrying presentation must neither advance the repair scan nor
+            // postpone an earlier notice already waiting for its presenter.
+            dispatch_time_t notice = dispatch_time(DISPATCH_TIME_NOW, InitialRecoverySeconds * (int64_t)NSEC_PER_SEC);
+            wake = MIN(wake, notice);
+            if (gRecoveryWake) wake = MIN(wake, gRecoveryWake);
+        }
+        if (wake != gRecoveryWake) {
+            gRecoveryWake = wake;
+            dispatch_source_set_timer(gRecovery, wake, DISPATCH_TIME_FOREVER, NSEC_PER_SEC);
+        }
+    }
+}
+
+// UIKit calls this block after presentation, not when presentation is requested.
+dispatch_block_t SGWGRecoveryPresentationCompletion(void) {
+    uint64_t outage = PendingRecoveryNotice();
+    if (!outage) return nil;
+    return ^{
+        os_unfair_lock_lock(&gReadinessLock);
+        BOOL current = outage == gOutage && !SGWGReady();
+        if (current) gPresentedOutage = outage;
+        os_unfair_lock_unlock(&gReadinessLock);
+        if (current) dispatch_async(gQueue, ^{ UpdateRecoveryTimer(); });
+    };
+}
+
+static void InstallRecoveryTimer(void) {
+    gRecovery = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
+    dispatch_source_set_timer(gRecovery, DISPATCH_TIME_FOREVER, DISPATCH_TIME_FOREVER, 0);
+    dispatch_source_set_event_handler(gRecovery, ^{
+        if (!gRecoveryWake) return;
+        BOOL repairDue = gRecoveryWake == gRepairDeadline || dispatch_time(DISPATCH_TIME_NOW, 0) >= gRepairDeadline;
+        gRecoveryWake = 0;
+        if (!SGWGReady() && repairDue) {
+            gRepairDeadline = 0;
+            gRecoveryDelay = MIN(2 * gRecoveryDelay, MaxRecoverySeconds);
+            if (!gNativeGuardsReady || gAdmissionPending) SGWGRefreshReadiness();
+            RetryPendingStart(NO);
+        }
+        if (PendingRecoveryNotice()) SGWGNotifyRecovery();
+        UpdateRecoveryTimer();
+    });
+    dispatch_resume(gRecovery);
+    gRecoveryDelay = InitialRecoverySeconds;
+    UpdateRecoveryTimer();
+}
+
 void SGWGRefreshReadiness(void) {
+    BOOL tunnel = [gKind isEqualToString:SGWGKindWireGuard];
     os_unfair_lock_lock(&gReadinessLock);
     uint64_t generation = gReadinessGeneration;
-    BOOL available = gEngineAvailable;
+    BOOL available = gEngineAvailable && (gHandedOff || !tunnel);
     os_unfair_lock_unlock(&gReadinessLock);
     // Patching can itself load an image. Validate outside the lock, then commit only that generation.
     BOOL native = SGWGInstallNativePatches();
     BOOL guards = gSessionGuards && native;
-    BOOL ready = guards && SGWGIsSupportedOS() && SGWGAdmissionReady() && available && !gBlockAll;
+    BOOL pending = NO;
+    BOOL admitted = !gBlockAll && SGWGCheckAdmission(&pending);
+    BOOL ready = guards && SGWGIsSupportedOS() && admitted && available && !gBlockAll;
     os_unfair_lock_lock(&gReadinessLock);
-    if (generation == gReadinessGeneration) {
+    BOOL current = generation == gReadinessGeneration;
+    if (current) {
+        // Completing an outage invalidates even a UIKit completion still in flight.
+        if (ready && !gReady) ++gOutage;
+        gAdmissionPending = pending;
+        atomic_store(&gNativeGuardsReady, native);
         atomic_store(&gGuardsReady, guards);
         atomic_store(&gEngineReady, available);
         atomic_store_explicit(&gReady, ready, memory_order_release);
     }
     os_unfair_lock_unlock(&gReadinessLock);
+    if (current && !admitted && !pending && !gBlockAll)
+        RefuseListener();
+    if (dispatch_get_specific(&kQueueKey)) UpdateRecoveryTimer();
+    else dispatch_async(gQueue, ^{ UpdateRecoveryTimer(); });
 }
 
 static void ImageChanged(const struct mach_header *header, intptr_t slide) {
-    if (!gActive) return;
+    // Readiness has never been published during registration. The full
+    // validation immediately afterwards covers replay and concurrent changes.
+    if (!gActive || gRegisteringImages) return;
     os_unfair_lock_lock(&gReadinessLock);
     gReadinessGeneration++;
     atomic_store_explicit(&gReady, false, memory_order_release);
+    BOOL enqueue = !gImageRefreshPending;
+    gImageRefreshPending = YES;
     os_unfair_lock_unlock(&gReadinessLock);
-    dispatch_async(gQueue, ^{ SGWGRefreshReadiness(); });
+    if (enqueue) dispatch_async(gQueue, ^{
+        // Relinquish this wake before the snapshot: changes during validation
+        // invalidate its commit and can claim a successor.
+        os_unfair_lock_lock(&gReadinessLock);
+        gImageRefreshPending = NO;
+        os_unfair_lock_unlock(&gReadinessLock);
+        SGWGRefreshReadiness();
+    });
 }
 
 __attribute__((constructor)) static void SGWGInit(void) {
     @autoreleasepool {
+        gEnginePathOverridesAtLaunch = SGWGProcessOverrides();
         gQueue = dispatch_queue_create("retrine.wireguard", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_set_specific(gQueue, &kQueueKey, &kQueueKey, NULL);
         if (!SGWGSettingEnabled()) return;
         atomic_store(&gActive, true);
         gKind = SGWGSettingKind();
@@ -1039,35 +1381,18 @@ __attribute__((constructor)) static void SGWGInit(void) {
         if (supported && tunnel && !ReserveListener()) gBlockAll = YES;
         BOOL pending = NO;
         BOOL admitted = supported && SGWGCheckAdmission(&pending);
-        if (tunnel && !admitted && !pending) RefuseListener();
+        if (!admitted && !pending) RefuseListener();
         gSessionGuards = InstallSessionHooks();
-        SGWGRefreshReadiness();
+        // Arm existing slots before dyld replays the image list. This pass
+        // installs guards but must not publish readiness.
+        SGWGInstallNativePatches();
+        gRegisteringImages = true;
         _dyld_register_func_for_add_image(ImageChanged);
         _dyld_register_func_for_remove_image(ImageChanged);
-        static dispatch_source_t recovery;
-        recovery = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, gQueue);
-        dispatch_source_set_timer(recovery, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), 5 * NSEC_PER_SEC, NSEC_PER_SEC);
-        dispatch_source_set_event_handler(recovery, ^{
-            if (!SGWGReady()) SGWGRefreshReadiness();
-            if (SGWGCurrentState() == SGWGStateWaitingProfile) {
-                if ([gKind isEqualToString:SGWGKindWireGuard]) StartEngine();
-                else StartExternalProxy();
-            } else if (SGWGCurrentState() == SGWGStateBlocked && !gBlockAll &&
-                       !atomic_load(&gEngineReady) && !atomic_load(&gCredentialStatus) &&
-                       SGWGIsSupportedOS()) {
-                BOOL stillPending = NO;
-                if (SGWGCheckAdmission(&stillPending)) {
-                    if (tunnel) StartEngine();
-                    else StartExternalProxy();
-                } else if (tunnel && !stillPending) RefuseListener();
-            } else if (SGWGCurrentState() == SGWGStateFailed && atomic_load(&gEngineRecoverable)) {
-                SGWGRequestRebind(@"engine unavailable");
-            }
-#ifndef SGWG_TESTING
-            if (!SGWGReady()) SGWGNotifyRecovery();
-#endif
-        });
-        dispatch_resume(recovery);
+        gRegisteringImages = false;
+        SGWGRefreshReadiness();
+        ObserveLifecycle();
+        dispatch_async(gQueue, ^{ InstallRecoveryTimer(); });
         if (!supported) {
             atomic_store(&gState, SGWGStateUnsupported);
             return;
@@ -1079,14 +1404,12 @@ __attribute__((constructor)) static void SGWGInit(void) {
             atomic_store(&gState, SGWGStateBlocked);
             return;
         }
-        SGWGInstallTransportPatches();
-        if (![gKind isEqualToString:SGWGKindWireGuard]) {
+        if (!tunnel) {
             StartExternalProxy();
             return;
         }
         atomic_store(&gState, gBlockAll ? SGWGStateBlocked : SGWGStateStarting);
-        ObserveLifecycle();
-        StartEngine();
+        dispatch_async(gQueue, ^{ StartEngine(); });
     }
 }
 
@@ -1101,10 +1424,12 @@ NSString *SGWGHostCategory(NSString *host) {
 }
 
 NSString *SGWGRedactText(NSString *text) {
-    char *raw = SGWGRedact((char *)(text ?: @"").UTF8String);
-    if (!raw) return @"";
-    NSString *out = [NSString stringWithUTF8String:raw] ?: @"";
-    SGWGFree(raw);
+    const struct SGWGAPI *api = EngineAPI();
+    if (!api) return gEngineLoadError;
+    char *raw = api->redact((char *)(text ?: @"").UTF8String);
+    if (!raw) return @"WireGuard redaction unavailable";
+    NSString *out = [NSString stringWithUTF8String:raw] ?: @"WireGuard redaction unavailable";
+    api->freeString(raw);
     return out;
 }
 

@@ -76,6 +76,16 @@ simulator clone and copy screenshots before the next language run overwrites the
 `PROMPT_SOURCE` can select an isolated source mutation; removing the row's page must fail the visible
 value-plus-chevron check without crashing the app.
 
+`light-check.sh` brings the mod's alerts up as Spotify shows them: its Info.plist sets no appearance, so the
+harness's key is removed and `system` leaves the window in the system's appearance under a dark navigation stack.
+In a simulator of its own, in Light Mode and then Dark Mode, `alerts` with `info`, `lock` and `toggle=0.1` brings up
+SGModPage's three alerts, `toggle=0.0` Pages.m's restart alert, and `information` SGPresentInformation's; `look`
+logs the alert's frame, and its screenshot there must be dark (mean luminance under 80; a light alert's glass reads
+about 165, a dark one's about 30). `LIGHT_SHOTS=<dir>` keeps the screenshots.
+
+2026-11-24, iPhone 17 Pro on iOS 26.5: before the alerts went through `SGPresentDark`, the four in Light Mode read
+165 to 173 and showed white glass; after, every alert reads under 40 in both modes.
+
 `refactor-check` runs offline and exits: the real About page's Reset row keeps its trash symbol, opening
 Mod Settings finds a navigation controller through the source's parents, and a deeper first-child stack
 wins over a shallower later sibling. About's external actions remain stubs.

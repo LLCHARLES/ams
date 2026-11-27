@@ -32,6 +32,9 @@
             "editorialNotes": {
               "short": "<p>The expanded edition.</p>",
               "standard": "<p>Bonus recordings from the expanded edition.</p>"
+            },
+            "editorialVideo": {
+              "motionTallVideo3x4": { "video": "https://fixture.invalid/deluxe/master.m3u8" }
             }
           }
         },

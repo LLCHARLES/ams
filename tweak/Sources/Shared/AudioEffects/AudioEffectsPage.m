@@ -4,6 +4,7 @@
 // cards, the 13pt titles over 11pt subtitles, the tiles, the value and the chevron, the checkmark lists.
 #import "Core/SGCore.h"
 #import "Settings/SGPage.h"
+#import "Settings/SGSettingsIndex.h"
 #import "Settings/SGPageStyle.h"
 #import "AudioEffectsPage.h"
 #import "SGDSPCurveView.h"
@@ -365,7 +366,7 @@ static NSString *numberText(SGDSPRow *row, double value) {
 
 #pragma mark - the page
 
-@interface SGDSPPage : SGPage
+@interface SGDSPPage : SGPage <SGSettingsSearchPages>
 @end
 
 @implementation SGDSPPage {
@@ -529,9 +530,16 @@ static NSString *numberText(SGDSPRow *row, double value) {
     cell.separatorInset = UIEdgeInsetsMake(0, 16, 0, 0);
 }
 
+- (NSArray<SGModRow *> *)sg_searchPageRows {
+    return @[
+        SGSearchIdentified(SGPageRow(SGL(@"settings.audioeffects.presets.title", @"Presets"), ^UIViewController *{ return SGDSPPresetsPage(); }), @"page.audiopresets"),
+        SGSearchIdentified(SGPageRow(SGL(@"settings.audioeffects.headphones.title", @"Headphones"), ^UIViewController *{ return SGDSPHeadphonesPage(); }), @"page.headphones"),
+    ];
+}
+
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
-    if (path.section == 0 && path.row == 1) return [self valueCell:table title:SGL(@"settings.audioeffects.presets.title", @"Presets") value:@""];
-    if (path.section == 0 && path.row == 2) return [self valueCell:table title:SGL(@"settings.audioeffects.headphones.title", @"Headphones") value:SGDSPHeadphoneSummary()];
+    if (path.section == 0 && path.row > 0)
+        return [self valueCell:table title:self.sg_searchPageRows[path.row-1].title value:path.row == 2 ? SGDSPHeadphoneSummary() : @""];
     if (path.section == 0) {
         UITableViewCell *cell = SGDequeueCell(table, @"master");
         [self fillHead:cell title:SGL(@"settings.audioeffects.effects.title", @"Effects") subtitle:SGDSPStatus()];
@@ -607,7 +615,7 @@ static NSString *numberText(SGDSPRow *row, double value) {
         return;
     }
     if (path.section == 0 && path.row > 0) {
-        [self.navigationController pushViewController:path.row == 1 ? SGDSPPresetsPage() : SGDSPHeadphonesPage() animated:YES];
+        [self.navigationController pushViewController:self.sg_searchPageRows[path.row-1].page() animated:YES];
         return;
     }
     SGDSPRow *row = [self rowAt:path];
@@ -698,6 +706,7 @@ static NSString *numberText(SGDSPRow *row, double value) {
         } completion:nil];
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [self presentViewController:alert animated:YES completion:nil];
 }
 

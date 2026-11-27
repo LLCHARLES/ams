@@ -23,6 +23,7 @@ static NSURL *cacheRoot;
 static BOOL holdLyricsCleanup, cleanupGateTimedOut;
 static dispatch_semaphore_t cleanupEntered, cleanupRelease;
 static NSUInteger completedLyricsCleanups;
+NSNotificationName const SGLyricsAIResultDidChangeNotification = @"spotifyglass.lyricsAIResultDidChange";
 static CGSize lastCoverRequest;
 static NSUInteger nativeAcquisitions;
 static CGRect screenBounds(id self, SEL cmd) { return CGRectMake(0, 0, 32, 48); }
@@ -31,6 +32,7 @@ static CGRect screenBounds(id self, SEL cmd) { return CGRectMake(0, 0, 32, 48); 
 // SGShownTrackArtwork stub. Only the transport is controlled; no network leaves this process.
 static NSMutableDictionary<NSString *, NSURLProtocol *> *coverRequests;
 static NSUInteger coverLoads;
+static NSMutableDictionary<NSString *, NSNumber *> *coverCompletions;
 @interface CoverProtocol : NSURLProtocol
 @end
 @implementation CoverProtocol
@@ -83,7 +85,7 @@ static NSUInteger coverLoads;
     }
     if (hold) {
         dispatch_semaphore_signal(cleanupEntered);
-        BOOL timedOut = dispatch_semaphore_wait(cleanupRelease, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0;
+        BOOL timedOut = dispatch_semaphore_wait(cleanupRelease, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) != 0;
         @synchronized (cacheRoot) { cleanupGateTimedOut = timedOut; }
     }
     BOOL removed = [self harnessRemoveItemAtURL:url error:error];
@@ -99,6 +101,24 @@ static void alreadyPlaying(void);
 __attribute__((constructor)) static void artworkBoundary(void) {
     coverRequests = [NSMutableDictionary dictionary];
     [NSURLProtocol registerClass:CoverProtocol.class];
+    coverCompletions = [NSMutableDictionary dictionary];
+    // NSURLProtocol finishing the transport is not SGShownTrackArtwork finishing
+    // decode. Its URLSession completion enqueues the decoded reply on main.
+    Method load = class_getInstanceMethod(NSURLSession.sharedSession.class, @selector(dataTaskWithURL:completionHandler:));
+    IMP loadIMP = method_getImplementation(load);
+    method_setImplementation(load, imp_implementationWithBlock(^NSURLSessionDataTask *(NSURLSession *session, NSURL *url,
+            void (^completion)(NSData *, NSURLResponse *, NSError *)) {
+        if ([url.host isEqual:@"cover.invalid"]) {
+            void (^consume)(NSData *, NSURLResponse *, NSError *) = completion;
+            completion = ^(NSData *data, NSURLResponse *response, NSError *error) {
+                consume(data, response, error);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    coverCompletions[url.absoluteString] = @([coverCompletions[url.absoluteString] unsignedIntegerValue] + 1);
+                });
+            };
+        }
+        return ((NSURLSessionDataTask *(*)(id, SEL, NSURL *, id))loadIMP)(session, @selector(dataTaskWithURL:completionHandler:), url, completion);
+    }));
     char *path = strdup([[NSTemporaryDirectory() stringByAppendingPathComponent:@"retrine-artwork.XXXXXX"] fileSystemRepresentation]);
     if (!mkdtemp(path)) { perror("mkdtemp artwork cache"); exit(1); }
     cacheRoot = [NSURL fileURLWithPath:@(path) isDirectory:YES];
@@ -211,7 +231,7 @@ NSURL *SGMotionMadeFile(NSString *key) {
     }
     if (entered) {
         dispatch_semaphore_signal(entered);
-        BOOL timedOut = dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0;
+        BOOL timedOut = dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) != 0;
         @synchronized (cacheRoot) { renderGateTimedOut = timedOut; }
     }
     NSData *data = [key dataUsingEncoding:NSUTF8StringEncoding];
@@ -252,12 +272,13 @@ static BOOL writeFrame(NSURL *file, CGImageRef frame) {
     NSData *data = UIImagePNGRepresentation([UIImage imageWithCGImage:frame]);
     return [data writeToURL:file atomically:YES];
 }
-static NSMutableArray<NSString *> *encodedLines;
+static NSMutableArray<NSString *> *encodedLines, *stoppedLines;
 static NSMutableDictionary<NSString *, NSString *> *encodedTranslations;
 static NSString *heldClip;
 static dispatch_semaphore_t clipEntered, clipRelease;
 static BOOL clipGateTimedOut;
-static void recordClip(NSURL *file, NSString *line, NSString *translation) {
+// NO, as the real writers return, when `current` says no more once the clip is under way: they ask it each frame.
+static BOOL recordClip(NSURL *file, NSString *line, NSString *translation, BOOL (^current)(void)) {
     BOOL hold;
     @synchronized (cacheRoot) {
         if (!encodedLines) encodedLines = [NSMutableArray array];
@@ -269,19 +290,25 @@ static void recordClip(NSURL *file, NSString *line, NSString *translation) {
     }
     if (hold) {
         dispatch_semaphore_signal(clipEntered);
-        clipGateTimedOut = dispatch_semaphore_wait(clipRelease, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) != 0;
+        clipGateTimedOut = dispatch_semaphore_wait(clipRelease, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) != 0;
     }
+    if (current && !current()) {
+        @synchronized (cacheRoot) {
+            if (!stoppedLines) stoppedLines = [NSMutableArray array];
+            [stoppedLines addObject:line ?: @""];
+        }
+        return NO;
+    }
+    return YES;
 }
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
                                  SGLyricsClipLayout layout, BOOL (^current)(void)) {
-    recordClip(file, line, translation);
-    return writeFrame(file, backdrop);
+    return recordClip(file, line, translation, current) && writeFrame(file, backdrop);
 }
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
                                  NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
-    recordClip(file, line, translation);
-    return writeFrame(file, blue.CGImage);
+    return recordClip(file, line, translation, current) && writeFrame(file, blue.CGImage);
 }
 CGImageRef SGLyricsClipMotionFrame(NSURL *motion, NSString *previous, NSString *line, NSString *translation,
                                    NSString *next, double from, double seconds, SGLyricsClipLayout layout) { return CGImageRetain(blue.CGImage); }
@@ -296,6 +323,10 @@ static void reportOnly(void) {
         if ([observer respondsToSelector:@selector(playerStateDidReport:)]) [observer playerStateDidReport:state];
     }
 }
+void harnessReport(NSString *uri, NSString *title) {
+    state = harnessState(uri, title);
+    reportOnly();
+}
 // Other lifecycle cases explicitly force a change (including simulated lyric seeks).
 static void report(void) {
     reportOnly();
@@ -304,7 +335,7 @@ static void report(void) {
 static void choose(SGLockArtwork value) {
     choice = value;
     [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
-    runFor(0.03);
+    drainMain();
 }
 static void track(NSString *uri, SGLockArtwork mode, NSURL *file, NSArray *lines) {
     choose(SGLockArtworkOff);
@@ -335,11 +366,7 @@ static void finishPoster(void) {
     [posterCallbacks removeObjectAtIndex:0];
     done(blue);
 }
-static BOOL await(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
-    while (!done() && deadline.timeIntervalSinceNow > 0) runFor(0.01);
-    return done();
-}
+#define await HarnessRunUntil
 static NSString *coverURL(NSString *key) {
     return [@"https://cover.invalid/" stringByAppendingString:key];
 }
@@ -354,13 +381,15 @@ static void finishCover(NSString *key, UIImage *image) {
     check(await(^BOOL { return coverRequests[url] != nil; }), @"metadata artwork reaches the real URL loader");
     NSURLProtocol *request = coverRequests[url];
     if (!request) return;
+    NSUInteger before = [coverCompletions[url] unsignedIntegerValue];
     [coverRequests removeObjectForKey:url];
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:request.request.URL
         statusCode:image ? 200 : 404 HTTPVersion:@"HTTP/1.1" headerFields:nil];
     [request.client URLProtocol:request didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
     if (image) [request.client URLProtocol:request didLoadData:UIImagePNGRepresentation(image)];
     [request.client URLProtocolDidFinishLoading:request];
-    runFor(.05);
+    if (!await(^BOOL { return [coverCompletions[url] unsignedIntegerValue] > before; }))
+        HARNESS_FAIL(@"URLSession did not finish delivering cover %@", key);
 }
 static UIImage *preview(id art) {
     Preview block = objc_getAssociatedObject(art, &previewKey);
@@ -419,6 +448,51 @@ void HarnessArtDispatch(dispatch_queue_t queue, dispatch_block_t block) {
 extern int64_t harnessRowDelay;
 extern BOOL harnessPlaying;
 extern double harnessRate;
+NSUInteger harnessRowFires, harnessArtFires;
+extern BOOL HarnessRowArmed(void);
+static void failedLookup(void) {
+    extern BOOL harnessLookupFailed;
+    extern void (^harnessLyricsRequested)(NSString *);
+    extern NSNotificationName const SGKaraokeLookupReadyNotification;
+    // Model the keeper's admitted network starts separately from its callers.
+    __block BOOL eligible = NO;
+    __block NSUInteger starts = 0;
+    harnessLyricsRequested = ^(NSString *trackID) {
+        if (eligible && [trackID isEqual:@"lookup"]) { starts++; eligible = NO; }
+    };
+    harnessPlaying = YES;
+    harnessLookupFailed = YES;
+    track(@"lookup", SGLockArtworkLyrics, nil, nil);
+    MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo = @{MPMediaItemPropertyTitle:@"Song",
+        MPMediaItemPropertyArtist:@"Artist", MPNowPlayingInfoPropertyElapsedPlaybackTime:@0, MPNowPlayingInfoPropertyPlaybackRate:@1};
+    drainMain();
+    NSUInteger row = harnessRowFires, art = harnessArtFires, sets = harnessSets();
+    check(!HarnessRowArmed() && (!harnessArmedArt || dispatch_source_testcancel(harnessArmedArt)) &&
+          harnessRowFires == row && harnessArtFires == art, @"failed lookup: neither reader fires again");
+    check(starts == 0 && harnessSets() == sets, @"failed lookup: no network starts or metadata setters");
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    eligible = YES;
+    [center postNotificationName:SGKaraokeLookupReadyNotification object:@"lookup"];
+    check(starts == 1, @"headers arriving wake a reader and admit one lookup");
+    [center postNotificationName:SGKaraokeLinesKeptNotification object:@"lookup"]; // still no sheet; budget spent
+    harnessPlaying = NO; reportOnly();
+    harnessPlaying = YES; reportOnly();
+    sets = harnessSets();
+    drainMain();
+    check(!HarnessRowArmed() && (!harnessArmedArt || dispatch_source_testcancel(harnessArmedArt)) &&
+          harnessRowFires == row && harnessArtFires == art && starts == 1 && harnessSets() == sets,
+          @"pause/resume with exhausted retries does not restart a display clock, request or setter");
+    eligible = YES;
+    [center postNotificationName:SGKaraokeLookupReadyNotification object:@"lookup"];
+    harnessLookupFailed = NO;
+    harnessLines(@[lineOf(@"Recovered", 0, 20000)]);
+    [center postNotificationName:SGKaraokeLinesKeptNotification object:@"lookup"];
+    check(starts == 2 && artwork() && (!getenv("LSL") || [harnessSystem()[MPMediaItemPropertyArtist] isEqual:@"Recovered"]),
+          @"renewal and lookup completion publish the current line and artwork without waiting for a timer");
+    harnessLyricsRequested = nil;
+    harnessPlaying = NO;
+    choose(SGLockArtworkOff);
+}
 static void playerDeadlines(void) {
     harnessPlaying = YES;
     // Artwork also wakes at the current line's sung end and 4 s before the next.
@@ -471,13 +545,13 @@ static void interleavedMode(void) {
         stalePoster = NO;
         dispatch_semaphore_signal(sampledMode);
     });
-    check(dispatch_semaphore_wait(sampledMode, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0, @"background defaults poster reached the handoff");
+    check(dispatch_semaphore_wait(sampledMode, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0, @"background defaults poster reached the handoff");
     choose(SGLockArtworkLyrics);
     check(artwork() != nil, @"main applied the new artwork while the old defaults notification was pending");
     dispatch_semaphore_signal(resumePoster);
     dispatch_group_wait(posted, DISPATCH_TIME_FOREVER);
     check(readOnPoster, @"the background writer sampled Off before main enabled artwork");
-    runFor(.03);
+    drainMain();
     choose(SGLockArtworkOff);
     check(artwork() == nil, @"final Off clears the applied artwork despite an interleaved background write");
 }
@@ -485,6 +559,8 @@ static void interleavedMode(void) {
 void artworkChecks(void) {
     red = image(UIColor.redColor);
     blue = image(UIColor.blueColor);
+    extern BOOL harnessCoverRevisions(UIImage *, UIImage *);
+    check(harnessCoverRevisions(red, blue), @"stable cover reuses its digest; the pixels identify it across revisions");
     check(lookups == 1, @"lock-screen startup looks up the already-playing track");
     report();
     check(lookups == 1, @"the first ordinary report does not repeat the startup lookup");
@@ -511,7 +587,7 @@ void artworkChecks(void) {
     });
     dispatch_group_wait(idleWrite, DISPATCH_TIME_FOREVER);
     check(posterHandoffs == 0, @"Off-to-Off background write queues no artwork work on main");
-    runFor(.03);
+    drainMain();
     method_setImplementation(dictionary, original);
     imp_removeBlock(counted);
     check(!snapshots, @"unrelated defaults change with artwork Off reads no defaults dictionary");
@@ -522,7 +598,7 @@ void artworkChecks(void) {
     NSArray *lines = @[lineOf(@"First", 0, 10000), lineOf(@"Second", 12000, 20000)];
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    drainMain();
 
     // A whole burst on a posting thread must return without waiting for main, and emit just once.
     __block NSUInteger notifications = 0;
@@ -536,13 +612,13 @@ void artworkChecks(void) {
         for (NSUInteger i = 0; i < 20; i++) nativeInfo(nil);
         dispatch_semaphore_signal(posted);
     });
-    check(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0,
+    check(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
           @"background now-playing setters never wait for main");
-    runFor(0.03);
+    HARNESS_AWAIT(notifications != 0);
     check(notifications == 1, @"native now-playing notification burst is coalesced");
     SGNowPlayingSetExtras(@"test", @{@"test": @YES}, @"Song");
     SGNowPlayingSetExtras(@"test", nil, nil);
-    runFor(0.03);
+    drainMain();
     check(notifications == 1, @"extras resends do not generate notifications");
     [NSNotificationCenter.defaultCenter removeObserver:token];
 
@@ -581,14 +657,14 @@ void artworkChecks(void) {
     supported = @[];
     track(@"late-capability", SGLockArtworkMotion, file, @[]);
     NSUInteger fetched = lookups, decoded = posters, sets = harnessSets();
-    for (NSUInteger i = 0; i < 5; i++) { nativeInfo(nil); runFor(0.01); }
+    for (NSUInteger i = 0; i < 5; i++) { nativeInfo(nil); drainMain(); }
     check(lookups == fetched && posters == decoded && !artwork(),
           @"unsupported capability does not refetch, decode or publish on repeated updates");
     runFor(0.1);
     check(harnessSets() == sets + 5, @"unsupported capability creates no polling/resend loop");
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    HARNESS_AWAIT(posterCallbacks.count);
     finishPoster();
     check(artwork() && lookups == fetched, @"late capability publishes the same track without downloading again");
     sets = harnessSets();
@@ -601,7 +677,7 @@ void artworkChecks(void) {
     choose(SGLockArtworkOff);
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    drainMain();
     check(!artwork() && posters == decoded, @"disabled artwork cannot revive a capability-waiting offer");
 
     supported = @[];
@@ -613,7 +689,7 @@ void artworkChecks(void) {
     lyric = artwork();
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    drainMain();
     check(artwork() == lyric && posters == decoded, @"lyrics ownership cancels a capability-waiting plain offer");
 
     supported = @[];
@@ -622,12 +698,12 @@ void artworkChecks(void) {
     fetched = lookups;
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    HARNESS_AWAIT(posterCallbacks.count);
     finishPoster();
     check(artwork() && lookups == fetched, @"plain motion recovers late capability without a new lookup");
 
     nativeInfo(nil);
-    runFor(.03);
+    drainMain();
     NSUInteger prepared = preparations();
     dispatch_semaphore_t entered = dispatch_semaphore_create(0), release = dispatch_semaphore_create(0);
     @synchronized (cacheRoot) {
@@ -637,7 +713,7 @@ void artworkChecks(void) {
         renderGateTimedOut = NO;
     }
     track(@"cover-during-render", SGLockArtworkEverySong, nil, @[]);
-    check(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0,
+    check(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
           @"coverless background worker is held before rendering");
     fetched = lookups;
     __block BOOL coverInfoDelivered = NO;
@@ -664,7 +740,7 @@ void artworkChecks(void) {
     @synchronized (cacheRoot) { check(!renderGateTimedOut, @"held render was explicitly released, not timed out"); }
 
     nativeInfo(nil);
-    runFor(.03);
+    drainMain();
     prepared = preparations();
     track(@"cover-never-arrives", SGLockArtworkEverySong, nil, @[]);
     check(await(^BOOL { return artwork() != nil; }), @"permanently coverless track publishes its safe fallback");
@@ -699,7 +775,7 @@ void artworkChecks(void) {
     id sameOffer = artwork();
     NSUInteger acquired = nativeAcquisitions, loaded = coverLoads;
     prepared = preparations(); sets = harnessSets(); fetched = lookups;
-    for (NSUInteger i = 0; i < 5; i++) { nativeArtworkInfo(sameNative); runFor(.01); }
+    for (NSUInteger i = 0; i < 5; i++) { nativeArtworkInfo(sameNative); drainMain(); }
     check(nativeAcquisitions == acquired && preparations() == prepared && harnessSets() == sets + 5
           && lookups == fetched && coverLoads == loaded,
           @"same-object elapsed updates do not reacquire, render, publish or download");
@@ -711,9 +787,9 @@ void artworkChecks(void) {
 
     supported = @[];
     nativeInfo(red);
-    runFor(.03);
+    drainMain();
     prepared = preparations(); acquired = nativeAcquisitions;
-    for (NSUInteger i = 0; i < 5; i++) { reportOnly(); runFor(.01); }
+    for (NSUInteger i = 0; i < 5; i++) { reportOnly(); drainMain(); }
     check(preparations() == prepared && nativeAcquisitions == acquired,
           @"lost cover capability does not acquire or prepare repeatedly");
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
@@ -764,7 +840,7 @@ void artworkChecks(void) {
     prepared = preparations(); loaded = coverLoads;
     finishCover(@"disabled-native-track", red);
     for (NSUInteger i = 0; i < 5; i++) nativeArtworkInfo(sameNative);
-    runFor(.03);
+    drainMain();
     check(!artwork() && preparations() == prepared && coverLoads == loaded,
           @"disabled fallback cannot acquire, prepare or revive from late native or URL events");
 
@@ -795,7 +871,7 @@ void artworkChecks(void) {
     fetched = lookups;
     supported = @[MPNowPlayingInfoProperty3x4AnimatedArtwork];
     nativeInfo(nil);
-    runFor(0.03);
+    HARNESS_AWAIT(artwork() != nil);
     id safeFallback = artwork();
     check(safeFallback != nil, @"Every song offers a safe selected fallback before the cover arrives");
     lastCoverRequest = CGSizeZero;
@@ -819,7 +895,7 @@ void artworkChecks(void) {
           && CGImageGetWidth(fluidPreview.CGImage) == 24 && CGImageGetHeight(fluidPreview.CGImage) == 32,
           @"native acquisition and authoritative rendering use the intended full raster");
     nativeInfo(blue);
-    runFor(0.03);
+    drainMain();
     check(artwork() == fluid, @"later native notifications cannot downgrade a successful URI cover");
     check(sameImage(preview(fluid), red), @"lazy fluid preview retains the offered cover");
     NSURL *fluidFile = video(fluid);
@@ -874,7 +950,7 @@ void artworkChecks(void) {
     nativeInfo(red);
     coverMetadata(@"lyrics-late-cover");
     finishCover(@"lyrics-late-cover", red);
-    runFor(0.03);
+    HARNESS_AWAIT(artwork() && ![name(artwork()) isEqual:name(empty)]);
     id covered = artwork();
     check(covered && ![name(covered) isEqual:name(empty)], @"paused late cover changes the current render identity");
     check(sameImage(preview(covered), red), @"late cover replaces the cached current preview");
@@ -893,7 +969,7 @@ void artworkChecks(void) {
           @"prefetched next disk clip uses the real-cover identity");
     sets = harnessSets();
     nativeInfo(red);
-    runFor(0.03);
+    drainMain();
     check(harnessSets() == sets + 1, @"unchanged cover/line does not republish or loop");
     position = 0;
     report();
@@ -901,7 +977,7 @@ void artworkChecks(void) {
     sets = harnessSets();
     fetched = lookups;
     for (NSUInteger i = 0; i < 20; i++) background(@{@"mode": @4, @"darkness": @0, @"color": @(0x0000FF + i)});
-    runFor(.25);
+    HARNESS_AWAIT(artwork() && ![name(artwork()) isEqual:name(previousStyle)]);
     id changedStyle = artwork();
     check(changedStyle && ![name(changedStyle) isEqual:name(previousStyle)] && lookups == fetched,
           @"paused lyric background changes current render identity without downloading");
@@ -915,7 +991,7 @@ void artworkChecks(void) {
     check(styleNext && ![styleNext isEqual:nextFile], @"style change creates a distinct prefetched disk clip");
     choose(SGLockArtworkOff);
     nativeInfo(nil);
-    runFor(0.03);
+    drainMain();
     check(!artwork(), @"late now-playing info cannot revive disabled lyrics");
 
     SGKaraokeLine *spoken = lineOf(@"原文", 0, 10000);
@@ -924,8 +1000,14 @@ void artworkChecks(void) {
     track(@"reading-revision", SGLockArtworkLyrics, nil, @[spoken]);
     id firstReading = artwork();
     video(firstReading);
+    extern NSUInteger harnessArtworkHashes;
+    NSUInteger hashes = harnessArtworkHashes;
+    for (NSUInteger i = 0; i < 10; i++) report();
+    check(harnessArtworkHashes == hashes, @"position reports reuse the unchanged song reading digest");
+    // The view's observer may apply the saved reading after the artwork observer is called.
+    [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsAIResultDidChangeNotification object:@"reading-revision"];
     spoken.pronunciation = lineOf(@"replacement reading", 0, 10000);
-    [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:@"reading-revision"];
+    check(await(^BOOL { return artwork() != firstReading; }), @"AI pronunciation edit refreshes the paused artwork");
     id replacementReading = artwork();
     video(replacementReading);
     check([encodedLines containsObject:@"replacement reading"] && video(firstReading) == nil,
@@ -955,13 +1037,14 @@ void artworkChecks(void) {
     coverMetadata(@"source-real");
     check(await(^BOOL { return coverRequests[coverURL(@"source-real")] != nil; }),
           @"paused report-only late metadata starts a cover load without a native info update");
-    runFor(.05);
+    HARNESS_AWAIT(artwork() != nil);
     id pending = artwork();
     check(sameImage(preview(pending), safe), @"native placeholder never enters the lyric preview while metadata cover loads");
     NSURL *pendingFile = video(pending);
     check(sameImage([UIImage imageWithContentsOfFile:pendingFile.path], safe),
           @"native placeholder never enters the lyric disk clip");
     finishCover(@"source-real", red);
+    HARNESS_AWAIT(artwork() && ![name(artwork()) isEqual:name(pending)]);
     id resolved = artwork();
     check(![name(resolved) isEqual:name(pending)] && sameImage(preview(resolved), red),
           @"metadata real cover replaces fallback even while native artwork remains a placeholder");
@@ -980,6 +1063,7 @@ void artworkChecks(void) {
     coverMetadata(@"source-new");
     check(sameImage(preview(artwork()), safe), @"same-title track never inherits native artwork from the previous URI");
     finishCover(@"source-new", blue);
+    HARNESS_AWAIT(artwork() && sameImage(preview(artwork()), blue));
     finishCover(@"source-old", red);
     check(sameImage(preview(artwork()), blue), @"late old-URI completion cannot replace the current cover");
 
@@ -988,6 +1072,7 @@ void artworkChecks(void) {
           @"paused report-only revised metadata starts a cover load without a native info update");
     coverMetadata(@"source-revised-new");
     finishCover(@"source-revised-new", red);
+    HARNESS_AWAIT(artwork() && sameImage(preview(artwork()), red));
     finishCover(@"source-revised-old", blue);
     check(sameImage(preview(artwork()), red), @"late old-URL completion cannot replace revised metadata for the same URI");
     coverMetadata(@"source-unavailable");
@@ -1026,6 +1111,7 @@ void artworkChecks(void) {
           @"the old source's retry is in flight");
     coverMetadata(@"source-retry-new");
     finishCover(@"source-retry-new", blue);
+    HARNESS_AWAIT(artwork() && sameImage(preview(artwork()), blue));
     check(sameImage(preview(artwork()), blue), @"the revised source URL shows its own cover while the old retry is pending");
     finishCover(@"source-retry-old", red);
     check(sameImage(preview(artwork()), blue), @"a late old-URL retry cannot replace the new source's cover");
@@ -1041,6 +1127,7 @@ void artworkChecks(void) {
     choose(SGLockArtworkLyrics);
     coverMetadata(@"source-retry-restored");
     finishCover(@"source-retry-restored", red);
+    HARNESS_AWAIT(artwork() && sameImage(preview(artwork()), red));
     check(sameImage(preview(artwork()), red), @"re-enabling starts a fresh source rather than reusing the retired retry");
     coverMetadata(@"source-disabled");
     check(await(^BOOL { return coverRequests[coverURL(@"source-disabled")] != nil; }), @"cover request starts before disabling");
@@ -1050,17 +1137,50 @@ void artworkChecks(void) {
 
     [NSUserDefaults.standardUserDefaults setVolatileDomain:@{SGKeyLockScreenTranslation: @YES} forName:NSArgumentDomain];
     harnessTranslations = @{@"en": @{@"Hola": @"Hello saved"}};
-    track(@"translation-delete", SGLockArtworkLyrics, nil, @[lineOf(@"Hola", 0, 10000)]);
-    runFor(.05);
+    SGKaraokeLine *hola = lineOf(@"Hola", 0, 10000);
+    track(@"translation-delete", SGLockArtworkLyrics, nil, @[hola]);
+    HARNESS_AWAIT([hola.translation isEqual:@"Hello saved"] && artwork());
+    drainMain();
+    id translatedArt = artwork();
     NSURL *translatedFile = video(artwork());
     check([encodedTranslations[translatedFile.path] isEqual:@"Hello saved"],
           @"paused artwork restores saved translation without a lyrics view");
     harnessTranslations = nil;
     [NSNotificationCenter.defaultCenter postNotificationName:SGLyricsTranslationsDidChangeNotification object:nil];
-    runFor(.05);
+    HARNESS_AWAIT(!hola.translation.length && artwork() && artwork() != translatedArt);
     NSURL *deletedFile = video(artwork());
     check([encodedTranslations[deletedFile.path] isEqual:@""],
           @"paused artwork removes deleted translation without a lyrics view");
+    [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
+
+    // Low Power Mode coming on while paused puts the paused line Still under a new ID, and its going off brings
+    // the chosen style back, with no player report in between.
+    [NSUserDefaults.standardUserDefaults setVolatileDomain:@{SGKeyLockScreenLyricsStyle: @(SGLyricsClipAnimated)} forName:NSArgumentDomain];
+    track(@"power-paused", SGLockArtworkLyrics, nil, @[lineOf(@"Breath", 0, 10000)]);
+    NSString *animatedLook = [NSString stringWithFormat:@"style%ldl", (long)SGLyricsClipAnimated];
+    NSString *stillLook = [NSString stringWithFormat:@"style%ldl", (long)SGLyricsClipStill];
+    HARNESS_AWAIT([name(artwork()) containsString:animatedLook]);
+    check(state.isPaused && [name(artwork()) containsString:animatedLook], @"a paused line shows the chosen breathing style");
+    // On the process info's own class, under both names, as harness/player swaps it.
+    __block BOOL lowPowerOn = YES;
+    Class processClass = object_getClass(NSProcessInfo.processInfo);
+    NSMutableArray<NSValue *> *swapped = [NSMutableArray array];
+    for (NSString *selector in @[@"isLowPowerModeEnabled", @"lowPowerModeEnabled"]) {
+        Method method = class_getInstanceMethod(processClass, NSSelectorFromString(selector));
+        if (!method) continue;
+        [swapped addObject:[NSValue valueWithPointer:method]];
+        [swapped addObject:[NSValue valueWithPointer:method_getImplementation(method)]];
+        method_setImplementation(method, imp_implementationWithBlock(^BOOL(id process) { return lowPowerOn; }));
+    }
+    [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
+    HARNESS_AWAIT([name(artwork()) containsString:stillLook]);
+    check([name(artwork()) containsString:stillLook], @"Low Power Mode while paused puts the line Still");
+    lowPowerOn = NO;
+    for (NSUInteger i = 0; i + 1 < swapped.count; i += 2)
+        method_setImplementation((Method)swapped[i].pointerValue, (IMP)swapped[i + 1].pointerValue);
+    [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
+    HARNESS_AWAIT([name(artwork()) containsString:animatedLook]);
+    check([name(artwork()) containsString:animatedLook], @"Low Power Mode going off while paused brings the chosen style back");
     [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
 
     NSArray *seekLines = @[lineOf(@"Held", 0, 900), lineOf(@"Passed", 1000, 1900),
@@ -1074,7 +1194,7 @@ void artworkChecks(void) {
     heldVideo(CGSizeMake(24, 32), ^(NSURL *url) {
         dispatch_async(dispatch_get_main_queue(), ^{ heldDone = YES; });
     });
-    check(dispatch_semaphore_wait(clipEntered, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0,
+    check(dispatch_semaphore_wait(clipEntered, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
           @"current clip holds the real serial artwork worker");
     @synchronized (cacheRoot) { [encodedLines removeAllObjects]; }
     position = 1000; report(); // queues Obsolete
@@ -1090,6 +1210,7 @@ void artworkChecks(void) {
     @synchronized (cacheRoot) {
         check([encodedLines isEqual:@[@"Demand", @"Wanted"]],
               @"same-track seeks drop superseded prefetches before encoding and current demand goes first");
+        check([stoppedLines containsObject:@"Held"], @"a clip whose line was seeked past stops encoding instead of finishing for nobody");
     }
     check(!clipGateTimedOut, @"held clip is released without a timeout");
 
@@ -1106,7 +1227,7 @@ void artworkChecks(void) {
     // and video request then arrive before that queued worker gets to select a job.
     track(@"cleanup-held", SGLockArtworkLyrics, nil,
           @[lineOf(@"Old", 0, 900), lineOf(@"Old next", 1000, 1900)]);
-    check(dispatch_semaphore_wait(cleanupEntered, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0,
+    check(dispatch_semaphore_wait(cleanupEntered, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
           @"old-track cache cleanup holds the serial worker");
     state = harnessState(@"cleanup-new", @"Song");
     harnessLines(@[lineOf(@"New current", 0, 10000)]);
@@ -1129,4 +1250,5 @@ void artworkChecks(void) {
     choose(SGLockArtworkOff);
     interleavedMode();
     playerDeadlines();
+    failedLookup();
 }

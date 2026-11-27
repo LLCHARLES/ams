@@ -37,7 +37,9 @@ NSNotificationName const SGAutoMixTransitionDidChangeNotification = @"SGAutoMixT
 @end
 
 static SGTransitionFacts *sg_transition;
-static NSDictionary *sg_inputs;
+static NSDictionary *sg_from, *sg_to;
+static NSArray *sg_identity;
+static SGTransitionSettings sg_settings;
 
 SGTransitionFacts *SGAutoMixCurrentTransition(void) {
     return sg_transition;
@@ -68,10 +70,20 @@ static BOOL hasAutomixMetadata(NSDictionary *metadata) {
     return NO;
 }
 
-static NSDictionary *metadata(SPTPlayerTrack *track) {
+static NSDictionary *metadata(SPTPlayerTrack *track, NSDictionary *previous) {
     NSDictionary *raw = track.metadata;
     if (![raw isKindOfClass:NSDictionary.class]) return @{};
     // Position, image metadata and collection updates do not change the upcoming transition.
+    if (previous) {
+        NSUInteger matched = 0;
+        BOOL changed = NO;
+        for (id key in raw) {
+            if (![key isKindOfClass:NSString.class] || (![key isEqual:@"duration"] && !automixKey(key))) continue;
+            if (!same(previous[key], raw[key])) { changed = YES; break; }
+            matched++;
+        }
+        if (!changed && matched == previous.count) return previous;
+    }
     NSMutableDictionary *selected = [NSMutableDictionary dictionary];
     for (id key in raw) {
         if ([key isKindOfClass:NSString.class] && ([key isEqual:@"duration"] || automixKey(key)))
@@ -85,16 +97,8 @@ static NSString *uid(SPTPlayerTrack *track) {
     return [value isKindOfClass:NSString.class] && [value length] ? value : nil;
 }
 
-static SGTransitionFacts *derive(NSDictionary *input) {
-    if (![input[@"local"] boolValue] || ![input[@"settingsKnown"] boolValue] ||
-        [input[@"repeatTrack"] boolValue]) return nil;
-    NSArray *identity = input[@"identity"];
-    if (!identity) return nil;
-    // Proven on the phone: an ordered album is gapless, even with Crossfade enabled.
-    // Other context types are not evidence of mixing; do not infer it from the switch alone.
-    if (![input[@"context"] hasPrefix:@"spotify:playlist:"]) return nil;
-    NSDictionary *from = input[@"from"], *to = input[@"to"];
-    BOOL automix = [input[@"automix"] boolValue];
+static SGTransitionFacts *derive(NSArray *identity, NSDictionary *from, NSDictionary *to, SGTransitionSettings settings) {
+    BOOL automix = settings.automix;
     SGTransitionKind kind = SGTransitionKindNone;
     if (automix && (hasAutomixMetadata(from) || hasAutomixMetadata(to))) {
         // "default" with both cue points is the native beat-matched path observed on TECHNO BUNKER.
@@ -112,8 +116,8 @@ static SGTransitionFacts *derive(NSDictionary *input) {
         return [[SGTransitionFacts alloc] initWithIdentity:identity kind:kind timesKnown:NO
                                                  outStart:0 outEnd:0 inStart:0 inEnd:0];
     }
-    NSInteger milliseconds = [input[@"milliseconds"] integerValue];
-    if (![input[@"crossfade"] boolValue] || milliseconds <= 0) return nil;
+    NSInteger milliseconds = settings.milliseconds;
+    if (!settings.crossfade || milliseconds <= 0) return nil;
     kind = SGTransitionKindCrossfade;
     double outDurationMilliseconds, inDurationMilliseconds;
     BOOL known = number(from[@"duration"], &outDurationMilliseconds) && outDurationMilliseconds > 0 &&
@@ -145,18 +149,22 @@ void SGAutoMixRefreshTransition(void) {
     NSString *fromURI = SGURIString(track.URI), *toURI = SGURIString(next.URI);
     SGTransitionSettings settings = {0};
     BOOL settingsKnown = SGTransitionSettingsRead(&settings);
-    NSMutableDictionary *input = [@{
-        @"local": @(SGPlayerPlaybackIsLocal()), @"settingsKnown": @(settingsKnown),
-        @"automix": @(settings.automix), @"crossfade": @(settings.crossfade),
-        @"milliseconds": @(settings.milliseconds), @"context": SGURIString(state.contextURI) ?: @"",
-        @"repeatTrack": @(state.options.repeatingTrack), @"from": metadata(track), @"to": metadata(next),
-    } mutableCopy];
-    if (fromURI.length && toURI.length) {
-        input[@"identity"] = @[fromURI, uid(track) ?: NSNull.null, toURI, uid(next) ?: NSNull.null];
+    SGTransitionFacts *facts = nil;
+    if (settingsKnown && SGPlayerPlaybackIsLocal() && !state.options.repeatingTrack &&
+        (settings.automix || (settings.crossfade && settings.milliseconds > 0)) &&
+        fromURI.length && toURI.length && [SGURIString(state.contextURI) hasPrefix:@"spotify:playlist:"]) {
+        id fromUID = uid(track) ?: NSNull.null, toUID = uid(next) ?: NSNull.null;
+        NSDictionary *from = metadata(track, sg_from), *to = metadata(next, sg_to);
+        BOOL samePair = same(sg_identity[0], fromURI) && same(sg_identity[1], fromUID) &&
+            same(sg_identity[2], toURI) && same(sg_identity[3], toUID);
+        if (samePair && from == sg_from && to == sg_to && settings.automix == sg_settings.automix &&
+            settings.crossfade == sg_settings.crossfade && settings.milliseconds == sg_settings.milliseconds) return;
+        if (!samePair) sg_identity = @[fromURI, fromUID, toURI, toUID];
+        sg_from = from; sg_to = to; sg_settings = settings;
+        facts = derive(sg_identity, from, to, settings);
+    } else {
+        sg_identity = nil; sg_from = nil; sg_to = nil;
     }
-    if ([sg_inputs isEqual:input]) return;
-    sg_inputs = [input copy];
-    SGTransitionFacts *facts = derive(input);
     if (sameFacts(sg_transition, facts)) return;
     sg_transition = facts;
     [NSNotificationCenter.defaultCenter postNotificationName:SGAutoMixTransitionDidChangeNotification object:nil];

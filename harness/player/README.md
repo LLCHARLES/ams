@@ -149,6 +149,9 @@ come late, out of order, or not at all.
   Kit's last look), two skips come in a row with the older picture answering last, and one track plays
   offline. Each step checks by color that the Kit and the field show that track's picture, and the log
   ends with `artwork checks: n of 4 right -- PASS` or `FAIL`. Before the fix it read 1 of 4.
+- `python3 harness/player/ui-check.py landscape-owner` counts ticks on both real karaoke pages. While the
+  landscape window fades in or out, both pages must tick. With landscape opaque, portrait must not tick;
+  once portrait is key and rendering again, the retired page must not tick.
 - `landscape` turns the lyrics sideways at 3 s, puts a line's meanings over them (the real
   `MeaningSheet.m`) at 4 s and takes them away at 9, then pauses at 14.5 and resumes at 15.5. Each step
   logs whether the controls are up and whether a touch on the lines lands on the lines or on the shield
@@ -171,7 +174,7 @@ come late, out of order, or not at all.
 - `cover` is issue #27. The cover is checked untouched first, drawn as the Music app's (24 pt in from the
   sides, its top 33 pt under the safe area, on a 402 pt iPhone), taking touches where it is drawn (5 pt under its
   top, through the header row, the stack of elements inside it and the stack holding it, as 9.2.0's are) with VoiceOver's frame and activation point there; with
-  Hide where it plays from switched off through the Player page's row, under the header row, which keeps its
+  Where it plays from switched on through the Player page's row, under the header row, which keeps its
   touches, and under where the row is now as its stack is moved 8 and 48 pt lower and back with no layout of the
   row (never below Spotify's own place), and no longer under it once it is moved out of the player within the window,
   and back at the Music app's top once switched on again; then given Spotify's layout for a track with lyrics, a
@@ -227,6 +230,9 @@ come late, out of order, or not at all.
   `settings` checks that Size immediately follows Lyrics Line and offers just 19 and 17 pt.
   Set `HARNESS_SIZE_SCREENSHOT=1` to stop on the two rows instead of continuing the settings suite.
 
+- `motion-mirror` takes a 3:4 `HARNESS_CANVAS_FILE` on a tall portrait phone. It checks that the mirrored
+  video starts at the cover's bottom edge and reaches the screen's foot. `HARNESS_MOTION_SCREENSHOT=1`
+  holds the checked player at 0.736 seconds for a comparison capture.
 - `motion` is Animated artwork. The clip, `HARNESS_CANVAS_FILE` (any mp4, `harness/fluid-clip` writes one),
   is served as the track's Canvas before the player's background has laid out; then the background lays
   out, the lyrics open and close, the background is built again, and the ⋯ menu's switch goes off, on, and
@@ -237,7 +243,8 @@ come late, out of order, or not at all.
   a track comes with no Canvas and then again with one (the clip comes in late), and a skip to a track whose
   clip is in the store keeps the last clip until the new one is over it, the cover hidden throughout. The clip's
   dim is checked over the clip and 0.15 darker under the lyrics, with the rule at its ends; `HARNESS_DIM` is the
-  dim the clip should get (`ffmpeg -f lavfi -i "color=c=white:s=360x640:d=4"` gives 0.54, black 0.10). Uninstall
+  dim the rule gives the clip (`ffmpeg -f lavfi -i "color=c=white:s=360x640:d=4"` gives 0.54, black 0.10), of which the
+  clip draws 0.7. Uninstall
   the app between clips, or the store answers with the last one. Then Low Power Mode, which the process is made
   to report (the simulator has none; Reduce Motion takes the same path), takes the clip away for the cover over
   Fluid and gives it back once off. Reported Serious heat also clears the clip, and cooling to Nominal brings it
@@ -369,16 +376,20 @@ come late, out of order, or not at all.
   row shows only while Smooth draws. Then what Spotify sets while the stand-ins show comes back exactly when they go:
   Connect cleared to nil and handed an image with no bitmap, the queue's two colors reset to nil, and a value set while
   they were out is not replaced by the record from the time before. With the song paused it reads the field's top band
-  at Grain 0, 100 and 200 on Smooth (more grain each time, a visible one at 200) and on Light at 100, a second after
+  at Grain 0, 100 and 200 on Smooth (none through 100, visible grain at 200) and on Light at 100, a second after
   the switch from Smooth, then 0 and 200 (all three the same pixels). The steps run one after another, each its delay
   after the last one ran: scheduled all at once from launch, `dispatch_after`'s leeway let two fire together with no
   layout pass between. Each state a screenshot is asked for (`options: screenshot <name> now`) holds two seconds or
   more. The log ends with `options checks: n of 25 right -- PASS` or `FAIL`, and the app exits with it.
 - `renderer` is the switch from Smooth to Light on its own, five times with the song paused: the field read about 0.2,
-  0.5, 1 and 2 s after it (each read's own time logged, with whether Smooth shows, the Metal layers in the field and
-  the Light copies hidden), compared with the band read about 4 s after; the read a second after must match it. It
-  uses only Kit API the committed renderer has too, so it also runs with HEAD's `SGRFluid.m` and `SGRFluidGPU.m` copied
-  into a source tree (`SRC=`). The log ends with `renderer checks: n of 5 right -- PASS` or `FAIL`.
+  0.5, 1 and 2 s after it (each read's own time logged, with whether Smooth shows and the number of Metal layers),
+  compared with the band read about 4 s after; the read a second after must match it. It
+  also changes a paused field's cover while detached and while resigning active: neither change should upload a texture
+  or start a display link. It samples Smooth's first drawable on attachment and reactivation, including an interrupted
+  crossfade with no further track change, and checks that the photo-covered settings preview submits no frame. It also
+  checks that Inactive keeps the last Smooth frame visible without submitting, and that a background artwork change
+  submits nothing either. A playing field must stop submitting after a motion hold settles.
+  `fluid-fragment-check.sh` separately checks Metal's active texture bindings for settled and fading copies.
 
 - `automix` is AutoMix's transitions in the player (`PlayerMix.x`, with `PlayerControls.x`, `PlayerQueue.m` and
   `PlayerArtwork.x`) and the AutoMix page's preview card (`Shared/AutoMix/AutoMixSettings.m`, `AutoMixPreview.m`), in

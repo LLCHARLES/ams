@@ -9,6 +9,7 @@
 //             untouched with Lyrics preview shown, the cover a centered square of its room with it hidden,
 //             and a small cover and a tilt view outside the cover cell untouched
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import "Native/Player/NowPlaying.h"
 #import "Core/SGBackdrop.h"
 #import "Shared/Gestures/Gestures.h"
@@ -20,6 +21,12 @@
 // Hooked by PlayerDeclutter.x but not looked at here.
 @interface _TtC12Element_List18CollectionViewCell : UICollectionViewCell @end
 @implementation _TtC12Element_List18CollectionViewCell @end
+@interface _TtC12Element_List21SupplementaryItemView : UICollectionReusableView @end
+@implementation _TtC12Element_List21SupplementaryItemView
+- (UICollectionViewLayoutAttributes *)preferredLayoutAttributesFittingAttributes:(UICollectionViewLayoutAttributes *)attributes {
+    return attributes;
+}
+@end
 @interface _TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit : UIViewController @end
 @implementation _TtC20NowPlaying_ModesImpl28PlaybackControlsElementsUnit @end
 @interface _TtC20NowPlaying_ModesImpl18FooterElementsUnit : UIViewController @end
@@ -70,6 +77,84 @@ static void check(NSString *step, BOOL ok, NSString *detail) {
 
 static BOOL hiddenPreviewRun(void) {
     return [NSProcessInfo.processInfo.arguments containsObject:@"preview-hidden"];
+}
+
+@interface CardListSource : NSObject <UICollectionViewDataSource> @end
+@implementation CardListSource
+- (NSInteger)collectionView:(UICollectionView *)list numberOfItemsInSection:(NSInteger)section { return 7; }
+- (UICollectionViewCell *)collectionView:(UICollectionView *)list cellForItemAtIndexPath:(NSIndexPath *)path {
+    return [list dequeueReusableCellWithReuseIdentifier:@"card" forIndexPath:path];
+}
+- (UICollectionReusableView *)collectionView:(UICollectionView *)list viewForSupplementaryElementOfKind:(NSString *)kind atIndexPath:(NSIndexPath *)path {
+    return [list dequeueReusableSupplementaryViewOfKind:kind withReuseIdentifier:@"section" forIndexPath:path];
+}
+@end
+
+static void checkCardRange(UIWindow *window) {
+    UICollectionViewFlowLayout *layout = [UICollectionViewFlowLayout new];
+    layout.headerReferenceSize = CGSizeMake(320, 800);
+    layout.sectionInset = UIEdgeInsetsMake(24, 0, 0, 0);
+    layout.itemSize = CGSizeMake(320, 0);
+    layout.minimumLineSpacing = 24;
+    UICollectionView *list = [[UICollectionView alloc] initWithFrame:CGRectMake(0, 0, 320, 600) collectionViewLayout:layout];
+    list.contentInsetAdjustmentBehavior = UIScrollViewContentInsetAdjustmentNever;
+    list.contentInset = UIEdgeInsetsMake(0, 0, 34, 0);
+    list.accessibilityIdentifier = @"scrolling_npv_collection_view_accessibility_identifier";
+    __attribute__((objc_precise_lifetime)) CardListSource *source = [CardListSource new];
+    list.dataSource = source;
+    [list registerClass:UICollectionViewCell.class forCellWithReuseIdentifier:@"card"];
+    for (NSString *kind in @[UICollectionElementKindSectionHeader, UICollectionElementKindSectionFooter])
+        [list registerClass:UICollectionReusableView.class forSupplementaryViewOfKind:kind withReuseIdentifier:@"section"];
+    [window addSubview:list];
+    [list layoutIfNeeded];
+    CGFloat bottom = list.contentSize.height + list.adjustedContentInset.bottom;
+    check(@"scroll ends at visible player", bottom == 800, @(bottom).stringValue);
+    layout.footerReferenceSize = CGSizeMake(320, 32);
+    [layout invalidateLayout];
+    [list layoutIfNeeded];
+    bottom = list.contentSize.height + list.adjustedContentInset.bottom;
+    check(@"new footer after collapsed cards reachable", bottom == 1034, @(bottom).stringValue);
+    [list removeFromSuperview];
+}
+
+static void checkCardHeader(void) {
+    UIView *list = [[UICollectionView alloc] initWithFrame:CGRectZero collectionViewLayout:[UICollectionViewFlowLayout new]];
+    list.accessibilityIdentifier = @"scrolling_npv_collection_view_accessibility_identifier";
+    UICollectionReusableView *header = [_TtC12Element_List21SupplementaryItemView new];
+    UICollectionViewLayoutAttributes *proposed = [UICollectionViewLayoutAttributes
+        layoutAttributesForSupplementaryViewOfKind:UICollectionElementKindSectionHeader
+        withIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+    proposed.size = CGSizeMake(320, 84);
+    header.alpha = 0.75;
+    [list addSubview:header];
+    [header layoutSubviews];
+    check(@"all cards: teaser header", header.alpha == 0, nil);
+    CGSize fitted = [header preferredLayoutAttributesFittingAttributes:proposed].size;
+    check(@"teaser takes no scroll space", CGSizeEqualToSize(fitted, CGSizeMake(320, 0)), NSStringFromCGSize(fitted));
+    [header addSubview:[UISlider new]];
+    [header layoutSubviews];
+    check(@"reused header now contains the slider", header.alpha == 0.75, nil);
+    fitted = [header preferredLayoutAttributesFittingAttributes:proposed].size;
+    check(@"reused slider header takes its normal space", CGSizeEqualToSize(fitted, CGSizeMake(320, 84)), NSStringFromCGSize(fitted));
+}
+
+static Class mockClass(const char *name) {
+    Class cls = objc_getClass(name);
+    if (!cls) { cls = objc_allocateClassPair(UIView.class, name, 0); objc_registerClassPair(cls); }
+    return cls;
+}
+
+// Spotify 9.2.2 renamed the credits card's module from Creator_ to CreatorElements_.
+static void checkCreditsCard(void) {
+    UICollectionViewCell *cell = [[_TtC12Element_List18CollectionViewCell alloc] initWithFrame:CGRectMake(0, 0, 358, 220)];
+    UIView *page = [mockClass("_TtGC13Element_UIKit11ElementViewO20NowPlaying_ScrollAPI20NowPlayingScrollDataP_P__") new];
+    [page addSubview:[mockClass("_TtGC13Element_UIKit11ElementViewV33CreatorElements_CreditsElementAPI19CreditsElementPropsP_P__") new]];
+    [cell.contentView addSubview:page];
+    UICollectionViewLayoutAttributes *proposed = [UICollectionViewLayoutAttributes
+        layoutAttributesForCellWithIndexPath:[NSIndexPath indexPathForItem:0 inSection:0]];
+    proposed.size = CGSizeMake(358, 220);
+    CGSize fitted = [cell preferredLayoutAttributesFittingAttributes:proposed].size;
+    check(@"9.2.2 credits card collapses", fitted.height == 0, NSStringFromCGSize(fitted));
 }
 
 static void runScrubChecks(UIWindow *window) {
@@ -186,6 +271,8 @@ static UIImageView *backgroundImage(UIViewController *controller, UIWindow *wind
     return SGBackdropImageView(controller.view.subviews.firstObject);
 }
 
+#import "../player/recognizer-reuse-check.h"
+
 static void runArtworkChecks(UIWindow *window) {
     NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
     [store setBool:YES forKey:SGKeyGestures];
@@ -193,6 +280,21 @@ static void runArtworkChecks(UIWindow *window) {
     _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView *player = [_TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView new];
     _TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView *album = [_TtC35CreativeWorkCommons_CoverArtTiltKit16CoverArtTiltView new];
     [cell addSubview:player];
+    player.frame = CGRectMake(0, 0, 354, 354);
+    [player layoutSubviews];
+    UIView *other = [[player.class alloc] initWithFrame:player.frame];
+    [cell addSubview:other];
+    checkRecognizerReuse(player, other, @"SGCoverHold", ^{ [player layoutSubviews]; }, ^{ [other layoutSubviews]; });
+    [other removeFromSuperview];
+    extern id harnessPlaybackController(void);
+    __attribute__((objc_precise_lifetime)) id controller = harnessPlaybackController();
+    HARNESS_CHECK(controller != nil);
+    [player handleTap]; // preference on, but no ancestor has installed the double tap
+    HARNESS_CHECK(player.inspected);
+    player.inspected = NO;
+    UIView *host = [_TtC35NowPlaying_ContentLayerPlatformImpl24AccessibleCollectionView new];
+    [host addSubview:cell];
+    [host layoutSubviews];
     [player handleTap];
     [album handleTap];
     HARNESS_CHECK(!player.inspected);
@@ -291,6 +393,11 @@ static void runSponsorBlockChecks(UIWindow *window) {
             exit(0);
         }
         if (!hiddenPreviewRun()) runScrubChecks(self.window);
+        if ([arguments containsObject:@"all-cards"]) {
+            checkCardHeader();
+            checkCreditsCard();
+            checkCardRange(self.window);
+        }
         runCoverChecks(self.window);
         NSLog(@"[harness] native player checks: %lu of %lu right -- %@", (unsigned long)sg_right, (unsigned long)sg_checks,
               sg_right == sg_checks ? @"PASS" : @"FAIL");
@@ -305,6 +412,10 @@ __attribute__((constructor(101))) static void sg_harnessDefaults(void) {
     [NSUserDefaults.standardUserDefaults setBool:NO forKey:@"spotifyglass.redesign"];
     // PlayerDeclutter snapshots this switch in its constructor, just as a real launch does.
     [NSUserDefaults.standardUserDefaults setBool:hiddenPreviewRun() forKey:SGHideLyricsInline];
+    for (NSString *key in @[SGHideLyricsCard, SGHideAboutArtist, SGHideRelatedVideos, SGHideSongDNA,
+                            SGHideLiveEvents, SGHideExploreArtist, SGHideCredits, SGHideMerch, SGHideRecommendations]) {
+        [NSUserDefaults.standardUserDefaults setBool:[NSProcessInfo.processInfo.arguments containsObject:@"all-cards"] forKey:key];
+    }
 }
 
 int main(int argc, char *argv[]) {

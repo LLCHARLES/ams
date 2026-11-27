@@ -9,6 +9,7 @@
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
 #import "Shared/Fonts/FontLibrary.h"
+#import "Shared/Fonts/Fonts.h"
 #import "Shared/Player/SGLastTrack.h"
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Shared/Player/PlayerState.h"
@@ -24,6 +25,10 @@ NSNotificationName const SGLyricsPiPDidChangeNotification = @"spotifyglass.lyric
 static BOOL sg_enabled;
 static void *kPossibleContext = &kPossibleContext;
 
+@interface SGLyricsPiPBackground (Session)
+- (void)refreshForTrack:(NSString *)track size:(CGSize)size background:(SGLyricsBackgroundStyle)style identity:(NSArray *)identity;
+@end
+
 @interface SGLyricsPiPHost : UIView
 @end
 @implementation SGLyricsPiPHost
@@ -34,6 +39,9 @@ static void *kPossibleContext = &kPossibleContext;
     AVPictureInPictureSampleBufferPlaybackDelegate, SGPlayerStateObserver> {
     CVPixelBufferPoolRef _pool;
     CMTimebaseRef _timebase;
+    SGLyricsBackgroundStyle _backdrop;
+    NSArray *_backdropIdentity, *_styleIdentity, *_stylePreferences;
+    NSString *_fontIdentifier;
 }
 @property (nonatomic, strong) SGLyricsPiPHost *host;
 @property (nonatomic, strong) AVPictureInPictureController *pip;
@@ -49,6 +57,7 @@ static void *kPossibleContext = &kPossibleContext;
 @property (nonatomic) CGSize raster;
 @property (nonatomic, strong) NSArray<SGKaraokeLine *> *sourceLines, *preparedLines, *pendingLines;
 @property (nonatomic) BOOL linesDirty;
+@property (nonatomic, copy) NSArray *linePreferences;
 @property (nonatomic, copy) void (^seekCompletion)(void);
 @property (nonatomic, copy) NSString *seekTrack;
 @property (nonatomic) NSInteger seekTarget;
@@ -82,7 +91,7 @@ void SGLyricsPiPToggle(UIView *from) {
             return;
         }
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:SGL(@"settings.lyrics.pip.title", @"Picture in Picture lyrics")
-            message:SGL(@"settings.lyrics.pip.disabled", @"Enable Picture in Picture lyrics in Retrine settings → Lyrics, then restart Spotify.")
+            message:SGL(@"settings.lyrics.pip.disabled", @"Enable lyrics in Mod Settings → Picture in Picture, then restart Spotify.")
             preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.ok", @"OK") style:UIAlertActionStyleDefault handler:nil]];
         SGPresentDark(alert);
@@ -162,6 +171,7 @@ void SGLyricsPiPToggle(UIView *from) {
     [_host removeFromSuperview];
     _shown = nil;
     _shownStyle = nil;
+    _style = nil;
     _sourceLines = nil;
     _preparedLines = nil;
     _pendingLines = nil;
@@ -201,7 +211,8 @@ void SGLyricsPiPToggle(UIView *from) {
         [_pip addObserver:self forKeyPath:@"pictureInPicturePossible" options:NSKeyValueObservingOptionNew context:kPossibleContext];
     }
     if (!_pip) return NO;
-    if (![self preparePool:SGLyricsPiPReadStyle().raster]) return NO;
+    [self prepareStyle];
+    if (![self preparePool:_style.raster]) return NO;
     _host.alpha = 1;
     [window addSubview:_host];
     [NSLayoutConstraint activateConstraints:@[
@@ -296,10 +307,47 @@ void SGLyricsPiPToggle(UIView *from) {
     });
 }
 
+- (NSArray *)currentLinePreferences {
+    return @[SGLyricsGeminiLanguage(), @([NSUserDefaults.standardUserDefaults integerForKey:SGKeyLyricsPronunciationNotation]),
+             @(SGFlag(@"spotifyglass.redesign.lyricsTranslation", NO)), @(SGFlag(@"spotifyglass.redesign.lyricsPronunciation", NO))];
+}
+
+// Defaults notifications include unrelated Spotify writes. Compare the inputs only
+// on those notifications, never on a playback tick or late-artwork callback.
+static NSArray *stylePreferences(void) {
+    static NSArray *keys;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray *all = [@[SGKeyPiPLayout, SGKeyPiPAlignment, SGKeyPiPInfo, SGKeyPiPFont, SGKeyAppFont,
+            SGKeyAppFontFile, SGKeyAppFontFiles, SGKeyAppFontName, SGKeyAppFontFamily, SGKeyAppFontLibrary] mutableCopy];
+        for (NSUInteger i = 0; i < 3; i++)
+            for (NSString *field in @[@"size", @"weight"]) [all addObject:SGLyricsPiPRoleKey(i, field)];
+        for (NSString *field in @[@"mode", @"darkness", @"blur", @"color"])
+            [all addObject:[SGKeyLyricsPiPBackground stringByAppendingFormat:@".%@", field]];
+        keys = [all copy];
+    });
+    NSMutableArray *values = [NSMutableArray arrayWithCapacity:keys.count];
+    for (NSString *key in keys) [values addObject:[NSUserDefaults.standardUserDefaults objectForKey:key] ?: NSNull.null];
+    return values;
+}
+
 - (void)backgroundChanged:(NSNotification *)note {
     // Settings and late artwork must update a paused frame without a polling render timer.
     dispatch_async(dispatch_get_main_queue(), ^{
-        if ([note.name isEqual:NSUserDefaultsDidChangeNotification]) {
+        if (!self.active && !self.starting) return;
+        if ([note.name isEqual:SGFontLibraryChangedNotification]) {
+            NSString *identifier = note.userInfo[@"identifier"];
+            if (![self->_fontIdentifier isEqual:identifier]) return;
+            // Custom notifications are registration changes only. Catalog downloads
+            // also announce progress, before their registered family changes.
+            if (![identifier isEqual:@"custom"] &&
+                [self.style.font isEqual:(SGFontLibraryRegisteredFamily(identifier) ?: @"system")]) return;
+            self.shownStyle = nil;
+            self.style = nil;
+        } else if ([note.name isEqual:NSUserDefaultsDidChangeNotification] && ![self->_stylePreferences isEqual:stylePreferences()])
+            self.style = nil;
+        if ([note.name isEqual:NSUserDefaultsDidChangeNotification] &&
+            ![self.linePreferences isEqual:[self currentLinePreferences]]) {
             self.linesDirty = YES;
             self.pendingLines = nil;
         }
@@ -331,9 +379,27 @@ void SGLyricsPiPToggle(UIView *from) {
     [self.displayLayer flushAndRemoveImage];
 }
 
+- (void)prepareStyle {
+    if (_style) return;
+    _stylePreferences = stylePreferences();
+    _style = SGLyricsPiPReadStyle();
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSString *font = [defaults stringForKey:SGKeyPiPFont] ?: @"app";
+    _fontIdentifier = nil;
+    if ([font hasPrefix:@"library:"]) _fontIdentifier = [font substringFromIndex:8];
+    else if ([font isEqual:@"custom"]) _fontIdentifier = font;
+    else if ([font isEqual:@"app"]) {
+        if (SGAppFontChosen() == SGAppFontCustom) _fontIdentifier = @"custom";
+        else if (SGAppFontChosen() == SGAppFontLibrary) _fontIdentifier = [defaults stringForKey:SGKeyAppFontLibrary];
+    }
+    _styleIdentity = _style.identity;
+    _backdrop = SGLyricsPiPReadBackground();
+    _backdropIdentity = @[SGLyricsBackgroundIdentity(_backdrop), [NSValue valueWithCGSize:_style.raster]];
+}
+
 - (void)refresh {
     if (!_active && !_starting) return;
-    _style = SGLyricsPiPReadStyle();
+    [self prepareStyle];
     if (![self preparePool:_style.raster]) { [self fail:@"could not resize pixel buffer pool"]; return; }
     if (self.displayLayer.status == AVQueuedSampleBufferRenderingStatusFailed) {
         [self fail:[NSString stringWithFormat:@"display layer failed: %@", self.displayLayer.error]];
@@ -342,7 +408,8 @@ void SGLyricsPiPToggle(UIView *from) {
     NSString *track = SGKaraokePlayingTrack();
     SPTPlayerState *state = [(id<SPTPlayer>)SGKaraokePlayer() state];
     NSString *artworkTrack = SGURIString(state.track.URI);
-    double position = MAX(0, SGKaraokePositionMs()) / 1000.0;
+    NSInteger positionMs = SGKaraokePositionMs();
+    double position = MAX(0, positionMs) / 1000.0;
     BOOL changedTrack = ![_track isEqualToString:track] && (_track || track);
     changedTrack |= ![_artworkTrack isEqualToString:artworkTrack] && (_artworkTrack || artworkTrack);
     if (_seekCompletion && ![_seekTrack isEqual:artworkTrack]) [self completeSeek];
@@ -361,7 +428,7 @@ void SGLyricsPiPToggle(UIView *from) {
     BOOL playbackChanged = changedTrack || jumped || playing != _playing || duration != _duration || speed != _speed;
     _track = [track copy];
     _artworkTrack = [artworkTrack copy];
-    [_background refreshForTrack:artworkTrack];
+    [_background refreshForTrack:artworkTrack size:_style.raster background:_backdrop identity:_backdropIdentity];
     _position = position;
     _duration = duration;
     _playing = playing;
@@ -381,6 +448,7 @@ void SGLyricsPiPToggle(UIView *from) {
     if (track.length && !SGKaraokeLinesForTrack(track)) SGKaraokeRequestLyrics(track);
     NSArray<SGKaraokeLine *> *lines = track.length ? SGKaraokeLinesForTrack(track) : nil;
     if (changedTrack || _linesDirty || _sourceLines != lines) {
+        _linePreferences = [self currentLinePreferences];
         _linesDirty = NO;
         _sourceLines = lines;
         if (changedTrack) _preparedLines = nil;
@@ -430,7 +498,8 @@ void SGLyricsPiPToggle(UIView *from) {
     BOOL showPronunciation = SGFlag(@"spotifyglass.redesign.lyricsPronunciation", NO);
     lines = _preparedLines;
     NSString *current = nil, *next = nil;
-    SGLyricsPiPTextKind kind = SGLyricsPiPTextFor(lines, SGKaraokePositionMs() - SGKaraokeDelayMs(), &current, &next);
+    NSInteger lyricsMs = positionMs - SGKaraokeDelayMs();
+    SGLyricsPiPTextKind kind = SGLyricsPiPTextFor(lines, lyricsMs, &current, &next);
     if (kind == SGLyricsPiPTextNoLyrics) {
         BOOL failed = SGLyricsLoadFailed(track);
         current = failed ? SGL(@"settings.lyrics.load_failed", @"Couldn't load lyrics · Retry")
@@ -444,7 +513,7 @@ void SGLyricsPiPToggle(UIView *from) {
     NSString *credit = track.length ? SGLyricsCreditFor(track) : nil;
     // Always credit every provider, a stronger rule than SGLyricsCreditRequired: full Spicy
     // maker/uploader attribution even with Show source off. Linked again on return from PiP.
-    SGKaraokeLine *selected = SGLyricsPiPSelectedLine(lines, SGKaraokePositionMs() - SGKaraokeDelayMs());
+    SGKaraokeLine *selected = SGLyricsPiPSelectedLine(lines, lyricsMs);
     SGShownTrack *metadata = SGShownTrackNow();
     BOOL currentMetadata = metadata.current && [metadata.uri isEqual:artworkTrack];
     NSArray<NSString *> *content = @[current ?: @"", next ?: @"", credit ?: @"",
@@ -452,7 +521,7 @@ void SGLyricsPiPToggle(UIView *from) {
         showTranslation ? SGLyricsShownTranslation(selected) ?: @"" : @"",
         currentMetadata ? metadata.title ?: @"" : @"", currentMetadata ? metadata.artist ?: @"" : @""];
     if (_background.image && (![_shown isEqualToArray:content] || _shownBackgroundRevision != _background.revision ||
-        ![_shownStyle isEqual:_style.identity]))
+        ![_shownStyle isEqual:_styleIdentity]))
         [self enqueue:content generation:_generation];
     [self startIfPossible];
 }
@@ -512,7 +581,7 @@ void SGLyricsPiPToggle(UIView *from) {
     if (generation == _generation && (_active || _starting)) {
         [layer enqueueSampleBuffer:sample];
         _shown = content;
-        _shownStyle = _style.identity;
+        _shownStyle = _styleIdentity;
         _shownBackgroundRevision = _background.revision;
     }
     CFRelease(sample);

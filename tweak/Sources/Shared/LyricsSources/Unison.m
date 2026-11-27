@@ -12,7 +12,7 @@ static const NSInteger kLengthSlack = 4;
 
 SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *result)) {
     if (!query.title.length || !query.artist.length) {
-        SGLog(@"unison: nothing to search with for %@", query.trackID);
+        SGLog(@"unison: no names to search");
         done(nil);
         return;
     }
@@ -29,13 +29,13 @@ SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
             query.requestContext.emptyNameSearch = SGUnisonAsk;
         if (![data isKindOfClass:NSDictionary.class]) {
             if (response.statusCode == 200 && data != NSNull.null) [query.requestContext noteFailure:YES];
-            SGLog(@"unison: no lyrics for %@ by %@", query.title, query.artist);
+            SGLog(@"unison: no matching lyrics");
             done(nil);
             return;
         }
         // Unison also keeps LRC and plain text, which carry nothing the other sources do not.
         if (![data[@"format"] isEqual:@"ttml"]) {
-            SGLog(@"unison: %@ by %@ is %@, not ttml", query.title, query.artist, data[@"format"]);
+            SGLog(@"unison: not TTML");
             done(nil);
             return;
         }
@@ -43,7 +43,7 @@ SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
         double duration;
         NSInteger length = SGLyricsNumber(data[@"duration"], &duration) ? (NSInteger)duration : 0;
         if (query.seconds > 0 && length > 0 && labs(length - query.seconds) > kLengthSlack) {
-            SGLog(@"unison: %@ is %lds against the track's %lds", query.title, (long)length, (long)query.seconds);
+            SGLog(@"unison: duration mismatch");
             done(nil);
             return;
         }
@@ -53,8 +53,7 @@ SGLyricsAsk SGUnisonAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *r
             done(nil);
             return;
         }
-        SGLog(@"unison: %@ by %@ has %lu %@ lines (%@ confidence)", query.title, query.artist,
-              (unsigned long)result.karaokeLines.count, result.wordTimed ? @"word timed" : @"line timed", data[@"confidence"]);
+        SGLog(@"unison: %lu %@ lines", (unsigned long)result.karaokeLines.count, result.wordTimed ? @"word timed" : @"line timed");
         done(result);
     });
 };

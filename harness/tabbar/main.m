@@ -51,11 +51,12 @@
 // A tab of the mod's own (Navbar.x), for `symbols`.
 @interface SGRTabItemView : UIControl
 @end
+#ifndef HARNESS_COMPOSED
 @implementation SGRTabItemView
 @end
+#endif
 NSString *const SGHarnessOwnTabTitle = @"Liked Songs";
-// An outline symbol, so its selected variant (heart.fill) can be told from it; with `hold`, house, the symbol Apple
-// symbols gives Home, so two tabs wear one symbol.
+// The custom tab uses heart and heart.fill, or the house SF Symbol for the Home hold check.
 NSString *SGHarnessOwnTabSymbol(void) {
     return [NSProcessInfo.processInfo.arguments containsObject:@"hold"] ? @"house" : @"heart";
 }
@@ -94,6 +95,7 @@ static __weak UIView *sgJamStrip;
 @property (nonatomic, strong) SGHarnessEncoreIcon *held;      // what the `icon` ivar refers to, kept alive here
 @property (nonatomic, strong) UIColor *foregroundColor, *activeForegroundColor;
 @property (nonatomic) BOOL isActive;
+@property (nonatomic, copy) dispatch_block_t onActiveLayout;
 @end
 @implementation SGHarnessGlyphView {
     CAShapeLayer *_shape;
@@ -118,6 +120,11 @@ static __weak UIView *sgJamStrip;
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (self.isActive && self.onActiveLayout) {
+        dispatch_block_t callback = self.onActiveLayout;
+        self.onActiveLayout = nil;
+        callback();
+    }
     SGHarnessEncoreIcon *shown = sgSwiftIcons && self.isActive ? self.held.active : self.held;
     UIColor *color = (self.isActive ? self.activeForegroundColor : nil) ?: self.foregroundColor ?: UIColor.whiteColor;
     CGRect box = CGRectInset(self.bounds, 3, 3);
@@ -263,8 +270,17 @@ static __weak UIView *sgJamStrip;
 // view's bottom, a stack as tall as the guide on the view's bottom, the tab bar as tall as the stack.
 // The page gets 49 pt more safe area on top of what the container has (0x10707bde4).
 @interface _TtC23NavigationUI_TabBarImpl19TabBarContainerImpl : UIViewController
++ (void)tapped:(UITapGestureRecognizer *)tap;
 @property (nonatomic, strong) UILayoutGuide *compactGuide;
+@property (nonatomic, strong) NSLayoutConstraint *stackLeft, *stackWidth;
 @property (nonatomic, strong) UIView *bar;
+@end
+// Both supported binaries dispatch the one-finger, single tap to -handleTap (v@:).
+@interface _TtC23NavigationUI_TabBarImpl19TabBarItemElementUI : NSObject
+@property (nonatomic, weak) UITapGestureRecognizer *tap;
+@end
+@implementation _TtC23NavigationUI_TabBarImpl19TabBarItemElementUI
+- (void)handleTap { [_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl tapped:self.tap]; }
 @end
 @implementation _TtC23NavigationUI_TabBarImpl19TabBarContainerImpl
 - (UILayoutGuide *)compactTabBarHeightLayoutGuide { return self.compactGuide; }
@@ -292,7 +308,11 @@ static __weak UIView *sgJamStrip;
 
 static UIView *tab(Class cls, NSString *title, UIView *icon, BOOL active) {
     UIView *item = [cls new];
-    [item addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:_TtC23NavigationUI_TabBarImpl19TabBarContainerImpl.class action:@selector(tapped:)]];
+    _TtC23NavigationUI_TabBarImpl19TabBarItemElementUI *owner = [_TtC23NavigationUI_TabBarImpl19TabBarItemElementUI new];
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:owner action:@selector(handleTap)];
+    owner.tap = tap;
+    objc_setAssociatedObject(tap, @selector(handleTap), owner, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    [item addGestureRecognizer:tap];
     icon.frame = CGRectMake(0, 5.67, 24, 24);
     icon.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     UILabel *label = [UILabel new];
@@ -353,6 +373,7 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
     }
 
     UIView *stack = [UIView new];
+    if ([NSProcessInfo.processInfo.arguments containsObject:@"unsupported-tap"]) stack.layer.backgroundColor = UIColor.orangeColor.CGColor;
     stack.accessibilityIdentifier = @"TabBarContainer.stackView";
     stack.translatesAutoresizingMaskIntoConstraints = NO;
     [view addSubview:stack];
@@ -408,8 +429,9 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
         [self.compactGuide.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
         // `regular`: Spotify's regular width bar, 8 pt in and 648 of the container's 1016 pt, leaving the rest to the
         // now playing capsule (9.2.0, iPad Pro 13-inch), and 16 pt above the container's foot (iPad Pro 11-inch).
-        [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:regular ? 8 : 0],
-        regular ? [stack.widthAnchor constraintEqualToAnchor:view.widthAnchor multiplier:648.0 / 1016]
+        self.stackLeft = [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:regular ? 8 : 0],
+        self.stackWidth = [args containsObject:@"panel"] ? [stack.widthAnchor constraintEqualToConstant:784] :
+                regular ? [stack.widthAnchor constraintEqualToAnchor:view.widthAnchor multiplier:648.0 / 1016]
                 : [stack.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
         [stack.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:regular ? -16 : 0],
         [stack.heightAnchor constraintEqualToAnchor:self.compactGuide.heightAnchor],
@@ -439,6 +461,7 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
 @property (nonatomic, strong) _TtC23NavigationUI_TabBarImpl19TabBarContainerImpl *tabs;
 @property (nonatomic, strong) UIView *banner;
 @property (nonatomic, strong) NSLayoutConstraint *bannerHeight;
+@property (nonatomic, strong) NSLayoutConstraint *primaryWidth;
 @property (nonatomic, strong) UIView *npb;
 @property (nonatomic, strong) NSLayoutConstraint *npbHeight;
 @end
@@ -489,7 +512,8 @@ static UIView *item(Class cls, NSString *title, NSString *symbol, BOOL active) {
 
     [NSLayoutConstraint activateConstraints:@[
         [primary.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
-        [primary.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
+        self.primaryWidth = [args containsObject:@"panel"] ? [primary.widthAnchor constraintEqualToConstant:1194] :
+                [primary.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
         [primary.topAnchor constraintEqualToAnchor:view.topAnchor],
         [primary.bottomAnchor constraintEqualToAnchor:self.banner.topAnchor],
         [self.banner.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
@@ -714,8 +738,12 @@ static void runFadeChecks(SGHarnessChrome *chrome) {
     [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
     expectFade(chrome, NO, @"switched off");
     if (first) HARNESS_FAIL(@"the fade switched off is still alive");
-    setFade(chrome, YES);
-    expectFade(chrome, YES, @"switched on again");
+    // Drain UIKit's temporary layout objects from this turn too, before counting
+    // discarded fades. The whole scenario otherwise runs inside one run-loop callback.
+    @autoreleasepool {
+        setFade(chrome, YES);
+        expectFade(chrome, YES, @"switched on again");
+    }
 
     NSPointerArray *made = [NSPointerArray weakObjectsPointerArray];
     for (NSUInteger i = 0; i < 20; i++) {
@@ -1272,9 +1300,61 @@ static void after(double seconds, dispatch_block_t block) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
 }
 
+// Resize the bar before moving its stack, as in Spotify's panel layout. Scrub the real
+// animation in both directions, holding each fraction until its presentation tree is sampled.
+static void samplePanel(SGHarnessChrome *chrome, UIViewPropertyAnimator *animation, int step) {
+    UIView *container = chrome.tabs.view;
+    UIWindow *window = container.window;
+    UIView *fade = viewsNamed(chrome.tabs.bar, @"SGRBarFade").firstObject;
+    HARNESS_CHECK(fade.layer.presentationLayer && container.layer.presentationLayer);
+    CGRect band = shownFrame(fade, window), page = shownFrame(container, window);
+    CGFloat fraction = step <= 10 ? step / 10.0 : (20 - step) / 10.0;
+    HARNESS_CHECK(fabs(page.size.width - (1194 - 407.5 * fraction)) <= 0.5);
+    if (fabs(CGRectGetMinX(band) - CGRectGetMinX(page)) > 0.5 ||
+        fabs(CGRectGetMaxX(band) - CGRectGetMaxX(page)) > 0.5)
+        HARNESS_FAIL(@"panel step %d: fade %@, container %@", step, NSStringFromCGRect(band), NSStringFromCGRect(page));
+    if (step == 20) {
+        puts("[harness] PASS panel fade edges");
+        exit(0);
+    }
+    if (step == 10) {
+        [animation stopAnimation:NO];
+        [animation finishAnimationAtPosition:UIViewAnimatingPositionEnd];
+        animation = nil;
+    }
+    after(step == 10 ? .4 : .12, ^{
+        UIViewPropertyAnimator *move = animation;
+        if (!move) {
+            BOOL open = step == 0;
+            move = [[UIViewPropertyAnimator alloc] initWithDuration:1 curve:UIViewAnimationCurveLinear animations:^{
+                chrome.primaryWidth.constant = open ? 786.5 : 1194;
+                chrome.tabs.stackWidth.constant = open ? 629.5 : 784;
+                [chrome.view layoutIfNeeded];
+                chrome.tabs.stackLeft.constant = open ? 78.5 : 8;
+                [chrome.view layoutIfNeeded];
+            }];
+            [move pauseAnimation];
+        }
+        move.fractionComplete = ((step % 10) + 1) / 10.0;
+        if (step == 19) {
+            [move stopAnimation:NO];
+            [move finishAnimationAtPosition:UIViewAnimatingPositionEnd];
+        }
+        after(.12, ^{ samplePanel(chrome, move, step + 1); });
+    });
+}
+
+#ifdef HARNESS_COMPOSED
+#include "launch-check.inc"
+#endif
+
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+#ifdef HARNESS_COMPOSED
+    runLaunch(self.window);
+    return;
+#endif
     SGHarnessChrome *chrome = [SGHarnessChrome new];
     self.window.rootViewController = chrome;
     [self.window makeKeyAndVisible];
@@ -1283,6 +1363,37 @@ static void after(double seconds, dispatch_block_t block) {
     // `away` one there from the start sliding away at 1.5 s, `cycle` in at 1.5 s and out at 4.5 s.
     NSArray<NSString *> *args = NSProcessInfo.processInfo.arguments;
     NSString *mode = args.count > 1 ? args[1] : @"none";
+    if ([mode isEqualToString:@"panel"]) {
+        after(.5, ^{ samplePanel(chrome, nil, 0); });
+        return;
+    }
+    if ([mode isEqualToString:@"unsupported-tap"]) {
+        [chrome.view layoutIfNeeded];
+        UIView *bar = chrome.tabs.bar;
+        UIView *search = SGRowIn(bar).arrangedSubviews[1];
+        CGPoint point = [search convertPoint:CGPointMake(CGRectGetMidX(search.bounds), CGRectGetMidY(search.bounds)) toView:bar];
+        UIView *mirrorHit = [bar hitTest:point withEvent:nil];
+        HARNESS_CHECK(search.window && mirrorHit && ![mirrorHit isDescendantOfView:search]);
+        UIView *gradient = viewsNamed(chrome.tabs.view, @"_TtC23NavigationUI_TabBarImpl18TabBarGradientView").firstObject;
+        HARNESS_CHECK(gradient && gradient.alpha == 0 && !bar.superview.layer.backgroundColor);
+        gradient.alpha = 0.625; // Spotify changes its fade while the glass is still covering it.
+        HARNESS_CHECK(gradient.alpha == 0);
+        UITapGestureRecognizer *tap = (id)search.gestureRecognizers.firstObject;
+        HARNESS_CHECK([tap isKindOfClass:UITapGestureRecognizer.class]);
+        tap.numberOfTapsRequired = 2;
+        pickTab(chrome, 1); // changes after layout must also be checked at dispatch
+        HARNESS_CHECK(!stockLit(chrome, @"Search"));
+        [bar setNeedsLayout];
+        [bar layoutIfNeeded];
+        HARNESS_CHECK(CGRectIsNull(SGRTabBarGlassRow(bar)));
+        UIView *hit = [bar hitTest:[search convertPoint:CGPointMake(CGRectGetMidX(search.bounds), CGRectGetMidY(search.bounds))
+                                                 toView:bar] withEvent:nil];
+        HARNESS_CHECK(hit == search || [hit isDescendantOfView:search]);
+        HARNESS_CHECK(gradient.alpha == 0.625 && bar.superview.layer.backgroundColor &&
+                      CGColorEqualToColor(bar.superview.layer.backgroundColor, UIColor.orangeColor.CGColor));
+        puts("[harness] PASS unsupported forwarding keeps stock tab interactive");
+        exit(0);
+    }
     BOOL reparentFling = [mode isEqualToString:@"reparent-fling"];
     if (reparentFling || [mode isEqualToString:@"reparent-drag"]) {
         UIView *wrapper = [[UIView alloc] initWithFrame:CGRectMake(0, 100, 380, 560)];
@@ -1726,9 +1837,10 @@ static void after(double seconds, dispatch_block_t block) {
 
 int main(int argc, char *argv[]) {
     sgJam = argc > 1 && strcmp(argv[1], "jam") == 0;
-    sgColorful = argc > 1 && (strcmp(argv[1], "fade") == 0 || strcmp(argv[1], "navsettings") == 0 || strcmp(argv[1], "glass") == 0);
+    sgColorful = argc > 1 && (strcmp(argv[1], "fade") == 0 || strcmp(argv[1], "navsettings") == 0 ||
+                              strcmp(argv[1], "glass") == 0 || strcmp(argv[1], "unsupported-tap") == 0);
     sgGlyphs = argc > 1 && (strcmp(argv[1], "glyphs") == 0 || strcmp(argv[1], "symbols") == 0);
-    sgSwiftIcons = sgGlyphs && argc > 2 && strcmp(argv[2], "swift") == 0;
+    sgSwiftIcons = argc > 2 && ((sgGlyphs && strcmp(argv[2], "swift") == 0) || strcmp(argv[2], "reentrant") == 0);
     sgSearch = argc > 1 && strcmp(argv[1], "search") == 0;
     Class glyphView = objc_allocateClassPair(SGHarnessGlyphView.class, "SPTEncoreIconView", 0);
     class_addIvar(glyphView, "icon", sizeof(void *), __builtin_ctz(sizeof(void *)), sgSwiftIcons ? "" : "@");

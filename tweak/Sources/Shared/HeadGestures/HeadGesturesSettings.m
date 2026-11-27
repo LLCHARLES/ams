@@ -9,6 +9,20 @@
 // Long enough to get the AirPods' attention and make a slow double nod.
 static const double kTrySeconds = 6;
 
+extern void SGHeadGesturesCancelTry(void (^done)(SGHeadGesture, BOOL));
+
+@interface SGHeadGesturesPage : SGModPage
+@property (nonatomic, copy) dispatch_block_t leave;
+@property (nonatomic, copy) void (^trying)(SGHeadGesture, BOOL);
+@end
+
+@implementation SGHeadGesturesPage
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+    if (_leave) _leave();
+}
+@end
+
 // SGHeadAction's names, in its order.
 static NSArray<NSString *> *actionNames(void) {
     return @[SGL(@"settings.headgestures.action.nothing", @"Nothing"), SGL(@"settings.headgestures.action.back_15", @"Back 15 seconds"), SGL(@"settings.headgestures.action.forward_15", @"Forward 15 seconds"), SGL(@"settings.headgestures.action.play_pause", @"Play or pause"), SGL(@"settings.headgestures.action.next_track", @"Next track"), SGL(@"settings.headgestures.action.previous_track", @"Previous track"),
@@ -41,6 +55,7 @@ static void forget(void (^done)(void)) {
         done();
     }]];
     [alert addAction:[UIAlertAction actionWithTitle:SGL(@"common.cancel", @"Cancel") style:UIAlertActionStyleCancel handler:nil]];
+    SGPresentDark(alert);
     [SGTopController() presentViewController:alert animated:YES completion:nil];
 }
 
@@ -57,13 +72,12 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
     SGModRow *shakeAction = SGWithSymbol(actionRow(SGL(@"settings.headgestures.shake.title", @"Shake your head"), SGHeadGestureShake), @"arrow.left.and.right");
     SGModRow *chime = SGWithSymbol(SGSwitchRow(SGL(@"settings.headgestures.chime.title", @"Chime on activation"), nil, SGKeyHeadChime), @"bell");
 
-    __block __weak SGModPage *page;
+    __block __weak SGHeadGesturesPage *page;
     __block NSString *tried = @"";
-    __block BOOL trying = NO;
     SGModRow *teach = SGStatActionRow(SGL(@"settings.headgestures.teach.title", @"Teach your gestures"), SGL(@"settings.headgestures.teach.subtitle", @"Five of each, then 20 seconds of ordinary movement"), ^NSString *{ return learnedValue(); }, ^{
         if (!headTracking()) return;
-        SGHeadGesturesStopListening();
-        trying = NO;
+        SGHeadGesturesCancelTry(page.trying);
+        page.trying = nil;
         tried = @"";
         SGPresentHeadGesturesTeaching(page, ^{ [page refreshVisibility]; });
     });
@@ -79,13 +93,12 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
 
     // What the last try picked up, read out on its row until the next; a new page starts blank.
     SGModRow *tryRow = SGStatActionRow(SGL(@"settings.headgestures.try.title", @"Try it"), SGL(@"settings.headgestures.try.subtitle", @"Listens after the tone and says what it picked up"), ^NSString *{ return tried; }, ^{
-        if (trying || !headTracking()) return;
-        trying = YES;
+        if (page.trying || !headTracking()) return;
         tried = SGL(@"settings.headgestures.try.listening", @"Listening…");
         [page.tableView reloadData];
         SGHeadGesturesCue(SGHeadCueReady);
-        SGHeadGesturesTry(kTrySeconds, ^(SGHeadGesture gesture, BOOL heard) {
-            trying = NO;
+        page.trying = ^(SGHeadGesture gesture, BOOL heard) {
+            page.trying = nil;
             tried = gesture == SGHeadGestureDoubleNod ? SGL(@"settings.headgestures.try.nod", @"Nod twice") : gesture == SGHeadGestureShake ? SGL(@"settings.headgestures.try.shake", @"Head shake") : heard ? SGL(@"settings.headgestures.try.nothing", @"Nothing") : SGL(@"settings.headgestures.try.no_motion", @"No motion");
             SGHeadGesturesCue(gesture != SGHeadGestureNone ? SGHeadCueWorked : SGHeadCueFailed);
             NSString *spoken = gesture != SGHeadGestureNone ? [SGL(@"settings.headgestures.try.picked_up_lead", @"Picked up: ") stringByAppendingString:tried]
@@ -93,7 +106,8 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
                                      : SGL(@"settings.headgestures.try.no_motion_hint", @"No motion came. Put in AirPods that track head motion.");
             UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, spoken);
             [page.tableView reloadData];
-        });
+        };
+        SGHeadGesturesTry(kTrySeconds, page.trying);
     });
 
     SGModRow *forgetRow = SGActionRow(SGL(@"settings.headgestures.forget.title", @"Forget what it learned"), nil, ^{ forget(^{ [page refreshVisibility]; }); });
@@ -101,7 +115,7 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
     forgetRow.visible = ^BOOL { return anythingLearned(); };
     for (SGModRow *row in @[nodAction, shakeAction, chime, teach, sensitivity, tryRow, forgetRow]) row.waitsOn = SGKeyHeadGestures;
 
-    SGModPage *shown = [[SGModPage alloc] initWithTitle:SGL(@"settings.headgestures.page.title", @"AirPods gestures") intro:nil sections:@[
+    SGHeadGesturesPage *shown = [[SGHeadGesturesPage alloc] initWithTitle:SGL(@"settings.headgestures.page.title", @"AirPods gestures") intro:nil sections:@[
         SGSection(nil, @[SGWithSymbol(toggle, @"airpods.pro")]),
         SGNotedSection(SGL(@"settings.headgestures.section.gestures", @"Gestures"), @[nodAction, shakeAction, chime],
             SGL(@"settings.headgestures.section.gestures.footer", @"They work while Spotify plays through headphones that track head motion: AirPods Pro, AirPods (3rd "
@@ -113,5 +127,11 @@ UIViewController *SGHeadGesturesSettingsPage(void) {
             "nothing to the music, so you can tune it while a song plays.")),
     ] footer:nil];
     page = shown;
+    shown.leave = ^{
+        if (!page.trying) return;
+        SGHeadGesturesCancelTry(page.trying);
+        page.trying = nil;
+        tried = @"";
+    };
     return shown;
 }

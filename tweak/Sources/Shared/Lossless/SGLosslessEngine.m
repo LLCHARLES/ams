@@ -44,9 +44,9 @@ static void capture(AudioUnit output, uint64_t epoch, double sourceFrame, double
     if (fill + n == length) atomic_store(&sg_capState, kFull);
 }
 
-#pragma mark - the ring (static, never freed: a render call never reads freed memory)
+#pragma mark - the ring (owned by the anchor queue, borrowed by the writer and admitted readers)
 
-static float sg_ringL[kRing], sg_ringR[kRing];
+static float (*sg_ring)[kRing];
 // File frames [start, end) are in the ring, frame f at f % kRing. The writer moves both forward only.
 static _Atomic uint64_t sg_ringStart, sg_ringEnd;
 // Where the render thread reads, so the writer never overwrites it.
@@ -54,14 +54,20 @@ static _Atomic uint64_t sg_readAt;
 
 static bool ringRead(uint64_t at, UInt32 frames, float *l, float *r) {
     atomic_store_explicit(&sg_readAt, at, memory_order_relaxed);
-    uint64_t start = atomic_load(&sg_ringStart), end = atomic_load(&sg_ringEnd);
-    if (at < start || at + frames > end || frames > kRing) return false;
+    // fill publishes the new start before the end on a skip. Reading end first
+    // cannot combine the old start with the new end and admit the skipped gap.
+    uint64_t end = atomic_load(&sg_ringEnd);
+#ifdef SG_RING_READ_INTERLEAVE
+    SG_RING_READ_INTERLEAVE();
+#endif
+    uint64_t start = atomic_load(&sg_ringStart);
+    if (at < start || at > end || frames > end - at || frames > kRing) return false;
     uint64_t i = at % kRing;
     UInt32 first = (UInt32)MIN((uint64_t)frames, kRing - i);
-    memcpy(l, sg_ringL + i, first * sizeof(float));
-    memcpy(r, sg_ringR + i, first * sizeof(float));
-    memcpy(l + first, sg_ringL, (frames - first) * sizeof(float));
-    memcpy(r + first, sg_ringR, (frames - first) * sizeof(float));
+    memcpy(l, sg_ring[0] + i, first * sizeof(float));
+    memcpy(r, sg_ring[1] + i, first * sizeof(float));
+    memcpy(l + first, sg_ring[0], (frames - first) * sizeof(float));
+    memcpy(r + first, sg_ring[1], (frames - first) * sizeof(float));
     return true;
 }
 
@@ -253,20 +259,21 @@ static uint64_t search(uint64_t from, uint64_t to, float *score, float *gain) {
     uint64_t lo = from / kCoarse, hi = MIN(to / kCoarse, sg_coarseCount);
     vDSP_Length capN = sg_capLength / kCoarse;
     if (hi <= lo || hi - lo <= capN) { *score = 0; return 0; }
-    float *cap = malloc(capN * sizeof(float)), *corr = malloc((hi - lo - capN + 1) * sizeof(float));
+    vDSP_Length fileN = hi - lo, lags = fileN - capN + 1, batch = MIN(lags, kChunk);
+    float *cap = malloc(capN * sizeof(float)), *corr = malloc(batch * sizeof(float));
     if (!cap || !corr) { free(cap); free(corr); *score = 0; return 0; }
     float filter[kCoarse], one = 1.0f / kCoarse;
     vDSP_vfill(&one, filter, 1, kCoarse);
     vDSP_desamp(sg_cap, kCoarse, filter, cap, capN, kCoarse);
     const float *file = sg_coarse + lo;
-    vDSP_Length fileN = hi - lo, lags = fileN - capN + 1;
-    vDSP_conv(file, 1, cap, 1, corr, 1, lags, capN);
     double running = 0;
     for (vDSP_Length i = 0; i < capN; i++) running += (double)file[i] * file[i];
     vDSP_Length coarse = 0;
     float best = -INFINITY;
     for (vDSP_Length i = 0; i < lags; i++) {
-        float s = running > 1e-9 ? corr[i] / sqrtf((float)running) : 0;
+        vDSP_Length slot = i % batch;
+        if (!slot) vDSP_conv(file + i, 1, cap, 1, corr, 1, MIN(batch, lags - i), capN);
+        float s = running > 1e-9 ? corr[slot] / sqrtf((float)running) : 0;
         if (s > best) { best = s; coarse = i; }
         if (i + capN < fileN) running += (double)file[i + capN] * file[i + capN] - (double)file[i] * file[i];
     }
@@ -277,14 +284,12 @@ static uint64_t search(uint64_t from, uint64_t to, float *score, float *gain) {
 
 // Records `seconds` of Spotify's sound in one unbroken run; NO after the timeout.
 static BOOL record(double seconds, NSString **error) {
-    static float *storage;
-    if (!storage) storage = malloc((size_t)(kAnchorSeconds * 96000) * sizeof(float));
-    if (!storage) { *error = @"not enough memory to record"; return NO; }
     atomic_store(&sg_capState, kIdle);
     // A render call that saw the last recording armed (one that timed out) would carry its fill into this one.
     while (atomic_load(&sg_capturing)) usleep(100);
-    sg_cap = storage;
     sg_capLength =(uint32_t)(MIN(seconds, kAnchorSeconds) * MIN(sg_capRate > 0 ? sg_capRate : 44100, 96000));
+    sg_cap = malloc(sg_capLength * sizeof(float));
+    if (!sg_cap) { *error = @"not enough memory to record"; return NO; }
     atomic_store(&sg_capFill, 0);
     atomic_store(&sg_capState, kArmed);
     for (int i = 0; i < (int)(seconds * 20) + 60 && atomic_load(&sg_capState) != kFull; i++) usleep(50000);
@@ -296,9 +301,9 @@ static BOOL record(double seconds, NSString **error) {
 
 #pragma mark - the writer
 
-// Fills the ring from where the render thread reads until the generation changes or the file ends. `l` and `r`
+// Fills the ring until this anchor is replaced, its source epoch ends, or EOF. `l` and `r`
 // are kChunk frames each, made by anchor() before it called the anchor good, and freed here.
-static void fill(NSString *path, double rate, uint64_t from, uint64_t generation, float *l, float *r) {
+static void fill(NSString *path, double rate, uint64_t from, uint64_t generation, uint64_t epoch, float *l, float *r) {
     Reader reader = {0};
     NSString *error;
     if (!openReader(&reader, path, rate, &error)) {
@@ -309,7 +314,7 @@ static void fill(NSString *path, double rate, uint64_t from, uint64_t generation
     }
     uint64_t end = from;
     BOOL seek = YES;
-    while (atomic_load(&sg_generation) == generation) {
+    while (atomic_load(&sg_generation) == generation && SGPlayerSourceEpoch() == epoch) {
         uint64_t reading = MAX(atomic_load_explicit(&sg_readAt, memory_order_relaxed), atomic_load(&sg_ringStart));
         if (reading > end + (uint64_t)rate) {
             // Spotify plays ahead of what the ring holds: start again where it plays.
@@ -324,10 +329,10 @@ static void fill(NSString *path, double rate, uint64_t from, uint64_t generation
         seek = NO;
         uint64_t i = end % kRing;
         UInt32 first = (UInt32)MIN((uint64_t)got, kRing - i);
-        memcpy(sg_ringL + i, l, first * sizeof(float));
-        memcpy(sg_ringR + i, r, first * sizeof(float));
-        memcpy(sg_ringL, l + first, (got - first) * sizeof(float));
-        memcpy(sg_ringR, r + first, (got - first) * sizeof(float));
+        memcpy(sg_ring[0] + i, l, first * sizeof(float));
+        memcpy(sg_ring[1] + i, r, first * sizeof(float));
+        memcpy(sg_ring[0], l + first, (got - first) * sizeof(float));
+        memcpy(sg_ring[1], r + first, (got - first) * sizeof(float));
         end += got;
         // Frames the writer passed out of the ring's reach are gone.
         if (end > kRing && atomic_load(&sg_ringStart) < end - kRing) atomic_store(&sg_ringStart, end - kRing);
@@ -345,6 +350,8 @@ static void stopPlaying(void) {
     quiesce();
     // A writer of the last anchor still inside its loop would write into the ring the next one resets.
     while (atomic_load(&sg_writers)) usleep(1000);
+    free(sg_ring);
+    sg_ring = NULL;
     atomic_store(&sg_anchorEpoch, 0);
 }
 
@@ -374,6 +381,8 @@ static NSDictionary *anchor(NSString *path, double hint, NSString **error) {
     // and empty, Spotify's sound playing and no new anchor asked for until the source changes.
     float *l = malloc(kChunk * sizeof(float)), *r = malloc(kChunk * sizeof(float));
     if (!l || !r) { free(l); free(r); *error = @"not enough memory for the writer"; return nil; }
+    sg_ring = calloc(2, sizeof *sg_ring);
+    if (!sg_ring) { free(l); free(r); *error = @"not enough memory for the ring"; return nil; }
 
     uint32_t bits;
     memcpy(&bits, &gain, sizeof bits);
@@ -389,9 +398,10 @@ static NSDictionary *anchor(NSString *path, double hint, NSString **error) {
     atomic_store(&sg_ringEnd, now);
     atomic_store(&sg_readAt, now);
     uint64_t generation = atomic_load(&sg_generation);
+    uint64_t epoch = sg_playEpoch;
     atomic_fetch_add(&sg_writers, 1);
     // Its own thread: it runs for the rest of the song, which would hold a shared queue's thread that long.
-    NSThread *writer = [[NSThread alloc] initWithBlock:^{ fill(path, rate, now, generation, l, r); }];
+    NSThread *writer = [[NSThread alloc] initWithBlock:^{ fill(path, rate, now, generation, epoch, l, r); }];
     writer.qualityOfService = NSQualityOfServiceUserInitiated;
     writer.name = @"spotifyglass.lossless.writer";
     [writer start];
@@ -403,7 +413,7 @@ static NSDictionary *anchor(NSString *path, double hint, NSString **error) {
 
 static NSDictionary *check(NSString **error) {
     uint64_t epoch = atomic_load(&sg_anchorEpoch);
-    if (!sg_coarse || !epoch) { *error = @"nothing anchored"; return nil; }
+    if (!sg_reader.file || !epoch) { *error = @"nothing anchored"; return nil; }
     NSMutableDictionary *result = [@{@"replaced_s" : @(atomic_load(&sg_replaced) / sg_reader.rate),
                                      @"epoch_current" : @(epoch == SGPlayerSourceEpoch())} mutableCopy];
     if (!record(kCheckSeconds, error)) return nil;
@@ -426,14 +436,30 @@ static NSDictionary *check(NSString **error) {
 
 static dispatch_queue_t queue(void) {
     static dispatch_once_t once;
-    dispatch_once(&once, ^{ sg_queue = dispatch_queue_create("spotifyglass.lossless", DISPATCH_QUEUE_SERIAL); });
+    dispatch_once(&once, ^{
+        sg_queue = dispatch_queue_create("spotifyglass.lossless", DISPATCH_QUEUE_SERIAL);
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidReceiveMemoryWarningNotification object:nil queue:nil
+            usingBlock:^(NSNotification *note) {
+                dispatch_async(sg_queue, ^{
+                    if (!SGLosslessPlaying()) { stopPlaying(); drop(); }
+                    else { free(sg_coarse); sg_coarse = NULL; sg_coarseCount = 0; }
+                });
+            }];
+    });
     return sg_queue;
+}
+
+static void releaseCapture(void) {
+    atomic_store(&sg_capState, kIdle);
+    while (atomic_load(&sg_capturing)) usleep(100);
+    free(sg_cap);
+    sg_cap = NULL;
 }
 
 NSDictionary *SGLosslessAnchor(NSString *path, double hintSeconds, NSString **error) {
     __block NSDictionary *result;
     __block NSString *failure;
-    dispatch_sync(queue(), ^{ NSString *e; result = anchor(path, hintSeconds, &e); failure = e; });
+    dispatch_sync(queue(), ^{ NSString *e; result = anchor(path, hintSeconds, &e); releaseCapture(); failure = e; });
     *error = failure;
     return result;
 }
@@ -441,7 +467,7 @@ NSDictionary *SGLosslessAnchor(NSString *path, double hintSeconds, NSString **er
 NSDictionary *SGLosslessCheck(NSString **error) {
     __block NSDictionary *result;
     __block NSString *failure;
-    dispatch_sync(queue(), ^{ NSString *e; result = check(&e); failure = e; });
+    dispatch_sync(queue(), ^{ NSString *e; result = check(&e); releaseCapture(); failure = e; });
     *error = failure;
     return result;
 }
@@ -450,7 +476,7 @@ void SGLosslessStop(BOOL release) {
     atomic_fetch_add(&sg_generation, 1);
     atomic_store(&sg_live, false);
     atomic_store(&sg_anchorEpoch, 0);
-    if (release) dispatch_async(queue(), ^{ drop(); });
+    if (release) dispatch_async(queue(), ^{ stopPlaying(); drop(); });
 }
 
 BOOL SGLosslessPlaying(void) {

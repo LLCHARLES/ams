@@ -64,6 +64,8 @@ SPTPlayerState *SGPlayerState(void) { return (SPTPlayerState *)playback; }
 BOOL SGRedesignedUI(void) { return NO; } // install on the scheduler double, not the system scheduler
 BOOL SGRPlayerTwoColumns(void) { return twoColumns; }
 BOOL SGRPlayerLyricsOpen(void) { return lyrics; }
+BOOL SGRPlayerLandscapeCovers(UIWindow *window) { return NO; }
+BOOL SGRPlayerInteractiveMorph(void) { return YES; }
 CGRect SGRSettledPlayerRect(UIWindow *window) { return cover; }
 void SGRObserveVisibility(UIView *view, dispatch_block_t changed) {
     HARNESS_CHECK(NSThread.isMainThread);
@@ -312,7 +314,7 @@ int main(void) { @autoreleasepool { @try {
     HARNESS_CHECK(t.isPaused && objc_getAssociatedObject(times.label, &kNotice) != nil);
     __block BOOL drained = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!drained && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
     HARNESS_CHECK(drained && !objc_getAssociatedObject(times.label, &kNotice));

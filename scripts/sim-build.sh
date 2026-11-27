@@ -58,6 +58,13 @@ if [ "$TWEAK" = 1 ]; then
   # Its objects go to .theos/obj-sim, so they never end up in a build for the phone (make quick builds
   # .theos/obj incrementally). Theos does not rebuild on changed flags, so a change of them cleans first.
   MAKE_FLAGS=(THEOS_OBJ_DIR_NAME=obj-sim SG_DRIVER="${SG_DRIVER:-0}" ADDITIONAL_CFLAGS=-DSG_TREE_PORT=$PORT)
+  if [ "${WIREGUARD:-0}" = 1 ]; then
+    # vtool changes a platform tag, not TargetConditionals. Compile the key
+    # list for its actual destination before building the retagged tweak.
+    xcrun --sdk iphonesimulator clang -target arm64-apple-ios16.0-simulator -E -P -x c \
+      -imacros TargetConditionals.h "$ROOT/tweak/Sources/Shared/WireGuard/SGWGLoaderKeys.inc" > "$WORK/SGWGSimKeys.inc"
+    MAKE_FLAGS+=("Sources/Shared/WireGuard/SGWGCore.m_CFLAGS=-I\"$WORK\" -DSGWG_LOADER_KEYS='\"SGWGSimKeys.inc\"'")
+  fi
   STAMP="$ROOT/tweak/.theos/obj-sim/sim-flags"
   CLEAN=""
   [ "$(cat "$STAMP" 2>/dev/null)" = "${MAKE_FLAGS[*]}" ] || CLEAN=clean
@@ -75,6 +82,9 @@ if [ "$TWEAK" = 1 ]; then
   rsync -a --delete "$ROOT/tweak/layout/Library/Application Support/Retrine.bundle/" "$APP/Retrine.bundle/"
   if [ "${WIREGUARD:-0}" = 1 ]; then
     cp "$ROOT/WireGuard/THIRD_PARTY_LICENSES.txt" "$APP/Retrine.bundle/WireGuard-THIRD_PARTY_LICENSES.txt"
+    cp "$ROOT/WireGuard/build/libsgwg.dylib" "$APP/Frameworks/"
+  else
+    rm -f "$APP/Frameworks/libsgwg.dylib"
   fi
 fi
 

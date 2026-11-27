@@ -52,6 +52,7 @@ static NSInteger sg_queueHeard;      // samples the detector was fed since a try
 static BOOL sg_recording, sg_trying, sg_held;
 static void (^sg_tryDone)(SGHeadGesture gesture, BOOL heard);
 static NSUInteger sg_ticket;         // which recording or try is current: a stopped one's timer finds it moved on
+static NSUInteger sg_detectorTicket; // sg_ticket when this detector was reset, on the motion queue
 static BOOL sg_listening;            // started with the handler, by updateListening
 static BOOL sg_detecting;            // the gestures want the motion: the page's listening, or the switch on and Spotify playing
 static BOOL sg_queueDetecting;       // sg_detecting, on sg_queue
@@ -278,10 +279,12 @@ static void sample(CMDeviceMotion *motion) {
     sg_queueHeard++;
     SGHeadGesture gesture = SGHeadDetectorFeed(&sg_detector, time, pitch, yaw);
     if (gesture == SGHeadGestureNone) return;
+    NSUInteger ticket = sg_detectorTicket;
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (ticket != sg_ticket) return;
         SGLog(@"head gestures: %@", gesture == SGHeadGestureDoubleNod ? @"double nod" : @"shake");
         if (sg_trying) {
-            endTry(sg_ticket, gesture, YES);
+            endTry(ticket, gesture, YES);
             return;
         }
         if (sg_recording || sg_held || !SGFlag(SGKeyHeadGestures, NO)) return;
@@ -319,7 +322,11 @@ static CMHeadphoneMotionManager *manager(void) {
 // A fresh detector at the thresholds set now.
 static void resetDetector(void) {
     double nod = threshold(SGKeyHeadNod, SGHeadDefaultNod), shake = threshold(SGKeyHeadShake, SGHeadDefaultShake);
-    [sg_queue addOperationWithBlock:^{ SGHeadDetectorReset(&sg_detector, nod, shake); }];
+    NSUInteger ticket = sg_ticket;
+    [sg_queue addOperationWithBlock:^{
+        sg_detectorTicket = ticket;
+        SGHeadDetectorReset(&sg_detector, nod, shake);
+    }];
 }
 
 // The gestures want the motion while the page listens or holds it, or while the switch is on and Spotify
@@ -408,6 +415,10 @@ void SGHeadGesturesHold(BOOL hold) {
     sg_held = hold;
     manager();
     SGHeadGesturesSettingsChanged();
+}
+
+void SGHeadGesturesCancelTry(void (^done)(SGHeadGesture, BOOL)) {
+    if (done && sg_tryDone == done) SGHeadGesturesStopListening();
 }
 
 void SGHeadGesturesRecord(double seconds, void (^done)(NSData *motion)) {

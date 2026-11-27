@@ -29,7 +29,7 @@ static const NSUInteger kKeptTracks = 40;
 
 static NSMutableDictionary<NSString *, id> *sg_kept;
 static NSMutableDictionary<NSString *, SGMusixmatchLookup *> *sg_waiting;
-static NSMutableArray<void (^)(NSString *, BOOL)> *sg_tokenWaiting;
+static NSMutableArray<void (^)(NSString *, SGLyricsRequestContext *)> *sg_tokenWaiting;
 static SGLyricsRequestContext *sg_tokenRequest;
 static NSDate *sg_tokenRefused;
 static BOOL sg_tokenFailed;
@@ -71,7 +71,7 @@ static NSInteger integerOf(id value) {
 }
 
 static NSInteger msOf(id seconds) {
-    return [seconds respondsToSelector:@selector(doubleValue)] ? (NSInteger)llround([seconds doubleValue] * 1000) : 0;
+    return SGLyricsSecondsToMs(seconds);
 }
 
 static id jsonOf(id text) {
@@ -99,7 +99,7 @@ static NSURLRequest *requestFor(NSString *method, NSDictionary<NSString *, NSStr
 
 static void call(SGLyricsRequestContext *context, NSString *method, NSDictionary<NSString *, NSString *> *query, void (^done)(NSDictionary *message)) {
     if (context.cancelled) return;
-    NSURLSessionDataTask *task = [NSURLSession.sharedSession dataTaskWithRequest:requestFor(method, query) completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+    NSURLSessionDataTask *task = SGBoundedRequestTask(requestFor(method, query), 0, ^(NSData *data, NSURLResponse *response, NSError *error) {
         SGLyricsNoteReply(response, error);
         [context noteResponse:response error:error];
         id message = dig(jsonOf(data), @"message");
@@ -109,7 +109,7 @@ static void call(SGLyricsRequestContext *context, NSString *method, NSDictionary
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!context.cancelled) done([message isKindOfClass:NSDictionary.class] ? message : nil);
         });
-    }];
+    });
     [context trackTask:task];
     [task resume];
 }
@@ -125,8 +125,9 @@ static void withToken(SGLyricsRequestContext *context, void (^use)(NSString *tok
         use(nil);
         return;
     }
-    void (^waiter)(NSString *, BOOL) = ^(NSString *token, BOOL failed) {
-        [context noteFailure:failed];
+    void (^waiter)(NSString *, SGLyricsRequestContext *) = ^(NSString *token, SGLyricsRequestContext *transport) {
+        [context noteFailure:transport.failed];
+        context.rateLimitUntil = MAX(context.rateLimitUntil,transport.rateLimitUntil);
         if (!context.cancelled) use(token);
     };
     [sg_tokenWaiting addObject:waiter];
@@ -154,10 +155,10 @@ static void withToken(SGLyricsRequestContext *context, void (^use)(NSString *tok
         SGLog(@"musixmatch: token %@ (status %@, hint %@)", usable ? @"received" : @"refused", dig(message, @"header/status_code"), dig(message, @"header/hint"));
         if (usable) [NSUserDefaults.standardUserDefaults setObject:fresh forKey:kTokenKey];
         else { sg_tokenRefused = NSDate.date; sg_tokenFailed = request.failed; }
-        NSArray<void (^)(NSString *, BOOL)> *waiting = [sg_tokenWaiting copy];
+        NSArray *waiting = [sg_tokenWaiting copy];
         [sg_tokenWaiting removeAllObjects];
         [request finishRequests];
-        for (void (^waiter)(NSString *, BOOL) in waiting) waiter(usable ? fresh : nil, request.failed);
+        for (void (^waiter)(NSString *, SGLyricsRequestContext *) in waiting) waiter(usable ? fresh : nil, request);
     });
 }
 
@@ -167,6 +168,7 @@ static void withToken(SGLyricsRequestContext *context, void (^use)(NSString *tok
 // o is from the line's start. A space entry ends the word before it; a word can come in more than
 // one entry ("Milion", "+", ","), so everything between two spaces is one word.
 static SGKaraokeLine *richsyncLine(NSDictionary *entry, NSInteger start, NSInteger end) {
+    if (start < 0 || end < 0) return nil;
     NSMutableArray<SGKaraokePiece *> *pieces = [NSMutableArray array];
     id parts = entry[@"l"];
     for (NSDictionary *part in [parts isKindOfClass:NSArray.class] ? parts : @[]) {
@@ -174,7 +176,9 @@ static SGKaraokeLine *richsyncLine(NSDictionary *entry, NSInteger start, NSInteg
         if (![text isKindOfClass:NSString.class]) continue;
         SGKaraokePiece *piece = [SGKaraokePiece new];
         piece.text = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        piece.start = start + msOf(part[@"o"]);
+        NSInteger offset = msOf(part[@"o"]);
+        if (offset < 0 || offset > SGKaraokeMaxTimeMs - start) return nil;
+        piece.start = start + offset;
         [pieces addObject:piece];
     }
     // An entry has no end of its own: a word is sung until the next one starts, past any space between
@@ -229,7 +233,9 @@ static SGLyricsResult *fromSubtitles(id body) {
         id text = dig(lines[i], @"text");
         BOOL last = i + 1 == lines.count;
         if (![text isKindOfClass:NSString.class]) text = @"";
-        [starts addObject:@(msOf(dig(lines[i], @"time/total")))];
+        NSInteger start = msOf(dig(lines[i], @"time/total"));
+        if (start < 0) continue;
+        [starts addObject:@(start)];
         [texts addObject:last ? @"" : ([text length] ? text : @"♪")];
     }
     SGLyricsResult *lyrics = [SGLyricsResult new];
@@ -272,16 +278,15 @@ static void noteCommontrack(NSString *trackID, id commontrack) {
 static void finish(SGLyricsRequestContext *context, NSString *trackID, SGLyricsResult *lyrics, BOOL answered) {
     SGMusixmatchLookup *lookup = sg_waiting[trackID];
     if (lookup.transport != context || context.cancelled) return;
-    if (answered && !context.failed) {
+    if (answered && !context.failed && (lyrics || context.definiteMiss || context.emptyNameSearch)) {
         if (sg_kept.count >= kKeptTracks) [sg_kept removeAllObjects];
         sg_kept[trackID] = lyrics ?: NSNull.null;
     }
     NSArray *waiting = [lookup.subscribers copy];
     [lookup.subscribers removeAllObjects];
     [sg_waiting removeObjectForKey:trackID];
-    SGLyricsAsk emptyNameSearch = context.emptyNameSearch;
     [context finishRequests];
-    for (void (^done)(SGLyricsResult *, BOOL, SGLyricsAsk) in waiting) done(lyrics, context.failed, emptyNameSearch);
+    for (void (^done)(SGLyricsResult *, SGLyricsRequestContext *) in waiting) done(lyrics, context);
 }
 
 // What the matcher settled on, kept even when Musixmatch may show no lyrics: the sources asked after
@@ -331,7 +336,9 @@ static void ask(SGLyricsRequestContext *context, NSString *trackID, NSDictionary
                 finish(context, trackID, nil, NO);
                 return;
             }
-            BOOL emptyNameSearch = match[@"q_track"] && integerOf(dig(calls, @"matcher.track.get/message/header/status_code")) == 404;
+            BOOL unmatched = integerOf(dig(calls, @"matcher.track.get/message/header/status_code")) == 404;
+            BOOL emptyNameSearch = match[@"q_track"] && unmatched;
+            context.definiteMiss = unmatched && match[@"track_spotify_id"] != nil;
             for (id reply in [calls allValues]) {
                 NSInteger substatus = integerOf(dig(reply, @"message/header/status_code"));
                 [context noteFailure:substatus != 200 && substatus != 404];
@@ -344,7 +351,7 @@ static void ask(SGLyricsRequestContext *context, NSString *trackID, NSDictionary
             };
             noteCommontrack(trackID, dig(calls, @"matcher.track.get/message/body/track/commontrack_id"));
             SGLyricsResult *lyrics = fromCalls(calls);
-            SGLog(@"musixmatch: %@ has %@", trackID, !lyrics ? @"no lyrics it may show"
+            SGLog(@"musixmatch: %@", !lyrics ? @"no lyrics it may show"
                   : lyrics.wordTimed ? [NSString stringWithFormat:@"%lu word timed lines", (unsigned long)lyrics.karaokeLines.count]
                   : lyrics.synced ? [NSString stringWithFormat:@"%lu line timed lines", (unsigned long)lyrics.karaokeLines.count]
                   : [NSString stringWithFormat:@"%lu untimed lines", (unsigned long)lyrics.texts.count]);
@@ -376,6 +383,7 @@ SGLyricsAsk SGMusixmatchAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
     }
     id kept = sg_kept[trackID];
     if (kept) {
+        if (kept == NSNull.null) query.requestContext.definiteMiss = YES;
         done(kept == NSNull.null ? nil : kept);
         return;
     }
@@ -388,10 +396,12 @@ SGLyricsAsk SGMusixmatchAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResul
         lookup.subscribers = [NSMutableArray array];
         sg_waiting[trackID] = lookup;
     }
-    void (^completed)(SGLyricsResult *, BOOL, SGLyricsAsk) = ^(SGLyricsResult *result, BOOL failed, SGLyricsAsk emptyNameSearch) {
+    void (^completed)(SGLyricsResult *, SGLyricsRequestContext *) = ^(SGLyricsResult *result, SGLyricsRequestContext *transport) {
         if (query.requestContext.cancelled) return;
-        [query.requestContext noteFailure:failed];
-        query.requestContext.emptyNameSearch = emptyNameSearch;
+        [query.requestContext noteFailure:transport.failed];
+        query.requestContext.rateLimitUntil = transport.rateLimitUntil;
+        query.requestContext.definiteMiss = transport.definiteMiss;
+        query.requestContext.emptyNameSearch = transport.emptyNameSearch;
         done(result);
     };
     [lookup.subscribers addObject:completed];

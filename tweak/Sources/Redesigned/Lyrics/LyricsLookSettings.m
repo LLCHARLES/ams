@@ -107,7 +107,7 @@ static void presentStyleSheet(UIViewController *owner) {
         sizeRow(SGL(@"settings.lyricslook.place.full_screen", @"Landscape and full screen"), SGRLyricsPlaceFullScreen),
     ];
     NSString *placesFooter = SGL(@"settings.lyricslook.place.footer", @"Default uses Text size. A percentage changes only that place.");
-    SGRLyricsStyleSheet *page = [[SGRLyricsStyleSheet alloc] initWithTitle:SGL(@"settings.lyricslook.title", @"Lyrics Style") intro:nil
+    SGRLyricsStyleSheet *page = [[SGRLyricsStyleSheet alloc] initWithTitle:SGL(@"settings.lyricslook.title", @"Tune look") intro:nil
                                                                  sections:@[SGNotedSection(nil, rows, footer),
                                                                             SGNotedSection(SGL(@"settings.lyricslook.place.header", @"Size in each place"),
                                                                                            places, placesFooter)]

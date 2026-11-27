@@ -153,13 +153,15 @@ void SGLoadSymbolNames(void (^done)(NSArray<NSString *> *names)) {
         // Each name is asked of UIKit, 8,500 of them on iOS 27, so the asking is spread over the cores.
         NSUInteger count = names.count;
         BOOL *draws = calloc(count ?: 1, sizeof(BOOL));
-        dispatch_apply(count, DISPATCH_APPLY_AUTO, ^(size_t i) {
-            id name = names[i];
-            draws[i] = [name isKindOfClass:NSString.class] && !scriptVariant(name) && symbolImage(name);
-        });
         NSMutableArray<NSString *> *kept = [NSMutableArray array];
-        for (NSUInteger i = 0; i < count; i++) if (draws[i]) [kept addObject:names[i]];
-        free(draws);
+        if (draws) {
+            dispatch_apply(count, DISPATCH_APPLY_AUTO, ^(size_t i) {
+                id name = names[i];
+                draws[i] = [name isKindOfClass:NSString.class] && !scriptVariant(name) && symbolImage(name);
+            });
+            for (NSUInteger i = 0; i < count; i++) if (draws[i]) [kept addObject:names[i]];
+            free(draws);
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             loaded = kept.count ? [kept copy] : SGCommonTabSymbols();
             SGLog(@"tab icons: %lu SF Symbols of %lu listed", (unsigned long)kept.count, (unsigned long)names.count);

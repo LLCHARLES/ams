@@ -5,17 +5,17 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 func mustAddrPort(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
 
-type rebindDevice struct{ failed bool }
+type rebindDevice struct{ failed atomic.Bool }
 
 func (d *rebindDevice) BindUpdate() error {
-	if d.failed {
+	if d.failed.Load() {
 		return errors.New("fixture UDP bind unavailable")
 	}
 	return nil
@@ -28,29 +28,60 @@ func TestStructuralRecoveryIsNotDestinationRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device := &rebindDevice{failed: true}
-	var events []int
+	device := &rebindDevice{}
+	anchor, err := listener.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal("listener reservation")
+	}
+	defer anchor.Close()
+	device.failed.Store(true)
+	events := make(chan int, 10)
+	expect := func(want int) {
+		t.Helper()
+		select {
+		case got := <-events:
+			if got != want {
+				t.Fatalf("structural event %d, want %d", got, want)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no structural event")
+		}
+	}
 	e := &Engine{dev: device, listener: listener, port: listener.Addr().(*net.TCPAddr).Port,
+		rearm:   (&reservedSocket{file: anchor}).listen,
 		clients: map[net.Conn]struct{}{}, pendingAuth: make(chan struct{}, maxUnauthenticatedClients),
-		dialTimeout: time.Second, stateChanged: func(event int) { events = append(events, event) }}
+		dialTimeout: time.Second, stateChanged: func(event int) { events <- event }}
 	defer e.Close()
 	e.setUnavailable(listenerUnavailable, false)
-	if e.Rebind() == nil {
-		t.Fatal("UDP rebind failure was lost")
-	}
+	expect(engineAvailable)
+	e.Rebind()
+	expect(engineUnavailable)
 	// A repaired listener cannot clear the independent failed UDP bind.
-	e.relisten(listener)
+	e.listenerFailed(listener)
 	if _, err := e.dial("127.0.0.1", 80); err == nil {
 		t.Fatal("special destination unexpectedly dialed")
 	}
-	device.failed = false
+	expect(engineDestinationFailed)
+	e.mu.Lock()
+	done := e.repairDone
+	e.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(4 * time.Second):
+			t.Fatal("persistent failure did not park repair")
+		}
+	}
+	if e.relistens.Load() != 1 {
+		t.Fatal("failed listener not replaced exactly once")
+	}
+	device.failed.Store(false)
 	if err := e.Rebind(); err != nil {
 		t.Fatal(err)
 	}
+	expect(engineAvailable)
 	e.Close()
-	if !reflect.DeepEqual(events, []int{1, 2, 3, 1, 0}) {
-		t.Fatalf("readiness and informational event sequence: %v", events)
-	}
+	expect(engineStopped)
 }
 
 func TestListenerRecoveryReportsStateChanges(t *testing.T) {
@@ -58,8 +89,14 @@ func TestListenerRecoveryReportsStateChanges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	anchor, err := listener.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal("listener reservation")
+	}
+	defer anchor.Close()
 	events := make(chan int, 4)
 	e := &Engine{listener: listener, port: listener.Addr().(*net.TCPAddr).Port,
+		rearm:   (&reservedSocket{file: anchor}).listen,
 		clients: map[net.Conn]struct{}{}, pendingAuth: make(chan struct{}, maxUnauthenticatedClients),
 		stateChanged: func(state int) { events <- state }}
 	done := make(chan struct{})

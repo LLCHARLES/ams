@@ -52,11 +52,13 @@ def bounded_file(path, limit):
     return data
 
 
-def macho(data):
+def macho(data, packaged_host=False):
     if len(data) < 32 or struct.unpack_from("<I", data)[0] != 0xFEEDFACF:
         raise ValueError("Expected thin arm64 Mach-O")
     if struct.unpack_from("<I", data, 4)[0] != 0x100000C:
         raise ValueError("Expected arm64")
+    if packaged_host and struct.unpack_from("<I", data, 12)[0] != 2:  # MH_EXECUTE
+        raise ValueError("Expected host executable")
     offset, uuid, encryption = 32, None, []
     for _ in range(struct.unpack_from("<I", data, 16)[0]):
         if offset + 8 > len(data):
@@ -64,6 +66,8 @@ def macho(data):
         command, size = struct.unpack_from("<II", data, offset)
         if size < 8 or offset + size > len(data):
             raise ValueError("Invalid load command")
+        if packaged_host and command == 0x27:  # LC_DYLD_ENVIRONMENT
+            raise ValueError("Unexpected LC_DYLD_ENVIRONMENT in packaged host")
         if command == 0x1B:
             if size < 24:
                 raise ValueError("Truncated UUID command")
@@ -82,6 +86,15 @@ def wireguard_version(version):
     if version not in INSPECTED_UUIDS:
         raise ValueError(f"Spotify {version} has no inspected WireGuard transport target")
     return "inspected IPA (static evidence only)"
+
+
+def check_packaged_host(path):
+    # Neither qualified distribution host needs any embedded dyld directive.
+    prefix = "Payload/Spotify.app/"
+    with zipfile.ZipFile(path) as archive:
+        info = plistlib.loads(bounded_member(archive, prefix + "Info.plist", MAX_PLIST_BYTES))
+        macho(bounded_member(archive, prefix + info["CFBundleExecutable"], MAX_IMAGE_BYTES), packaged_host=True)
+    return {"packaged_host": "no embedded dyld environment"}
 
 
 def scan(path, require_version=None, wireguard_compatible=False):
@@ -141,10 +154,11 @@ if __name__ == "__main__":
     parser.add_argument("ipa", type=Path)
     parser.add_argument("--require-version")
     parser.add_argument("--wireguard-compatible", action="store_true")
+    parser.add_argument("--check-packaged-host", action="store_true")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
     try:
-        result = scan(args.ipa, args.require_version, args.wireguard_compatible)
+        result = check_packaged_host(args.ipa) if args.check_packaged_host else scan(args.ipa, args.require_version, args.wireguard_compatible)
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Spotify transport preflight failed: {error}\n")
     text = json.dumps(result, indent=2) + "\n"

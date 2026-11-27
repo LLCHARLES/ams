@@ -56,6 +56,9 @@ static __weak UIView *sg_card;
 static CGRect sg_stripFrame;
 static __weak UIVisualEffectView *sg_cardGlass;
 static __weak UIView *sg_cardArtwork;
+// The view a music video plays in, masked to the cover's shape in its middle with these corners (maskVideoCover).
+static __weak UIView *sg_videoCover;
+static CGFloat sg_videoRadius;
 static __weak UIView *sg_progress;
 static __weak UIViewController *sg_container;
 // The container's view while it stands in the minimized tab bar's row, below the page that holds it.
@@ -140,12 +143,21 @@ CGRect SGRNowPlayingCardFrameIn(UIView *host, CGFloat *radius) {
     return [host convertRect:glass.bounds fromView:glass];
 }
 
+// The square in the middle of `video`'s bounds, the cover's side.
+static CGRect videoSquare(UIView *video) {
+    CGSize size = video.bounds.size;
+    CGFloat side = MIN(size.width, size.height);
+    return CGRectMake((size.width - side) / 2, (size.height - side) / 2, side, side);
+}
+
 CGRect SGRNowPlayingArtworkFrameIn(UIView *host, CGFloat *radius) {
     settleCard();
     UIView *artwork = sg_cardArtwork;
     if (!artwork.window || !host) return CGRectNull;
-    if (radius) *radius = artwork.layer.cornerRadius;
-    return [host convertRect:artwork.bounds fromView:artwork];
+    // A video's view shows only the square its mask leaves (maskVideoCover).
+    BOOL video = artwork == sg_videoCover;
+    if (radius) *radius = video ? sg_videoRadius : artwork.layer.cornerRadius;
+    return [host convertRect:video ? videoSquare(artwork) : artwork.bounds fromView:artwork];
 }
 
 // The Jam strip. The height keeps out a view of the same module that can hold the track card too.
@@ -235,22 +247,93 @@ static CGFloat artworkRadius(CGFloat width, CGFloat cardHeight) {
     return sg_capsule ? capsuleSquareRadius(cardHeight / 2, (cardHeight - width) / 2) : kArtworkSquareRadius;
 }
 
+// A music video can play in the cover's place in a view that is not square (Eevee issue #193), which the square cover
+// below never takes. With no shown square cover in the card, the view the video plays in -- not square, at least
+// kVideoMin each way and no more than twice the card's height either way, starting in the leading third of the card,
+// with no text or control in it and in nothing that is one or is the track's title block -- is masked to the square in
+// its middle with the cover's corners, so it shows as the cover's shape.
+static const CGFloat kVideoMin = 24;
+static char kVideoMaskKey;
+
+static BOOL isTextOrControl(UIView *view) {
+    return [view isKindOfClass:UILabel.class] || [view isKindOfClass:UIControl.class];
+}
+
+// Whether `view` holds text or a control, or sits under one, or under the title block (trackMarker), below `card`.
+static BOOL touchesTextOrControl(UIView *view, UIView *card) {
+    for (UIView *u = view.superview; u && u != card; u = u.superview) {
+        if (isTextOrControl(u) || [NSStringFromClass(u.class) containsString:@"InformationContainer"]) return YES;
+    }
+    __block BOOL holds = NO;
+    SGForEachView(view, ^(UIView *v) { if (isTextOrControl(v)) holds = YES; });
+    return holds;
+}
+
+static UIView *videoCoverIn(UIView *card) {
+    CGSize cardSize = card.bounds.size;
+    BOOL rtl = card.effectiveUserInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    __block UIView *found = nil;
+    __block CGFloat nearest = CGFLOAT_MAX;
+    SGForEachView(card, ^(UIView *v) {
+        if (v == card || inStrip(v, card)) return;
+        CGSize size = v.bounds.size;
+        if (size.width < kVideoMin || size.height < kVideoMin || size.width > 2 * cardSize.height || size.height > 2 * cardSize.height) return;
+        // A square one is a cover, rounded or not, never a video to mask.
+        if (fabs(size.width - size.height) < 1) return;
+        CGRect frame = [v convertRect:v.bounds toView:card];
+        CGFloat lead = rtl ? cardSize.width - CGRectGetMaxX(frame) : CGRectGetMinX(frame);
+        if (lead >= cardSize.width / 3 || lead >= nearest || !SGShownUnder(v, card) || touchesTextOrControl(v, card)) return;
+        nearest = lead;
+        found = v;
+    });
+    return found;
+}
+
+static void maskVideoCover(UIView *video, CGFloat cardHeight) {
+    CGRect square = videoSquare(video);
+    sg_videoRadius = artworkRadius(square.size.width, cardHeight);
+    UIBezierPath *path = [UIBezierPath bezierPathWithRoundedRect:square cornerRadius:sg_videoRadius];
+    CAShapeLayer *mask = objc_getAssociatedObject(video, &kVideoMaskKey);
+    if (!mask) {
+        mask = [CAShapeLayer layer];
+        objc_setAssociatedObject(video, &kVideoMaskKey, mask, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (video.layer.mask == mask && CGRectEqualToRect(mask.frame, video.bounds) && CGPathEqualToPath(mask.path, path.CGPath)) return;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    mask.frame = video.bounds;
+    mask.path = path.CGPath;
+    video.layer.mask = mask;
+    [CATransaction commit];
+}
+
+static void unmaskVideoCover(UIView *video) {
+    CAShapeLayer *mask = objc_getAssociatedObject(video, &kVideoMaskKey);
+    if (mask && video.layer.mask == mask) video.layer.mask = nil;
+}
+
 static void restyleCardContent(UIView *card) {
+    // The video is looked for again on every pass, and only while there is no square cover.
+    if (sg_cardArtwork && sg_cardArtwork == sg_videoCover) sg_cardArtwork = nil;
+    __block BOOL squareCover = NO;
     SGForEachView(card, ^(UIView *v) {
         if (inStrip(v, card)) return;
         CGSize size = v.bounds.size;
         // 40 pt on the phone's card, 60 pt on the iPad's capsule (the iPad's bar, 9.1.90).
         BOOL square = size.width >= 36 && size.width <= (sg_capsule ? kCapsuleArtworkMax : kCardArtworkMax) && fabs(size.width - size.height) < 1;
         if (!square || v.layer.cornerRadius <= 0) return;
+        // A hidden cover is still shaped for when it shows again, but only a shown one is the cover the bar shows.
+        BOOL shown = SGShownUnder(v, card);
+        if (shown) squareCover = YES;
         // The shape asked for is there already: nothing to change, as on every layout after the first.
         CGFloat radius = artworkRadius(size.width, card.bounds.size.height);
         if (v.layer.cornerRadius == radius) {
-            if (!sg_cardArtwork) sg_cardArtwork = v;
+            if (!sg_cardArtwork && shown) sg_cardArtwork = v;
             return;
         }
         // Round already, and not by this file: Spotify's own round cover is left as it is.
         if (!objc_getAssociatedObject(v, &kRoundedKey) && v.layer.cornerRadius >= size.width / 2) {
-            if (!sg_cardArtwork) sg_cardArtwork = v;
+            if (!sg_cardArtwork && shown) sg_cardArtwork = v;
             return;
         }
         UIView *outer = v;
@@ -260,8 +343,15 @@ static void restyleCardContent(UIView *card) {
             if (!objc_getAssociatedObject(u, &kRoundedKey)) objc_setAssociatedObject(u, &kRoundedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             outer = u;
         }
-        sg_cardArtwork = outer;
+        if (shown) sg_cardArtwork = outer;
     });
+    UIView *video = squareCover ? nil : videoCoverIn(card);
+    if (sg_videoCover && sg_videoCover != video) unmaskVideoCover(sg_videoCover);
+    sg_videoCover = video;
+    if (video) {
+        maskVideoCover(video, card.bounds.size.height);
+        sg_cardArtwork = video;
+    }
     __block UIView *progress = sg_progress;
     if (![progress isDescendantOfView:card]) {
         progress = nil;
@@ -875,7 +965,25 @@ static const CGFloat kRowLinesGap = 1, kRowLinesMargin = 6;
     [self applyFonts];
     [self addSubview:_title];
     [self addSubview:_artists];
+    __weak SGRBarText *weakSelf = self;
+    SGRObserveVisibility(self, ^{ [weakSelf updateScrolling]; });
+    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateScrolling)
+                                               name:SGRPlayerVisibilityDidChangeNotification object:nil];
     return self;
+}
+
+- (void)updateScrolling {
+    UIWindow *window = self.window;
+    // A pager changes its offset without laying the neighbouring title out again.
+    // Coverage belongs to the bar, not to a page's momentary clipped rect.
+    BOOL paused = !window || SGRPlayerLandscapeCovers(window);
+    for (UIView *v = self; !paused && v; v = v.superview) {
+        paused = v.hidden || v.alpha <= 0;
+        if (!paused && v == sgr_nowPlayingRoot)
+            paused = CGRectContainsRect(SGRSettledPlayerRect(window), [v convertRect:v.bounds toView:window]);
+    }
+    _title.scrollingPaused = paused;
+    _artists.scrollingPaused = paused || _artists.alpha == 0;
 }
 
 // Capped at Large, so a bar made at one text size and shown at another needs them made again.
@@ -905,6 +1013,7 @@ static const CGFloat kRowLinesGap = 1, kRowLinesMargin = 6;
     _title.frame = CGRectMake(0, top, size.width, titleHeight);
     _artists.frame = CGRectMake(0, top + titleHeight - overlap, size.width, artistsHeight);
     _artists.alpha = two ? 1 : 0;
+    [self updateScrolling];
 }
 @end
 
@@ -1242,7 +1351,8 @@ static void styleNowPlayingBar(UIViewController *container) {
 // bar's old place and took every touch there (#70), so a touch on nothing of the moved bar's goes through.
 // Next's whole touch target is reached here too (nextButtonHit), and the iPad capsule where it has grown past the
 // page's bounds (capsuleIn), which UIKit asks the page about only once its pointInside: says the touch is its.
-%hook _TtC22NowPlaying_BarPageImplP33_CCC0D2EEA6D4725EECD8965E8C38C86D20TouchPassthroughView
+%group SGRBarTouchHooks
+%hook SGRBarTouchView
 - (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
     return %orig || CGRectContainsPoint(capsuleIn((UIView *)self), point);
 }
@@ -1262,6 +1372,7 @@ static void styleNowPlayingBar(UIViewController *container) {
     UIView *inside = [moved hitTest:[(UIView *)self convertPoint:point toView:moved] withEvent:event];
     return inside && inside != moved ? inside : nil;
 }
+%end
 %end
 
 // A page lays out again when Spotify moves its text, which it does after the first pass at launch.
@@ -1307,6 +1418,10 @@ static SGRBarOptionsWatcher *sg_optionsWatcher;
 %ctor {
     if (!SGRedesignedUI()) return;
     %init;
+    Class touch = SGFileprivateViewClass("_TtC22NowPlaying_BarPageImplP33_CCC0D2EEA6D4725EECD8965E8C38C86D20TouchPassthroughView", UIView.class);
+    if (touch) {
+        %init(SGRBarTouchHooks, SGRBarTouchView = touch);
+    } else SGLog(@"TouchPassthroughView not found, its hooks are inactive");
     sg_optionsWatcher = [SGRBarOptionsWatcher new];
     SGAddPlayerStateObserver(sg_optionsWatcher);
     sg_showTitles = showTitlesEnabled();
@@ -1329,7 +1444,6 @@ static SGRBarOptionsWatcher *sg_optionsWatcher;
     SGRequireClasses(@[
         @"_TtC18NowPlaying_BarImpl36NowPlayingBarContainerViewController",
         @"_TtC18NowPlaying_BarImpl27NowPlayingBarViewController",
-        @"_TtC22NowPlaying_BarPageImplP33_CCC0D2EEA6D4725EECD8965E8C38C86D20TouchPassthroughView",
         @"_TtCE14Encore_TextKitO16EncoreFoundation6Encore12MarqueeLabel",
         @"_TtC18NowPlaying_BarImpl17InformationCellV2",
     ]);

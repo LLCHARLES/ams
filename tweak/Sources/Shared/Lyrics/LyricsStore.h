@@ -19,6 +19,13 @@ void SGLyricsStoreDelete(NSString *track);
 void SGLyricsStoreSize(void (^done)(unsigned long long bytes));
 void SGLyricsStoreDeleteAll(void (^done)(unsigned long long remainingBytes));
 
-// For tests only: enqueue an isolated directory and caps, with pruning unthrottled.
+@class SGLyricsLease;
+typedef NS_ENUM(NSInteger, SGBulkWrite) { SGBulkFailed, SGBulkWritten, SGBulkAlreadyPresent, SGBulkCapacity };
+extern NSNotificationName const SGLyricsStoreChanged;
+void SGLyricsStoreInventory(NSArray<NSString *> *tracks, void (^done)(NSSet<NSString *> *present, unsigned long long writableBytes));
+void SGLyricsStoreAddAutomatic(NSString *track, SGLyricsResult *result, SGLyricsLease *lease, void (^done)(SGBulkWrite));
+void SGLyricsStoreRemoveAutomatic(NSArray<NSString *> *tracks);
+
+// For tests only: enqueue an isolated directory and caps, resetting the prune cooldown.
 // Call before any test operations. Nothing touches the real store in that case.
 void SGLyricsStoreConfigureForTests(NSURL *directory, NSUInteger countCap, unsigned long long byteCap);

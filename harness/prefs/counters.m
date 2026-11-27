@@ -3,17 +3,24 @@
 #import "Core/SGFileHash.h"
 #import "../harness-fail.h"
 #import "../sha256-fixture.h"
+#import "../harness-wait.h"
+
+// Capture the actual scheduled save and its requested offset at the GCD
+// boundary. Other stores in this process have independent pending saves.
+static NSMutableArray<dispatch_block_t> *saves;
+static void scheduleSave(int64_t offset, dispatch_queue_t queue, dispatch_block_t save) {
+    HARNESS_CHECK(queue == dispatch_get_main_queue() && offset == 30 * NSEC_PER_SEC);
+    [saves addObject:[save copy]];
+}
+#define dispatch_time(base, delta) (delta)
+#define dispatch_after scheduleSave
+#import "Core/SGCounterStore.m"
+#undef dispatch_after
+#undef dispatch_time
 
 static NSString *checkKey;
 static void cleanDefaults(void) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:checkKey];
-}
-
-static void pumpUntil(BOOL (^done)(void), NSTimeInterval seconds) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    while (!done() && deadline.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    HARNESS_CHECK(done());
 }
 
 static SGCounterStore *plain(NSString *key) {
@@ -99,51 +106,36 @@ int main(void) {
             [queued flush];
             dispatch_semaphore_signal(enqueued);
         });
-        HARNESS_CHECK(dispatch_semaphore_wait(enqueued, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0);
+        HARNESS_CHECK(dispatch_semaphore_wait(enqueued, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * NSEC_PER_SEC)) == 0);
         HARNESS_CHECK(![defaults objectForKey:key]);
         [queued reset];
         [queued increment:@"after"];
-        pumpUntil(^BOOL { return [defaults dictionaryForKey:key] != nil; }, 2);
+        HARNESS_AWAIT([defaults dictionaryForKey:key] != nil);
         HARNESS_CHECK([[defaults dictionaryForKey:key] isEqual:@{@"after": @1}]);
 
-        // A defaults observer can read and reset on another thread while main is writing.
-        // Its reset's queued flush must win over the in-flight snapshot.
-        __block BOOL observed = NO;
+        // Flush remains visible to settings/export without broadcasting a preference change.
+        __block NSUInteger notifications = 0;
         id observer = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification
-            object:defaults queue:nil usingBlock:^(NSNotification *note) {
-                if (observed) return;
-                observed = YES;
-                HARNESS_CHECK(NSThread.isMainThread);
-                dispatch_semaphore_t finished = dispatch_semaphore_create(0);
-                dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-                    HARNESS_CHECK([queued.counts[@"after"] isEqual:@2]);
-                    [queued reset];
-                    dispatch_semaphore_signal(finished);
-                });
-                HARNESS_CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0);
-            }];
+            object:nil queue:nil usingBlock:^(NSNotification *note) { notifications++; }];
         [queued increment:@"after"];
         [queued flush];
-        HARNESS_CHECK(observed);
+        HARNESS_CHECK(notifications == 0);
+        HARNESS_CHECK([[defaults dictionaryRepresentation][key] isEqual:@{@"after": @2}]);
+        [queued reset];
+        HARNESS_CHECK(notifications == 0);
         [NSNotificationCenter.defaultCenter removeObserver:observer];
-        pumpUntil(^BOOL { return [defaults objectForKey:key] == nil; }, 2);
+        HARNESS_AWAIT([defaults objectForKey:key] == nil);
 
         // First increment opens a 30-second window. Reset/flush inside it must not cancel or
         // postpone that timer, and the timer must save the new counts, not the original snapshot.
         SGCounterStore *timed = plain(key);
-        NSTimeInterval start = NSProcessInfo.processInfo.systemUptime;
+        saves = [NSMutableArray array];
         [timed increment:@"old"];
-        HARNESS_CHECK(![defaults objectForKey:key]);
-        __block BOOL replaced = NO;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-            HARNESS_CHECK(![defaults objectForKey:key]);
-            [timed reset];
-            [timed increment:@"new"];
-            replaced = YES;
-        });
-        pumpUntil(^BOOL { return [defaults dictionaryForKey:key] != nil; }, 32);
-        HARNESS_CHECK(replaced);
-        HARNESS_CHECK(NSProcessInfo.processInfo.systemUptime - start >= 30);
+        HARNESS_CHECK(saves.count == 1 && ![defaults objectForKey:key]);
+        [timed reset];
+        [timed increment:@"new"];
+        HARNESS_CHECK(saves.count == 1 && ![defaults objectForKey:key]);
+        saves.firstObject();
         HARNESS_CHECK([[defaults dictionaryForKey:key] isEqual:@{@"new": @1}]);
         [timed reset];
         puts("counter store and file hash: ok");

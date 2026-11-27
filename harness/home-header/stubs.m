@@ -6,6 +6,7 @@
 #import "Redesigned/Kit/SGRGlass.h"
 #import "Redesigned/Kit/SGRRestyle.h"
 #import "Home.h"
+#import "../album/motion-player-double.h"
 
 // The hooks install: this is the redesign.
 BOOL SGRedesignedUI(void) { return YES; }

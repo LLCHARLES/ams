@@ -7,6 +7,7 @@ typedef struct {
     unsigned rumbleStarts, rumbleStops, levels;
     double levelSum, levelMax;       // the rumble's intensities as sent
     BOOL rumbling;                   // carried over
+    BOOL running;
 } FakeHaptics;
 
 // The counts since the last call, and a fresh start.

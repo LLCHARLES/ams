@@ -80,6 +80,9 @@ rsync -a --delete "$ROOT/tweak/layout/Library/Application Support/Retrine.bundle
 NOTICE="$APP/Retrine.bundle/WireGuard-THIRD_PARTY_LICENSES.txt"
 if [ "$WIREGUARD" = 1 ]; then
   cp "$ROOT/WireGuard/THIRD_PARTY_LICENSES.txt" "$NOTICE"
+  cp "$ROOT/WireGuard/build/libsgwg.dylib" "$APP/Frameworks/"
+else
+  rm -f "$APP/Frameworks/libsgwg.dylib"
 fi
 
 exec "$ROOT/scripts/install.sh" "$APP"

@@ -4,7 +4,7 @@
 //   tour        the tour, as on a first launch (the default)
 //   old         the tour as below iOS 26: the redesign card untested, Legacy picked
 //   whatsnew    the What's new sheet
-//   pick        taps the other look's card three seconds in, to see the note change
+//   pick        taps the other look's card once it appears, to see the note change
 //   environment loads a stand-in EeveeSpotify.dylib and runs the install check (the harness's own
 //               version, 1.0, is not Spotify's either), whose alert follows about 5 s in
 #import <UIKit/UIKit.h>
@@ -17,10 +17,12 @@
 #import "Settings/SGModPage.h"
 #import "Shared/SponsorBlock/SponsorBlock.h"
 #import <objc/runtime.h>
+#import "../harness-wait.h"
 
 static BOOL sg_old;
 static NSDictionary *sg_installInfo;
 void CheckSponsorBlockScreens(UIWindow *window);
+void CheckKeptCleanup(UIWindow *window);
 
 @interface NSBundle (SGInstallFixture)
 - (id)sg_installObjectForInfoDictionaryKey:(NSString *)key;
@@ -83,6 +85,17 @@ static int checkInstallWarnings(void) {
             break;
         }
     }
+    for (NSString *version in @[@"9.1.90", @"9.2.0", @"9.2.2", @"9.1.78", @"9.1.88", @"1.0"]) {
+        sg_installInfo = @{@"CFBundleShortVersionString": version, @"NSSupportsLiveActivities": @YES, @"MusicHapticsSupported": @YES};
+        BOOL supported = [@[@"9.1.90", @"9.2.0", @"9.2.2"] containsObject:version];
+        NSArray *expected = supported ? @[] : @[[NSString stringWithFormat:
+            SGL(@"settings.environment.supported_versions.title", @"Supported Spotify versions: %@"), @"9.1.90, 9.2.0, 9.2.2"]];
+        NSArray *titles = [SGEnvironmentWarningRows() valueForKey:@"title"];
+        if (![titles isEqual:expected]) {
+            NSLog(@"FAIL Spotify %@: expected %@, got %@", version, expected, titles);
+            result = 1;
+        }
+    }
     sg_installInfo = nil;
     method_exchangeImplementations(original, fixture);
     if (!result) NSLog(@"PASS: stripped IPA is quiet; hand-injected .deb gets the app-changes warning");
@@ -96,6 +109,7 @@ static int checkInstallWarnings(void) {
 
 @interface Scene : UIResponder <UIWindowSceneDelegate>
 @property (nonatomic, strong) UIWindow *window;
+@property BOOL checkStarted;
 @end
 
 @implementation Scene
@@ -116,10 +130,7 @@ static int checkInstallWarnings(void) {
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.rootViewController = home;
     [self.window makeKeyAndVisible];
-    if ([arguments containsObject:@"sponsorblock-check"]) {
-        dispatch_async(dispatch_get_main_queue(), ^{ CheckSponsorBlockScreens(self.window); });
-        return;
-    }
+    if ([arguments containsObject:@"kept-cleanup"] || [arguments containsObject:@"sponsorblock-check"]) return;
 
     if ([arguments containsObject:@"environment"]) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"spotifyglass.environment.told"];
@@ -131,29 +142,39 @@ static int checkInstallWarnings(void) {
         return;
     }
     BOOL whatsNew = [arguments containsObject:@"whatsnew"];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    HarnessWhen(@"active tour host", ^BOOL { return scene.activationState == UISceneActivationStateForegroundActive; }, ^{
         NSLog(@"harness: %lu changes in the notes", (unsigned long)SGWhatsNewChanges().count);
         if (whatsNew) SGShowWhatsNew();
         else SGShowOnboarding();
     });
     if ([arguments containsObject:@"pick"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIViewController *tour = home.presentedViewController;
-            NSMutableArray<UIControl *> *cards = [NSMutableArray array];
-            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:tour.view];
+        __block UIControl *other;
+        HarnessWhen(@"unselected look card in the presented tour", ^BOOL {
+            UIView *tour = home.presentedViewController.viewIfLoaded;
+            if (!tour.window) return NO;
+            NSMutableArray<UIView *> *queue = [NSMutableArray arrayWithObject:tour];
             while (queue.count) {
                 UIView *view = queue.firstObject;
                 [queue removeObjectAtIndex:0];
-                if ([NSStringFromClass(view.class) isEqualToString:@"SGLookCard"]) [cards addObject:(UIControl *)view];
+                if ([NSStringFromClass(view.class) isEqualToString:@"SGLookCard"] && !((UIControl *)view).selected) {
+                    other = (UIControl *)view;
+                    return YES;
+                }
                 [queue addObjectsFromArray:view.subviews];
             }
-            for (UIControl *card in cards) {
-                if (!card.selected) {
-                    [card sendActionsForControlEvents:UIControlEventTouchUpInside];
-                    break;
-                }
-            }
-        });
+            return NO;
+        }, ^{ [other sendActionsForControlEvents:UIControlEventTouchUpInside]; });
+    }
+}
+
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    if (self.checkStarted) return;
+    self.checkStarted = YES;
+    NSArray *arguments = NSProcessInfo.processInfo.arguments;
+    if ([arguments containsObject:@"kept-cleanup"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CheckKeptCleanup(self.window); });
+    } else if ([arguments containsObject:@"sponsorblock-check"]) {
+        dispatch_async(dispatch_get_main_queue(), ^{ CheckSponsorBlockScreens(self.window); });
     }
 }
 

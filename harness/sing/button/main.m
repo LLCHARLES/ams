@@ -21,6 +21,8 @@ UIViewController *SGTopController(void) {
 @property (nonatomic, strong) UIWindow *window;
 @end
 
+#import "../../harness-wait.h"
+
 @implementation SGHarnessDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
@@ -40,10 +42,10 @@ UIViewController *SGTopController(void) {
     [self.window makeKeyAndVisible];
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"cardCheck"]) {
         extern void SGCheckSingCard(UIView *);
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ SGCheckSingCard(root.view); });
+        HarnessWhen(@"attached Sing card host", ^BOOL { return root.view.window.windowScene != nil; }, ^{ SGCheckSingCard(root.view); });
     }
     if ([NSUserDefaults.standardUserDefaults boolForKey:@"panel"]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        HarnessWhen(@"attached Sing button", ^BOOL { return button.window.windowScene != nil; }, ^{
             [button performSelector:@selector(showPanel)];
         });
     }

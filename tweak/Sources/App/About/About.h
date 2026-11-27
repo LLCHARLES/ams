@@ -44,7 +44,7 @@ NSString *SGUpdateVersion(void);  // nil unless GitHub has a release newer than 
 BOOL SGUpdateIsNewer(NSString *version);   // whether that release is newer than the build running
 BOOL SGVersionIsNewer(NSString *candidate, NSString *current);   // semantic versions, pre-releases included
 NSString *SGUpdateStatus(void);
-void SGCheckForUpdate(BOOL force);
+BOOL SGCheckForUpdate(BOOL force); // YES if a check is now in flight, including one already running
 UIViewController *SGUpdatePage(void);   // UpdatePage.m: the state and the changelog
 UIViewController *SGLicensesPage(void); // Licenses.m: the mod's license and the third-party ones it ships
 

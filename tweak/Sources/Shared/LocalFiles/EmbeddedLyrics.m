@@ -73,11 +73,12 @@ static SGLyricsResult *id3Lyrics(Span s, BOOL synced) {
         return s.n <= textLimit ? textResult(decode(s,&enc)) : nil;
     }
     NSMutableArray *starts = [NSMutableArray array], *texts = [NSMutableArray array];
-    NSUInteger bytes = 0, rawBytes = 0, chars = 0;
+    NSUInteger bytes = 0, rawBytes = 0, chars = 0, entries = 0;
     while (s.n) {
+        if (++entries > SGFileLyricsMaxLines) return nil;
         NSUInteger before = s.n;
         NSString *line = terminated(&s,&enc,wide);
-        if (!line || s.n < 4 || starts.count >= SGFileLyricsMaxLines || line.length > SGFileLyricsMaxCharacters - chars) return nil;
+        if (!line || s.n < 4 || line.length > SGFileLyricsMaxCharacters - chars) return nil;
         chars += line.length;
         rawBytes += before - s.n - (wide ? 2 : 1);
         bytes += [line lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
@@ -159,7 +160,9 @@ static SGLyricsResult *id3(Reader *r, const uint8_t *h) {
         NSUInteger n = v == 2 ? be(p+3,3) : v == 3 ? be(p+4,4) : safeSize(p+4);
         unsigned format = v == 2 ? 0 : p[9];
         if (n > cursor.end-cursor.at) break;
-        if (!(plain || synced) || (format & (v == 4 ? 0x0c : 0xc0)) || n > r->left+cursor.len-cursor.pos) {
+        // Text budget plus per-SYLT timestamp/terminator, descriptor and unsynchronisation overhead.
+        if (!(plain || synced) || n > 2 * (textLimit + 6 * SGFileLyricsMaxLines + 4096) ||
+            (format & (v == 4 ? 0x0c : 0xc0)) || n > r->left+cursor.len-cursor.pos) {
             if (!take(&cursor,n,NULL)) break;
             continue;
         }

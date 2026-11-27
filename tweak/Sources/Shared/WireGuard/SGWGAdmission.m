@@ -1,6 +1,28 @@
 #import "SGWGCore.h"
+#import "SGWGImage.h"
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
+#import <string.h>
+
+SGWGImageMatch SGWGMatchImage(const char *path) {
+    if (!path) return (SGWGImageMatch){0};
+    static dispatch_once_t once;
+    static NSData *ownedName;
+    static const void *bytes;
+    static size_t length;
+    dispatch_once(&once, ^{
+        NSString *name = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"];
+        if ([name isKindOfClass:NSString.class]) ownedName = [name dataUsingEncoding:NSUTF8StringEncoding];
+        bytes = ownedName.bytes;
+        length = ownedName.length;
+    });
+    const char *slash = strrchr(path, '/');
+    const char *name = slash ? slash + 1 : path;
+    return (SGWGImageMatch){
+        .main = !strcmp(name, "Spotify") || (length && strlen(name) == length && !memcmp(name, bytes, length)),
+        .shared = !strcmp(name, "SpotifyShared"),
+    };
+}
 
 BOOL SGWGCheckAdmission(BOOL *pendingImages) {
     if (pendingImages) *pendingImages = NO;
@@ -18,13 +40,10 @@ BOOL SGWGCheckAdmission(BOOL *pendingImages) {
     if (!expectedMain) return NO;
     BOOL mainSeen = NO, sharedSeen = NO;
     for (uint32_t i = 0; i < _dyld_image_count(); i++) {
-        NSString *name = @(_dyld_get_image_name(i)).lastPathComponent;
-        BOOL main = [name isEqualToString:@"Spotify"] ||
-            [name isEqualToString:[NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleExecutable"]];
-        BOOL shared = [name isEqualToString:@"SpotifyShared"];
-        if (!main && !shared) continue;
+        SGWGImageMatch match = SGWGMatchImage(_dyld_get_image_name(i));
+        if (!match.main && !match.shared) continue;
         const struct mach_header_64 *header = (const void *)_dyld_get_image_header(i);
-        if (header->magic != MH_MAGIC_64) return NO;
+        if (!header || header->magic != MH_MAGIC_64) return NO;
         const uint8_t *cursor = (const uint8_t *)(header + 1), *end = cursor + header->sizeofcmds;
         NSString *uuid = nil;
         for (uint32_t j = 0; j < header->ncmds; j++) {
@@ -37,9 +56,9 @@ BOOL SGWGCheckAdmission(BOOL *pendingImages) {
             }
             cursor += command->cmdsize;
         }
-        if (![uuid isEqualToString:main ? expectedMain : expectedShared]) return NO;
-        mainSeen |= main;
-        sharedSeen |= shared;
+        if (![uuid isEqualToString:match.main ? expectedMain : expectedShared]) return NO;
+        mainSeen |= match.main;
+        sharedSeen |= match.shared;
     }
     if (pendingImages) *pendingImages = !mainSeen || !sharedSeen;
     return mainSeen && sharedSeen;

@@ -2,9 +2,9 @@
 // what it reads:
 //   - the Lyrics style clears the words when its source changes to lyrics that are not synced (a kept-lines
 //     notification for the playing track), instead of leaving the old source's line on screen;
-//   - the display link asks for the screen's full rate whether or not the player's lyrics are open over the
-//     hills or Reduce Motion is on, and the hills draw 60, 30 and 15 times a second in those three cases from a
-//     120 Hz link's ticks;
+//   - the display link asks for the rate the view draws at, up to the screen's: 60 (Bars 120 on a 120 Hz screen,
+//     60 on a 60 Hz one), 30 with the player's lyrics open over the hills, 15 with Reduce Motion; and the hills draw
+//     60, 30 and 15 times a second in those three cases from a 120 Hz link's ticks;
 //   - the five first style ids, their order and names stay, Poster and Cut follow them, and an unknown or absent
 //     stored style reads as Hills;
 //   - Poster and Cut's parameters read their defaults when missing or malformed, clamp numbers, parse only
@@ -35,7 +35,7 @@
 #import "Shared/Player/SpeedPitch.h"
 #import "Settings/SGModPage.h"
 #import "Player.h"
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 
 #pragma mark - the stubs
 
@@ -90,6 +90,7 @@ NSUInteger SGRSetPlayerBackground(SGRPlayerBackgroundKind kind) { return 0; }
 SGRArtworkField *SGRPlayerField(void) { return nil; }
 void SGRPlayerHoldField(void) {}
 BOOL SGRPlayerLyricsOpen(void) { return NO; }
+BOOL SGRPlayerPageOpen(void) { return NO; }
 BOOL SGRPlayerMotionShowing(void) { return NO; }
 // PlayerMotion.x's no-clip fallback and the shuffle and heat switches (Core/SGPrefs.m): all off, as unset.
 BOOL SGHidden(NSString *key) { return NO; }
@@ -237,11 +238,6 @@ static id printOf(UIView *view) {
     return [[stageOf(view) valueForKey:@"_print"] contents];
 }
 
-// The main queue run until `done` holds, for two seconds at the most.
-static BOOL waitFor(BOOL (^done)(void)) {
-    for (int i = 0; i < 200 && !done(); i++) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-    return done();
-}
 
 static UIImage *coverArt(UIColor *top, UIColor *bottom, UIColor *disc) {
     UIGraphicsImageRendererFormat *format = [UIGraphicsImageRendererFormat new];
@@ -371,23 +367,30 @@ int main(void) {
         [NSNotificationCenter.defaultCenter postNotificationName:SGKaraokeLinesKeptNotification object:@"track-a"];
         HARNESS_CHECK([shownWords(view) isEqualToString:@"hold me close"]);
 
-        // The link asks for the screen's full rate in every case.
+        // The link asks for the rate the view draws at, its maximum the screen's.
         gWindow = window;
-        NSInteger screenRate = window.screen.maximumFramesPerSecond;
-        HARNESS_CHECK(screenRate == 120);
+        HARNESS_CHECK(window.screen.maximumFramesPerSecond == 120);
         id<Probe> probe = (id<Probe>)view;
         [probe setMoving:YES];
         CADisplayLink *link = [view valueForKey:@"_link"];
         HARNESS_CHECK(link != nil);
-        HARNESS_CHECK(link.preferredFrameRateRange.maximum == screenRate && link.preferredFrameRateRange.preferred == screenRate);
+        HARNESS_CHECK(CAFrameRateRangeIsEqualToRange(link.preferredFrameRateRange, CAFrameRateRangeMake(60, 120, 60)));
         [probe setBlurred:YES animated:NO];
         [probe setMoving:YES];
-        HARNESS_CHECK(link.preferredFrameRateRange.maximum == screenRate && link.preferredFrameRateRange.preferred == screenRate);
+        HARNESS_CHECK(CAFrameRateRangeIsEqualToRange(link.preferredFrameRateRange, CAFrameRateRangeMake(30, 120, 30)));
         [probe setBlurred:NO animated:NO];
         gReduceMotion = YES;
         [probe setMoving:YES];
-        HARNESS_CHECK(link.preferredFrameRateRange.maximum == screenRate && link.preferredFrameRateRange.preferred == screenRate);
+        HARNESS_CHECK(CAFrameRateRangeIsEqualToRange(link.preferredFrameRateRange, CAFrameRateRangeMake(15, 120, 15)));
         gReduceMotion = NO;
+        SGRSetVisualiserStyle(@"builtin:bars");
+        [probe setMoving:YES];
+        HARNESS_CHECK(CAFrameRateRangeIsEqualToRange(link.preferredFrameRateRange, CAFrameRateRangeMake(120, 120, 120)));
+        window.screen.maximumFramesPerSecond = 60;
+        [probe setMoving:YES];
+        HARNESS_CHECK(CAFrameRateRangeIsEqualToRange(link.preferredFrameRateRange, CAFrameRateRangeMake(60, 60, 60)));
+        window.screen.maximumFramesPerSecond = 120;
+        SGRSetVisualiserStyle(@"builtin:lyrics");
 
         // The hills draw 60 times a second normally, 30 behind the player's lyrics and 15 with Reduce Motion.
         HARNESS_CHECK(drawsOf(view, 120) == 60);
@@ -498,7 +501,7 @@ int main(void) {
                   [UIColor colorWithRed:0.40 green:0.18 blue:0.48 alpha:1]];
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
         HARNESS_CHECK(printOf(v) == nil);
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
         id print = printOf(v);
         HARNESS_CHECK(print != (id)gArtwork.CGImage);
         gWindow = window;
@@ -526,7 +529,7 @@ int main(void) {
         gArtwork = coverArt(UIColor.darkGrayColor, UIColor.blackColor, UIColor.whiteColor);
         gArtworkID = @"art-b";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil && printOf(v) != print);
         HARNESS_CHECK(printOf(v) != print);
 
         // A print that cannot be made (a cover with no bitmap: the nil answer a failed allocation gives) is final for
@@ -535,7 +538,7 @@ int main(void) {
         gArtwork = [UIImage new];
         gArtworkID = @"art-empty";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+        HARNESS_AWAIT(printOf(v) == (id)gArtwork.CGImage);
         HARNESS_CHECK(printOf(v) == (id)gArtwork.CGImage);
         UIView *failed = visualiser();
         HARNESS_CHECK(printOf(failed) == (id)gArtwork.CGImage);
@@ -551,11 +554,11 @@ int main(void) {
         gArtwork = coverArt(UIColor.greenColor, UIColor.blueColor, UIColor.yellowColor);
         gArtworkID = @"art-fast";
         UIView *newer = visualiser();
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(newer) != nil; }));
+        HARNESS_AWAIT(printOf(newer) != nil);
         id fastPrint = printOf(newer);
         HARNESS_CHECK(printOf(v) == nil);
         dispatch_semaphore_signal(gGate);
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
         HARNESS_CHECK(printOf(v) != fastPrint);
         UIView *later = visualiser();
         HARNESS_CHECK(printOf(later) == fastPrint);
@@ -565,7 +568,7 @@ int main(void) {
         gArtwork = artA;
         gArtworkID = @"art-a";
         [NSNotificationCenter.defaultCenter postNotificationName:SGRNowPlayingArtworkDidChangeNotification object:nil];
-        HARNESS_CHECK(waitFor(^BOOL { return printOf(v) != nil; }));
+        HARNESS_AWAIT(printOf(v) != nil);
 
         // Poster under Reduce Motion: the new line only fades in; otherwise it rises into place.
         __block BOOL moved = NO;

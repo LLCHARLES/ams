@@ -101,6 +101,7 @@ struct SGSingEngine {
     atomic_bool alive;
     pthread_mutex_t lock;        // the separator, the error, `asked` and the worker's parking predicate
     pthread_cond_t wake;
+    bool playbackPaused;          // under lock; unlike a heat hold, not a request to play dry
     void *separator;              // retained
     NSString *error;
     float *window[2], *vocals[2];
@@ -408,7 +409,7 @@ static void setError(SGSingEngine *engine, NSString *error) {
 
 static SGSingSeparator *waitForSeparator(SGSingEngine *engine) {
     pthread_mutex_lock(&engine->lock);
-    while (atomic_load(&engine->alive) && (!engine->separator || !atomic_load(&engine->on) || atomic_load(&engine->paused))) {
+    while (atomic_load(&engine->alive) && (!engine->separator || !atomic_load(&engine->on) || atomic_load(&engine->paused) || engine->playbackPaused)) {
         pthread_cond_wait(&engine->wake, &engine->lock);
     }
     SGSingSeparator *separator = (__bridge SGSingSeparator *)engine->separator;
@@ -651,6 +652,14 @@ void SGSingEngineSetPaused(SGSingEngine *engine, bool paused) {
     pthread_mutex_lock(&engine->lock);
     atomic_store(&engine->paused, paused);
     pthread_cond_signal(&engine->wake);
+    pthread_mutex_unlock(&engine->lock);
+}
+
+void SGSingEngineSetPlaybackPaused(SGSingEngine *engine, bool paused) {
+    pthread_mutex_lock(&engine->lock);
+    bool resume = engine->playbackPaused && !paused;
+    engine->playbackPaused = paused;
+    if (resume) pthread_cond_signal(&engine->wake);
     pthread_mutex_unlock(&engine->lock);
 }
 

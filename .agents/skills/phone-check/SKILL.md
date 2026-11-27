@@ -16,7 +16,7 @@ Values that belong to one person's phone live in `.phone.env` at the repo root (
 ## Install
 
 - `make quick` rebuilds only the tweak and installs it in seconds. It needs a full build with FLEX first:
-  `scripts/pipeline.sh ipa/Spotify-9.1.78.ipa`, then `make quick`.
+  `scripts/pipeline.sh ipa/Spotify-9.2.0.ipa` for the release base, then `make quick`.
 - The full build fails inside the sandbox at the App Intents step ("Exception during writing compiled
   data"); run it outside the sandbox.
 - `make quick` refuses when the extension, a plist or an icon changed since the full build. Run the full

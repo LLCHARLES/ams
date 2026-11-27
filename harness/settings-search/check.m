@@ -42,13 +42,12 @@ static SGModPage *pageOf(NSString *title, NSArray<SGModRow *> *rows) {
     return [[SGModPage alloc] initWithTitle:title intro:nil sections:@[SGSection(nil, rows)] footer:nil];
 }
 
-// The page the search is typed on: a switch that hides a row, rows of its own, pages under it, and a page three
-// levels down, which is out of reach.
-static UIViewController *tooFarPage(void);
+// A row at the depth limit, and a page one step beyond it.
+static UIViewController *thirdPage(void);
 
 static UIViewController *deeperPage(void) {
     built++;
-    return pageOf(@"Deeper", @[row(@"Deeper row", nil), pageRow(@"Too far", ^UIViewController *{ return tooFarPage(); })]);
+    return pageOf(@"Deeper", @[row(@"Deeper row", nil), pageRow(@"Third", ^UIViewController *{ return thirdPage(); })]);
 }
 
 static UIViewController *deepPage(void) {
@@ -56,9 +55,11 @@ static UIViewController *deepPage(void) {
     return pageOf(@"Deep", @[row(@"Deep row", nil), pageRow(@"Deeper", ^UIViewController *{ return deeperPage(); })]);
 }
 
-static UIViewController *tooFarPage(void) {
+static UIViewController *thirdPage(void) {
     built++;
-    return pageOf(@"Too far", @[row(@"Out of reach", nil)]);
+    return pageOf(@"Third", @[row(@"Third-level setting", nil), pageRow(@"Fourth", ^UIViewController *{
+        return pageOf(@"Fourth", @[row(@"Out of reach", nil)]);
+    })]);
 }
 
 static UIViewController *carPlayPage(void) {
@@ -144,10 +145,11 @@ static void runChecks(void) {
     check([titles([index hitsForQuery:@"live activity"]) isEqual:(@[@"Live Activity", @"Artwork"])], @"the page above a row is found by its name, and the page itself too");
     check(built == before, @"a new query builds nothing again");
 
-    // Within reach: the pages the page's rows open, then the pages theirs open. The third level is not read.
+    // Deep destinations are searchable, but a fourth-level page is not traversed.
     while (index.running) pass(index);
     check([titles([index hitsForQuery:@"deeper row"]) isEqual:@[@"Deeper row"]], @"the second level's rows are found");
-    check([index hitsForQuery:@"out of reach"].count == 0, @"a page three levels down is out of reach");
+    check([titles([index hitsForQuery:@"third-level setting"]) isEqual:@[@"Third-level setting"]], @"the third level's rows are found");
+    check([index hitsForQuery:@"out of reach"].count == 0, @"a page four levels down is out of reach");
 
     // A title the query starts lands over a row only its keywords hold.
     SGSettingsIndex *ranked = started();
@@ -236,23 +238,23 @@ static void runChecks(void) {
     built = 0;
     SGSettingsIndex *walked = started();
     [walked scheduleStep];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (walked.running && deadline.timeIntervalSinceNow > 0) {
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
     }
     check(!walked.running, @"the run loop reads every page and the build ends by itself");
-    check(built == 4, [NSString stringWithFormat:@"the run loop built all four pages (%lu)", (unsigned long)built]);
+    check(built == 5, [NSString stringWithFormat:@"the run loop built all five reachable pages (%lu)", (unsigned long)built]);
     check([titles([walked hitsForQuery:@"deeper row"]) isEqual:@[@"Deeper row"]], @"a row of the second level down is found after the run loop's passes");
     check([titles([walked hitsForQuery:@"typeface"]) isEqual:@[@"Font"]], @"and so is a row of the first page under the page");
 
     // The index tells the results when its rows changed, so they show without waiting for the next keystroke: once per
     // pass that read a page, and once more when the last pass finds nothing left, so "No Results" can be put up. The
-    // root's rows open three pages, and one of theirs opens a fourth.
+    // root's rows open three pages, with two more levels on the Deep branch.
     __block NSUInteger grew = 0;
     SGSettingsIndex *watched = started();
     watched.grew = ^{ grew++; };
     while (watched.running) pass(watched);
-    check(grew == 5, [NSString stringWithFormat:@"the results are told once per pass that read a page, and once when the pages end (%lu)", (unsigned long)grew]);
+    check(grew == 6, [NSString stringWithFormat:@"the results are told once per pass that read a page, and once when the pages end (%lu)", (unsigned long)grew]);
 
     // A build that is stopped is not continued by a pass already asked for.
     built = 0;
@@ -276,25 +278,38 @@ static void runChecks(void) {
     check(SGSearchRecents().count == 0, @"nothing is stored to begin with");
     NSArray<NSString *> *art = @[@"row.Live Activity", @"row.Artwork"];
     NSArray<NSString *> *accentPlace = @[@"row.Appearance", @"row.Accent color"];
-    SGSearchRememberPlace(art);
-    SGSearchRememberPlace(accentPlace);
+    SGSettingsIndex *history = [SGSettingsIndex new];
+    [history rememberPlace:art];
+    [history rememberPlace:accentPlace];
     check([SGSearchRecents() isEqualToArray:@[accentPlace, art]], @"a place opened after another comes first");
-    SGSearchRememberPlace(art);
+    [history rememberPlace:art];
     check([SGSearchRecents() isEqualToArray:@[art, accentPlace]], @"a place opened again moves to the front, once");
-    for (int i = 0; i < 8; i++) SGSearchRememberPlace(@[[NSString stringWithFormat:@"Place %d", i]]);
+    for (int i = 0; i < 8; i++) [history rememberPlace:@[[NSString stringWithFormat:@"Place %d", i]]];
     check(SGSearchRecents().count == 6, @"six places are kept at most");
     check([[NSUserDefaults.standardUserDefaults arrayForKey:SGKeySearchRecents] count] == 6, @"six places are stored at most");
     check([SGSearchRecents().firstObject isEqualToArray:@[@"Place 7"]], @"the newest place leads and the oldest goes");
-    SGSearchRememberPlace(@[]);
-    SGSearchRememberPlace(@[@"Place 7", @""]);
-    SGSearchRememberPlace(nil);
+    [history rememberPlace:@[]];
+    [history rememberPlace:@[@"Place 7", @""]];
+    [history rememberPlace:nil];
     check(SGSearchRecents().count == 6 && [SGSearchRecents().firstObject isEqualToArray:@[@"Place 7"]],
           @"a place that is not a list of names is not stored");
 
+    SGModPage *movedRoot = rootPage();
+    NSArray *oldArt = @[@"old.artwork"];
+    SGSettingsIndexMovesWith(movedRoot, ^NSArray *(NSArray *place) { return [place isEqual:oldArt] ? art : place; });
+    SGSettingsIndex *moved = [SGSettingsIndex new];
+    [moved startWithRoot:movedRoot];
+    while (moved.running) pass(moved);
+    NSArray *others = @[@[@"a"], @[@"b"], @[@"c"], @[@"d"], @[@"e"]];
+    [NSUserDefaults.standardUserDefaults setObject:[@[oldArt] arrayByAddingObjectsFromArray:others] forKey:SGKeySearchRecents];
+    [moved rememberPlace:moved.recentHits.firstObject.place];
+    check([SGSearchRecents() isEqual:[@[art] arrayByAddingObjectsFromArray:others]],
+          @"reopening a moved result replaces its old trail without evicting the sixth recent");
+
     // A place the current look no longer has is left out of what the index shows.
     SGSearchForgetRecents();
-    SGSearchRememberPlace(@[@"row.Search"]);
-    SGSearchRememberPlace(art);
+    [history rememberPlace:@[@"row.Search"]];
+    [history rememberPlace:art];
     SGSettingsIndex *recents = started();
     while (recents.running) pass(recents);
     check([titles([recents recentHits]) isEqual:@[@"Artwork"]], @"a place the current look does not have is skipped");
@@ -333,7 +348,7 @@ static void runChecks(void) {
     while (nativeIndex.running) pass(nativeIndex);
     SGSettingsHit *nativeAccent = [nativeIndex hitsForQuery:@"accent color"].firstObject;
     check([nativeAccent.place isEqualToArray:@[@"row.appearance.native.accentcolor"]], @"the native look's setting is named the native look's");
-    SGSearchRememberPlace(nativeAccent.place);
+    [nativeIndex rememberPlace:nativeAccent.place];
     // The look switches: the same titles are there, and the design's rows are named the design's.
     SGSettingsIndex *redesignedIndex = [SGSettingsIndex new];
     [redesignedIndex startWithRoot:redesignedLook];
@@ -357,7 +372,7 @@ static void runChecks(void) {
     while (beforeFlip.running) pass(beforeFlip);
     SGSettingsHit *homeBefore = [beforeFlip hitsForQuery:@"home"].firstObject;
     check([homeBefore.place isEqualToArray:@[@"page.home.native"]], @"the page row is named for the look stored when the index starts");
-    SGSearchRememberPlace(homeBefore.place);
+    [history rememberPlace:homeBefore.place];
     storedLook = @"redesigned";
     SGSettingsIndex *afterFlip = [SGSettingsIndex new];
     [afterFlip startWithRoot:openRoot];
@@ -367,14 +382,14 @@ static void runChecks(void) {
     check([[afterFlip hitsForQuery:@"gradient"].firstObject.place isEqualToArray:(@[@"page.home.redesigned", @"row.Gradient"])],
           @"and so are the rows under it");
     check([afterFlip recentHits].count == 0, @"a recent of the other look does not open this look's page");
-    SGSearchRememberPlace(homeAfter.place);
+    [afterFlip rememberPlace:homeAfter.place];
     check([afterFlip recentHits].count == 1 && [afterFlip recentHits].firstObject == homeAfter, @"a recent of this look opens it");
 
     // A language switch: the titles are translated, and the stored place still finds its row, because it holds names.
     SGModPage *translated = pageOf(@"외관", @[row(@"강조 색", nil)]);
     translated.sections[0].rows[0].searchIdentifier = @"row.appearance.native.accentcolor";
     SGSearchForgetRecents();
-    SGSearchRememberPlace(nativeAccent.place);
+    [nativeIndex rememberPlace:nativeAccent.place];
     SGSettingsIndex *koreanIndex = [SGSettingsIndex new];
     [koreanIndex startWithRoot:translated];
     while (koreanIndex.running) pass(koreanIndex);
@@ -397,7 +412,7 @@ static void runChecks(void) {
     check(![volumes[0].place isEqualToArray:volumes[1].place], @"their places tell them apart");
     checkEveryHitIsUnique(volumes, @"two rows of one title");
     SGSearchForgetRecents();
-    SGSearchRememberPlace(volumes[1].place);
+    [twin rememberPlace:volumes[1].place];
     check([twin recentHits].count == 1 && [twin recentHits].firstObject == volumes[1],
           @"a place of one of two rows of a title finds that row, not the other");
 

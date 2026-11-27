@@ -2,7 +2,9 @@
 #import <objc/runtime.h>
 #import "Core/SGPrefs.h"
 #import "Native/Appearance/Appearance.h"
+#import "Native/Appearance/Repaint.h"
 #import "Redesigned/Kit/SGRAccent.h"
+#import "Redesigned/Kit/SGRRepaint.h"
 #import "../harness-fail.h"
 #include <stdlib.h>
 #include <string.h>
@@ -49,12 +51,27 @@ static UIView *badge(Class cls, NSString *identifier) {
 - (NSString *)accessibilityIdentifier { self.reads++; return super.accessibilityIdentifier; }
 @end
 
+// Same nested Spotify type after its declaring source file has moved.
+@interface _TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_0000000000000000000000000000000013ExplicitBadge : UIView @end
+@implementation _TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_0000000000000000000000000000000013ExplicitBadge @end
+// A same-named type from another file that is not a view must not make the lookup ambiguous.
+@interface _TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_1111111111111111111111111111111113ExplicitBadge : NSObject @end
+@implementation _TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_1111111111111111111111111111111113ExplicitBadge @end
+
+@interface StandaloneLayer : CALayer
+@end
+@implementation StandaloneLayer
+- (id<CALayerDelegate>)delegate {
+    if (!NSThread.isMainThread) HARNESS_FAIL(@"background layer delegate inspected");
+    return super.delegate;
+}
+@end
+
 static void check(UIWindow *window) {
     @autoreleasepool {
         [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
         refresh();
-        Class retrieval = objc_allocateClassPair(UIView.class, "_TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_9D5FF3EB21C9757CC8B47C2445B48C7B13ExplicitBadge", 0);
-        objc_registerClassPair(retrieval);
+        Class retrieval = _TtCCC36CreativeWorkPlatform_RetrievalRowKit21RetrievalRowElementUI10BadgesViewP33_0000000000000000000000000000000013ExplicitBadge.class;
         UIView *component = badge(UIView.class, @"Components.UI.ExplicitIcon");
         UIView *row = badge(retrieval, @"CreativeWorkPlatform_RetrievalRowKit.ExplicitBadge");
         [window addSubview:component];
@@ -75,6 +92,29 @@ static void check(UIWindow *window) {
         stored(!SGNativeUI(), !SGRedesignedUI());
         expect(paints(component), @"inactive look's setting cannot hide a badge");
         stored(SGNativeUI(), SGRedesignedUI());
+        {
+            if (SGNativeUI()) sg_homeRoot = page;
+            else sgr_nowPlayingRoot = page;
+            CGColorRef white = UIColor.whiteColor.CGColor;
+            dispatch_group_t work = dispatch_group_create();
+            dispatch_semaphore_t started = dispatch_semaphore_create(0);
+            dispatch_group_async(work, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                CALayer *layer = [StandaloneLayer layer];
+                for (int i = 0; i < 64; ++i) {
+                    CALayer *mask = [CALayer layer];
+                    layer.mask = mask;
+                    layer.backgroundColor = white;
+                    if (layer.mask != mask || !CGColorEqualToColor(layer.backgroundColor, white))
+                        HARNESS_FAIL(@"background setter did not take effect on return");
+                    if (!i) dispatch_semaphore_signal(started);
+                }
+            });
+            dispatch_semaphore_wait(started, DISPATCH_TIME_FOREVER);
+            for (int i = 0; i < 8; ++i) stored(SGNativeUI() && i % 2, SGRedesignedUI() && i % 2);
+            dispatch_group_wait(work, DISPATCH_TIME_FOREVER);
+            if (SGNativeUI()) sg_homeRoot = nil;
+            else sgr_nowPlayingRoot = nil;
+        }
         [window addSubview:page];
         expect(returning.layer.mask != nil, @"badge detached at enable is masked on unchanged reattachment");
         for (UIView *view in @[component, row]) {

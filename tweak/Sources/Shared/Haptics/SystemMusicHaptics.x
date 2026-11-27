@@ -158,7 +158,7 @@ typedef NS_ENUM(NSInteger, SGNativePhase) {
 API_AVAILABLE(ios(18.0))
 @interface SGNativeMusicHaptics : NSObject <SGPlayerStateObserver>
 - (void)follow:(SPTPlayerState *)state again:(BOOL)again;
-- (void)systemChanged;
+- (void)refreshSystemFollowingTrack:(BOOL)force;
 @end
 
 @implementation SGNativeMusicHaptics {
@@ -174,6 +174,7 @@ API_AVAILABLE(ios(18.0))
 }
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
+    if (!SGMusicHapticsInBackground()) return;
     [self follow:state again:NO];
 }
 
@@ -282,9 +283,10 @@ API_AVAILABLE(ios(18.0))
     if (_observer || !_enabled) return;
     __weak SGNativeMusicHaptics *weakSelf = self;
     _observer = [MAMusicHapticsManager.sharedManager addStatusObserver:^(NSString *code, BOOL active) {
+        if (!SGMusicHapticsInBackground()) return;
         dispatch_async(dispatch_get_main_queue(), ^{
             SGNativeMusicHaptics *strongSelf = weakSelf;
-            if (!strongSelf) return;
+            if (!strongSelf || !SGMusicHapticsInBackground()) return;
             strongSelf->_observedCode = code;
             strongSelf->_observedActive = active;
             static NSUInteger logged;
@@ -294,12 +296,14 @@ API_AVAILABLE(ios(18.0))
     }];
 }
 
-- (void)systemChanged {
+- (void)refreshSystemFollowingTrack:(BOOL)force {
+    if (!SGMusicHapticsInBackground()) return;
     MAMusicHapticsManager *manager = MAMusicHapticsManager.sharedManager;
     BOOL enabled = systemEnabled(manager), active = manager.isActive;
     BOOL first = !_known, wasEnabled = _enabled;
     if (!first && enabled == _enabled && active == _active) {
         [self observe];
+        if (force) [self follow:SGPlayerState() again:YES];
         return;
     }
     _known = YES;
@@ -308,26 +312,24 @@ API_AVAILABLE(ios(18.0))
     SGSetSystemMusicHapticsOn(enabled);
     SGLog(@"music haptics: iOS's Music Haptics %@, %@", enabled ? @"on" : @"off", active ? @"active" : @"paused");
     [self observe];
-    if (first || enabled != wasEnabled) [self follow:SGPlayerState() again:YES];
+    if (force || first || enabled != wasEnabled) [self follow:SGPlayerState() again:YES];
     else [self showStatus];
 }
 
 @end
 
-%ctor {
-    // MusicHaptics.x's constructor moves it too, but may run after this one.
-    SGMigrateMusicHaptics();
-    sg_isrcs = [NSCache new];
-    sg_isrcs.countLimit = kKeptISRCs;
-    if (@available(iOS 18.0, *)) {
-        static SGNativeMusicHaptics *native;
+API_AVAILABLE(ios(18.0))
+static SGNativeMusicHaptics *systemHaptics(void) {
+    static SGNativeMusicHaptics *native;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
         native = [SGNativeMusicHaptics new];
         SGAddPlayerStateObserver(native);
         NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-        void (^changed)(NSNotification *) = ^(NSNotification *note) { [native systemChanged]; };
+        void (^changed)(NSNotification *) = ^(NSNotification *note) { [native refreshSystemFollowingTrack:NO]; };
         // iOS's own may come from any thread: heard there and handed to main without waiting (AGENTS.md).
         void (^changedFromAnywhere)(NSNotification *) = ^(NSNotification *note) {
-            dispatch_async(dispatch_get_main_queue(), ^{ [native systemChanged]; });
+            dispatch_async(dispatch_get_main_queue(), ^{ [native refreshSystemFollowingTrack:NO]; });
         };
         [center addObserverForName:MAMusicHapticsManagerActiveStatusDidChangeNotification object:nil queue:nil usingBlock:changedFromAnywhere];
         // Not in the SDK's headers, though MediaAccessibility exports it: posted as the switch in Accessibility moves.
@@ -335,14 +337,25 @@ API_AVAILABLE(ios(18.0))
         id name = enabledName ? (__bridge id)*(void **)enabledName : nil;
         if ([name isKindOfClass:NSString.class]) [center addObserverForName:name object:nil queue:nil usingBlock:changedFromAnywhere];
         [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:changed];
-        // Only In the Background's own flip: Music Haptics' would take iOS's identifier off for nothing.
+    });
+    return native;
+}
+
+%ctor {
+    SGMigrateMusicHaptics();
+    // ISRC lookups also serve animated artwork, independent of the haptics switches.
+    sg_isrcs = [NSCache new];
+    sg_isrcs.countLimit = kKeptISRCs;
+    if (@available(iOS 18.0, *)) {
         __block BOOL background = SGMusicHapticsInBackground();
-        [center addObserverForName:SGMusicHapticsSwitchesChangedNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+        if (background) dispatch_async(dispatch_get_main_queue(), ^{ [systemHaptics() refreshSystemFollowingTrack:NO]; });
+        [NSNotificationCenter.defaultCenter addObserverForName:SGMusicHapticsSwitchesChangedNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
             if (SGMusicHapticsInBackground() == background) return;
             background = !background;
-            [native follow:SGPlayerState() again:YES];
+            SGNativeMusicHaptics *native = systemHaptics();
+            if (background) [native refreshSystemFollowingTrack:YES];
+            else [native follow:SGPlayerState() again:YES];
         }];
-        dispatch_async(dispatch_get_main_queue(), ^{ [native systemChanged]; });
     } else {
         SGSetMusicHapticsStatus(@"Needs iOS 18");
     }

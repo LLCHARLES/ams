@@ -3,6 +3,7 @@
 // the background or the full player appears.
 #import "Core/SGCore.h"
 #import "Diagnostics.h"
+#if SG_DRIVER
 #import "SGDriverAuth.h"
 #import <sys/socket.h>
 #import <ifaddrs.h>
@@ -77,7 +78,7 @@ static void appendModState(NSMutableString *out) {
     ];
     for (NSString *key in [stored.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         if (![key hasPrefix:@"spotifyglass."] || [key isEqualToString:SGKeyStock]) continue;
-        if (SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer] || [key isEqual:@"spotifyglass.wireguard"]) continue;
+        if (SGPrivatePreferenceKey(key) || [key isEqual:SGKeySponsorBlockServer] || [key isEqual:SGKeyLyricsOpenAIBaseURL] || [key isEqual:@"spotifyglass.wireguard"]) continue;
         BOOL skip = NO;
         for (NSString *prefix in local) skip |= [key hasPrefix:prefix];
         if (!skip) [out appendFormat:@"%@ = %@\n", key, describeValue(stored[key])];
@@ -161,9 +162,6 @@ static void serve(int client, BOOL tailnet) {
     setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     int no = 1;
     setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &no, sizeof(no));
-#if !SG_DRIVER
-    readRequest(client);
-#else
     NSString *request = readRequest(client);
     if (tailnet) {
         if (!SGDriverRequestAuthorized(request, SGDriverToken())) {
@@ -186,6 +184,11 @@ static void serve(int client, BOOL tailnet) {
         }
         NSMutableDictionary<NSString *, NSString *> *params = [NSMutableDictionary dictionary];
         for (NSURLQueryItem *item in url.queryItems) params[item.name] = item.value ?: @"1";
+        if (tailnet && [command isEqual:@"pref"] && [params[@"key"] isEqual:SGKeyDriverToken]) {
+            respond(client, @"403 Forbidden", @"application/json", [@"{\"ok\":false,\"error\":\"private preference\"}" dataUsingEncoding:NSUTF8StringEncoding]);
+            close(client);
+            return;
+        }
         // One command at a time, so two clients' touches never interleave; the tree is served alongside.
         static dispatch_queue_t commands;
         static dispatch_once_t once;
@@ -196,7 +199,6 @@ static void serve(int client, BOOL tailnet) {
         close(client);
         return;
     }
-#endif
     __block NSString *body = nil;
     if (!SGRunOnMain(5, ^{ body = SGScreenTree(); })) {
         respond(client, @"503 Service Unavailable", @"text/plain", [@"the main thread did not answer in 5 s\n" dataUsingEncoding:NSUTF8StringEncoding]);
@@ -231,10 +233,9 @@ static int listenOn(in_addr_t address, BOOL tailnet, dispatch_source_t __strong 
     return fd;
 }
 
-#if SG_DRIVER
 // The tailnet listener: the user asked to drive the app from their Mac over Tailscale. It binds the phone's
-// exact Tailscale address (a utun interface in 100.64.0.0/10), never every interface and never Wi-Fi or
-// cellular, so only the user's own tailnet reaches it, and every request on it needs the token, made once and
+// exact tunnel address (a utun interface in 100.64.0.0/10), never every interface. The range is
+// not proof of Tailscale identity, so every request on it needs the token, made once and
 // kept in the app's defaults. SGDriverAuth owns migration and comparison; local tooling reads the
 // stored credential through the loopback pref command, never through a log or screen tree.
 
@@ -280,22 +281,16 @@ static void watchTailnet(void) {
     });
     dispatch_resume(timer);
 }
-#endif
 
 static void startTreeServer(void) {
-#if SG_DRIVER
     SGDriverToken();   // migrate before accepting requests, including loopback pref reads
-#endif
     static dispatch_source_t source;
     if (listenOn(htonl(INADDR_LOOPBACK), NO, &source) < 0) {   // loopback, which only the cable's iproxy reaches
         SGLog(@"tree server: could not listen on %u", kTreePort);
         return;
     }
-    SGLog(@"tree server on 127.0.0.1:%u; on the Mac: iproxy %u:%u, then GET http://127.0.0.1:%u/tree%@", kTreePort, kTreePort, kTreePort, kTreePort,
-          SG_DRIVER ? @", or drive the app with scripts/phone.py" : @"");
-#if SG_DRIVER
+    SGLog(@"tree server on 127.0.0.1:%u; on the Mac: iproxy %u:%u, then GET http://127.0.0.1:%u/tree, or drive the app with scripts/phone.py", kTreePort, kTreePort, kTreePort, kTreePort);
     watchTailnet();
-#endif
 }
 
 %hook _TtC21NowPlaying_ScrollImpl23NPVScrollViewController
@@ -323,3 +318,6 @@ static void startTreeServer(void) {
         SGLog(@"debug build: backgrounding the app dumps the visible screen's view tree");
     }
 }
+#else
+BOOL SGIsDebugBuild(void) { return NO; }
+#endif

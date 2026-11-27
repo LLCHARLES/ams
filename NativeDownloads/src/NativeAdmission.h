@@ -12,6 +12,7 @@ bool SAPImageIsHostExecutable(const struct mach_header *header,const char *path,
 // Exactly the main header admitted when it loaded (by name, file and UUID), not
 // any other image or an address inside it; revoked when that image unloads.
 bool SAPIsAdmittedMainImage(const struct mach_header *header);
+void SAPObserveProfileImages(void);
 #ifdef SAP_TESTING
 void SAPTestAdmitMainImage(const struct mach_header *header);
 void SAPTestRemoveImage(const struct mach_header *header);
@@ -20,4 +21,4 @@ void SAPTestRemoveImage(const struct mach_header *header);
 // A loaded-library entry point is not proof that its host was admitted.
 // Lock-free image snapshot published by dyld callbacks; bundle metadata is
 // immutable. Rejections are never latched, and image removal revokes admission.
-bool SAPRuntimeProfileAdmitted(void);
+__attribute__((visibility("default"))) bool SAPRuntimeProfileAdmitted(void);

@@ -14,14 +14,16 @@ NSString *SGFileSHA256(NSURL *url) {
     if (!handle) return nil;
     CC_SHA256_CTX context;
     CC_SHA256_Init(&context);
+    NSError *error = nil;
     for (;;) {
         @autoreleasepool {
-            NSData *chunk = [handle readDataUpToLength:1 << 20 error:nil];
-            if (!chunk.length) break;
+            NSData *chunk = [handle readDataUpToLength:1 << 20 error:&error];
+            if (error || !chunk.length) break;
             CC_SHA256_Update(&context, chunk.bytes, (CC_LONG)chunk.length);
         }
     }
     [handle closeFile];
+    if (error) return nil;
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256_Final(digest, &context);
     NSMutableString *hex = [NSMutableString stringWithCapacity:2 * CC_SHA256_DIGEST_LENGTH];

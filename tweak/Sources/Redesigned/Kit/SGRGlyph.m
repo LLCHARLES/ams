@@ -104,6 +104,14 @@ static const CGFloat kMinTouch = 44, kPressAlpha = 0.5, kPressScale = 0.9, kDisa
 - (void)setHighlighted:(BOOL)highlighted {
     [super setHighlighted:highlighted];
     SGRGlyphView *glyph = _glyph;
+    if (self.pressedAlpha > 0) {
+        CGFloat alpha = highlighted ? self.pressedAlpha : 1;
+        [glyph.layer removeAnimationForKey:@"opacity"];
+        glyph.alpha = alpha;
+        if (!CGAffineTransformIsIdentity(glyph.transform)) glyph.transform = CGAffineTransformIdentity;
+        if (self.onPress) self.onPress(highlighted);
+        return;
+    }
     SGRAnimate(SGRMotionPress, ^{
         glyph.alpha = highlighted ? kPressAlpha : 1;
         glyph.transform = highlighted ? CGAffineTransformMakeScale(kPressScale, kPressScale) : CGAffineTransformIdentity;

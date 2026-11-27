@@ -7,7 +7,8 @@
 //     xcrun simctl launch <udid> com.retrine.modsettingsharness [setup...] [action...]
 //
 // Setup: redesign (Redesigned UI stored on), warning (a red environment row at the top), keep (the stored
-// look stays; otherwise it is cleared first).
+// look stays; otherwise it is cleared first), system (the window in the system's appearance under a dark
+// navigation stack, as Spotify's is; light-check.sh).
 // Actions: toggle=<section>.<row> (that row's switch flipped the way a tap does), cancel (the alert that
 // switch brings up closed with Later), bottom (scrolled to the end), dump (the rows of each section and
 // what each reads beside its chevron, to the log), gated (a page of a switch, ten rows, a headed and noted
@@ -15,7 +16,9 @@
 // let come; the page's ticker brings it), top (scrolled to the start), layout (the scroll offset, and each
 // section's rows and heading and note heights, to the log), needs (the Lock screen artwork section below iOS
 // 26), tap=<section>.<row> (that row selected, and the alert it brings up logged), rows (the row the mod adds to
-// Spotify's settings list and drawer, after each list is emptied of its subviews, counted to the log).
+// Spotify's settings list and drawer, after each list is emptied of its subviews, counted to the log), alerts (a
+// page of SGModPage's alerts) with info, lock and toggle=0.1 bringing each up, information (SGPresentInformation
+// over the page), look (the controller on top, its appearance and its presentation's, and its frame, to the log).
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "Core/SGCore.h"
@@ -25,7 +28,10 @@
 #import <CoreText/SFNTLayoutTypes.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/Flags/Flags.h"
+#import "Shared/Gestures/Gestures.h"
 #import "App/About/About.h"
+#import "App/Pages.h"
+#import "Shared/LocalFiles/LocalAudioImport.h"
 #import "../harness-fail.h"
 
 // Spotify's page protocol, so SGRegisterPages finds one and the page is pushed as on the phone.
@@ -38,6 +44,15 @@
 
 // A page of the search's own: rows whose titles stand in for real settings, and one row that opens a page under it.
 // The real SGSettingsResults and the real UISearchController are what the checks drive.
+@interface SGSearchFixturePage : SGModPage
+@property(nonatomic,strong) UINavigationController *fallback;
+@end
+@implementation SGSearchFixturePage
+- (void)presentViewController:(UIViewController *)page animated:(BOOL)animated completion:(void (^)(void))completion {
+    if ([page isKindOfClass:UINavigationController.class]) self.fallback=(id)page;
+    else [super presentViewController:page animated:animated completion:completion];
+}
+@end
 static SGModPage *searchHarnessPage(void) {
     SGModRow *plain = SGModRow.new;
     plain.title = @"Plain row";
@@ -47,9 +62,12 @@ static SGModPage *searchHarnessPage(void) {
     under.key = @"spotifyglass.harness.search.second";
     SGModRow *page = SGPageRow(@"Live Activity", ^UIViewController *{ return nil; });
     page.searchIdentifier = @"page.liveactivity";
-    return [[SGModPage alloc] initWithTitle:@"Search" intro:nil sections:@[
+    SGModRow *foreign = SGPageRow(@"Pixie Download Manager", ^UIViewController *{
+        UIViewController *result=[UIViewController new];result.title=@"Unregistered page";return result;
+    });
+    return [[SGSearchFixturePage alloc] initWithTitle:@"Search" intro:nil sections:@[
         SGSection(nil, @[plain]),
-        SGSection(nil, @[page]),
+        SGSection(nil, @[page,foreign]),
     ] footer:nil];
 }
 
@@ -65,8 +83,9 @@ static NSUInteger searchControllerChecks(void) {
     };
     // Two places to show on the empty field, stored the way the results would store them.
     SGSearchForgetRecents();
-    SGSearchRememberPlace(@[@"page.liveactivity"]);
-    SGSearchRememberPlace(@[@"spotifyglass.harness.search.plain"]);
+    SGSettingsIndex *history = [SGSettingsIndex new];
+    [history rememberPlace:@[@"page.liveactivity"]];
+    [history rememberPlace:@[@"spotifyglass.harness.search.plain"]];
 
     SGModPage *page = searchHarnessPage();
     page.searchable = YES;
@@ -112,6 +131,15 @@ static NSUInteger searchControllerChecks(void) {
     search.showsSearchResultsController = YES;
     check([table.dataSource tableView:table numberOfRowsInSection:0] == 2, @"up again, the recents are shown once more");
 
+    search.searchBar.text=@"Pixie Download Manager";
+    [updater updateSearchResultsForSearchController:search];
+    if ([table.dataSource tableView:table numberOfRowsInSection:1]==1) {
+        [table.delegate tableView:table didSelectRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:1]];
+        [search.delegate didDismissSearchController:search];
+        check(nav.topViewController==page && [((SGSearchFixturePage *)page).fallback.topViewController.title isEqual:@"Unregistered page"],
+              @"nonconforming search destination is presented outside the host stack");
+    }else check(NO,@"Pixie row is indexed");
+
     SGSearchForgetRecents();
     window.hidden = YES;
     fprintf(stderr, "[harness] search controller checks: %lu failure(s)\n", (unsigned long)failures);
@@ -139,6 +167,12 @@ static NSUInteger searchPlacesChecks(void) {
     SGModPage *page = (SGModPage *)nav.topViewController;
     [page loadViewIfNeeded];
     SGSettingsIndex *index = [SGSettingsIndex new];
+    NSArray *headings = @[SGL(@"settings.main.look.header", @"Look & navigation"), SGL(@"settings.main.screens.header", @"Screens"),
+        SGL(@"settings.main.audio.header", @"Audio & playback"), SGL(@"settings.main.outside.header", @"Outside Spotify & devices"),
+        SGL(@"settings.main.privacy.header", @"Privacy, network & downloads"), SGL(@"settings.main.advanced.header", @"Advanced & about")];
+    NSMutableArray *namedSections = [NSMutableArray array];
+    for (SGModSection *section in page.sections) if (section.title.length) [namedSections addObject:section.title];
+    check([namedSections isEqual:headings], @"six root headings in navigation order");
     // Search the visible language, but keep the stored place independent of it. Reindex the same open
     // page after a look switch, as live search does when settings change.
     BOOL savedLook = SGRedesignedUIStored();
@@ -155,8 +189,46 @@ static NSUInteger searchPlacesChecks(void) {
         check(!titled, @"no place is a row's title");
         NSArray *place = look.boolValue ? @[@"page.appearance.redesigned"] : @[@"page.appearance.native"];
         check([hits.firstObject.place isEqualToArray:place], @"the Appearance row's place names the stored look");
+        NSArray *libraryPlace = look.boolValue ? @[@"page.search.redesigned", @"spotifyglass.redesign.library.hideChips"]
+                                               : @[@"page.search.native", @"spotifyglass.adblock.searchVideos"];
+        NSString *libraryQuery = look.boolValue ? SGL(@"settings.library.compact.title", @"Compact library")
+                                                : SGL(@"settings.privacy.hide_search_carousel.title", @"Hide the video carousel in Search");
+        check([[index hitsForQuery:libraryQuery].firstObject.place isEqual:libraryPlace], @"Search & Library indexes the selected look's settings");
+        SGSearchForgetRecents();
+        // Seed as the previous release wrote them, without the current root's redirects.
+        SGSettingsIndex *legacy = [SGSettingsIndex new];
+        [legacy rememberPlace:look.boolValue ? @[@"page.library.redesigned", @"spotifyglass.redesign.library.hideChips"]
+                                             : @[@"page.ads", @"spotifyglass.adblock.searchVideos"]];
+        check([index.recentHits.firstObject.place isEqual:libraryPlace], @"a saved Library or carousel result now leads to its new page");
+        [legacy rememberPlace:@[look.boolValue ? @"page.player.native" : @"page.player.redesigned", @"page.player.localfiles"]];
+        check([index.recentHits.firstObject.place isEqual:@[@"page.playback", @"page.player.localfiles"]], @"the other look's old Player recent opens Local files in Playback");
+        [legacy rememberPlace:@[look.boolValue ? @"page.lyrics.native" : @"page.lyrics.redesigned", @"page.lyrics.sing"]];
+        check([index.recentHits.firstObject.place isEqual:@[@"page.sing"]], @"the other look's old Karaoke recent opens the shared destination");
+        [legacy rememberPlace:@[@"page.mod", SGKeyShowCacheLimit]];
+        check([index.recentHits.firstObject.place isEqual:@[@"page.mod", @"page.mod.storage", SGKeyShowCacheLimit]], @"the old cache setting resolves inside Mod Storage");
+        NSArray *translation = @[look.boolValue ? @"page.lyrics.redesigned" : @"page.lyrics.native", @"page.lyrics.translation", @"spotifyglass.lyrics.translationPrompt"];
+        [legacy rememberPlace:@[@"page.lyrics.redesigned", translation[1], @"page.lyrics.gemini", translation[2]]];
+        check([index.recentHits.firstObject.place isEqual:translation], @"both looks resolve the shared translation prompt");
     }
+    SGSearchForgetRecents();
     SGSetEnabled(SGKeyRedesign, savedLook);
+    // One real import and one stale record. Read the parent first: visiting Imported files prunes stale records.
+    NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
+    NSURL *input = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString]];
+    HARNESS_CHECK([NSData.data writeToURL:input atomically:YES]);
+    NSArray *failed;
+    NSString *copied = SGLocalAudioImport(@[input], SGLocalAudioFolder(), store, &failed).firstObject;
+    HARNESS_CHECK(copied && !failed.count);
+    NSArray *records = [store arrayForKey:SGKeyLocalAudioImported];
+    [store setObject:[records arrayByAddingObject:@{@"name":@"missing.mp3", @"inode":@0}] forKey:SGKeyLocalAudioImported];
+    SGModPage *playback = (id)SGPlaybackSettingsPage();
+    SGModRow *local = nil;
+    for (SGModSection *group in playback.sections) for (SGModRow *row in group.rows)
+        if ([row.searchIdentifier isEqual:@"page.player.localfiles"]) local = row;
+    check(local.value && [local.value() isEqual:@"1"], @"Local files summary counts existing imports, not stale records");
+    HARNESS_CHECK(SGLocalAudioDelete(copied, SGLocalAudioFolder(), store));
+    [store removeObjectForKey:SGKeyLocalAudioImported];
+    HARNESS_CHECK([NSFileManager.defaultManager removeItemAtURL:input error:nil]);
     window.hidden = YES;
     fprintf(stderr, "[harness] search places checks: %lu failure(s)\n", (unsigned long)failures);
     return failures;
@@ -218,24 +290,41 @@ BOOL SGHarnessWarning;
 @end
 
 static void refactorChecks(void) {
+    UITableViewController *gestures = (id)SGGesturesSettingsPage();
+    UITableView *gestureTable = gestures.tableView;
+    NSIndexPath *split = [NSIndexPath indexPathForRow:0 inSection:1];
+    NSIndexPath *hold = [NSIndexPath indexPathForRow:0 inSection:3];
+    for (NSNumber *enabled in @[@NO, @YES]) {
+        SGSetEnabled(SGKeyGestures, enabled.boolValue);
+        SGSetInt(SGKeyGestureSplit, 1);
+        UITableViewCell *choice = [gestures tableView:gestureTable cellForRowAtIndexPath:split];
+        HARNESS_CHECK(choice.userInteractionEnabled == enabled.boolValue);
+        HARNESS_CHECK([gestures tableView:gestureTable cellForRowAtIndexPath:hold].userInteractionEnabled);
+        [gestures tableView:gestureTable didSelectRowAtIndexPath:split];
+        HARNESS_CHECK(SGGestureSplit() == (enabled.boolValue ? 0 : 1));
+    }
     // The Mod page keeps its action's symbol when row decoration is shared with Settings.
     SGModPage *about = (SGModPage *)SGAboutPage();
-    SGModRow *reset = nil;
+    SGModRow *reset = nil, *storageLink = nil;
     for (SGModSection *section in about.sections) {
         for (SGModRow *row in section.rows) {
-            if ([row.title isEqualToString:@"Reset all settings"]) reset = row;
+            if ([row.title isEqualToString:SGL(@"settings.mod.reset.title", @"Reset all settings")]) reset = row;
+            if ([row.searchIdentifier isEqualToString:@"page.mod.storage"]) storageLink = row;
         }
     }
     HARNESS_CHECK([reset.symbol isEqualToString:@"trash"]);
 
     extern NSURL *SGHarnessStorageURI;
-    NSUInteger storage = [about.sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
+    HARNESS_CHECK(storageLink.page);
+    SGModPage *hub = (id)storageLink.page();
+    HARNESS_CHECK([hub.sections.lastObject.title isEqualToString:@"Retrine"] && hub.sections.lastObject.rows.count == 4);
+    NSUInteger storage = [hub.sections indexOfObjectPassingTest:^BOOL(SGModSection *section, NSUInteger idx, BOOL *stop) {
         return [section.rows.firstObject.key isEqualToString:SGKeyShowCacheLimit];
     }];
     HARNESS_CHECK(storage != NSNotFound);
-    SGModSection *group = about.sections[storage];
+    SGModSection *group = hub.sections[storage];
     HARNESS_CHECK(group.rows.count == 2 && group.rows.firstObject.defaultOn && group.footer.length);
-    UITableView *table = about.tableView;
+    UITableView *table = hub.tableView;
     table.frame = CGRectMake(0, 0, 375, 667);
     NSIndexPath *firstRow = [NSIndexPath indexPathForRow:0 inSection:storage];
     NSIndexPath *action = [NSIndexPath indexPathForRow:1 inSection:storage];
@@ -306,6 +395,25 @@ static UIViewController *gatedPage(void) {
         SGNotedSection(@"Gated", gated, @"A note under the gated rows, which goes with them."),
         SGSection(@"Later", @[later]),
     ] footer:nil];
+}
+
+// The `alerts` page, for the alerts SGModPage itself brings up: a switch with an ⓘ (`info`) and a switch whose
+// warning comes up as it is turned on (`toggle=0.1`); `lock` asks the page why a locked row will not move.
+@interface SGModPage (HarnessAlerts)
+- (void)explainLock;
+@end
+
+static UIViewController *alertsPage(void) {
+    SGModRow *info = SGOptionRow(@"With an info button", nil, @"spotifyglass.harness.alerts.info");
+    info.info = @"What the row does, read out under its title.";
+    SGModRow *warned = SGOptionRow(@"Unstable", nil, @"spotifyglass.harness.alerts.warned");
+    warned.warning = @"This one can misbehave.";
+    SGSetEnabled(warned.key, NO);
+    return [[SGModPage alloc] initWithTitle:@"Alerts" intro:nil sections:@[SGSection(nil, @[info, warned])] footer:nil];
+}
+
+static NSString *styleName(UIUserInterfaceStyle style) {
+    return style == UIUserInterfaceStyleDark ? @"dark" : style == UIUserInterfaceStyleLight ? @"light" : @"unspecified";
 }
 
 @interface SGInformationPresenter : UIViewController
@@ -412,14 +520,17 @@ static void pageStyleChecks(void) {
     for (NSString *arg in [args subarrayWithRange:NSMakeRange(1, args.count - 1)]) {
         if ([arg isEqualToString:@"redesign"]) SGSetEnabled(SGKeyRedesign, YES);
         else if ([arg isEqualToString:@"warning"]) SGHarnessWarning = YES;
-        else if (![arg isEqualToString:@"keep"]) [actions addObject:arg];
+        else if (![arg isEqualToString:@"keep"] && ![arg isEqualToString:@"system"]) [actions addObject:arg];
     }
 
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     UIViewController *home = [UIViewController new];
     home.view.backgroundColor = UIColor.blackColor;
     self.nav = [[UINavigationController alloc] initWithRootViewController:home];
+    // `system`: the window takes the system's appearance and only the navigation stack is dark, as in Spotify, whose
+    // Info.plist sets no style (light-check.sh drops the harness's).
+    if ([args containsObject:@"system"]) self.nav.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+    else self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
     self.window.rootViewController = self.nav;
     [self.window makeKeyAndVisible];
     if ([args containsObject:@"information-check"]) {
@@ -479,6 +590,23 @@ static void pageStyleChecks(void) {
         [table setContentOffset:CGPointMake(0, MAX(-table.adjustedContentInset.top, table.contentSize.height - table.bounds.size.height + table.adjustedContentInset.bottom)) animated:NO];
     } else if ([verb isEqualToString:@"gated"]) {
         [self.nav pushViewController:gatedPage() animated:NO];
+    } else if ([verb isEqualToString:@"alerts"]) {
+        [self.nav pushViewController:alertsPage() animated:NO];
+    } else if ([verb isEqualToString:@"info"]) {
+        // The ⓘ beside the first row's switch, tapped.
+        NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
+        findViews([table cellForRowAtIndexPath:[NSIndexPath indexPathForRow:0 inSection:0]].accessoryView, UIButton.class, buttons);
+        [buttons.firstObject sendActionsForControlEvents:UIControlEventTouchUpInside];
+    } else if ([verb isEqualToString:@"lock"]) {
+        [(SGModPage *)self.nav.topViewController explainLock];
+    } else if ([verb isEqualToString:@"information"]) {
+        SGPresentInformation(self.nav.topViewController, @"Information", @"An alert the mod presents through SGPresentDark.");
+    } else if ([verb isEqualToString:@"look"]) {
+        UIViewController *shown = self.window.rootViewController;
+        while (shown.presentedViewController) shown = shown.presentedViewController;
+        NSLog(@"[harness] look %@ controller %@ presentation %@ frame %@ window %.0f", NSStringFromClass(shown.class),
+              styleName(shown.traitCollection.userInterfaceStyle), styleName(shown.presentationController.traitCollection.userInterfaceStyle),
+              NSStringFromCGRect([shown.view convertRect:shown.view.bounds toView:nil]), self.window.bounds.size.width);
     } else if ([verb isEqualToString:@"rows"]) {
         // The row ModSettings.x adds to Spotify's settings list and to the side drawer's list, each emptied of its
         // subviews afterward as Spotify can do, then laid out again.

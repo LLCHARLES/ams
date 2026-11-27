@@ -147,8 +147,16 @@ static void googleHolds(void) {
 #include "round-one-check.inc"
 #include "model-budget-check.inc"
 #include "reader-check.inc"
+#include "timed-idle-check.inc"
 
 void SGHarnessRunTranslationCheck(UIWindow *window) {
+    if (getenv("SG_LYRICS_TIMED_IDLE_ONLY")) {
+        [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) {
+            timedIdleChecks(window);
+            exit(sg_failed);
+        }];
+        return;
+    }
     modelBudgetChecks();
     if (getenv("SG_LYRICS_MODEL_BUDGET_ONLY")) {
         exit(sg_failed ? 1 : 0);
@@ -353,6 +361,7 @@ void SGHarnessRunTranslationCheck(UIWindow *window) {
 #endif
         roundOneChecks(window);
         readerChecks(window);
+        timedIdleChecks(window);
         printf("%d failed\n", sg_failed);
         fflush(stdout);
         exit(sg_failed);

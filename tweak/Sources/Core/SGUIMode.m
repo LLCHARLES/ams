@@ -33,6 +33,8 @@ static BOOL startsUntested(void) {
         return NO;
     }
     [store setBool:YES forKey:kStarting];
+    // The watchdog can kill this opt-in launch before an asynchronous defaults flush.
+    if (![store synchronize]) SGLog(@"ui: could not persist the untested launch marker");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kStarted * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         [store removeObjectForKey:kStarting];
     });

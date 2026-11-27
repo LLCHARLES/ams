@@ -17,9 +17,6 @@ static NSString *const adFlags[] = {
     @"ios-feature-adsbase.enable_ads_connect_state_observer",
     @"ios-feature-adsbase.enable_minimal_preroll_management",
     @"ios-feature-adsnowplayingui.embedded_npv_video_show_with_canvas",
-    @"ios-feature-adssponsoredcontext.sponsored_playlist_v2_enabled",
-    @"ios-feature-adssponsoredcontext.sponsored_context_mismatch_aderror_enabled",
-    @"ios-feature-adssponsoredcontextnpbattachment.sponsored_npb_slot_fetch_enabled",
     @"ios-feature-nowplaying.keep_fullscreen_during_video_ads",   // 9.1.94's
 };
 
@@ -32,7 +29,6 @@ static NSString *const upsellFlags[] = {
     @"ios-jam-freeuserskipupsellpage-impl.free_user_skip_upsell_sheet_enabled",
     @"ios-jam-freehostedjamsupsell-impl.free_hosted_jams_upsell_enabled",
     @"ios-reinventfree-contextualupsellpremiumpromo-impl.is_promo_cta_enabled",
-    @"ios-reinventfree-contextualupsellpremiumpromo-impl.show_time_cap_upsell_with_premium_badge",
     @"ios-reinventfree-controllerui-impl.enable_video_time_cap_upsell",
     @"ios-reinventfree-controllerui-impl.enable_video_time_cap_upsell_on_search",
     @"ios-reinventfree-timecappivot-impl.music_video_upsell_enabled",
@@ -181,10 +177,10 @@ NSUInteger SGAdBlockChecked(NSString *label) {
 
 // Spotify leaving the screen writes what was counted since the last write.
 __attribute__((constructor)) static void saveChecksOnLeaving(void) {
-    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil
-                                                usingBlock:^(NSNotification *note) {
-        [counter() flush];
-    }];
+    for (NSNotificationName name in @[UIApplicationWillResignActiveNotification, UIApplicationWillTerminateNotification])
+        [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil usingBlock:^(NSNotification *note) {
+            [counter() flush];
+        }];
 }
 
 NSArray<NSString *> *SGAdBlockLabels(void) {

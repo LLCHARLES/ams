@@ -37,10 +37,36 @@ static NSDictionary *readFile(NSData *data, NSString **name, NSString **error) {
     return SGDSPReadPresetFile(data, @"From file", name, error);
 }
 
+static void checkTextImports(void) {
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSURL *dir = [fm.temporaryDirectory URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    check([fm createDirectoryAtURL:dir withIntermediateDirectories:NO attributes:nil error:nil], @"create import fixtures");
+    for (NSNumber *number in @[@(SGDSPFileLiveprog), @(SGDSPFileDDC)]) {
+        SGDSPFileKind kind = number.integerValue;
+        NSString *ext = SGDSPFileExtensions(kind).firstObject;
+        NSURL *file = [dir URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingPathExtension:ext]];
+        NSURL *link = [dir URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingPathExtension:ext]];
+        NSMutableData *data = [NSMutableData dataWithLength:1 << 20];
+        const char *marker = kind == SGDSPFileLiveprog ? "@sample\n" : "SR_44100\nSR_48000\n";
+        memcpy(data.mutableBytes, marker, strlen(marker));
+        check([data writeToURL:file atomically:YES], @"write boundary file");
+        check(SGDSPImportFile(kind, file, nil) != nil, @"1 MiB text file imports");
+        check([fm createSymbolicLinkAtURL:link withDestinationURL:file error:nil], @"create import link");
+        check(SGDSPImportFile(kind, link, nil) == nil, @"text import refuses a symlink");
+        [data appendBytes:" " length:1];
+        check([data writeToURL:file atomically:YES], @"grow boundary file");
+        check(SGDSPImportFile(kind, file, nil) == nil, @"oversized text file cannot replace an import");
+        SGDSPDeleteFile(kind, file.lastPathComponent);
+        SGDSPDeleteFile(kind, link.lastPathComponent);
+    }
+    [fm removeItemAtURL:dir error:nil];
+}
+
 int main(void) {
     @autoreleasepool {
         clearDefaults();
 
+        checkTextImports();
         check(SGDSPFileKey((SGDSPFileKind)-1) == nil, @"invalid file kind has no selection key");
         check([SGDSPPresetMissingFiles(@{
             SGKeyDSPConvolverFile: @"refactor-missing-ir.wav",

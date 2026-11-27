@@ -94,7 +94,10 @@ int main(void) {
                 if (!backdropMatches(palette.backdrop)) fails++;
                 done++;
             }];
-        while (done < 3) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:45];
+        while (done < 3 && limit.timeIntervalSinceNow > 0)
+            [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+        if (done != 3) { fprintf(stderr, "FAIL: received %d of 3 palette completions\n", done); return 1; }
         printf(fails ? "FAIL\n" : "PASS\n");
         return fails;
     }

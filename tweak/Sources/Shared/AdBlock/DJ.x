@@ -6,6 +6,7 @@
 #import "AdBlock.h"
 
 @interface SPTEncorePopUpPresenter : NSObject
++ (instancetype)shared;
 - (void)dismissPopupWithAnimate:(BOOL)animate clearQueue:(BOOL)clearQueue completion:(id)completion;
 @end
 
@@ -54,8 +55,11 @@ static NSSet<NSString *> *regionTitles(void) {
     static char kTitleKey;
     NSString *title = ((UILabel *)SGFindIdentifier(container.view, @"PopUp.Dialog.Title-internal", &kTitleKey)).text;
     if (!title || ![regionTitles() containsObject:title]) return;
+    Class cls = %c(SPTEncorePopUpPresenter);
+    if (![cls respondsToSelector:@selector(shared)]) return;
+    id presenter = [cls shared];
+    if (![presenter respondsToSelector:@selector(dismissPopupWithAnimate:clearQueue:completion:)]) return;
     container.view.window.hidden = YES;
-    id presenter = [(id)%c(SPTEncorePopUpPresenter) valueForKey:@"shared"];
     [presenter dismissPopupWithAnimate:NO clearQueue:NO completion:nil];
     SGLog(@"DJ: closed \"%@\"", title);
 }

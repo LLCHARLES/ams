@@ -1,17 +1,34 @@
 // SGLosslessEngine.m's capture against a recording that changes under it: a render call that saw the last
 // recording armed must not carry its fill into a shorter one, nor write past the buffer. The engine file is
 // included whole so its static capture state can be set up exactly; run under AddressSanitizer by capture-race.sh.
+#ifndef ONLY_GUARD
+static void interleaveSkip(void);
+#define SG_RING_READ_INTERLEAVE interleaveSkip
+#endif
 #import "../../tweak/Sources/Shared/Lossless/SGLosslessEngine.m"
 #import <pthread.h>
 
 void SGPlayerSetSourceSelector(SGPlayerSourceSelector selector) {}
-uint64_t SGPlayerSourceEpoch(void) { return 1; }
+static _Atomic uint64_t sourceEpoch = 1;
+uint64_t SGPlayerSourceEpoch(void) { return atomic_load(&sourceEpoch); }
 
 static int failures;
 #define CHECK(ok, ...) do { BOOL _ok = (ok); printf("%s ", _ok ? "  ok  " : "  FAIL"); printf(__VA_ARGS__); printf("\n"); if (!_ok) failures++; } while (0)
 
 static AudioUnit const kUnit = (AudioUnit)0x1;
 static float left[512], right[512];
+
+#ifndef ONLY_GUARD
+static NSString *skipPath;
+static void interleaveSkip(void) {
+    if (!skipPath) return;
+    // Run the actual writer between the two bound loads. The read is near EOF,
+    // so the seek succeeds and fill returns without waiting for ring space.
+    atomic_store(&sg_writers, 1);
+    fill(skipPath, 44100, 0, 0, 1, malloc(kChunk * sizeof(float)), malloc(kChunk * sizeof(float)));
+    skipPath = nil;
+}
+#endif
 
 static void renderOnce(double sourceFrame) {
     struct { AudioBufferList list; AudioBuffer second; } buffers = {{2, {{1, sizeof left, left}}}, {1, sizeof right, right}};
@@ -24,7 +41,7 @@ static void *recordOneSecond(void *ok) {
     return NULL;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     @autoreleasepool {
         // A render call left a fill from a 4 s recording behind a 1 s one: the next call must not write on.
         uint32_t length = 44100;
@@ -62,6 +79,56 @@ int main(void) {
         pthread_join(thread, NULL);
         CHECK(recorded && atomic_load(&sg_capFill) == atomic_load(&sg_capLength),
               "then records the whole second (%u of %u frames)", atomic_load(&sg_capFill), atomic_load(&sg_capLength));
+
+        NSString *path = @(argv[1]);
+        releaseCapture();
+        sg_ring = calloc(2, sizeof *sg_ring);
+        NSString *error;
+        if (!load(path, 44100, &error)) { NSLog(@"fixture: %@", error); return 1; }
+        uint64_t gap = sg_reader.frames - 44100 / 2;
+        skipPath = path;
+        bool replacedGap = ringRead(gap, 512, left, right);
+        CHECK(!replacedGap && atomic_load(&sg_ringStart) > gap && atomic_load(&sg_ringEnd) > sg_ringStart,
+              "a writer skip between the bound loads leaves the gap dry");
+        atomic_store(&sg_readAt, 0);
+        atomic_store(&sg_ringStart, 0);
+        atomic_store(&sg_ringEnd, 0);
+        atomic_store(&sg_writers, 1);
+        NSThread *writer = [[NSThread alloc] initWithBlock:^{
+            fill(path, 44100, 0, 0, 1, malloc(kChunk * sizeof(float)), malloc(kChunk * sizeof(float)));
+        }];
+        [writer start];
+        for (int i = 0; i < 200 && atomic_load(&sg_ringEnd) + 2*kChunk <= kRing; ++i) usleep(5000);
+        CHECK(atomic_load(&sg_ringEnd) + 2*kChunk > kRing && atomic_load(&sg_writers), "writer is blocked on a full ring before EOF");
+        // A warning can discard the search copy, but not the live replacement's samples.
+        uint64_t bufferedEnd = atomic_load(&sg_ringEnd);
+        float unity = 1;
+        uint32_t bits;
+        memcpy(&bits, &unity, sizeof bits);
+        atomic_store(&sg_gainBits, bits);
+        sg_playEpoch = 1; sg_playUnit = kUnit; sg_playRate = 44100;
+        atomic_store(&sg_anchorEpoch, 1);
+        atomic_store(&sg_live, true);
+        (void)queue();
+        [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidReceiveMemoryWarningNotification object:nil];
+        dispatch_sync(queue(), ^{});
+        // Free two chunks of space; require a block past the old end, not a
+        // successful read from already-buffered audio after a stopped writer.
+        renderOnce(2 * kChunk);
+        uint64_t next = bufferedEnd + kChunk;
+        for (int i = 0; i < 200 && atomic_load(&sg_ringEnd) < next + 512; ++i) usleep(5000);
+        memset(left, 0, sizeof left);
+        memset(right, 0, sizeof right);
+        uint64_t before = atomic_load(&sg_replaced);
+        renderOnce(next);
+        BOOL matches = YES;
+        for (int i = 0; i < 512; ++i) matches &= left[i] == 0.25f && right[i] == -0.25f;
+        CHECK(!sg_coarse && matches && atomic_load(&sg_replaced) == before + 512,
+              "memory warning releases search memory and newly decoded stereo samples still replace playback");
+        atomic_fetch_add(&sourceEpoch, 1); // pause, without stopPlaying() changing generation
+        for (int i = 0; i < 200 && atomic_load(&sg_writers); ++i) usleep(5000);
+        CHECK(!atomic_load(&sg_writers), "epoch change alone releases the full-ring writer");
+        stopPlaying();
 #endif
         printf("\n%s: %d failed\n", failures ? "FAILED" : "all passed", failures);
         return failures ? 1 : 0;
