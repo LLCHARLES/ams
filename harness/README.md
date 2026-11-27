@@ -29,28 +29,36 @@ first matching name or directory. The shortcut requires the running registry to 
 the head literal, so entries derived or modified after it cannot be missed.
 A harness with no tweak
 dependency is always selected, with a warning. The selected harnesses are
-packed into at most three shards by greedy weight and run as
+packed into at most five shards by greedy weight and run as
 `Harnesses <shard>` jobs with a 45-minute timeout. Each shard containing a Theos harness uses
 the setup-Theos action; its caches contain build tools/output, never
 credentials or test data.
 
-The cap reduces macOS runner demand without changing the weighting. The successful
-full scheduled run [43850580004](https://github.com/oneulddu/retrine/actions/runs/43850580004)
-(2026-11-16, `297145c6`) reported 78 harness durations totaling 3,601.7 seconds.
-Repacking those measurements with the current three-shard plan gives 820.7,
-1,209.4 and 1,571.6 seconds. Per-job setup/cleanup overhead was 42–71 seconds,
-including 35–61 seconds for Theos. The largest projection plus the worst overhead
-is 27m23s, leaving 17m37s within the unchanged 45-minute timeout for variability
-and newer checks (SponsorBlock was not present in that measured run).
-These are projections, not a measured three-shard run.
+When a harness exits nonzero, the runner summarizes new `.ips` files in the
+user's `Library/Logs/DiagnosticReports`: process, exception, termination, and the
+first 15 frames of the crashed thread. A signal exit (including shell status
+above 128) or failed simulator harness waits up to 10 seconds for ReportCrash,
+stopping after two quiet seconds once a report is printed. Other failures scan
+once without waiting. Reports are selected by creation time, not proof of
+causation. No reports are uploaded or removed.
 
-`.github/workflows/runner-starvation-retry.yml` inspects completed Mac harnesses
-and WireGuard checks runs of pull requests. It retries failed jobs once, only on attempt 1
-of a failed/cancelled run when **every** non-successful job has no steps and a
-check-run annotation containing `was not acquired by Runner`. Real failures,
-mixed failures, missing annotations and later attempts are logged without retry.
-The privileged workflow runs only its own inline code, with no checkout or
-execution of code/artifacts from the triggering run.
+On PRs, odd attempts use `macos-latest` and even attempts use `macos-26-intel`.
+Host, Catalyst and simulator harnesses build for the runner's architecture;
+iPhone device libraries still target arm64. On same-repo PRs the Ubuntu watchdog
+watches for up to 20 minutes and cancels only if **all planned Mac jobs** have
+been queued for at least 90 seconds. Linux jobs aren't watched. Forks and
+Dependabot PRs wait for GitHub's natural starvation failure.
+
+`.github/workflows/runner-starvation-retry.yml` retries the **whole PR run**,
+at most once: if `macos-latest` starves, the second and final attempt uses
+`macos-26-intel` without a watchdog. A retry requires either GitHub's
+`was not acquired by Runner` annotation on at least one workload with no
+steps (other unsuccessful jobs must also be unacquired or have been cancelled),
+or a successful or cancelled watchdog's warning naming the exact cancelled
+Mac jobs, all without runners or steps and with other workloads successful. It
+does not retry a job failure with steps, a timeout, a superseded run or a SHA no longer at the PR head. The
+last attempt waits in the queue normally. The privileged retry workflow runs
+default-branch inline code only; it doesn't check out PR code or read artifacts.
 
 Locally, the same script explains and runs selections from the repo root:
 

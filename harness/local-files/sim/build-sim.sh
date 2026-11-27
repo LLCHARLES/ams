@@ -5,7 +5,7 @@
 # text size and sets the size back after.
 #
 #     THEOS=$HOME/theos ./build-sim.sh [<udid> [large]]
-set -e
+set -eo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=$(cd "$HERE/../../../tweak/Sources" && pwd)
 OUT=${OUT:-"$HERE/../build/sim"}   # harness/*/build/ is ignored
@@ -13,7 +13,7 @@ LOCAL=${LOCAL:-"$SRC/Shared/LocalFiles"}
 rm -rf "$OUT/gen" "$OUT/EditInfoHarness.app"; mkdir -p "$OUT/gen" "$OUT/EditInfoHarness.app" "$OUT/shots"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$LOCAL/EditInfoMenu.x" > "$OUT/gen/EditInfoMenu.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -Wall \
     -I"$SRC" -I"$SRC/Shared/LocalFiles" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/../../scene.m" "$OUT/gen/EditInfoMenu.m" "$LOCAL/LocalFiles.m" "$LOCAL/LocalInfoLookup.m" "$LOCAL/LocalInfoReview.m" "$SRC/Core/SGLog.m" "$SRC/Core/SGGlass.m" "$SRC/Core/SGViewTree.m" \
     "$SRC/Settings/SGPageStyle.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGUIMode.m" "$SRC/Core/SGLocalize.m" \
@@ -45,10 +45,21 @@ echo "built $OUT/EditInfoHarness.app"
 [ -n "$1" ] || exit 0
 UDID=$1
 xcrun simctl install "$UDID" "$OUT/EditInfoHarness.app"
-[ "$2" = large ] && xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
-xcrun simctl launch --console-pty "$UDID" com.retrine.editinfoharness $2 2>&1 | tr -ud '\r' | while IFS= read -r line; do
+if [ "$2" = large ]; then
+    xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
+    trap 'xcrun simctl ui "$UDID" content_size large' EXIT
+fi
+
+python3 "$HERE/../../sim-launch.py" --live --terminate-running-process "$UDID" com.retrine.editinfoharness "${2:-editor}" capture-shots 2>&1 |
+while IFS= read -r line; do
     echo "$line"
-    case "$line" in *"[harness] SHOT "*) xcrun simctl io "$UDID" screenshot "$OUT/shots/${line##*SHOT }.png" >/dev/null 2>&1 & ;; esac
+    case "$line" in
+        *"[harness] CAPTURE "*)
+            capture=${line##*CAPTURE }
+            shot=${capture%% *}
+            ack=${capture#* }
+            xcrun simctl io "$UDID" screenshot "$OUT/shots/$shot.png" >/dev/null
+            touch "$ack"
+            ;;
+    esac
 done
-[ "$2" = large ] && xcrun simctl ui "$UDID" content_size large
-exit 0

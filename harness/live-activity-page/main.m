@@ -6,10 +6,12 @@
 #import "Shared/LiveActivity/LiveActivity.h"
 #import "Shared/LiveActivity/SGLiveActivityPreview.h"
 #import "../timer-lifecycle.h"
+#import "../reduce-motion-fixture.h"
 
 extern BOOL HarnessActivityEnabled;
 
 static void previewBackgroundChecks(UIWindow *window) {
+    harnessMotion = allowMotion;
     SGHarnessBeginTimerCapture();
     SGLiveActivityPreview *preview = [SGLiveActivityPreview new];
     [window addSubview:preview];

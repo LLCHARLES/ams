@@ -7,8 +7,8 @@ from pathlib import Path
 import re
 import signal
 import subprocess
+import sys
 import tempfile
-import threading
 
 HERE = Path(__file__).resolve().parent
 parser = argparse.ArgumentParser(description=__doc__)
@@ -50,26 +50,16 @@ with tempfile.TemporaryDirectory(prefix="player-ui-") as work:
             env = dict(os.environ, SIMCTL_CHILD_HARNESS_SCENARIO=scenario,
                        SIMCTL_CHILD_HARNESS_CANVAS_FILE=str(work / "clip.mp4"),
                        SIMCTL_CHILD_HARNESS_SQUARE_FILE=str(work / "square.mp4"))
-            launch = subprocess.Popen(["xcrun", "simctl", "launch", "--console-pty", udid,
-                                       "com.vojta.playerharness"], stdout=subprocess.PIPE,
-                                      stderr=subprocess.STDOUT, text=True, env=env)
-            watchdog = threading.Timer(180, launch.kill)
-            watchdog.start()
+            app = subprocess.run([sys.executable, HERE.parent / "sim-launch.py", udid, "com.vojta.playerharness"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace", env=env)
             verdict = None
-            try:
-                for line in launch.stdout:
-                    print(line.rstrip(), flush=True)
-                    result = re.search(rf"{scenario} checks: (\d+) of (\d+) right -- (PASS|FAIL)", line)
-                    if result:
-                        verdict = result.group(3)
-                launch.wait()
-            finally:
-                watchdog.cancel()
-                if launch.poll() is None:
-                    launch.kill()
-                launch.wait()
-            if verdict != "PASS" or launch.returncode:
-                raise SystemExit(f"FAILED: player {scenario}: {verdict or 'no verdict'}, simctl status {launch.returncode}")
+            for line in app.stdout.splitlines():
+                print(line, flush=True)
+                result = re.search(rf"{scenario} checks: (\d+) of (\d+) right -- (PASS|FAIL)", line)
+                if result:
+                    verdict = result.group(3)
+            if verdict != "PASS" or app.returncode:
+                raise SystemExit(f"FAILED: player {scenario}: {verdict or 'no verdict'}, app status {app.returncode}")
     finally:
         if not args.udid:
             try:

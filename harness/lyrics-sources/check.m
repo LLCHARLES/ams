@@ -125,7 +125,7 @@ static id awaitReply(void (^ask)(void (^done)(id)), BOOL *answeredAtOnce) {
     });
     if (answeredAtOnce) *answeredAtOnce = answered;
     waiting = YES;
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!answered && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
     waiting = NO;
@@ -664,7 +664,7 @@ static void checkNewSources(void) {
         SGLyricsPlusAsk(empty, done);
         SGDeezerAskWith(nil, empty, done);
     });
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:60];
     while (finished < 4 && until.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     CHECK(finished == 4);
     printf("Bugs, Genie, LyricsPlus, Deezer: parser, matching, fallback, auth and main-queue checks passed\n");

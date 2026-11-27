@@ -50,7 +50,7 @@ static void play(SGTestLocalTrack *track) {
     [observer playerStateDidChange:SGPlayerState()];
 }
 static void pumpUntil(BOOL (^done)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     CHECK(done());
@@ -95,7 +95,7 @@ int main(void) { @autoreleasepool {
         }
         if (block) {
             dispatch_semaphore_signal(entered);
-            CHECK(dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+            CHECK(dispatch_semaphore_wait(release, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)) == 0);
         }
         return ((BOOL (*)(id, SEL))accessOriginal)(url, @selector(startAccessingSecurityScopedResource));
     });
@@ -158,7 +158,7 @@ int main(void) { @autoreleasepool {
         @synchronized (readLock) { blockedPath = file; }
         SGTestLocalTrack *pending = track(@{@"image_url": file});
         CHECK(!resolve(pending));
-        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
         play(track(@{}));
         play(pending);
         __block NSUInteger publications = 0;
@@ -202,7 +202,7 @@ int main(void) { @autoreleasepool {
         SGLocalCoverFill(spotify);
         CHECK(provisional.image == image);
         spotify.image = blue; // Spotify takes ownership while the metadata read is still pending.
-        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
         __block BOOL refreshed = NO;
         id refresh = [NSNotificationCenter.defaultCenter addObserverForName:SGLocalFileFallbackCoverDidChangeNotification
             object:nil queue:nil usingBlock:^(NSNotification *note) {

@@ -532,7 +532,7 @@ static void checkSettings(UINavigationController *nav) {
     UIViewController *page = SGRArtistSettingsPage();
     nav.viewControllers = @[page];
     [nav.view layoutIfNeeded];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
+    [page.view layoutIfNeeded];
 
     SGModRow *round = rowWithKey((SGModPage *)page, SGRKeyArtistRoundPlay), *cut = rowWithKey((SGModPage *)page, SGRKeyArtistCutOutPlay);
     SGModRow *accent = rowWithKey((SGModPage *)page, SGRKeyAccentPlay);

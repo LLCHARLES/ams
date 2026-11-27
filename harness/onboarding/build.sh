@@ -12,7 +12,7 @@ cp "$SRC/App/Onboarding/WhatsNew.m" "$OUT/onboarding/WhatsNew.m"
 ALLOW_UPSTREAM=1 ../../scripts/whats-new.sh "$VERSION" ../../CHANGELOG.md "$OUT/onboarding/SGWhatsNewNotes.h"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/App/Onboarding" -isysroot "$SDK" -Wno-deprecated-declarations -DSG_VERSION="\"$VERSION\"" \
     main.m sponsorblock-check.m cleanup-check.m "$SRC"/App/Onboarding/Tour.m "$OUT"/onboarding/WhatsNew.m \
     "$SRC"/App/About/Update.m \
@@ -26,7 +26,7 @@ xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-ar
     -o "$OUT/OnboardingHarness.app/OnboardingHarness"
 
 # A stand-in for EeveeSpotify's dylib, which the install check finds by its name alone.
-echo 'void sg_stand_in(void) {}' | xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" \
+echo 'void sg_stand_in(void) {}' | xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -isysroot "$SDK" \
     -x c - -dynamiclib -o "$OUT/OnboardingHarness.app/EeveeSpotify.dylib"
 
 cat > "$OUT/OnboardingHarness.app/Info.plist" <<'PLIST'

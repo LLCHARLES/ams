@@ -15,7 +15,7 @@ def run():
             "-I" + str(ROOT / "tweak/Sources"), "-I" + str(SOURCE.parent),
             str(ROOT / "harness/local-files/suggest-check.m"), str(SOURCE),
             "-framework", "Foundation", "-o", str(out / "check")], check=True)
-        subprocess.run([str(out / "check")], check=True, timeout=10)
+        subprocess.run([str(out / "check")], check=True, timeout=180)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
 OUT=$(mktemp -d "${TMPDIR:-/tmp}/retrine-update-check.XXXXXX")
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -I"$SRC" -DSG_VERSION='"1.0.0"' \
     "$SRC/App/About/Update.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGLocalize.m" \

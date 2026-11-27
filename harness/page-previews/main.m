@@ -17,6 +17,7 @@
 // chevron the left to right one turned around.
 // Exits nonzero on the first failure (harness-fail.h).
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
 #import "Core/SGCore.h"
 #import "Settings/SGModPage.h"
@@ -211,6 +212,7 @@ static void runReveal(NSString *name, UIViewController *(^builder)(void), void (
 // which the card grows with.
 static void runLooks(NSString *name, UIViewController *(^builder)(void)) {
     reset();
+    window.traitOverrides.preferredContentSizeCategory = UIContentSizeCategoryLarge;
     CGFloat height = show(builder).bounds.size.height;
     NSDictionary<NSString *, NSNumber *> *accents = @{@"accent-light": @0xFFD60A, @"accent-dark": @0x2A1B6E};
     for (NSString *accent in accents) {
@@ -595,6 +597,7 @@ static void runChecks(void) {
 
 @implementation HarnessScene
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    harnessMotion = allowMotion;
     UIWindowScene *windowScene = (UIWindowScene *)scene;
     window = [[UIWindow alloc] initWithWindowScene:windowScene];
     window.frame = windowScene.coordinateSpace.bounds;

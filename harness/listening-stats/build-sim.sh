@@ -8,7 +8,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/ListeningStatsHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/ListeningStats/ListeningStats.x" > "$OUT/gen/ListeningStats.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Shared/ListeningStats" -isysroot "$SDK" -Wall -Werror -Wno-deprecated-declarations \
     "$(dirname "$0")/sim/main.m" "$(dirname "$0")/sim/stubs.m" "$(dirname "$0")/../scene.m" "$OUT/gen/ListeningStats.m" \
     "$SRC"/Shared/ListeningStats/ListeningStatsPage.m "$SRC"/Shared/ListeningStats/SGPlayLog.m \

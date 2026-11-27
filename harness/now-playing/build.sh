@@ -15,7 +15,7 @@ done
 
 # main.m first, so its constructor replaces the system's setter before the hooks wrap it.
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios26.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
+xcrun clang -target $(uname -m)-apple-ios26.0-macabi -isysroot "$SDK" -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" \
     -fobjc-arc -g -O0 -Wall -I"$OUT/gen" -I"$SRC" -I"$SRC/Shared/ArtistBlock" -I"$SRC/Shared/LockScreenLyrics" -I"$SRC/Shared/AnimatedArtwork" -I"$SRC/Shared/LiveActivity" \
     "$(dirname "$0")/main.m" "$(dirname "$0")/artwork.m" "$(dirname "$0")/activity.m" "$(dirname "$0")/motion-dispatch-driver.m" \
     "$OUT/gen/ArtistSkip.m" "$(dirname "$0")/row-clock-driver.m" "$(dirname "$0")/art-clock-driver.m" "$(dirname "$0")/extras-clock-driver.m" "$(dirname "$0")/activity-clock-driver.m" \

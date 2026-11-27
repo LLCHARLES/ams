@@ -11,7 +11,7 @@ xcrun clang -fobjc-arc -O2 -Wall -Werror -I ../../tweak/Sources -framework Found
 SRC=$(cd ../../tweak/Sources && pwd)
 SDK=$(xcrun --sdk macosx --show-sdk-path)
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/ListeningStats/ListeningStats.x" > "$OUT/ListeningStats.m"
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -O2 -Wall -Werror \
     -I"$SRC" -I"$SRC/Shared/ListeningStats" recorder.m "$OUT/ListeningStats.m" \
     "$SRC/Shared/ListeningStats/SGPlayLog.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGPrefs.m" \
@@ -21,7 +21,7 @@ xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
 rm -rf "$OUT/recorder-home"
 mkdir -p "$OUT/recorder-home"
 __CFPREFERENCES_AVOID_DAEMON=1 CFFIXED_USER_HOME="$OUT/recorder-home" "$OUT/recorder"
-xcrun -sdk macosx clang -target arm64-apple-ios17.0-macabi -isysroot "$SDK" \
+xcrun -sdk macosx clang -target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -fobjc-arc -O2 -Wall -Werror \
     -I"$SRC" album-plays.m "$SRC/Redesigned/Album/AlbumPlays.m" \
     "$SRC/Shared/ListeningStats/SGPlayLog.m" "$SRC/Core/SGLocalize.m" \

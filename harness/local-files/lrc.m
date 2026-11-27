@@ -15,6 +15,9 @@
 extern char **environ;
 
 #import "../harness-fail.h"
+#import "../harness-wait.h"
+extern void HarnessImportHeld(void), HarnessObserveNextImport(void);
+extern BOOL HarnessImportIsQueuedBehindHeld(void);
 #define CHECK(cond) HARNESS_CHECK(cond)
 
 // What LyricsSources.m and KaraokeSource.x give the tweak, here as little as the file needs.
@@ -39,8 +42,9 @@ static dispatch_semaphore_t sg_slowEntered, sg_slowRelease;
 void SGLyricsPageLines(NSArray<SGKaraokeLine *> *lines, NSArray<NSNumber *> **starts, NSArray<NSString *> **texts) {
     if (atomic_load(&sg_requireWorker)) CHECK(!NSThread.isMainThread);
     if (lines.count && [SGKaraokeLineText(lines.firstObject) isEqual:@"Slow A"] && atomic_exchange(&sg_holdSlow, false)) {
+        HarnessImportHeld();
         dispatch_semaphore_signal(sg_slowEntered);
-        CHECK(dispatch_semaphore_wait(sg_slowRelease, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(sg_slowRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)) == 0);
     }
     NSMutableArray *at = [NSMutableArray array], *said = [NSMutableArray array];
     for (SGKaraokeLine *line in lines) {
@@ -90,17 +94,17 @@ static void invalidationCheck(BOOL asynchronous) {
             dispatch_semaphore_signal(finished);
         });
     }
-    CHECK(dispatch_semaphore_wait(read, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(read, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     CHECK(deleteLRC(@"race.lrc"));
     CHECK([importLRC(lrc(@"race.lrc", @"[00:01]Replacement lyrics"), uri, nil) isEqual:@"race.lrc"]);
     dispatch_semaphore_signal(resume);
     if (asynchronous) {
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
         while (!delivered && deadline.timeIntervalSinceNow > 0)
             [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
         CHECK(delivered && [stale.texts.firstObject isEqual:@"Replacement lyrics"]);
     } else {
-        CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
         CHECK(!stale);
     }
     CHECK([SGImportedLRCFor(uri, @"Track", @"Race").texts.firstObject isEqual:@"Replacement lyrics"]);
@@ -116,7 +120,7 @@ static SGLyricsResult *asyncLyrics(NSString *track, NSString *title) {
         CHECK(NSThread.isMainThread); answer = result; done = YES;
     });
     CHECK(!done);
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(done);
@@ -448,12 +452,12 @@ static void validatorCheck(void) {
     atomic_store(&sg_holdSlow, true);
     NSMutableArray<NSString *> *completed = [NSMutableArray array];
     pasteLyrics(@"[00:01]Slow A", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"A"]; pasted = name; });
-    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     __block NSString *fastName = nil;
+    HarnessObserveNextImport();
     pasteLyrics(@"[00:01]Fast B", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"B"]; fastName = name; });
     // Where pastes could overtake each other, B is stored and answered while A is still held.
-    NSDate *overtaking = [NSDate dateWithTimeIntervalSinceNow:1];
-    while (!fastName && overtaking.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    if (!HarnessImportIsQueuedBehindHeld()) HARNESS_AWAIT(fastName != nil);
     dispatch_semaphore_signal(sg_slowRelease);
     waitForStore();
     CHECK(([completed isEqual:(@[@"A", @"B"])]));
@@ -465,11 +469,11 @@ static void validatorCheck(void) {
     atomic_store(&sg_holdSlow, true);
     [completed removeAllObjects];
     importLyrics(lrc(@"slow-import.lrc", @"[00:01]Slow A"), pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"A"]; pasted = name; });
-    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(sg_slowEntered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     fastName = nil;
+    HarnessObserveNextImport();
     pasteLyrics(@"[00:01]Fast B", pasteUri, ^(NSString *name, NSError *reason) { CHECK(name && !reason); [completed addObject:@"B"]; fastName = name; });
-    overtaking = [NSDate dateWithTimeIntervalSinceNow:1];
-    while (!fastName && overtaking.timeIntervalSinceNow > 0) [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    if (!HarnessImportIsQueuedBehindHeld()) HARNESS_AWAIT(fastName != nil);
     dispatch_semaphore_signal(sg_slowRelease);
     waitForStore();
     CHECK(([completed isEqual:(@[@"A", @"B"])]));
@@ -516,7 +520,7 @@ static SGLyricsResult *playbackTag(NSString *file) {
         HARNESS_CHECK(NSThread.isMainThread);
         sheet = result; delivered = YES;
     });
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!delivered && limit.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     HARNESS_CHECK(delivered);

@@ -1,7 +1,12 @@
 // Compile the real engine, replacing only its system PiP transport. No real PiP/audio session starts.
 #import "tests.h"
 #import <objc/runtime.h>
+#import "../dispatch-clock.h"
+#define dispatch_time HarnessTime
+#define dispatch_after HarnessAfter
 #import "../../tweak/Sources/Shared/LyricsPiP/LyricsPiP.m"
+#undef dispatch_after
+#undef dispatch_time
 
 static BOOL paused = YES, loading;
 static BOOL loadFailed;
@@ -108,7 +113,7 @@ static UIAlertController *retryAlert;
             return;
         }
         SGTestAssert([alert.message isEqual:@"Enable lyrics in Mod Settings → Picture in Picture, then restart Spotify."],
-            @"disabled tap gives exact activation and restart guidance");
+            [NSString stringWithFormat:@"disabled tap gives exact activation and restart guidance (got %@: %@)", alert.title, alert.message]);
         alerts++;
     }
     if (completion) completion();
@@ -386,8 +391,13 @@ void SGTestLifecycle(void) {
     SGTestAssert(requestedSeek == 20000 && replaced == 1, @"rapid skips accumulate the target and acknowledge superseded requests once");
     position = requestedSeek; loading = NO; [engine refresh];
     SGTestAssert(replaced == 2 && paused && player.resumes == 0, @"newest rapid skip completes at its own target");
+    HarnessStartClock();
     [engine pictureInPictureController:(id)pip skipByInterval:CMTimeMake(10, 1) completionHandler:^{ completions++; }];
-    SGTestAssert(SGTestPump(^BOOL { return completions == 8; }) && player.resumes == 0,
+    HarnessAdvanceClock(2 * NSEC_PER_SEC - 1);
+    SGTestAssert(completions == 7, @"unacknowledged seek stays pending before its deadline");
+    HarnessAdvanceClock(1);
+    HarnessStopClock();
+    SGTestAssert(completions == 8 && player.resumes == 0,
         @"unacknowledged seek times out once without starting audio");
     loading = NO; [engine refresh];
     NSUInteger pausesBeforeClose = player.pauses;
@@ -467,6 +477,8 @@ void SGTestIntent(void) {
         SGTestAssert(SGTestPump(^BOOL { return engine.shown != nil; }), @"queued-track seek fixture opens");
         TestPiP *pip = (id)engine.pip;
         __block NSUInteger oldDone = 0, newDone = 0;
+        [engine pictureInPictureControllerDidStartPictureInPicture:(id)pip];
+        HarnessStartClock();
         [engine pictureInPictureController:(id)pip skipByInterval:CMTimeMake(10, 1) completionHandler:^{ oldDone++; }];
         SGTestAssert(requestedSeek == 110000 && oldDone == 0, @"old track has an unacknowledged seek target");
         SGTestSetTrack(@"spotify:track:new-seek", nil);
@@ -478,11 +490,15 @@ void SGTestIntent(void) {
             @"second skip before queued refresh bases forward/backward bounds on actual new-track position");
         SGTestAssert(paused && player.resumes == 0 && player.pauses == 0 && CMTimebaseGetRate(engine.clock) == 0,
             @"retiring old seek does not change the new song's paused playback");
+        // The refresh queued before the second skip belongs to the frames that skip reset, so the
+        // engine drops it; Spotify's report after the seek settles is what acknowledges it. The
+        // seek timeout runs on the driven clock and cannot fire here.
         position = requestedSeek; loading = NO;
+        [engine playerStateDidReport:SGPlayerState()];
         SGTestAssert(SGTestPump(^BOOL { return newDone == 1; }) && oldDone == 1,
-            @"queued refresh acknowledges only the new track's settled target");
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2.1];
-        SGTestPump(^BOOL { return deadline.timeIntervalSinceNow <= 0; });
+            @"the settled report acknowledges only the new track's target");
+        HarnessAdvanceClock(2100 * NSEC_PER_MSEC);
+        HarnessStopClock();
         SGTestAssert(oldDone == 1 && newDone == 1 && paused && player.resumes == 0 && player.pauses == 0,
             @"stale seek timeout callbacks cannot repeat completion or change playback");
         [engine finish];

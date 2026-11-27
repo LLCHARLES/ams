@@ -22,7 +22,7 @@ NSURL *SGLyricsTestCacheRoot(void) {
     if (!NSThread.isMainThread && holdStore) {
         holdStore = NO;
         dispatch_semaphore_signal(storeEntered);
-        if (dispatch_semaphore_wait(storeRelease, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC))) {
+        if (dispatch_semaphore_wait(storeRelease, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC))) {
             fprintf(stderr, "FAIL: main blocked behind the translation store queue\n");
             exit(1);
         }

@@ -22,11 +22,11 @@ pathlib.Path(sys.argv[2]).write_text(text[start:text.index("\nstatic NSHashTable
 PY
 if [ "${SIMULATOR:-0}" = 1 ]; then
     SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-    TARGET=arm64-apple-ios17.0-simulator
+    TARGET=$(uname -m)-apple-ios17.0-simulator
     FRAMEWORKS=
 else
     SDK=$(xcrun --sdk macosx --show-sdk-path)
-    TARGET=arm64-apple-ios17.0-macabi
+    TARGET=$(uname -m)-apple-ios17.0-macabi
     FRAMEWORKS="-iframework $SDK/System/iOSSupport/System/Library/Frameworks"
 fi
 xcrun clang -target "$TARGET" -fobjc-arc -g -O0 -isysroot "$SDK" $FRAMEWORKS \

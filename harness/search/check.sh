@@ -12,7 +12,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/gen" "$APP"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Redesigned/Search/SearchSections.x" > "$OUT/gen/SearchSections.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/Search" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$HERE/main.m" "$HERE/stubs.m" "$OUT/gen/SearchSections.m" \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGGlass.m \

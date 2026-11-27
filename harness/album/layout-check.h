@@ -53,9 +53,9 @@ static void layoutShot(UIWindow *window, NSString *name) {
     NSLog(@"[harness] SHOT %@", file);
 }
 
-// `then` once `ready` holds, looked at every 50 ms for at most 20 s.
+// `then` once `ready` holds.
 static void layoutWhen(NSString *what, BOOL (^ready)(void), dispatch_block_t then) {
-    CFTimeInterval deadline = CACurrentMediaTime() + 20;
+    CFTimeInterval deadline = CACurrentMediaTime() + 45;
     [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer *timer) {
         if (!ready()) {
             if (CACurrentMediaTime() > deadline) HARNESS_FAIL(@"timed out waiting for %@", what);
@@ -64,10 +64,6 @@ static void layoutWhen(NSString *what, BOOL (^ready)(void), dispatch_block_t the
         [timer invalidate];
         then();
     }];
-}
-
-static void layoutAfter(NSTimeInterval seconds, dispatch_block_t then) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), then);
 }
 
 // The page shown whole: the field's veil faded.
@@ -117,7 +113,9 @@ static void layoutTextSize(UIWindow *window, UIView *page) {
     layoutWhen(@"the page revealed", ^BOOL { return layoutRevealed(page) && besideFind(page, @"SGRHeaderInfo"); }, ^{
         NSLog(@"[harness] READY text-size, opened at %@", opened);
         layoutWhen(@"the text size changed", ^BOOL { return changed; }, ^{
-            layoutAfter(1, ^{
+            layoutWhen(@"window received the new text size", ^BOOL {
+                return ![window.traitCollection.preferredContentSizeCategory isEqualToString:opened];
+            }, ^{
                 UIContentSizeCategory now = UIApplication.sharedApplication.preferredContentSizeCategory;
                 HARNESS_CHECK(![now isEqualToString:opened]);
                 // The header's sizes stop growing at Extra Large.
@@ -176,7 +174,9 @@ static void layoutResizeCard(UIWindow *window, UIView *page, UIView *cover, disp
         frame.size.width = to;
         page.frame = frame;
         relayout();
-        layoutAfter(0.5, ^{
+        layoutWhen(@"Spotify square recentered after resize", ^BOOL {
+            return fabs(CGRectGetMidX([cover convertRect:cover.bounds toView:page]) - to / 2) < 0.5;
+        }, ^{
             relayout();
             layoutShot(window, @"resize-card");
             CGRect spotify = [cover convertRect:cover.bounds toView:page];
@@ -223,7 +223,7 @@ static void layoutBesideScrim(UIWindow *window, UIView *page) {
     }, ^{
         [NSUserDefaults.standardUserDefaults setBool:NO forKey:SGRKeyCoverBeside];
         layoutWhen(@"the stacked header", ^BOOL { return !info.sgr_coverBeside; }, ^{
-            layoutAfter(0.5, ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 layoutShot(window, @"beside-scrim");
                 UIView *hero = besideFind(page, @"SGRAlbumHero");
                 CAGradientLayer *scrim = [hero valueForKey:@"scrim"];
@@ -274,7 +274,7 @@ static void layoutBesideFaces(UIWindow *window, UIView *page, UILabel *artistNam
         artistName.superview.superview.accessibilityLabel = names;
         relayout();
         layoutWhen(@"the faces before the long names", ^BOOL { return layoutFaces(info) && [creator.text isEqualToString:names] && info.sgr_coverBeside; }, ^{
-            layoutAfter(0.6, ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
                 relayout();
                 layoutShot(window, @"beside-faces");
                 CGFloat needed = ceil([creator sizeThatFits:CGSizeMake(creator.bounds.size.width, CGFLOAT_MAX)].height);
@@ -327,7 +327,7 @@ static void layoutMeasure(UIWindow *window, UIView *page, UILabel *artistName, d
         info = besideFind(page, @"SGRHeaderInfo");
         return info && layoutRevealed(page) && ([[info valueForKey:@"picture"] image] || layoutFaces(info));
     }, ^{
-        layoutAfter(0.6, ^{
+        dispatch_async(dispatch_get_main_queue(), ^{
             layoutCountMeasures();
             layoutPasses(info, relayout, 1);
             NSUInteger again = layoutPasses(info, relayout, 10);

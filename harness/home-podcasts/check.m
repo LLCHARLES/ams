@@ -8,16 +8,22 @@
 #import "Redesigned/Kit/SGRMotionBudget.h"
 #import "Home.h"
 
-// HomeHeader.x reads Reduce Motion from the harness, which switches it without touching the Mac's own setting.
-static BOOL sg_reduceMotion;
-static BOOL harnessReduceMotion(void) { return sg_reduceMotion; }
-#define SGRReduceMotion harnessReduceMotion
+#import "../reduce-motion-fixture.h"
+// Drive the application state read alongside the lifecycle notifications we send.
+static UIApplicationState fixtureState = UIApplicationStateActive;
+@interface UIApplication (FridayCheck)
+- (UIApplicationState)fridayFixtureState;
+@end
+@implementation UIApplication (FridayCheck)
+- (UIApplicationState)fridayFixtureState { return fixtureState; }
+@end
+#define applicationState fridayFixtureState
 static BOOL lowPower;
 static NSProcessInfoThermalState heat;
 #define SGRMotionHeldForPowerOrHeat() SGRMotionHeldFor(lowPower, heat)
 #include "HomeHeader.gen.m"
 #undef SGRMotionHeldForPowerOrHeat
-#undef SGRReduceMotion
+#undef applicationState
 
 #pragma mark - helpers
 
@@ -26,14 +32,24 @@ static NSUInteger sg_checks;
 
 static NSUserDefaults *defaults(void) { return NSUserDefaults.standardUserDefaults; }
 
-static void spin(NSTimeInterval seconds) {
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:seconds]];
+static void until(NSString *what, BOOL (^ready)(void)) {
+    double deadline = NSProcessInfo.processInfo.systemUptime + 45;
+    while (!ready()) {
+        if (NSProcessInfo.processInfo.systemUptime >= deadline) HARNESS_FAIL(@"waiting for %@", what);
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
+    }
+}
+
+static void drainChips(void) {
+    __block BOOL done = NO;
+    dispatch_async(dispatch_get_main_queue(), ^{ done = YES; });
+    until(@"previous chip actions delivered", ^BOOL { return done; });
 }
 
 static void setHidePodcasts(BOOL hidden) {
     [defaults() setBool:hidden forKey:SGRKeyHomeHidePodcasts];
     SGPrefsChanged();
-    spin(0.3);
+    drainChips();
 }
 
 #pragma mark - Home
@@ -92,7 +108,7 @@ static void checkLeaving(void) {
     defaultChip.selected = NO;
     podcasts.selected = YES;
     syncPodcastChips(stack);
-    spin(0.1);
+    drainChips();
     CHECK(sg_defaultFired == 0);
 
     // Hidden, and chosen: back to the default chip on the next turn, not this one, and once.
@@ -100,10 +116,10 @@ static void checkLeaving(void) {
     SGPrefsChanged();
     syncPodcastChips(stack);
     CHECK(sg_defaultFired == 0);
-    spin(0.1);
+    until(@"default chip action", ^BOOL { return sg_defaultFired > 0; });
     CHECK(sg_defaultFired == 1);
     syncPodcastChips(stack);
-    spin(0.1);
+    drainChips();
     CHECK(sg_defaultFired == 1);
     CHECK(sg_musicFired == 0 && sg_podcastsFired == 0);
 
@@ -112,14 +128,14 @@ static void checkLeaving(void) {
     defaultChip.selected = NO;
     music.selected = YES;
     syncPodcastChips(stack);
-    spin(0.1);
+    drainChips();
     CHECK(sg_defaultFired == 1);
 
     // Chosen again later, the way back is asked again.
     music.selected = NO;
     podcasts.selected = YES;
     syncPodcastChips(stack);
-    spin(0.1);
+    until(@"default chip reselected", ^BOOL { return sg_defaultFired >= 2; });
     CHECK(sg_defaultFired == 2);
     podcasts.selected = NO;
     setHidePodcasts(NO);
@@ -130,9 +146,10 @@ static void checkLive(void) {
     UIStackView *stack = chipStack();
     setHidePodcasts(NO);
     ((UIControl *)stack.arrangedSubviews[2]).selected = YES;
-    spin(0.1);
+    drainChips();
     CHECK(sg_defaultFired == 0);
     setHidePodcasts(YES);
+    until(@"live preference returned to All", ^BOOL { return sg_defaultFired != 0; });
     CHECK(sg_defaultFired == 1);
     ((UIControl *)stack.arrangedSubviews[2]).selected = NO;
     setHidePodcasts(NO);
@@ -161,14 +178,13 @@ static CAAnimation *ringTurn(CALayer *ring) {
 }
 
 static void switchReduceMotion(BOOL on) {
-    sg_reduceMotion = on;
+    harnessMotion = on ? reduceMotion : allowMotion;
     [NSNotificationCenter.defaultCenter postNotificationName:UIAccessibilityReduceMotionStatusDidChangeNotification object:nil];
-    spin(0.1);
 }
 
 static void scrollPillAwayAndBack(UIView *glass) {
     riseGlass(glass, CGAffineTransformMakeTranslation(0, -40), 0);
-    spin(0.5);
+    until(@"pill material faded", ^BOOL { return !glass.layer.animationKeys.count; });
     riseGlass(glass, CGAffineTransformIdentity, 1);
 }
 
@@ -187,11 +203,20 @@ static void checkFriday(void) {
     CHECK(objc_getAssociatedObject(glass, &kFridayKey) == nil);
 
     answerWeekday(6);
+    harnessMotion = reduceMotion;
     layoutFriday(glass, size);
     CALayer *ring = objc_getAssociatedObject(glass, &kFridayKey);
     CHECK(ring && !ring.hidden && ring.superlayer == glass.layer && ring.opacity == 1);
     CHECK(CGRectEqualToRect(ring.frame, CGRectMake(0, 0, 100, 44)));
+    NSLog(@"[harness] Friday ring: host Reduce Motion %d, fixture %d, turn %@",
+          hostReducesMotion(), SGRReduceMotion(), ringTurn(ring) ? @"on" : @"off");
+    CHECK(SGRReduceMotion() && !ringTurn(ring));
+    switchReduceMotion(NO);
     CABasicAnimation *turn = (CABasicAnimation *)ringTurn(ring);
+    NSLog(@"[harness] Friday ring: host/app state %ld/%ld, host/fixture Reduce Motion %d/%d, window %d, resigning %d, glass %d, power %d, heat %ld, turn %@, duration %.1f max FPS %.0f",
+          (long)UIApplication.sharedApplication.applicationState, (long)fixtureState, hostReducesMotion(), SGRReduceMotion(),
+          glass.window != nil, ((SGRHomeGlassHolder *)glass).resigning, sg_glassShown, lowPower, (long)heat,
+          turn ? @"on" : @"off", turn.duration, turn.preferredFrameRateRange.maximum);
     CHECK(turn.duration == 6 && turn.preferredFrameRateRange.maximum == 30);
 
     extern __weak UIView *harnessSettledPlayerField;
@@ -210,6 +235,10 @@ static void checkFriday(void) {
     CHECK(ringTurn(ring));
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
     CHECK(!ringTurn(ring));
+    fixtureState = UIApplicationStateInactive;
+    layoutFriday(glass, size);
+    CHECK(!ringTurn(ring));
+    fixtureState = UIApplicationStateActive;
     [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
     CHECK(ringTurn(ring));
     lowPower = YES;
@@ -225,7 +254,7 @@ static void checkFriday(void) {
 
     riseGlass(glass, CGAffineTransformMakeTranslation(0, -40), 0);
     CHECK(ring.opacity == 0);
-    spin(0.5);
+    until(@"hidden Friday ring stopped", ^BOOL { return !ringTurn(ring); });
     CHECK(ringTurn(ring) == nil);
     riseGlass(glass, CGAffineTransformIdentity, 1);
     CHECK(ring.opacity == 1);
@@ -245,6 +274,7 @@ static void checkFriday(void) {
     CHECK(ringTurn(ring) == nil);
     answerWeekday(0);
     [glass removeFromSuperview];
+    harnessMotion = useHostMotion;
 }
 
 static void run(void) {
@@ -266,7 +296,7 @@ static void run(void) {
     self.window = [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 390, 844)];
     self.window.rootViewController = [UIViewController new];
     // A timer, not a block of the main queue: the checks run the run loop, which would not run the main queue's other blocks from inside one.
-    [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:NO block:^(NSTimer *timer) { run(); }];
+    [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) { run(); }];
     return YES;
 }
 @end

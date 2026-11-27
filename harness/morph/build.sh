@@ -5,9 +5,9 @@ OUT=${MORPH_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/retrine-morph.XXXXXX")}
 mkdir -p "$OUT/gen" "$OUT/MorphHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${MORPH_SOURCE:-$SRC/Redesigned/Player/PlayerMorph.x}" > "$OUT/gen/PlayerMorph.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun swiftc -target arm64-apple-ios17.0-simulator -sdk "$SDK" -parse-as-library -emit-object \
+xcrun swiftc -target $(uname -m)-apple-ios17.0-simulator -sdk "$SDK" -parse-as-library -emit-object \
     "$SRC/Shared/AlbumQueue/AlbumPage.swift" -o "$OUT/gen/fields.o"
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -DMORPH_UNSUPPORTED_OWNER=${MORPH_UNSUPPORTED_OWNER:-0} \
     -I"$SRC" -I"$SRC/Redesigned/Player" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$OUT/gen/PlayerMorph.m" "$OUT/gen/fields.o" \

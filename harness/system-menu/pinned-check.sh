@@ -29,7 +29,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 # PlaylistMenu.x, the page claim's consumer, through Logos as the tweak builds it; pinned-check.m includes it.
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Redesigned/Playlist/PlaylistMenu.x" > "$OUT/PlaylistMenu.gen.m"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -g -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$SRC/Redesigned/Playlist" -I"$OUT" -Wno-deprecated-declarations \
     "$HERE/pinned-check.m" "$HERE/../scene.m" \
     "$SRC/Redesigned/Kit/SGRActionRow.m" "$SRC/Redesigned/Kit/SGRHeaderInfo.m" "$SRC/Redesigned/Kit/SGRGlass.m" \

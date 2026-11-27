@@ -6,7 +6,7 @@ SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
 OUT=$(mktemp -d /tmp/retrine-appearance-rows.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -O0 -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -O0 -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" \
     "$HERE/rows-check.m" "$SRC/Native/Appearance/AppearanceSettings.m" "$SRC/Native/Appearance/AccentHistory.m" \
     "$SRC/Redesigned/Kit/SGRAppearanceSettings.m" "$SRC/Redesigned/Kit/SGRAccentHistory.m" \

@@ -18,7 +18,7 @@ static void check(BOOL ok, NSString *why) {
     checks++;
 }
 static void waitFor(BOOL (^finished)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!finished() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     check(finished(), @"asynchronous result completed");

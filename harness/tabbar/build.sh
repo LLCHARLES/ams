@@ -18,7 +18,7 @@ for f in $navbar Shared/Navigation/Links.x Redesigned/Navbar/TabBar.x Redesigned
 done
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc $composed -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc $composed -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/Navbar" -I"$SRC/Redesigned/NowPlayingBar" -I"$SRC/Redesigned/Kit" -I"$SRC/Shared/Navigation" -I"$OUT/gen" -isysroot "$SDK" \
     -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/stubs.m" "$(dirname "$0")/touch.m" "$(dirname "$0")/navsettings.m" "$(dirname "$0")/search.m" \

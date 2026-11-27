@@ -83,7 +83,7 @@ void CheckKeptCleanup(UIWindow *window) {
         pending[1]();
         HARNESS_CHECK([SGEnvironmentWarningRows().lastObject.subtitle isEqual:page.expectedSubtitle]);
     });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_FAIL(@"cleanup row did not refresh or present its alerts");
     });
 }

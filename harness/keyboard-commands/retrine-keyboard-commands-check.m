@@ -7,6 +7,12 @@
 #import <math.h>
 #import <stdio.h>
 #import "Shared/Keyboard/Keyboard.h"
+#import "../dispatch-clock.h"
+#define dispatch_time HarnessTime
+#define dispatch_after HarnessAfter
+#import "Shared/Keyboard/KeyboardCommands.m"
+#undef dispatch_after
+#undef dispatch_time
 
 static int failures;
 
@@ -135,13 +141,8 @@ typedef struct {
 - (BOOL)becomeFirstResponder { self.becomeCalls++; self.alreadyFirstResponder = YES; return YES; }
 @end
 
-// Runs the main run loop long enough for a run's delay and every step of it to fire.
-static void spin(NSTimeInterval seconds) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:seconds];
-    while (until.timeIntervalSinceNow > 0) [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.02]];
-}
-
 static void checkRunOwnership(void) {
+    HarnessStartClock();
     HarnessResponder *field = [HarnessResponder new];
     __block RunTally stale = {0}, live = {0};
     // A control whose press is counted, so "pressed nothing" is observed rather than inferred.
@@ -175,7 +176,7 @@ static void checkRunOwnership(void) {
     expectFlag("two runs get different tokens", staleToken != liveToken, YES);
 
     expectFlag("the field has no cursor before the run reaches it", field.isFirstResponder, NO);
-    spin(0.6);   // both delays and every step of both runs
+    HarnessAdvanceClock(NSEC_PER_SEC);
 
     expectValue("the replaced run's callback never runs its probe", stale.probes, 0);
     expectValue("the replaced run pressed nothing", controlPresses, 0);
@@ -191,7 +192,7 @@ static void checkRunOwnership(void) {
         *outField = alreadyFocused;
         return SGKeyboardRunTake;
     }, pressControl, 0, 0.02, 3);
-    spin(0.2);
+    HarnessAdvanceClock(NSEC_PER_SEC);
     expectValue("a field that already has the cursor is not asked again", alreadyFocused.becomeCalls, 0);
 
     // One ordered run whose first step is the activation: as ⌘F is one run now, the press cannot happen after the
@@ -214,7 +215,7 @@ static void checkRunOwnership(void) {
             [log addObject:@"press"];
             [pressedControl sendActionsForControlEvents:UIControlEventPrimaryActionTriggered];
         }, 0, 0.02, 4);
-        spin(0.3);
+        HarnessAdvanceClock(NSEC_PER_SEC);
         [log addObject:inputField.becomeCalls ? @"focus" : @"no-focus"];
         expectFlag("one run presses first and then takes the field", [log isEqual:@[@"press", @"focus"]], YES);
         expectValue("the one run's press went through the caller's press block", orderedPresses, 1);
@@ -226,10 +227,8 @@ static void checkRunOwnership(void) {
         waits++;
         return SGKeyboardRunWait;
     }, pressControl, 0, 0.02, 10);
-    // Until the tenth probe, however slow the machine's timers are, then a while longer for any eleventh.
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:5];
-    while (waits < 10 && limit.timeIntervalSinceNow > 0) spin(0.02);
-    spin(0.3);
+    HarnessAdvanceClock(NSEC_PER_SEC);
+    HarnessStopClock();
     expectValue("ten attempts probe exactly ten times", waits, 10);
     expectFlag("the budgeted run still owns the work when it runs out", SGKeyboardRunOwns(budgetToken), YES);
 

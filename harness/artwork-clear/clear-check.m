@@ -73,13 +73,8 @@ static NSUInteger answerReads;
 }
 @end
 
-static void waitFor(BOOL (^ready)(void)) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:10];
-    while (!ready() && until.timeIntervalSinceNow > 0)
-        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
-    CHECK(ready());
-}
-static void settle(void) { [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.3]]; }
+#import "../harness-wait.h"
+#define waitFor(...) HARNESS_CHECK(HarnessRunUntil(__VA_ARGS__))
 
 static void put(NSURL *file, NSString *text) {
     CHECK([files() createDirectoryAtURL:file.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil]);
@@ -460,7 +455,6 @@ int main(void) {
         CHECK([alert.actions[1].title isEqual:@"Clear"] && alert.actions[1].style == UIAlertActionStyleDestructive);
         NSDictionary *beforeCancel = snapshot(motion);
         if (handlerOf(alert.actions[0])) handlerOf(alert.actions[0])(alert.actions[0]);
-        settle();
         CHECK([snapshot(motion) isEqual:beforeCancel]);
         CHECK([detail(row) isEqual:shown(expected)]);
         CHECK(album(@"Fresh", &remote) && !remote && albumSearches == 2 && !informedMessage);
@@ -484,9 +478,9 @@ int main(void) {
         __block BOOL queuedDone = NO, queuedMade = YES;
         SGMotionMakeFile(SGMotionMadeFile(@"blocker"), ^BOOL {
             dispatch_semaphore_signal(entered);
-            return dispatch_semaphore_wait(gate, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC)) == 0;
+            return dispatch_semaphore_wait(gate, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * NSEC_PER_SEC)) == 0;
         }, ^(BOOL ok) {});
-        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        CHECK(dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * NSEC_PER_SEC)) == 0);
         NSURL *queued = SGMotionMadeFile(@"queued before the clear");
         SGMotionMakeFile(queued, ^BOOL { return [@"x" writeToURL:queued atomically:YES encoding:NSUTF8StringEncoding error:nil]; },
                          ^(BOOL ok) { queuedMade = ok; dispatch_async(dispatch_get_main_queue(), ^{ queuedDone = YES; }); });
@@ -589,7 +583,7 @@ int main(void) {
         informedTitle = informedMessage = nil;
         tapClear(failing);
         waitFor(^BOOL { return ![files() fileExistsAtPath:answers.path]; });
-        settle();
+        waitFor(^BOOL { return ![detail(failing) isEqual:@"Clearing…"] && ![detail(failing) isEqual:@"Calculating…"]; });
         CHECK(!informedMessage && ([ownedClipNames() isEqual:@[leased.lastPathComponent]]));
         checkProtected();
 

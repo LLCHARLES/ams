@@ -9,7 +9,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/gen" "$OUT/SystemMenuHarness.app"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "${CONTEXT_MENU_SOURCE:-$SRC/Redesigned/ContextMenu/ContextMenu.x}" > "$OUT/gen/ContextMenu.m"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.4-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.4-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$SRC/Redesigned/ContextMenu" -isysroot "$SDK" -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/../scene.m" "$(dirname "$0")/../tabbar/touch.m" "$OUT"/gen/*.m "$SRC"/Redesigned/Player/PlayerMenu.m "$SRC"/Redesigned/ContextMenu/FireControl.m \
     "$SRC"/Core/SGLog.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGViewTree.m "$SRC"/Core/SGUIMode.m "$SRC"/Core/SGLocalize.m \

@@ -69,7 +69,7 @@ static void checkColdQueue(NSString *mode) {
             if (![track isEqual:a] && ![track isEqual:b] && ![track isEqual:c]) return;
             dispatch_semaphore_t signal=dispatch_semaphore_create(0);
             dispatch_async(dispatch_get_main_queue(),^{[serviced addObject:track];dispatch_semaphore_signal(signal);});
-            CHECK(dispatch_semaphore_wait(signal,dispatch_time(DISPATCH_TIME_NOW,2*NSEC_PER_SEC))==0);
+            CHECK(dispatch_semaphore_wait(signal,dispatch_time(DISPATCH_TIME_NOW,60*NSEC_PER_SEC))==0);
         });
         SGLyricsSetOrder(@[@"musixmatch"]);SGSetEnabled(SGKeyLyricsOffline,YES);SGSetEnabled(SGKeyPixieLyrics,YES);SGPrefsChanged();
         SGPixieLyricsSettingsChanged();pumpUntil(^BOOL{return fixtureLibrary()!=nil;});

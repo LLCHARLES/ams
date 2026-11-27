@@ -7,7 +7,7 @@ SRC=../../tweak/Sources
 mkdir -p build/gen
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/Privacy/CleanLinks.x" > build/gen/CleanLinks.m
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O0 -g -isysroot "$SDK" \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -O0 -g -isysroot "$SDK" \
     -I "$SRC" -I "$SRC/Shared/Privacy" \
     sim/main.m build/gen/CleanLinks.m "$SRC"/Shared/Privacy/CleanLinks.m "$SRC"/Core/SGPrefs.m "$SRC"/Core/SGLog.m \
     -framework UIKit -framework Foundation -o build/clean-links-sim

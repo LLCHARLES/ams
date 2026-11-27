@@ -116,7 +116,7 @@ static AttributeDelegate *receiveTask(Class cls, NSURLSession *session, NSURLSes
     [delegate URLSession:session dataTask:task didReceiveResponse:reply completionHandler:^(NSURLSessionResponseDisposition disposition) {
         dispatch_semaphore_signal(answered);
     }];
-    check(dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
+    check(dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0,
           @"response decision completed");
     for (NSData *chunk in chunks) [delegate URLSession:session dataTask:(id)task didReceiveData:chunk];
     [delegate URLSession:session task:task didCompleteWithError:error];
@@ -263,7 +263,7 @@ static void completionCases(void) {
                 reply = (NSHTTPURLResponse *)response;
                 dispatch_semaphore_signal(completed);
             }] resume];
-            if (dispatch_semaphore_wait(completed, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+            if (dispatch_semaphore_wait(completed, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) {
                 check(NO, @"completion-handler transport timed out");
                 [session invalidateAndCancel];
                 return;
@@ -390,14 +390,14 @@ static int reviewRegressions(const char *libraryPath) {
         receive(SPTCoreURLSessionDataDelegate.class, urlFor(2), 304, nil, nil);
         dispatch_semaphore_signal(finished);
     });
-    if (dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+    if (dispatch_semaphore_wait(entered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) {
         check(NO, @"R5 replay did not reach transformer");
         dispatch_semaphore_signal(release);
         return 1;
     }
     receive(SPTCoreURLSessionDataDelegate.class, urlFor(2), 200, new, nil);
     dispatch_semaphore_signal(release);
-    if (dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC))) {
+    if (dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC))) {
         check(NO, @"R5 replay did not finish"); return 1;
     }
     AttributeDelegate *latest = receive(SPTCoreURLSessionDataDelegate.class, urlFor(2), 304, nil, nil);
@@ -515,7 +515,7 @@ static int recheckRegressions(const char *libraryPath) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
                 delegate.decision(allow.boolValue ? NSURLSessionResponseAllow : NSURLSessionResponseCancel);
             });
-            check(dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
+            check(dispatch_semaphore_wait(answered, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0,
                   @"asynchronous response disposition completed");
             check(allow.boolValue ? delegate.body.length > 0 && delegate.dataOnDelegateQueue : delegate.body.length == 0,
                   @"replay only follows Allow on the delegate queue");

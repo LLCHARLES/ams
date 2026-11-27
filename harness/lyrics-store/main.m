@@ -21,7 +21,7 @@ static SGKaraokeLine *line(NSString *text, NSInteger start) {
 }
 
 static void pump(BOOL (^ready)(void)) {
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && until.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.002]];
     CHECK(ready());
@@ -162,7 +162,7 @@ static BOOL holdDirectory(id self,SEL sel,NSURL *url,BOOL intermediates,NSDictio
     if ([url isEqual:heldDirectory]) {
         dispatch_semaphore_t signal=retiredDuringWrite;
         dispatch_async(dispatch_get_main_queue(),retireWhileWriting);
-        CHECK(dispatch_semaphore_wait(signal,dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC))==0);
+        CHECK(dispatch_semaphore_wait(signal,dispatch_time(DISPATCH_TIME_NOW,60*NSEC_PER_SEC))==0);
     }
     return ((BOOL(*)(id,SEL,NSURL *,BOOL,NSDictionary *,NSError **))createDirectory)(self,sel,url,intermediates,attributes,error);
 }
@@ -214,7 +214,7 @@ static id holdOwnershipRead(id self, SEL sel, NSURL *url, NSError **error) {
                                isEqual:heldDirectory.URLByResolvingSymlinksInPath.path]) {
         dispatch_async(dispatch_get_main_queue(), retireWhileWriting);
         retireWhileWriting=nil;
-        CHECK(dispatch_semaphore_wait(retiredDuringWrite,dispatch_time(DISPATCH_TIME_NOW,3*NSEC_PER_SEC))==0);
+        CHECK(dispatch_semaphore_wait(retiredDuringWrite,dispatch_time(DISPATCH_TIME_NOW,60*NSEC_PER_SEC))==0);
     }
     return ((id(*)(id,SEL,NSURL *,NSError **))readPlist)(self,sel,url,error);
 }

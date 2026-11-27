@@ -9,7 +9,7 @@ OUT=${OUT:-$(dirname "$0")/build}
 rm -rf "$OUT"; mkdir -p "$OUT/AudioEffectsPageHarness.app"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -I"$FX" -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/sheet.m" "$(dirname "$0")/../scene.m" "$(dirname "$0")/../tabbar/touch.m" "$(dirname "$0")/stubs.m" \
     "$FX"/AudioEffectsSettings.m "$FX"/AudioEffectsPage.m "$FX"/SGDSPCurveView.m "$FX"/AudioEffectsLibraryPage.m "$FX"/SGDSPFilters.m \

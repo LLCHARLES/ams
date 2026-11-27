@@ -6,7 +6,8 @@
 #import "Core/SGPrefs.h"
 #import "Redesigned/Kit/SGRHeaderInfo.h"
 #import "Redesigned/Kit/SGRActionRow.h"
-#import "../harness-fail.h"
+#import "../harness-wait.h"
+#import "Redesigned/Kit/SGRField.h"
 #import "../album/hero-veil-check.h"
 #import "../album/beside-check.h"
 
@@ -37,6 +38,7 @@ static void watchPinnedHold(UIView *page, BOOL freeze) {
     __block NSUInteger frames = 0, veiled = 0, onCapsule = 0;
     __block BOOL failed = NO, frozen = !freeze, done = NO;
     __block CFTimeInterval start = 0;
+    __block SGRArtworkField *heldField;
     CFRunLoopObserverRef observer = CFRunLoopObserverCreateWithHandler(NULL, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true, 2000001,
                                                                        ^(CFRunLoopObserverRef obs, CFRunLoopActivity activity) {
         if (done) return;
@@ -46,7 +48,12 @@ static void watchPinnedHold(UIView *page, BOOL freeze) {
         if (!start) start = CACurrentMediaTime();
         UIView *veil = nil;
         for (UIView *v in page.subviews) if ([NSStringFromClass(v.class) isEqualToString:@"SGRFieldVeil"]) veil = v;
-        if (!veil && CACurrentMediaTime() - start > 1) {
+        if (!veil && !veiled && !heldField) {
+            heldField = [SGRArtworkField new];
+            [heldField holdPage:page];
+            veil = veilFind(page, @"SGRFieldVeil");
+        }
+        if (!veil && veiled) {
             done = YES;
             sg_holdChecked = YES;
             sg_holdPassed = !failed && veiled > 0;
@@ -95,6 +102,7 @@ static void watchPinnedHold(UIView *page, BOOL freeze) {
             layer.speed = 1;
             layer.timeOffset = 0;
         }
+        if (veil && heldField && veiled == 1) [heldField showPage];
     });
     CFRunLoopAddObserver(CFRunLoopGetMain(), observer, kCFRunLoopCommonModes);
     CFRelease(observer);
@@ -906,17 +914,26 @@ static void buildLikedSongs(UIViewController *page, CGFloat W) {
     UIView *face = box(creator, _TtCE13Encore_FaceKitO16EncoreFoundation6Encore12FacepileView.class, CGRectMake(0, 5, 24, 24), nil);
     face.backgroundColor = [UIColor colorWithWhite:0.8 alpha:1];
     face.layer.cornerRadius = 12;
-    // The owner's picture, in an image view inside the facepile, landing at 1.5 s after the header has laid out.
+    // The phone frame references were captured before the late owner picture.
+    // Keep that input state for both measurements, independent of the redraw rate.
+    BOOL phoneFrames = [NSProcessInfo.processInfo.arguments containsObject:@"cover-beside"] &&
+                       [NSProcessInfo.processInfo.arguments containsObject:@"-header-width"];
     UIImageView *facePicture = [[UIImageView alloc] initWithFrame:face.bounds];
     [face addSubview:facePicture];
     label(creator, CGRectMake(32, 9, 77, 16), @"The Weeknd", 13, UIColor.whiteColor, @"Encore.Label");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (!phoneFrames) HarnessWhen(@"creator header laid out before its picture arrives", ^BOOL {
+        return veilFind(page.view, @"SGRHeaderInfo").window != nil;
+    }, ^{
         facePicture.image = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(48, 48)] imageWithActions:^(UIGraphicsImageRendererContext *c) {
             [UIColor.orangeColor setFill];
             UIRectFill(CGRectMake(0, 0, 48, 48));
         }];
     });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (!phoneFrames) HarnessWhen(@"owner image delivered and creator header ready", ^BOOL {
+        NSArray *args = NSProcessInfo.processInfo.arguments;
+        BOOL picture = [args containsObject:@"verify-details"] && ![args containsObject:@"no-line"] && ![args containsObject:@"no-picture"];
+        return facePicture.image && (!picture || [creatorPictureState(page.view) hasPrefix:@"drawn"]);
+    }, ^{
         NSLog(@"[harness] owner picture: %@", creatorPictureState(page.view));
         NSArray *args = NSProcessInfo.processInfo.arguments;
         if ([args containsObject:@"verify-details"]) {
@@ -1312,7 +1329,7 @@ static void buildLikedSongs(UIViewController *page, CGFloat W) {
               cover.hidden, cover.layer.mask != nil);
     });
     if ([NSProcessInfo.processInfo.arguments containsObject:@"verify-actions"])
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        HarnessWhen(@"pinned hold observed and released", ^BOOL { return sg_holdChecked; }, ^{
             BOOL independent = (mix || [NSProcessInfo.processInfo.arguments containsObject:@"other"]) &&
                 ![NSProcessInfo.processInfo.arguments containsObject:@"no-download"];
             verifyMixActions(page.view, independent);

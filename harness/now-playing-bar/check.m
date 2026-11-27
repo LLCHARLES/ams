@@ -4,6 +4,7 @@
 // statics are reachable; the player state, the view tree of Spotify's page and the stubs it links against are
 // doubles. A failed check exits 1 with its name.
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "../harness-fail.h"
 #import "Shared/Player/PlayerState.h"
 #include "repeat.inc"
@@ -175,7 +176,6 @@ static void setTextSize(UIWindow *window, UIContentSizeCategory category) {
     // Hand the new traits down now rather than whenever the window next lays out: a slow machine may not in 0.1 s.
     [window updateTraitsIfNeeded];
     [window layoutIfNeeded];
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
 }
 
 static SGRBarText *barIn(UIView *host) {
@@ -212,7 +212,9 @@ static void checkTextSize(void) {
 
 // The pager lays out its neighbour before scrolling it into view. No placeText or
 // title layout occurs between that scroll and the first visible frame.
-static void checkPagedMarquee(void) {
+static void checkPagedMarquee(BOOL reduced) {
+    BOOL hostReduced = UIAccessibilityIsReduceMotionEnabled();
+    harnessMotion = reduced ? reduceMotion : allowMotion;
     UIView *host = [(id)UIApplication.sharedApplication.delegate window].rootViewController.view;
     UIScrollView *pager = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, 300, 60)];
     [host addSubview:pager];
@@ -226,9 +228,19 @@ static void checkPagedMarquee(void) {
     [text.title layoutIfNeeded];
     pager.contentOffset = CGPointMake(300, 0);
     CALayer *label = text.title.subviews.firstObject.layer;
-    HARNESS_CHECK([label animationForKey:@"sg.marquee"] && label.speed == 1);
+    NSLog(@"[harness] marquee: attached=%d key=%d scene=%ld app=%ld hostReduceMotion=%d fixtureReduceMotion=%d bounds=%@ fitted=%.1f paused=%d speed=%.1f animation=%d",
+          text.window != nil, text.window.isKeyWindow, (long)text.window.windowScene.activationState,
+          (long)UIApplication.sharedApplication.applicationState, hostReduced, reduced,
+          NSStringFromCGRect(text.title.bounds), [text.title.subviews.firstObject sizeThatFits:CGSizeMake(CGFLOAT_MAX, text.title.bounds.size.height)].width,
+          text.title.scrollingPaused, label.speed, [label animationForKey:@"sg.marquee"] != nil);
+    if (reduced) {
+        HARNESS_CHECK(![label animationForKey:@"sg.marquee"]);
+    } else {
+        HARNESS_CHECK([label animationForKey:@"sg.marquee"] && label.speed == 1);
+    }
     sg_checks++;
     [pager removeFromSuperview];
+    harnessMotion = useHostMotion;
 }
 
 #pragma mark - the artist under the title in the minimized row
@@ -694,10 +706,10 @@ static void switchTitles(NSString *key, BOOL on, dispatch_block_t next) {
     BOOL translate = [key isEqualToString:SGKeyLyricsTranslateTitles];
     void (^post)(void) = ^{
         [NSNotificationCenter.defaultCenter postNotificationName:translate ? SGTitleTranslationSettingsDidChangeNotification : SGSimplifyTitlesDidChangeNotification object:nil];
+        dispatch_async(dispatch_get_main_queue(), next);
     };
     if (translate) dispatch_async(dispatch_get_main_queue(), post);
     else post();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), next);
 }
 static void toggleTitles(BOOL enabled, dispatch_block_t next) {
     TitleRefreshProbe *root = [TitleRefreshProbe new];
@@ -863,7 +875,8 @@ static void runDisabled(void) {
 
     checkInlineArtist();
     checkTextSize();
-    checkPagedMarquee();
+    checkPagedMarquee(NO);
+    checkPagedMarquee(YES);
     checkNextButton();
     checkConnectButton();
     checkArtworkShape();

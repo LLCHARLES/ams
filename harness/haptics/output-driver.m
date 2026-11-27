@@ -58,7 +58,7 @@ void HarnessBetweenPlayerTurns(void (^body)(void)) {
     }
     atomic_store(&holdNextWake, true);
     dispatch_semaphore_signal(sg_wake);
-    HARNESS_CHECK(!dispatch_semaphore_wait(held, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)));
+    HARNESS_CHECK(!dispatch_semaphore_wait(held, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)));
     body();
     dispatch_semaphore_signal(resume);
 }

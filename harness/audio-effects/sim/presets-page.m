@@ -11,7 +11,7 @@
 #import "Shared/AudioEffects/AudioEffects.h"
 #import "Shared/AudioEffects/AudioEffectsPage.h"
 #import "Shared/AudioEffects/AudioEffectsPresets.h"
-#import "../../harness-fail.h"
+#import "../../harness-wait.h"
 
 @interface UIViewController (PresetsPageHarness)
 - (void)askForName;
@@ -37,7 +37,7 @@
         [presets loadViewIfNeeded];
         [presets askForName];
     }
-    [self after:1 do:^{
+    HarnessWhen(@"attached Save dialog", ^BOOL { return weakPage.presentedViewController.view.window != nil; }, ^{
         UIAlertController *dialog = (UIAlertController *)weakPage.presentedViewController;
         HARNESS_CHECK([dialog isKindOfClass:UIAlertController.class]);
         HARNESS_CHECK(dialog.view.window != nil);
@@ -49,14 +49,12 @@
         }
         [weakPage dismissViewControllerAnimated:NO completion:^{
             [self.nav popViewControllerAnimated:NO];
-            [self after:1 do:^{ done(weakPage == nil, weakAlert == nil); }];
+            HarnessWhen(@"release of popped presets page and Save dialog", ^BOOL {
+                return !weakPage && !weakAlert;
+            }, ^{ done(weakPage == nil, weakAlert == nil); });
         }];
         weakAlert = dialog;
-    }];
-}
-
-- (void)after:(double)seconds do:(void (^)(void))block {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
+    });
 }
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
@@ -69,7 +67,7 @@
     for (NSString *key in store.dictionaryRepresentation.allKeys) {
         if ([key hasPrefix:@"spotifyglass.dsp"]) [store removeObjectForKey:key];
     }
-    [self after:1 do:^{ [self run]; }];
+    HarnessWhen(@"visible presets navigation controller", ^BOOL { return self.nav.view.window != nil; }, ^{ [self run]; });
     return YES;
 }
 

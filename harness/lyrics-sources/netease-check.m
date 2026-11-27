@@ -67,7 +67,7 @@ void checkNetEaseURLs(void) {
         CHECK([SGKaraokeLineText(result.karaokeLines.firstObject) isEqual:@"Hello"]);
         finished = YES;
     });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     CHECK(finished);

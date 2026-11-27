@@ -7,6 +7,7 @@
 """
 import json
 import os
+from pathlib import Path
 import struct
 import subprocess
 import sys
@@ -21,6 +22,8 @@ failures = 0
 
 
 def phone(*args):
+    if args[0] == "wait" and "--timeout" not in args:
+        args = (*args, "--timeout", "60")
     out = subprocess.run([sys.executable, PHONE, *args], capture_output=True, text=True).stdout
     return out if args[0] == "tree" else json.loads(out)
 
@@ -61,14 +64,17 @@ check("harness: menu will display" in log and "harness: finger up" in log
 check(phone("state")["menu"] is True, "state: menu is up")
 start = last()
 check(phone("menu.pick", "Alpha")["ok"], "menu.pick: the row is found and tapped")
-check(phone("wait", "--log", "harness: menu picked Alpha", "--timeout", "2")["ok"], "menu.pick: the row's action ran")
-check(phone("wait", "--menu", "1", "--gone", "1", "--timeout", "2")["ok"], "wait --menu --gone: the menu closed")
+check(phone("wait", "--log", "harness: menu picked Alpha")["ok"], "menu.pick: the row's action ran")
+check(phone("wait", "--menu", "1", "--gone", "1")["ok"], "wait --menu --gone: the menu closed")
 
 answer = phone("scroll", "--id", "scroller", "--by", "0,500")
 check(answer["ok"] and answer["after"] == [0, 500], "scroll: the scroll view moved by the offset")
 phone("swipe", "--id", "scroller", "--by", "0,-300")
-time.sleep(1.5)
-offset = phone("find", "--id", "scroller")["views"][0]["contentOffset"][1]
+end = time.monotonic() + 60
+while True:
+    offset = phone("find", "--id", "scroller")["views"][0]["contentOffset"][1]
+    if offset > 850 or time.monotonic() >= end:
+        break
 check(offset > 850, f"swipe: a real fling moved the list past the 300 pt of the swipe ({offset:.0f})")
 
 start = last()
@@ -95,9 +101,9 @@ os.remove(frame)
 
 check(phone("player.open")["ok"] and phone("wait", "--id", "Context menu")["ok"], "player.open: the bar opened the player")
 check(phone("player.more")["ok"], "player.more: the ⋯ was tapped")
-check(phone("wait", "--log", "harness: player menu will display", "--timeout", "3")["ok"], "wait --log: the ⋯'s menu came up")
+check(phone("wait", "--log", "harness: player menu will display")["ok"], "wait --log: the ⋯'s menu came up")
 phone("menu.pick", "Sleep timer")
-check(phone("wait", "--log", "harness: player menu picked Sleep timer", "--timeout", "3")["ok"], "menu.pick: Sleep timer picked in the player's menu")
+check(phone("wait", "--log", "harness: player menu picked Sleep timer")["ok"], "menu.pick: Sleep timer picked in the player's menu")
 phone("player.close")
 check(phone("state")["player"] is False, "player.close: the down arrow closed the player")
 
@@ -124,13 +130,27 @@ check(phone("settings.page", "Row 33")["ok"] and phone("wait", "--log", "harness
 check(phone("tap", "--id", "nope")["error"] == "no view matches id=nope", "tap: a missing view is an error, not a crash")
 
 # The tree still answers while a command waits.
-waiting = threading.Thread(target=phone, args=("wait", "--log", "never", "--timeout", "2"))
-waiting.start()
-time.sleep(0.3)
-began = time.time()
-phone("tree")
-check(time.time() - began < 1 and waiting.is_alive(), "the tree is served while a wait runs")
-waiting.join()
+container = subprocess.check_output(["xcrun", "simctl", "get_app_container", os.environ.get("DRIVER_UDID", "booted"),
+                                     "com.retrine.driverharness", "data"], text=True).strip()
+gate = Path(container) / "tmp" / "driver-overlap"
+gate.mkdir()
+reply = []
+waiting = threading.Thread(target=lambda: reply.append(phone("wait", "--id", "overlap-finished")))
+try:
+    waiting.start()
+    end = time.monotonic() + 60
+    while not (gate / "entered").exists():
+        if time.monotonic() >= end:
+            raise RuntimeError("driver did not inspect the window while waiting")
+        time.sleep(0.02)
+    check("== window" in phone("tree") and waiting.is_alive(), "the tree is served while a wait runs")
+finally:
+    (gate / "release").touch()
+    waiting.join()
+    (gate / "release").unlink()
+    (gate / "entered").unlink(missing_ok=True)
+    gate.rmdir()
+check(reply and reply[0]["ok"], "releasing the window identifier completed the pending wait")
 
 print("done," , "all passed" if not failures else f"{failures} failed")
 sys.exit(1 if failures else 0)

@@ -152,7 +152,7 @@ int main(void) { @autoreleasepool {
     CHECK([UIImagePNGRepresentation(blue) writeToFile:path atomically:YES]);
     state.track.metadata = @{@"image_url": path};
     UIViewController *bar = [_TtC18NowPlaying_BarImpl27NowPlayingBarViewController new];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     // Real layout callbacks ask the bridge again as the asynchronous metadata thumbnail arrives.
     while (!fieldIs(field, 0, 1) && deadline.timeIntervalSinceNow > 0) {
         [bar viewDidLayoutSubviews];

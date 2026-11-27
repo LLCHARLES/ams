@@ -12,7 +12,7 @@ if [ "${UBSAN:-0}" = 1 ]; then
   sanitizer="-fsanitize=integer-divide-by-zero -fno-sanitize-recover=integer-divide-by-zero -Wl,-rpath,@executable_path"
   cp "$(xcrun clang -print-resource-dir)/lib/darwin/libclang_rt.ubsan_iossim_dynamic.dylib" "$APP/"
 fi
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -O1 -g \
+xcrun --sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -O1 -g \
   $sanitizer \
   -isysroot "$SDK" -I"$SRC" -I"$SRC/Shared/Player" -Wno-deprecated-declarations \
   "$HERE/handoff.m" "$HERE/../scene.m" "$OUT/gen/SpeedPitch.m" \

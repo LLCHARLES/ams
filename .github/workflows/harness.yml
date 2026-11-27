@@ -11,7 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: harness-${{ github.workflow }}-${{ github.ref }}
+  # The freshness check and rerun POST aren't atomic. A retry must never evict a newer
+  # pending or running first attempt, even if a push lands between those two requests.
+  group: harness-${{ github.workflow }}-${{ github.ref }}-${{ github.run_attempt == '1' && 'latest' || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -47,11 +49,26 @@ jobs:
             python3 scripts/harness-plan.py plan --all --github-output "$GITHUB_OUTPUT"
           fi
 
+  runner-watchdog:
+    name: Runner watchdog
+    needs: plan
+    if: >-
+      always() && needs.plan.result == 'success' &&
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]' && fromJSON(github.run_attempt) < 2 && needs.plan.outputs.any == 'true'
+    permissions:
+      actions: write
+    uses: ./.github/workflows/runner-queue-watchdog.yml
+    with:
+      shards: ${{ join(fromJSON(needs.plan.outputs.matrix).include.*.shard, ',') }}
+
   harness:
     name: Harnesses ${{ matrix.shard }}
     needs: plan
     if: github.event_name == 'pull_request' && needs.plan.outputs.any == 'true'
-    runs-on: macos-latest
+    runs-on: >-
+      ${{ (endsWith(github.run_attempt, '0') || endsWith(github.run_attempt, '2') || endsWith(github.run_attempt, '4') ||
+           endsWith(github.run_attempt, '6') || endsWith(github.run_attempt, '8')) && 'macos-26-intel' || 'macos-latest' }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -63,6 +80,13 @@ jobs:
       - name: Set up Theos for Logos hooks only
         if: matrix.theos
         uses: ./.github/actions/setup-theos
+      - name: Install ffmpeg and Pillow for the header pixel check
+        if: contains(matrix.harnesses, 'Header decoder suspension')
+        run: |
+          command -v ffmpeg >/dev/null || brew install ffmpeg
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/header-pixels"
+          "$RUNNER_TEMP/header-pixels/bin/python" -m pip install --only-binary=:all: Pillow==11.3.0
+          echo "MOTION_PIXELS_PYTHON=$RUNNER_TEMP/header-pixels/bin/python" >> "$GITHUB_ENV"
       - name: Build and assert
         shell: bash
         env:

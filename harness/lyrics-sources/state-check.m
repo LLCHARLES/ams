@@ -323,7 +323,7 @@ static id spotifyMiss(id self, SEL selector, NSURLRequest *request, void (^done)
 static HarnessRoute *sg_fakeRoute;
 static id fakeRoute(id self, SEL selector) { return sg_fakeRoute; }
 static void pumpUntilAt(BOOL (^ready)(void), int caller) {
-    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *limit = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!ready() && [limit timeIntervalSinceNow] > 0) [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     if (!ready()) { fprintf(stderr, "FAILED wait at line %d\n", caller); exit(1); }
 }

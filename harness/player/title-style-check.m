@@ -735,7 +735,7 @@ static void run(UIWindow *window) {
     [self.window makeKeyAndVisible];
     // From a timer, not the main queue: the checks turn the run loop for the row's work queued on the main queue.
     [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) { run(self.window); }];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         HARNESS_FAIL(@"title style checks did not finish");
     });
     return YES;

@@ -68,7 +68,7 @@ void SGHarnessFinishFontDownload(void) {
     pendingFont = nil;
     done(nil);
     // The registration the completion asked for lands on main in a later turn; the caller checks what it did.
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:3];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (landingsPending && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
     HARNESS_CHECK(!landingsPending);

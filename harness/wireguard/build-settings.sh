@@ -5,7 +5,7 @@ SRC="$ROOT/tweak/Sources"
 APP="${OUT:-$ROOT/harness/wireguard/build}/WGSettings.app"
 mkdir -p "$APP"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -I"$SRC" \
+xcrun clang -target $(uname -m)-apple-ios17.0-simulator -isysroot "$SDK" -fobjc-arc -I"$SRC" \
   -Wall -Werror -Wno-deprecated-declarations \
   "$ROOT/harness/wireguard/settings.m" "$ROOT/harness/scene.m" \
   "$SRC/Shared/WireGuard/SGWGSettingsController.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGLog.m" "$SRC/Settings/SGPage.m" \

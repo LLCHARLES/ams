@@ -10,7 +10,7 @@ SRC=$(cd "$HERE/../../tweak/Sources" && pwd)
 LOGOS=${THEOS:-$HOME/theos}/bin/logos.pl
 if [ -n "${OUT:-}" ]; then mkdir -p "$OUT"; else OUT=$(mktemp -d /tmp/retrine-cover-check.XXXXXX); trap 'rm -rf "$OUT"' EXIT; fi
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-CC="xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot $SDK -iframework $SDK/System/iOSSupport/System/Library/Frameworks -Wno-deprecated-declarations"
+CC="xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -g -O0 -isysroot $SDK -iframework $SDK/System/iOSSupport/System/Library/Frameworks -Wno-deprecated-declarations"
 FRAMEWORKS="-framework UIKit -framework QuartzCore -framework CoreGraphics -framework CoreImage -framework Foundation -framework Vision"
 
 $CC -DSGR_COVER_READ_TEST -I"$SRC" "$HERE/cover-read-check.m" "$SRC/Redesigned/Kit/SGRCoverRead.m" "$SRC/Redesigned/Kit/SGRTokens.m" \

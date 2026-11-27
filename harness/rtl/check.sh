@@ -22,7 +22,7 @@ APP=$OUT/RTLCheck.app
 mkdir -p "$OUT/gen" "$APP"
 "${THEOS:-$HOME/theos}/bin/logos.pl" -c generator=internal "$SRC/Shared/ListeningStats/ListeningStats.x" > "$OUT/gen/ListeningStats.m"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 -isysroot "$SDK" -Wall -Wno-deprecated-declarations \
     -Wno-undeclared-selector -I"$SRC" -I"$SRC/Shared/ListeningStats" "$HERE/check.m" \
     "$HERE/../sing/button/sing-stubs.m" "$HERE/../listening-stats/sim/stubs.m" "$OUT/gen/ListeningStats.m" \
     "$SRC"/Shared/Sing/SGSingCard.m "$SRC"/Settings/SGMarquee.m \
@@ -47,6 +47,13 @@ cat > "$APP/Info.plist" <<'PLIST'
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>UIUserInterfaceStyle</key><string>Dark</string>
 <key>UILaunchScreen</key><dict/>
+<key>UIApplicationSceneManifest</key><dict>
+<key>UIApplicationSupportsMultipleScenes</key><false/>
+<key>UISceneConfigurations</key><dict>
+<key>UIWindowSceneSessionRoleApplication</key><array><dict>
+<key>UISceneConfigurationName</key><string>Default</string>
+<key>UISceneDelegateClassName</key><string>RTLScene</string>
+</dict></array></dict></dict>
 </dict></plist>
 PLIST
 codesign -f -s - "$APP" >/dev/null 2>&1
@@ -60,17 +67,22 @@ if [ -z "$UDID" ]; then
     OWN=$(xcrun simctl create "$PREFIX$$" com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro)
     UDID=$OWN
     xcrun simctl boot "$UDID"
-    xcrun simctl bootstatus "$UDID" -b >/dev/null
 fi
+xcrun simctl bootstatus "$UDID" >/dev/null
 xcrun simctl install "$UDID" "$APP"
 status=0
 for direction in ltr rtl; do
     set -- "$direction"
     [ "$direction" = rtl ] && set -- rtl -AppleTextDirection YES -NSForceRightToLeftWritingDirection YES
-    xcrun simctl launch --console --terminate-running-process "$UDID" com.retrine.rtlcheck "$@" > "$OUT/$direction.log" 2>&1 || true
-    if grep -q "\[harness\] PASS $direction" "$OUT/$direction.log"; then echo "PASS $direction"
-    # A launch that never reached the check leaves no [harness] line; its own output says why.
-    else echo "FAIL $direction"; grep -q "\[harness\]" "$OUT/$direction.log" && grep "\[harness\]" "$OUT/$direction.log" | tail -3 || tail -20 "$OUT/$direction.log"; status=1; fi
+    launched=0
+    python3 "$HERE/../sim-launch.py" --terminate-running-process "$UDID" com.retrine.rtlcheck "$@" > "$OUT/$direction.log" 2>&1 || launched=$?
+    if [ "$launched" -eq 0 ] && grep -q "\[harness\] PASS $direction" "$OUT/$direction.log"; then echo "PASS $direction"
+    else
+        echo "FAIL $direction (launch status $launched)"
+        if grep -q '\[harness\]' "$OUT/$direction.log"; then grep '\[harness\]' "$OUT/$direction.log" | tail -3
+        else tail -20 "$OUT/$direction.log"; fi
+        status=1
+    fi
 done
 xcrun simctl uninstall "$UDID" com.retrine.rtlcheck
 exit $status

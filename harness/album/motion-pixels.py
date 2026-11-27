@@ -3,7 +3,6 @@ from pathlib import Path
 import re
 import subprocess as sp
 import sys
-import threading
 from PIL import Image, ImageDraw, ImageChops, ImageStat
 
 
@@ -32,10 +31,9 @@ def fixture(out):
 
 
 def run(sim, bundle, out):
-    launch = sp.Popen(["xcrun", "simctl", "launch", "--console-pty", sim, bundle, "motion-visibility"],
+    launch = sp.Popen([sys.executable, Path(__file__).resolve().parents[1] / "sim-launch.py",
+                       "--live", "--timeout", "100", sim, bundle, "motion-visibility"],
                       stdout=sp.PIPE, stderr=sp.STDOUT, text=True, errors="replace")
-    timer = threading.Timer(100, launch.kill)
-    timer.start()
     seen = {}
     try:
         for line in launch.stdout:
@@ -86,8 +84,7 @@ def run(sim, bundle, out):
                 ack.write(b"+")
         raise RuntimeError("app exited without its verdict")
     finally:
-        timer.cancel()
-        launch.kill()
+        launch.terminate()
         launch.wait()
 
 

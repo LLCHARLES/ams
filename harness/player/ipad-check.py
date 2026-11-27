@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 
@@ -19,14 +20,14 @@ def run(*command, **kwargs):
 
 def scenario(udid, bundle, name, variables, marker):
     env = dict(os.environ, **{"SIMCTL_CHILD_" + k: v for k, v in variables.items()})
-    process = subprocess.Popen(["xcrun", "simctl", "launch", "--console-pty", udid, bundle],
+    process = subprocess.Popen([sys.executable, ROOT / "harness/sim-launch.py", "--live", "--timeout", "270", udid, bundle],
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     def timeout():
         print("FAIL " + name + ": no completion within 90 seconds of its first output", flush=True)
-        process.kill()
+        process.terminate()
     def silent():
         print("FAIL " + name + ": no output within 180 seconds of launch", flush=True)
-        process.kill()
+        process.terminate()
     # The bound is the app's own run, counted from its first output: on a clone just booted on CI, the system's
     # first launch of an app alone takes 80 seconds and more before the app writes anything. The launch itself
     # gets its own, wider bound so a launch that never prints fails instead of waiting out the job.
@@ -53,7 +54,7 @@ def scenario(udid, bundle, name, variables, marker):
         launch.cancel()
         watchdog.cancel()
         if process.poll() is None:
-            process.kill()
+            process.terminate()
         process.wait()
     if not passed:
         raise RuntimeError(name + ": no PASS verdict")

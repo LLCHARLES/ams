@@ -9,12 +9,12 @@ if [ -n "${OUT:-}" ]; then mkdir -p "$OUT"; else OUT=$(mktemp -d /tmp/meaning-tr
 APP=$OUT/MeaningTranslateCheck.app
 if [ "${MEANING_SIMULATOR:-0}" = 1 ]; then
     SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-    TARGET=arm64-apple-ios17.0-simulator
+    TARGET=$(uname -m)-apple-ios17.0-simulator
     BUNDLE=$APP
     INSIDE=MeaningTranslateCheck
 else
     SDK=$(xcrun --sdk macosx --show-sdk-path)
-    TARGET=arm64-apple-ios17.0-macabi
+    TARGET=$(uname -m)-apple-ios17.0-macabi
     BUNDLE=$APP/Contents
     INSIDE=Contents/MacOS/MeaningTranslateCheck
     mkdir -p "$BUNDLE/MacOS"

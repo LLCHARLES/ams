@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import "../harness-fail.h"
+#import "../harness-wait.h"
 #import "Redesigned/Player/Player.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Redesigned/Kit/SGRBridges.h"
@@ -39,19 +40,23 @@ UICollectionViewCell *SGHarnessSelectableCover(UICollectionView *covers, Class c
     return cell;
 }
 
-static void tapPreview(UIView *preview, dispatch_block_t settled) {
+static void tapPreview(UIView *preview, NSString *what, BOOL (^received)(void), dispatch_block_t settled) {
     UIWindow *window = preview.window;
     CGPoint point = [preview convertPoint:CGPointMake(CGRectGetMidX(preview.bounds), CGRectGetMidY(preview.bounds)) toView:window];
     UIView *hit = [window hitTest:point withEvent:nil];
     if (![hit isDescendantOfView:preview]) HARNESS_FAIL(@"preview touch would hit %@ instead", hit);
     SGHarnessTap(window, point);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), settled);
+    HarnessWhen(what, received, settled);
 }
 
 static void pendingCase(UIView *preview, UIViewController *player, NSUInteger step) {
     SGKaraokeKeepLines(SGKaraokePlayingTrack(), nil);
     HARNESS_CHECK(!SGRPlayerLyricsAvailable());
-    tapPreview(preview, ^{
+    tapPreview(preview, @"pending tap registered on the preview window", ^BOOL {
+        for (UIGestureRecognizer *gesture in preview.window.gestureRecognizers)
+            if ([gesture isKindOfClass:NSClassFromString(@"SGRPendingPreview")]) return YES;
+        return NO;
+    }, ^{
         HARNESS_CHECK(!SGRPlayerLyricsOpen() && pager.selections == 1);
         dispatch_block_t deliver = ^{
             SGKaraokeKeepLines(SGKaraokePlayingTrack(), @[]);
@@ -93,7 +98,7 @@ static void pendingCase(UIView *preview, UIViewController *player, NSUInteger st
 
 void SGHarnessCheckPreviewTap(UIView *preview, UIViewController *player, dispatch_block_t givePreviewBack) {
     HARNESS_CHECK(preview.layer.mask && !SGRPlayerLyricsOpen());
-    tapPreview(preview, ^{
+    tapPreview(preview, @"masked preview selected the covering cell", ^BOOL { return pager.selections > 0; }, ^{
         if (SGRPlayerLyricsOpen() || pager.selections != 1)
             HARNESS_FAIL(@"masked preview: lyrics open=%d, selections=%lu (wanted NO, 1)", SGRPlayerLyricsOpen(), (unsigned long)pager.selections);
         givePreviewBack();
@@ -102,7 +107,7 @@ void SGHarnessCheckPreviewTap(UIView *preview, UIViewController *player, dispatc
             pendingCase(preview, player, 0);
             return;
         }
-        tapPreview(preview, ^{
+        tapPreview(preview, @"unmasked preview opened lyrics", ^BOOL { return SGRPlayerLyricsOpen(); }, ^{
             if (!SGRPlayerLyricsOpen() || pager.selections != 1)
                 HARNESS_FAIL(@"visible preview: lyrics open=%d, new selections=%lu (wanted YES, 0)", SGRPlayerLyricsOpen(), (unsigned long)(pager.selections - 1));
             NSLog(@"[harness] preview-tap checks: 2 of 2 right -- PASS");

@@ -8,10 +8,10 @@ it exits 0 only when a FAIL line containing that text is logged and <pass text> 
 """
 import argparse
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
-import threading
 
 parser = argparse.ArgumentParser()
 parser.add_argument("udid")
@@ -23,36 +23,35 @@ argv = sys.argv[1:]
 split = argv.index("--") if "--" in argv else len(argv)
 args = parser.parse_args(argv[:split])
 launch_args = argv[split + 1:]
+if args.shots:
+    launch_args.append("capture-shots")
 
-launch = subprocess.Popen(["xcrun", "simctl", "launch", "--console-pty", "--terminate-running-process", args.udid,
+launch = subprocess.Popen([sys.executable, Path(__file__).resolve().parents[1] / "sim-launch.py",
+                           "--live", "--timeout", "120", "--terminate-running-process", args.udid,
                            "com.vojta.albumharness", *launch_args],
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-watchdog = threading.Timer(120, launch.kill)
-watchdog.start()
 passed = False
 failures = []
 for line in launch.stdout:
     if "[harness]" not in line:
         continue
     print(line.rstrip(), flush=True)
-    shot = re.search(r"\[harness\] SHOT (\S+)", line)
+    shot = re.search(r"\[harness\] CAPTURE (\S+) (.+)$", line.rstrip())
     if shot and args.shots:
         os.makedirs(args.shots, exist_ok=True)
         subprocess.run(["xcrun", "simctl", "io", args.udid, "screenshot",
                         os.path.join(args.shots, shot.group(1) + args.suffix + ".png")],
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        Path(shot.group(2)).touch()
     if "[harness] FAIL" in line:
         failures.append(line.strip())
         break
     if args.passed in line:
         passed = True
         break
-timed_out = not watchdog.is_alive() and not passed and not failures
-watchdog.cancel()
-launch.kill()
-launch.wait()
-subprocess.run(["xcrun", "simctl", "terminate", args.udid, "com.vojta.albumharness"],
-               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+if passed or failures:
+    launch.terminate()
+timed_out = launch.wait() == 124
 label = " ".join(launch_args)
 if args.fail:
     if not passed and any(args.fail in failure for failure in failures):

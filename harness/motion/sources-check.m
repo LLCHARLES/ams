@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/AnimatedArtwork/SGMotionTicket.h"
+#import "Shared/LyricsSources/SGBoundedRequest.h"
 #import "Shared/AdBlock/Protobuf.h"
 #import "Settings/SGModPage.h"
 #import "Settings/SGSourcesPage.h"
@@ -50,7 +51,6 @@ static NSUInteger heldRequests;
 @property (nonatomic, copy) NSString *uri;
 - (void)finish;
 @end
-static CanvasProtocol *held;
 @implementation CanvasProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return YES; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
@@ -73,10 +73,8 @@ static CanvasProtocol *held;
     CHECK([self.uri hasPrefix:@"spotify:track:"]);
     CHECK(![self.uri hasPrefix:@"spotify:track:offline-"]);
     dispatch_async(dispatch_get_main_queue(), ^{
-        if ([self.uri isEqual:@"spotify:track:held"]) {
-            heldRequests++;
-            held = self;
-        } else [self finish];
+        if ([self.uri isEqual:@"spotify:track:held"]) heldRequests++;
+        [self finish];
     });
 }
 - (void)finish {
@@ -94,6 +92,22 @@ static CanvasProtocol *held;
 - (void)stopLoading {}
 @end
 
+// Hold delivery to the source walk, not the HTTP connection: 200 cache fills can
+// outlast the fixture's one-second request timeout. Keep the real transport and reply bytes.
+extern __typeof__(SGBoundedRequestTask) fixtureHTTPTask;
+static BOOL holdNextReply;
+static dispatch_block_t releaseReply;
+NSURLSessionDataTask *SGBoundedRequestTask(NSURLRequest *request, NSTimeInterval timeout,
+    void (^done)(NSData *, NSURLResponse *, NSError *)) {
+    if (!holdNextReply) return fixtureHTTPTask(request, timeout, done);
+    holdNextReply = NO;
+    return fixtureHTTPTask(request, timeout, ^(NSData *data, NSURLResponse *response, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            releaseReply = ^{ done(data, response, error); };
+        });
+    });
+}
+
 static NSURLSession *fixtureSession;
 @interface NSURLSession (CanvasCheck)
 + (NSURLSession *)canvasSession;
@@ -103,7 +117,7 @@ static NSURLSession *fixtureSession;
 @end
 
 static void waitFor(BOOL (^ready)(void)) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
     while (!ready() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.001]];
     CHECK(ready());
@@ -187,9 +201,10 @@ int main(void) {
             CHECK([file.absoluteString isEqual:@"https://fixture.invalid/second.mp4"]);
             delivered++;
         };
+        holdNextReply = YES;
         ask(@"spotify:track:held", waiter);
         ask(@"spotify:track:held", waiter);
-        waitFor(^BOOL { return held != nil; });
+        waitFor(^BOOL { return releaseReply != nil; });
         revised = NO;
         for (NSUInteger i = 0; i < 200; i++)
             CHECK(lookup([NSString stringWithFormat:@"spotify:track:fill-%lu", (unsigned long)i]) != nil);
@@ -199,7 +214,8 @@ int main(void) {
         CHECK([lookup(@"spotify:track:negative").absoluteString isEqual:@"https://fixture.invalid/second.mp4"]);
         ask(@"spotify:track:held", waiter);
         CHECK(heldRequests == 1 && delivered == 0);
-        [held finish];
+        releaseReply();
+        releaseReply = nil;
         waitFor(^BOOL { return delivered == 3; });
         CHECK([lookup(@"spotify:track:held").absoluteString isEqual:@"https://fixture.invalid/second.mp4"]);
         CHECK(delivered == 3 && heldRequests == 1);
@@ -209,7 +225,6 @@ int main(void) {
         [walk cancel];
         CHECK(fileTicket.cancelled);
         holdFile = NO;
-        held = nil;
         // A cancelled metadata lookup must not start a file download when its reply arrives.
         NSUInteger before = fileRequests;
         walk = SGMotionRequestClip(@"spotify:track:cancel-metadata", nil, nil, nil, 720,

@@ -246,6 +246,18 @@ static UIButton *menuButton(NSString *title, NSString *identifier, NSArray<NSStr
 @interface HarnessWindow : UIWindow
 @end
 @implementation HarnessWindow
+- (NSString *)accessibilityIdentifier {
+    // The host and simulator share this app's container. A wait for this
+    // identifier stays pending until the host has received the tree.
+    NSString *gate = [NSTemporaryDirectory() stringByAppendingPathComponent:@"driver-overlap"];
+    NSFileManager *files = NSFileManager.defaultManager;
+    if ([files fileExistsAtPath:gate]) {
+        NSString *entered = [gate stringByAppendingPathComponent:@"entered"];
+        if (![files fileExistsAtPath:entered]) [files createFileAtPath:entered contents:nil attributes:nil];
+        if ([files fileExistsAtPath:[gate stringByAppendingPathComponent:@"release"]]) return @"overlap-finished";
+    }
+    return super.accessibilityIdentifier;
+}
 - (void)sendEvent:(UIEvent *)event {
     for (UITouch *touch in event.allTouches) {
         if (touch.phase == UITouchPhaseEnded) SGLog(@"harness: finger up");

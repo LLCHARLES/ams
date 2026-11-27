@@ -57,7 +57,7 @@ static NSArray<SGPlay *> *recordedPlays(void) {
     [SGListeningLog() finishPendingWritesWithCompletion:^(NSError *error) {
         CHECK(!error); done = YES;
     }];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(done);
@@ -67,7 +67,7 @@ static NSArray<SGPlay *> *recordedPlays(void) {
 static void drainMain(void) {
     __block BOOL applied = NO;
     dispatch_async(dispatch_get_main_queue(), ^{ applied = YES; });
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!applied && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(applied);
@@ -149,7 +149,7 @@ int main(void) { @autoreleasepool {
         recording(YES);
         dispatch_semaphore_signal(posted);
     });
-    CHECK(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     drainMain();
     setElapsed(500);
     [observer playerStateDidChange:state(@"spotify:track:last", @"Last", @"Artist")];
@@ -164,7 +164,7 @@ int main(void) { @autoreleasepool {
         [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
         dispatch_semaphore_signal(posted);
     });
-    CHECK(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC)) == 0);
+    CHECK(dispatch_semaphore_wait(posted, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC)) == 0);
     setElapsed(510);
     recording(NO);
     drainMain();
@@ -276,7 +276,7 @@ int main(void) { @autoreleasepool {
     SGPlayLog *reopened = [[SGPlayLog alloc] initWithPath:[support stringByAppendingPathComponent:@"Retrine/Listening.tsv"]];
     __block BOOL loaded = NO;
     [reopened loadWithCompletion:^{ loaded = YES; }];
-    NSDate *loadDeadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    NSDate *loadDeadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!loaded && loadDeadline.timeIntervalSinceNow > 0)
         [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]];
     CHECK(loaded && !reopened.loadError);

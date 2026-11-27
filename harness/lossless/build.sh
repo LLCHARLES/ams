@@ -5,7 +5,7 @@ OUT=${LOSSLESS_PROBE_OUT:-"$HERE/build"}
 APP="$OUT/LosslessProbe.app"
 mkdir -p "$APP"
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun --sdk iphonesimulator clang -target arm64-apple-ios16.1-simulator -fobjc-arc -O1 \
+xcrun --sdk iphonesimulator clang -target $(uname -m)-apple-ios16.1-simulator -fobjc-arc -O1 \
     -isysroot "$SDK" -Wno-deprecated-declarations "$HERE/main.m" "$HERE/../scene.m" \
     -framework UIKit -framework Foundation -framework AVFoundation -framework AudioToolbox \
     -framework CoreMedia -o "$APP/LosslessProbe"

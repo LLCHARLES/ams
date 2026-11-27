@@ -1,6 +1,10 @@
 import importlib.util
+import io
+import json
+from contextlib import nullcontext, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -9,6 +13,92 @@ ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("harness_plan", ROOT / "scripts/harness-plan.py")
 planner = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(planner)
+
+
+class CrashDiagnostics(unittest.TestCase):
+    def test_late_report_watch_is_bounded_and_only_for_possible_crashes(self):
+        for name, status, publish, expect_report in [
+            ("Fluid clips", -5, True, True), ("Fluid clips", 133, True, True),
+            ("SponsorBlock screens", 1, True, True), ("Player visualizer shuffle and heat", 1, False, False),
+            ("Fluid clips", 1, True, False),
+        ]:
+            with self.subTest(name=name, status=status), TemporaryDirectory() as home:
+                reports = Path(home) / "Library/Logs/DiagnosticReports"
+                reports.mkdir(parents=True)
+                elapsed = 0.0
+
+                def advance(seconds):
+                    nonlocal elapsed
+                    elapsed += seconds
+                    self.assertLessEqual(elapsed, 10)
+                    if publish and elapsed >= 3 and not (reports / "late.ips").exists():
+                        (reports / "late.ips").write_text('{}\n{"procName":"LateApp"}')
+
+                output = io.StringIO()
+                with patch.dict(planner.os.environ, HOME=home, GITHUB_STEP_SUMMARY=""), \
+                        patch.object(planner, "build_index", return_value=planner.HARNESSES), \
+                        patch.object(planner, "check_preference_lock_coverage"), \
+                        patch.object(planner, "harness_locks", return_value=nullcontext()), \
+                        patch.object(planner, "run_harness", return_value=status), \
+                        patch.object(planner.time, "monotonic", side_effect=lambda: elapsed), \
+                        patch.object(planner.time, "sleep", side_effect=advance), redirect_stdout(output):
+                    self.assertEqual(planner.cmd_run(SimpleNamespace(names=[name], shard="unit")), 1)
+                self.assertEqual(output.getvalue().count("Process: LateApp"), int(expect_report))
+                if expect_report:
+                    self.assertLess(elapsed, 10)
+                else:
+                    self.assertEqual(elapsed, 0 if publish else 10)
+
+    def test_failed_harness_prints_only_its_new_reports(self):
+        with TemporaryDirectory() as home:
+            reports = Path(home) / "Library/Logs/DiagnosticReports"
+            reports.mkdir(parents=True)
+
+            def report(name, triggered=False):
+                body = {
+                    "procName": name,
+                    "exception": {"type": "EXC_BREAKPOINT", "signal": "SIGTRAP", "message": "fixture trap"},
+                    "termination": {"namespace": "SIGNAL", "code": 5, "indicator": "Trace/BPT trap: 5"},
+                    "usedImages": [{"name": "HarnessKit"}],
+                    "threads": [{"frames": [{"symbol": "OtherThread"}]},
+                                {"frames": [{"imageIndex": 0, "symbol": f"check{i}"} for i in range(16)]}],
+                    "privateData": "not part of the summary",
+                }
+                if triggered:
+                    body["threads"][1]["triggered"] = True
+                else:
+                    body["faultingThread"] = 1
+                (reports / (name + ".ips")).write_text('{"bug_type":"309"}\n' + json.dumps(body))
+
+            report("BeforeRun")
+            entries = [dict(name=n, dir=n, run=n) for n in ("Pass", "Fail")]
+
+            def run(command):
+                if command == "Pass":
+                    report("DuringSuccess")
+                    return 0
+                # Appending to an older report does not make it a new crash.
+                with (reports / "BeforeRun.ips").open("a") as f:
+                    f.write("\n")
+                report("HostCrash")
+                report("SimulatorCrash", triggered=True)
+                return 1
+
+            output = io.StringIO()
+            with patch.dict(planner.os.environ, HOME=home, GITHUB_STEP_SUMMARY=""), \
+                    patch.object(planner, "build_index", return_value=entries), \
+                    patch.object(planner, "check_preference_lock_coverage"), \
+                    patch.object(planner, "harness_locks", return_value=nullcontext()), \
+                    patch.object(planner, "run_harness", side_effect=run), redirect_stdout(output):
+                result = planner.cmd_run(SimpleNamespace(names=["Pass,Fail"], shard="unit"))
+            self.assertEqual(result, 1)
+            text = output.getvalue()
+            for expected in ("HostCrash", "SimulatorCrash", "EXC_BREAKPOINT", "SIGTRAP",
+                             "fixture trap", "Trace/BPT trap: 5", "HarnessKit", "check14"):
+                self.assertIn(expected, text)
+            for excluded in ("BeforeRun", "DuringSuccess", "OtherThread", "check15", "not part of the summary"):
+                self.assertNotIn(excluded, text)
+            self.assertEqual(len(list(reports.glob("*.ips"))), 4)
 
 
 class BuildInputSelection(unittest.TestCase):
@@ -50,6 +140,18 @@ class BuildInputSelection(unittest.TestCase):
                     {"Player settings", "Player AutoMix UI"},
                     {entry["name"] for entry in selected},
                 )
+
+
+class ShardMatrix(unittest.TestCase):
+    def test_full_matrix_balances_across_five_shards(self):
+        entries = [dict(name=name, weight=weight, theos=name == "F")
+                   for name, weight in zip("ABCDEF", (5, 4, 3, 2, 1, 1))]
+        with patch.object(planner, "HARNESSES", entries):
+            matrix = planner.shard_matrix(entries)
+        self.assertEqual([(s["shard"], s["harnesses"], s["theos"]) for s in matrix], [
+            ("1/5", "A", False), ("2/5", "B", False), ("3/5", "C", False),
+            ("4/5", "D", False), ("5/5", "E,F", True),
+        ])
 
 
 class GlobalSelection(unittest.TestCase):

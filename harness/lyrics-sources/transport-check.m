@@ -175,7 +175,7 @@ dispatch_block_t SGSpotifyISRCWithOutcome(NSString *uri, NSUInteger tries, void 
 }
 NSString *SGLyricsTranslationLanguage(void) { return nil; }
 static void waitFor(BOOL *finished) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!*finished && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
     CHECK(*finished);

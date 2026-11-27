@@ -22,9 +22,10 @@ run() {
     id=$1 expected=$2
     shift 2
     log="$OUT/$(echo "$id $*" | tr -c 'A-Za-z0-9.\n-' '_').log"
-    xcrun simctl launch --console-pty --terminate-running-process "$UDID" "$id" "$@" 2>&1 | tr -ud '\r' | while IFS= read -r line; do
+    xcrun simctl launch --console-pty --terminate-running-process "$UDID" "$id" "$@" capture-veil 2>&1 | tr -ud '\r' | while IFS= read -r line; do
         echo "$line"
         case "$line" in *"[harness] SHOT "*) xcrun simctl io "$UDID" screenshot "$OUT/${line##*SHOT }.png" > /dev/null 2>&1 ;; esac
+        case "$line" in *"[harness] VEIL-ACK "*) touch "${line##*VEIL-ACK }" ;; esac
     done > "$log"
     if grep -q '\[harness\] FAIL' "$log" || ! grep -q "$expected" "$log"; then
         echo "FAILED: $id $*"

@@ -25,7 +25,7 @@ lift = source[source.index("// The header rows taking touches in a player"):sour
 (Path(sys.argv[2]) / "volume-cover-production.inc").write_text(source[top:source.index("\n", top)] + "\n" + lift)
 PY
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$OUT" \
     "$HERE/volume-layout-check.m" -framework UIKit -framework Foundation -framework CoreGraphics -o "$OUT/volume-layout-check"
 "$OUT/volume-layout-check"

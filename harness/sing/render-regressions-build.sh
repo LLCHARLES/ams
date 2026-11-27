@@ -6,7 +6,7 @@ SRC="$HERE/../../tweak/Sources"
 : "${OUT:?Set OUT to a temporary build directory}"
 mkdir -p "$OUT"
 ENGINE=${ENGINE_SOURCE:-"$SRC/Shared/Sing/SGSingEngine.m"}
-xcrun clang -fobjc-arc -O2 -Wall -Werror -target arm64-apple-macos15.0 \
+xcrun clang -fobjc-arc -O2 -Wall -Werror -target $(uname -m)-apple-macos15.0 \
     -I "$SRC" -I "$SRC/Shared/Sing" -I "$HERE/shim" \
     "-DSG_SING_ENGINE_SOURCE=\"$ENGINE\"" \
     "$HERE/render-regressions.m" "$SRC/Shared/Sing/SGSingSeparator.m" \

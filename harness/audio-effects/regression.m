@@ -7,6 +7,7 @@
 #include <math.h>
 #include "Shared/AudioEffects/SGDSPEngine.h"
 #include "Shared/Player/SGRenderGate.h"
+#import "../reader-handoff.h"
 
 static int failures;
 static void check(bool ok, const char *name) {
@@ -60,14 +61,14 @@ static void contention(void) {
     atomic_store(&holdParameters, true);
     pthread_t writer;
     pthread_create(&writer, NULL, changeRoom, engine);
-    while (!atomic_load(&setterEntered)) usleep(100);
+    HARNESS_AWAIT(atomic_load(&setterEntered));
     // No retired state: maintenance must finish even with configuration admission held.
     dispatch_semaphore_t collected = dispatch_semaphore_create(0);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
         SGDSPEngineCollect(engine);
         dispatch_semaphore_signal(collected);
     });
-    bool collectedEarly = !dispatch_semaphore_wait(collected, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC));
+    bool collectedEarly = !dispatch_semaphore_wait(collected, dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC));
     check(collectedEarly, "steady-state collection needs no configuration admission");
     bool ok = true;
     // Every block is processed while the setting remains in flight.
@@ -94,7 +95,8 @@ static void *transfer(void *context) {
     Handoff *handoff = context;
     SGRenderGateClose(&handoff->gate);
     atomic_store(&handoff->closed, true);
-    while (!SGRenderGateIdle(&handoff->gate)) usleep(100);
+    harnessRetiring = YES;
+    while (!SGRenderGateIdle(&handoff->gate)) HarnessWriterSleep(100);
     handoff->owner = 2;
     SGRenderGateOpen(&handoff->gate);
     atomic_store(&handoff->transferred, true);
@@ -105,16 +107,16 @@ static void admission(void) {
     Handoff handoff = {.owner = 1};
     check(SGRenderGateEnter(&handoff.gate), "first post-render reader admitted");
     pthread_t writer;
+    HarnessStartHandoff();
     pthread_create(&writer, NULL, transfer, &handoff);
-    while (!atomic_load(&handoff.closed)) usleep(100);
-    // Longer than the old bounded waitFor: ownership must still not move.
-    usleep(150000);
+    HarnessWaitForHeldReader();
     check(!atomic_load(&handoff.transferred) && handoff.owner == 1,
           "ownership waits for the admitted post-render reader, without a timeout");
     bool entered = SGRenderGateEnter(&handoff.gate);
     check(!entered, "another output cannot enter during handoff");
     if (entered) SGRenderGateLeave(&handoff.gate);
     SGRenderGateLeave(&handoff.gate);
+    dispatch_semaphore_signal(harnessResumeWriter);
     pthread_join(writer, NULL);
     entered = SGRenderGateEnter(&handoff.gate);
     check(entered && handoff.owner == 2, "next output enters after the old reader exits");

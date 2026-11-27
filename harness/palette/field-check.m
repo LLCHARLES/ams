@@ -111,7 +111,8 @@ static void checkDrift(void) {
     spin(0.4);
     check(rest.count == 5 && moved(flow, rest, NULL) == 0, "a flow that was never started stays at rest");
     flow.moving = YES;
-    spin(1);
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:45];
+    while (moved(flow, rest, NULL) <= 1 && deadline.timeIntervalSinceNow > 0) spin(.02);
     check(moved(flow, rest, &drifted) > 1, "a moving flow drifts, by the layer's own steps");
     flow.moving = NO;
     moved(flow, nil, &drifted);

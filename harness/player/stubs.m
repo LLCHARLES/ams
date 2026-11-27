@@ -113,6 +113,13 @@ void SGRHarnessClearTrack(void) {
     for (id<SGPlayerStateObserver> observer in sg_observers.allObjects) [observer playerStateDidChange:nil];
 }
 
+static id<SGPlayerStateObserver> firstTrackObserver;
+static dispatch_block_t afterFirstRefresh;
+void SGRHarnessObserveHandover(id preview, dispatch_block_t check) {
+    firstTrackObserver = preview;
+    afterFirstRefresh = check;
+}
+
 // `imageURI` is the xlarge picture as Spotify's metadata has it, spotify:image:<40 hex digits>, or nil for
 // a track whose metadata names none.
 void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused) {
@@ -149,7 +156,18 @@ void SGRHarnessSetTrack(NSString *uri, NSString *imageURI, BOOL paused) {
         [state setValue:@240 forKey:@"duration"];
     }
     sg_state = state;
-    for (id<SGPlayerStateObserver> observer in sg_observers.allObjects) [observer playerStateDidChange:state];
+    NSArray *observers = sg_observers.allObjects;
+    id<SGPlayerStateObserver> first = firstTrackObserver;
+    if (first && [observers containsObject:first]) {
+        // Put the card's real queued refresh, then its observation, on main
+        // before the player arms the handover deadline. Notify each observer once.
+        [first playerStateDidChange:state];
+        dispatch_async(dispatch_get_main_queue(), afterFirstRefresh);
+    }
+    firstTrackObserver = nil;
+    afterFirstRefresh = nil;
+    for (id<SGPlayerStateObserver> observer in observers)
+        if (observer != first) [observer playerStateDidChange:state];
 }
 
 #pragma mark - Shared/Haptics
@@ -248,7 +266,10 @@ NSInteger SGKaraokePositionMs(void) {
 }
 void SGKaraokeSeek(NSInteger ms) {
     sg_position = ms;
-    sg_started = CACurrentMediaTime();
+    // Lyric-line assertions move explicitly between verses and portion boundaries.
+    // Leave continuous playback for the animated screenshot fixture.
+    const char *scenario = getenv("HARNESS_SCENARIO");
+    sg_started = scenario && (!strncmp(scenario, "lyric-line", 10) || !strcmp(scenario, "seek")) ? 0 : CACurrentMediaTime();
 }
 void SGRHarnessPlayFrom(NSInteger ms) { SGKaraokeSeek(ms); }
 
@@ -462,10 +483,6 @@ NSURL *SGMotionCanvasIn(NSDictionary *metadata) {
     id address = metadata[@"canvas.url"] ?: metadata[SGMotionHiddenCanvas @"canvas.url"];
     return [type hasPrefix:@"VIDEO"] && [address isKindOfClass:NSString.class] ? [NSURL URLWithString:address] : nil;
 }
-// A walk asked for while this is set answers that many seconds late, so a check can look at the player while the
-// lookup is out.
-static NSTimeInterval sg_lookupDelay;
-void SGRHarnessSetLookupDelay(NSTimeInterval seconds) { sg_lookupDelay = seconds; }
 static NSMutableDictionary<NSString *, NSMutableArray<dispatch_block_t> *> *sg_heldLookups;
 void SGRHarnessHoldLookups(NSString *uri) {
     if (!sg_heldLookups) sg_heldLookups = [NSMutableDictionary dictionary];
@@ -484,16 +501,18 @@ void SGMotionClipFor(NSString *uri, NSURL *canvas, NSString *artist, NSString *a
         void (^answer)(NSURL *, NSString *) = [done copy];
         NSMutableArray *held = sg_heldLookups[uri];
         done = ^(NSURL *file, NSString *source) {
-            [held addObject:^{ answer(file, source); }];
-        };
-    } else if (sg_lookupDelay > 0) {
-        void (^answer)(NSURL *, NSString *) = [done copy];
-        NSTimeInterval delay = sg_lookupDelay;
-        done = ^(NSURL *file, NSString *source) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ answer(file, source); });
+            // A second consumer can finish after the first answer opened the gate.
+            // Don't enqueue its answer on an array that will never be drained again.
+            if (sg_heldLookups[uri] == held) [held addObject:^{ answer(file, source); }];
+            else answer(file, source);
         };
     }
     void (^apple)(void) = ^{ SGMotionAlbumCover(artist, album, pixels, ^(NSURL *file) { done(file, file ? @"applemusic" : nil); }); };
+    if (!canvas && [uri isEqual:@"spotify:track:noClip"]) {
+        // The settings scenario supplies a known catalog miss, not a live Apple Music search.
+        dispatch_async(dispatch_get_main_queue(), ^{ done(nil, nil); });
+        return;
+    }
     if (!canvas) { apple(); return; }
     SGMotionFile(canvas, ^(NSURL *file) { if (file) done(file, @"canvas"); else apple(); });
 }

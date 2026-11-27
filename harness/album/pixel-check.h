@@ -2,18 +2,27 @@
 // pixels read in sRGB, and OKLab worked out here (Björn Ottosson's matrices), apart from the tweak's own conversion.
 #pragma once
 #import <UIKit/UIKit.h>
-#import "../harness-fail.h"
+#import "../harness-wait.h"
 
-// Each element a block to run or an NSNumber of seconds to wait; a block is followed by one turn of the main queue.
+// One independent run-loop turn per action; run from a timer so an action
+// waiting for a delivered image can service the main queue.
 static void checkSteps(NSArray *steps, NSUInteger index) {
     if (index >= steps.count) return;
     id step = steps[index];
-    NSTimeInterval wait = 0;
-    if ([step isKindOfClass:NSNumber.class]) wait = [step doubleValue];
-    else ((void (^)(void))step)();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(wait * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    ((void (^)(void))step)();
+    [NSTimer scheduledTimerWithTimeInterval:0 repeats:NO block:^(NSTimer *timer) {
         checkSteps(steps, index + 1);
-    });
+    }];
+}
+
+static void checkShot(NSString *name) {
+    NSLog(@"[harness] SHOT %@", name);
+    if (![NSProcessInfo.processInfo.arguments containsObject:@"capture-shots"]) return;
+    NSString *ack = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    [CATransaction flush];
+    NSLog(@"[harness] CAPTURE %@ %@", name, ack);
+    HARNESS_AWAIT([NSFileManager.defaultManager fileExistsAtPath:ack]);
+    HARNESS_CHECK([NSFileManager.defaultManager removeItemAtPath:ack error:nil]);
 }
 
 // `view` and what it holds alone, as the screen draws it (masks included), on a clear sRGB canvas.

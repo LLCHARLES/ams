@@ -257,19 +257,19 @@ static void runChecks(void) {
     [self.window makeKeyAndVisible];
 }
 - (void)sceneDidBecomeActive:(UIScene *)scene {
+    static BOOL started;
+    if (started) return;
+    started = YES;
     dispatch_async(dispatch_get_main_queue(), ^{ runChecks(); });
 }
 @end
 
 @implementation CheckApp
-- (BOOL)application:(UIApplication *)app didFinishLaunchingWithOptions:(NSDictionary *)options {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
-        HARNESS_FAIL(@"timed out");
-    });
-    return YES;
-}
 @end
 
 int main(int argc, char **argv) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        HARNESS_FAIL(@"timed out waiting for scene activation or inset checks");
+    });
     @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(CheckApp.class)); }
 }

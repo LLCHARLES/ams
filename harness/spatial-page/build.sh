@@ -7,7 +7,7 @@ OUT=${OUT:-$(dirname "$0")/build}
 rm -rf "$OUT"; mkdir -p "$OUT/SpatialPageHarness.app"
 
 SDK=$(xcrun --sdk iphonesimulator --show-sdk-path)
-xcrun -sdk iphonesimulator clang -target arm64-apple-ios17.0-simulator -fobjc-arc -g -O0 \
+xcrun -sdk iphonesimulator clang -target $(uname -m)-apple-ios17.0-simulator -fobjc-arc -g -O0 \
     -I"$SRC" -isysroot "$SDK" -Wall -Werror -Wno-deprecated-declarations \
     "$(dirname "$0")/main.m" "$(dirname "$0")/stubs.m" "$(dirname "$0")/../scene.m" \
     "$SRC"/Shared/Sing/SingSettings.m "$SRC"/Shared/Sing/SGSingCard.m "$SRC"/Shared/Sing/SGSpatialPreview.m "$SRC"/Core/SGGlass.m \

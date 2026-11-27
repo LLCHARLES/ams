@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 OUT=$(mktemp -d /tmp/retrine-artist-artwork.XXXXXX)
 trap 'rm -rf "$OUT"' EXIT
 SDK=$(xcrun --sdk macosx --show-sdk-path)
-FLAGS=(-target arm64-apple-ios17.0-macabi -isysroot "$SDK"
+FLAGS=(-target $(uname -m)-apple-ios17.0-macabi -isysroot "$SDK"
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks"
     -fobjc-arc -I ../../tweak/Sources
     -framework UIKit -framework Foundation -framework QuartzCore -framework CoreGraphics -framework AVFoundation -framework CoreMedia -framework CoreVideo)

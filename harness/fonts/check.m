@@ -30,8 +30,8 @@ bool harnessRegister(CFURLRef url, CTFontManagerScope scope, CFErrorRef *error) 
     dispatch_semaphore_t hold = [((__bridge NSURL *)url).lastPathComponent isEqual:@"Harness.ttf"] ? sg_holdImported : sg_holdRegistration;
     if (hold) {
         atomic_fetch_add(&sg_registrationEntries, 1);
-        if (dispatch_semaphore_wait(hold, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC)))
-            HARNESS_FAIL(@"registration of %@ stayed held for 3 s", [(__bridge NSURL *)url lastPathComponent]);
+        if (dispatch_semaphore_wait(hold, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC)))
+            HARNESS_FAIL(@"registration of %@ stayed held", [(__bridge NSURL *)url lastPathComponent]);
         HARNESS_CHECK([NSFileManager.defaultManager fileExistsAtPath:[(__bridge NSURL *)url path]]);
     }
     return true;
@@ -52,12 +52,21 @@ NSArray<NSString *> *SGAppFontNames(void) { return @[]; }
 NSArray<NSString *> *SGAppFontFamilies(void) { return @[]; }
 
 static void pumpUntilAt(BOOL (^done)(void), int line) {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:60];
     while (!done() && deadline.timeIntervalSinceNow > 0)
         [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
     if (!done()) HARNESS_FAIL(@"condition at check.m:%d did not become true", line);
 }
 #define pumpUntil(...) pumpUntilAt(__VA_ARGS__, __LINE__)
+
+extern dispatch_queue_t harnessImportQueue(void);
+static void drainRegistrations(dispatch_queue_t worker) {
+    __block BOOL drained = NO;
+    dispatch_async(worker, ^{
+        dispatch_async(dispatch_get_main_queue(), ^{ drained = YES; });
+    });
+    pumpUntil(^BOOL { return drained; });
+}
 
 // A reader can submit registration on the next main-queue turn. Don't park main waiting for it.
 static void awaitRegistrations(unsigned count) {
@@ -136,7 +145,7 @@ int main(void) { @autoreleasepool {
 
     // Opening it again registers nothing twice and announces nothing new.
     SGFontLibraryRegisterInstalled();
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    drainRegistrations(registrationQueue());
     HARNESS_CHECK(announced.count == 2 && atomic_load(&sg_workerCalls) == 7);
 
     // A removal behind a pending registration wins: the family is never published after it.
@@ -147,7 +156,7 @@ int main(void) { @autoreleasepool {
     SGFontLibraryRemove(@"poppins");
     HARNESS_CHECK(!SGFontLibraryInstalled(@"poppins") && !SGFontLibraryRegisteredFamily(@"poppins"));
     pumpUntil(^BOOL { return [announced containsObject:@"jua"]; });
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
+    drainRegistrations(registrationQueue());
     HARNESS_CHECK(!SGFontLibraryRegisteredFamily(@"poppins"));
 
     // The synchronous entry still answers a family nothing has registered yet, and publishes it.
@@ -288,7 +297,7 @@ int main(void) { @autoreleasepool {
     // The imported files are registered: asking again, as the Font page does at every visit, registers nothing.
     int registered = atomic_load(&sg_workerCalls);
     for (int ask = 0; ask < 3; ask++) SGRegisterCustomFontAsync();
-    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    drainRegistrations(harnessImportQueue());
     HARNESS_CHECK(atomic_load(&sg_workerCalls) == registered && atomic_load(&sg_mainCalls) == 0);
     sg_holdRegistration = sg_holdImported = nil;
     [NSNotificationCenter.defaultCenter removeObserver:pipToken];

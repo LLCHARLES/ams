@@ -11,6 +11,7 @@
 //   a title too long for its line starting at the leading edge and gliding toward the trailing side
 //   (Settings/SGMarquee.m)
 #import <UIKit/UIKit.h>
+#import "../reduce-motion-fixture.h"
 #import "Settings/SGGlowSwitch.h"
 #import "Settings/SGPageStyle.h"
 #import "Settings/SGModPage.h"
@@ -126,18 +127,15 @@ static void checkSingCard(UIView *host) {
     if (rtl ? column >= play : column <= play) HARNESS_FAIL(@"Sing card: column at %.0f, play at %.0f", column, play);
 }
 
-// The mic's slider at a fifth of its range: its accent fill is the run of track below the thumb.
-static void checkMicSlider(UIView *host, void (^then)(void)) {
-    SGSetSingLevel(0.4f);
-    SGRSingButton *mic = [[SGRSingButton alloc] initWithFrame:CGRectMake(300, 400, 44, 44)];
-    [host addSubview:mic];
-    [mic layoutIfNeeded];
-    [mic performSelector:@selector(showPanel)];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
-        findViews(mic, UISlider.class, sliders);
-        HARNESS_CHECK(sliders.count == 1);
-        UISlider *slider = sliders[0];
+// The panel's slider drawn on screen: its green fill measured from a render of the host. The panel is shown with an
+// animation that the host may not have drawn yet (a slow simulator draws nothing in the first frames), so the render
+// is taken again until the fill is there; only its place is the check.
+static void measureMicSlider(UIView *host, SGRSingButton *mic, CFTimeInterval deadline, void (^then)(void)) {
+    NSMutableArray<UISlider *> *sliders = [NSMutableArray array];
+    findViews(mic, UISlider.class, sliders);
+    HARNESS_CHECK(sliders.count == 1);
+    UISlider *slider = sliders[0];
+    {
         slider.minimumTrackTintColor = UIColor.greenColor;
         slider.maximumTrackTintColor = UIColor.redColor;
         [slider layoutIfNeeded];
@@ -163,11 +161,28 @@ static void checkMicSlider(UIView *host, void (^then)(void)) {
                 if (px[1] > 150 && px[0] < 90 && px[2] < 90) { greenY += y; greenCount++; }
             }
         }
-        HARNESS_CHECK(greenCount > 0);
+        if (greenCount == 0) {
+            if (CACurrentMediaTime() >= deadline) HARNESS_FAIL(@"mic slider: no fill drawn in %@", NSStringFromCGRect(box));
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 20), dispatch_get_main_queue(), ^{
+                measureMicSlider(host, mic, deadline, then);
+            });
+            return;
+        }
         CGFloat middle = CGRectGetMidY(box) * scale;
         if (greenY / greenCount <= middle) HARNESS_FAIL(@"mic slider: the fill sits above the middle (%.0f over %.0f)", greenY / greenCount, middle);
         then();
-    });
+    }
+}
+
+// The mic's slider at a fifth of its range: its accent fill is the run of track below the thumb.
+static void checkMicSlider(UIView *host, void (^then)(void)) {
+    SGSetSingLevel(0.4f);
+    SGRSingButton *mic = [[SGRSingButton alloc] initWithFrame:CGRectMake(300, 400, 44, 44)];
+    [host addSubview:mic];
+    [mic layoutIfNeeded];
+    [mic performSelector:@selector(showPanel)];
+    CFTimeInterval deadline = CACurrentMediaTime() + 60;
+    dispatch_async(dispatch_get_main_queue(), ^{ measureMicSlider(host, mic, deadline, then); });
 }
 
 static void checkRecapBar(UIView *host) {
@@ -227,6 +242,7 @@ static void checkRecapTaps(UIView *host) {
 }
 
 static void checkMarquee(UIView *host) {
+    harnessMotion = allowMotion;
     SGMarqueeLabel *title = [[SGMarqueeLabel alloc] initWithFrame:CGRectMake(20, 600, 100, 24)];
     title.text = @"And the voice should come out clean, every word of it";
     [host addSubview:title];
@@ -247,22 +263,33 @@ static void checkMarquee(UIView *host) {
     BOOL toward = rtl ? furthest > 0 : furthest < 0;
     if (!starts || !toward) HARNESS_FAIL(@"marquee: text at %@, glides %.0f", NSStringFromCGRect(text.frame), furthest);
     [title removeFromSuperview];
+    harnessMotion = useHostMotion;
 }
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
-@property (nonatomic, strong) UIWindow *window;
+@end
+@implementation AppDelegate
 @end
 
-@implementation AppDelegate
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
-    // The launch arguments are what make the direction; a run that did not get it checks nothing.
-    BOOL running = application.userInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
-    if (running != rtl) HARNESS_FAIL(@"asked for %@, running %@", rtl ? @"rtl" : @"ltr", running ? @"rtl" : @"ltr");
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+@interface RTLScene : UIResponder <UIWindowSceneDelegate>
+@property (nonatomic, strong) UIWindow *window;
+@property BOOL started;
+@end
+
+@implementation RTLScene
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
+    self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.rootViewController = [UIViewController new];
     self.window.rootViewController.view.backgroundColor = UIColor.blackColor;
     [self.window makeKeyAndVisible];
+}
+- (void)sceneDidBecomeActive:(UIScene *)scene {
+    if (self.started) return;
+    self.started = YES;
+    rtl = [NSProcessInfo.processInfo.arguments containsObject:@"rtl"];
+    // The launch arguments are what make the direction; a run that did not get it checks nothing.
+    BOOL running = UIApplication.sharedApplication.userInterfaceLayoutDirection == UIUserInterfaceLayoutDirectionRightToLeft;
+    if (running != rtl) HARNESS_FAIL(@"asked for %@, running %@", rtl ? @"rtl" : @"ltr", running ? @"rtl" : @"ltr");
     UIView *host = self.window.rootViewController.view;
     dispatch_async(dispatch_get_main_queue(), ^{
         checkGlowSwitch(host);
@@ -274,16 +301,19 @@ static void checkMarquee(UIView *host) {
         checkRecapTaps(host);
         checkMarquee(host);
         checkMicSlider(host, ^{
-            NSLog(@"[harness] PASS %@", rtl ? @"rtl" : @"ltr");
+            fprintf(stderr, "[harness] PASS %s\n", rtl ? "rtl" : "ltr");
             exit(0);
         });
     });
-    return YES;
 }
 @end
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+        fputs("[harness] RTLCheck entered main\n", stderr);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 180 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            HARNESS_FAIL(@"did not complete scene activation and direction checks");
+        });
         return UIApplicationMain(argc, argv, nil, NSStringFromClass(AppDelegate.class));
     }
 }

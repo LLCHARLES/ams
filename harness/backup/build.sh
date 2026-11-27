@@ -9,7 +9,7 @@ APP="$BUILD/Backup.app"
 mkdir -p "$APP/Contents/MacOS" "$BUILD/export"
 # Exercise the actual pre-hook flag conversions without installing hooks in the Catalyst host.
 sed '/^%hook/,$d' "$SRC/Shared/Flags/Flags.x" > "$BUILD/flag-conversions.inc"
-xcrun clang -target arm64-apple-ios17.0-macabi -fobjc-arc -Os -Wl,-dead_strip -isysroot "$SDK" \
+xcrun clang -target $(uname -m)-apple-ios17.0-macabi -fobjc-arc -Os -Wl,-dead_strip -isysroot "$SDK" \
     -iframework "$SDK/System/iOSSupport/System/Library/Frameworks" -I"$SRC" -I"$BUILD" -I"$SRC/Shared/Flags" -DSG_VERSION=\"test\" \
     "$HERE/check.m" "$SRC/Core/SGPrefs.m" "$SRC/Core/SGLocalize.m" "$SRC/Core/SGGlass.m" \
     "$HERE/../scene.m" -framework UIKit -framework Foundation -framework OSLog -framework UniformTypeIdentifiers -o "$APP/Contents/MacOS/Backup"
