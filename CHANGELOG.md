@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.1-beta.7](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.6...v1.0.1-beta.7) (2026-11-27)
+
+
+### Fixes
+
+* AI DJ를 열 때 빈 대기열의 레이아웃 반복으로 죽던 문제 ([098ddc3](https://github.com/oneulddu/Retrine/commit/098ddc33bb73ebf3172fe08f2b6caaf96095f44d))
+* Apple Music 대기열의 손잡이 드래그와 AutoMix 토글 상태 동기화 ([#74](https://github.com/oneulddu/Retrine/issues/74)) ([0370439](https://github.com/oneulddu/Retrine/commit/037043960f51b4e07d1006ffcfd4cde7b418f568))
+* Fluid 네모 조각 없애고 클립 없는 곡 배경 멈춤 추가 ([#66](https://github.com/oneulddu/Retrine/issues/66)) ([4d60954](https://github.com/oneulddu/Retrine/commit/4d609543ee3545a422c0a3f1587bd7226c053c52))
+* IPA 빌드가 macOS 러너를 못 받으면 Intel 러너로 다시 빌드 ([#69](https://github.com/oneulddu/Retrine/issues/69)) ([f4bf885](https://github.com/oneulddu/Retrine/commit/f4bf8857a1113c50369098823cefaa452b263381))
+* iPad을 돌리면 홈 머리 버튼이 아바타를 따라가지 않던 문제 ([66dfc1b](https://github.com/oneulddu/Retrine/commit/66dfc1b0144440433e161a2172f7e004a90e6a68))
+* 볼륨을 끄면 커버 아래 틈, DJ 버튼과 가사 머리 겹침 ([#71](https://github.com/oneulddu/Retrine/issues/71)) ([64275d8](https://github.com/oneulddu/Retrine/commit/64275d88308490cb382f70e27926ceb54cb835eb))
+* 설정 가져오기에서 파일 선택 뒤 반응이 없던 문제 ([#75](https://github.com/oneulddu/Retrine/issues/75)) ([21dac9f](https://github.com/oneulddu/Retrine/commit/21dac9fcb7b77712ca3640f0e1b092f28280e8e1))
+* 설정 검색 기록과 번역 설정의 개편 후속 정리 ([0a98534](https://github.com/oneulddu/Retrine/commit/0a985347d2ee0365ae4eb2a2be9cd71f9e82d315))
+* 설정 의존 행·경로 문구·백업 제외 정리 ([1aca697](https://github.com/oneulddu/Retrine/commit/1aca697cefb9296c45290c2abfcb1a2fdd71953c))
+* 설정 첫 화면을 목적별 여섯 구역으로 정리 ([9af6032](https://github.com/oneulddu/Retrine/commit/9af6032c9afb18a1b28c4390245170118e3cdd33))
+* 설정 페이지 안의 중복과 오배치 정리 ([cb9e731](https://github.com/oneulddu/Retrine/commit/cb9e7319db0c427ee47090796475976e2eabb9e8))
+* 움직이는 아트워크 누락·검은 띠 고치고 Smooth 기본 ([#67](https://github.com/oneulddu/Retrine/issues/67)) ([502a8f9](https://github.com/oneulddu/Retrine/commit/502a8f99d9ad03d81ae27545dafefd697bb29801))
+* 커스텀 탭 막대가 실행 직후 일부 탭과 아이콘을 놓치던 문제 ([#72](https://github.com/oneulddu/Retrine/issues/72)) ([47ae35c](https://github.com/oneulddu/Retrine/commit/47ae35cba45f47a1a1f9969586d5553f54b4d565))
+
 ## [1.0.1-beta.6](https://github.com/oneulddu/Retrine/compare/v1.0.1-beta.5...v1.0.1-beta.6) (2026-11-26)
 
 
