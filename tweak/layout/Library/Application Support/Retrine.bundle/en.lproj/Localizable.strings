@@ -518,7 +518,7 @@
 "settings.automix.blendlength.format" = "%ld s";
 "settings.automix.blendlength.title" = "Blend length";
 "settings.automix.footer.note" = "AutoMix needs Premium, or Spoof Premium under Premium, ads & privacy.";
-"settings.automix.footer.style" = "Beat-matched works only on some playlists Spotify made. For your own playlists, also turn on Mix, left of Shuffle in the queue.";
+"settings.automix.footer.style" = "Beat-matched works only on some playlists Spotify made. For your own playlists, also turn on Mix in Spotify's queue or the playlist's ⋯ menu.";
 "settings.automix.player.footer" = "In the redesigned player. The progress bar and the cover show crossfades only, as Spotify gives no times for a beat-matched blend.";
 "settings.automix.preview.accessibility" = "AutoMix, %@, %@";
 "settings.automix.preview.beatmatched.subtitle" = "%ld s blend, on the beat";
@@ -2729,7 +2729,7 @@
 "settings.player.queue_devices.title" = "Queue & devices";
 "settings.player.queue_flip.title" = "Queue flip transition";
 "settings.player.queue_style.music" = "Apple Music";
-"settings.player.queue_style.music_note" = "The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back.";
+"settings.player.queue_style.music_note" = "The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back. AutoMix controls global transitions; per-playlist Mix stays in the playlist's ⋯ menu.";
 "settings.player.queue_style.spotify" = "Spotify";
 "settings.player.queue_style.spotify_note" = "Spotify's own queue screen opens over the player, where songs can be reordered and removed.";
 "settings.player.queue_style.subtitle" = "Choose how the queue opens after restart. The two-column iPad player always shows it in the side column.";

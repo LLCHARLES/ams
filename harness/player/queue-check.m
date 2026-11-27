@@ -3,6 +3,7 @@
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SleepTimer.h"
 #import "Redesigned/Player/PlayerMix.h"
+#import "Redesigned/Player/PlayerQueue.h"
 #import "Redesigned/Kit/SGRKit.h"
 #import "../harness-fail.h"
 
@@ -27,16 +28,30 @@
 @end
 @implementation QueueState
 @end
-@interface QueueSnapshot : NSObject
+@interface SPTCommandOptions : NSObject
+@property (nonatomic) BOOL overrideRestrictions;
+@end
+@implementation SPTCommandOptions
+@end
+@interface QueueSnapshot : NSObject <NSCopying>
 @property SPTPlayerTrack *track;
 @property NSArray *prevTracks;
 @property NSArray *nextTracks;
 @end
 @implementation QueueSnapshot
+- (id)copyWithZone:(NSZone *)zone {
+    QueueSnapshot *copy = [QueueSnapshot new];
+    copy.track = self.track;
+    copy.prevTracks = self.prevTracks;
+    copy.nextTracks = self.nextTracks;
+    return copy;
+}
 @end
 @interface QueuePlayer : NSObject
 @property QueueSnapshot *currentQueue;
 @property BOOL withoutQueueAPI;
+@property NSArray<SPTPlayerTrack *> *sentNextTracks;
+@property BOOL sentOverrideRestrictions;
 @end
 @implementation QueuePlayer
 - (BOOL)respondsToSelector:(SEL)selector {
@@ -44,6 +59,11 @@
     return [super respondsToSelector:selector];
 }
 - (void)fetchQueue:(void (^)(id))callback on:(dispatch_queue_t)queue { callback(self.currentQueue); }
+- (id)setQueue:(QueueSnapshot *)queue options:(SPTCommandOptions *)options {
+    self.sentNextTracks = queue.nextTracks;
+    self.sentOverrideRestrictions = options.overrideRestrictions;
+    return nil;
+}
 - (id)skipToNextTrackWithOptions:(id)options track:(SPTPlayerTrack *)track {
     self.currentQueue.track = track; return nil;
 }
@@ -69,10 +89,20 @@ void SGAddPlayerStateObserver(id<SGPlayerStateObserver> observer) {
 NSString *SGURIString(id uri) { return [uri isKindOfClass:NSURL.class] ? [uri absoluteString] : uri; }
 NSArray *SGPlayerUpcomingTracks(SPTPlayerState *value, NSUInteger limit) { return value.future ?: @[]; }
 NSString *SGL(NSString *key, NSString *english) { return english; }
+static BOOL stubAutoMixFlag;
+static BOOL stubAutoMixApplied;
+static NSInteger stubAutoMixApplies;
+static BOOL stubTransitionKnown;
+static SGTransitionSettings stubTransitionSettings;
 BOOL SGRedesignedUI(void) { return YES; }
-BOOL SGFlag(NSString *key, BOOL fallback) { return fallback; }
+BOOL SGFlag(NSString *key, BOOL fallback) {
+    if ([key isEqualToString:@"spotifyglass.automix"]) return stubAutoMixFlag;
+    return fallback;
+}
 NSInteger SGInt(NSString *key, NSInteger fallback) { return fallback; }
-void SGSetEnabled(NSString *key, BOOL on) {}
+void SGSetEnabled(NSString *key, BOOL on) {
+    if ([key isEqualToString:@"spotifyglass.automix"]) stubAutoMixFlag = on;
+}
 void SGPresentDark(UIViewController *controller) { controller.overrideUserInterfaceStyle = UIUserInterfaceStyleDark; }
 UIViewController *SGTopController(void) { return window.rootViewController; }
 UIColor *SGRPrimary(void) { return UIColor.whiteColor; }
@@ -89,14 +119,23 @@ UIFont *SGCategoryCappedFont(UIFontTextStyle style, UIFontWeight weight, UIConte
     return [UIFont preferredFontForTextStyle:style];
 }
 SGTransitionFacts *SGAutoMixCurrentTransition(void) { return nil; }
-BOOL SGAutoMixAccountAllows(void) { return NO; }
-void SGAutoMixApply(BOOL on) {}
+BOOL SGAutoMixAccountAllows(void) { return YES; }
+void SGAutoMixApply(BOOL on) {
+    stubAutoMixApplied = on;
+    stubAutoMixApplies++;
+    if (on && stubTransitionKnown) stubTransitionSettings = (SGTransitionSettings){YES, YES, 5000};
+    else if (!on && stubTransitionKnown) stubTransitionSettings = (SGTransitionSettings){NO, NO, 0};
+}
 SGSleepTimerMode SGSleepTimerCurrentMode(void) { return SGSleepTimerOff; }
 NSDate *SGSleepTimerEnd(void) { return nil; }
 void SGSetSleepTimer(SGSleepTimerMode mode, NSTimeInterval seconds) {}
 BOOL SGRMixShowsQueue(void) { return NO; }
 BOOL SGRMixTrackIs(SPTPlayerTrack *track, NSString *uri, NSString *uid) { return NO; }
-BOOL SGTransitionSettingsRead(SGTransitionSettings *settings) { return NO; }
+BOOL SGTransitionSettingsRead(SGTransitionSettings *settings) {
+    if (!stubTransitionKnown) return NO;
+    if (settings) *settings = stubTransitionSettings;
+    return YES;
+}
 const CGFloat SGRRadiusThumb = 6;
 // The cover each song's metadata names, landing a turn of the run loop later as a fetched one does; "Current" names none.
 // While covers are held none lands, as a slow download's; each fetch's progress is kept by the song's title.
@@ -172,8 +211,21 @@ static void report(NSString *revision) {
     for (id<SGPlayerStateObserver> observer in observers.allObjects) [observer playerStateDidReport:state];
 }
 
+static UIView *findReorderControl(UIView *view) {
+    if ([NSStringFromClass(view.class) containsString:@"Reorder"]) return view;
+    for (UIView *sub in view.subviews) {
+        UIView *found = findReorderControl(sub);
+        if (found) return found;
+    }
+    return nil;
+}
+
 @interface SGRPlayerQueueController : UITableViewController
 - (instancetype)initMusicStyle;
+- (BOOL)tableView:(UITableView *)table canMoveRowAtIndexPath:(NSIndexPath *)path;
+- (void)tableView:(UITableView *)table willBeginReorderingRowAtIndexPath:(NSIndexPath *)path;
+- (void)tableView:(UITableView *)table moveRowAtIndexPath:(NSIndexPath *)from toIndexPath:(NSIndexPath *)to;
+- (void)tableView:(UITableView *)table didEndReorderingRowAtIndexPath:(NSIndexPath *)path;
 @end
 @interface MusicQueueCheck : SGRPlayerQueueController
 @end
@@ -336,6 +388,73 @@ static void run(void) {
     check(!closedTable.window && CGRectGetMinY(footer.frame) > 0 &&
           labelIn(footer, @"No songs are in the queue."),
           @"the offscreen empty Music queue lays out its message below the sections and settles");
+
+    // Issue #74: Music queue grip drags immediately even inside an outer scroll view, toggles still cancel into scroll,
+    // reordering submits the moved track order, and the AutoMix toggle follows Spotify Playback settings.
+    QueueTrack *moveA = song(@"moveA", @"Move First"), *moveB = song(@"moveB", @"Move Second");
+    [moveA setValue:@"spotify:track:moveA" forKey:@"URI"];
+    [moveB setValue:@"spotify:track:moveB" forKey:@"URI"];
+    player.currentQueue.nextTracks = @[moveA, moveB];
+    player.sentNextTracks = nil;
+    player.sentOverrideRestrictions = NO;
+    [state setValue:@[moveA, moveB] forKey:@"future"];
+    state.queueRevision = @"200";
+    stubAutoMixFlag = YES;
+    stubTransitionKnown = YES;
+    stubTransitionSettings = (SGTransitionSettings){YES, YES, 5000};
+    stubAutoMixApplies = 0;
+    UIViewController *musicPage = ((UIViewController *(*)(void))SGRPlayerQueuePage)();
+    UIScrollView *outer = [[UIScrollView alloc] initWithFrame:window.bounds];
+    outer.delaysContentTouches = YES;
+    [window.rootViewController.view addSubview:outer];
+    [window.rootViewController addChildViewController:musicPage];
+    musicPage.view.frame = outer.bounds;
+    [outer addSubview:musicPage.view];
+    [musicPage didMoveToParentViewController:window.rootViewController];
+    SGRPlayerQueuePageConfigure(musicPage, 90, nil);
+    [musicPage.view layoutIfNeeded];
+    SGRPlayerQueueController *musicList = (SGRPlayerQueueController *)musicPage.childViewControllers.firstObject;
+    UITableView *musicTable = musicList.tableView;
+    [musicTable layoutIfNeeded];
+    NSInteger upcomingSection = [musicTable numberOfSections] - 1;
+    UITableViewCell *firstCell = [musicTable cellForRowAtIndexPath:row(upcomingSection, 0)];
+    [firstCell layoutIfNeeded];
+    UIView *reorderGrip = findReorderControl(firstCell);
+    UIControl *mixToggle = [musicPage valueForKey:@"mix"];
+    UIButton *clearButton = [UIButton new];
+    BOOL canMove = [musicList tableView:musicTable canMoveRowAtIndexPath:row(upcomingSection, 0)];
+    check(canMove && reorderGrip != nil &&
+          !musicTable.delaysContentTouches &&
+          [musicTable touchesShouldCancelInContentView:mixToggle] &&
+          [musicTable touchesShouldCancelInContentView:clearButton] &&
+          ![musicTable touchesShouldCancelInContentView:reorderGrip],
+          [NSString stringWithFormat:@"Music queue cell mounts a real reorder grip that starts dragging without touch delay while toggles still scroll (sec=%ld canMove=%d cell=%d grip=%@ delay=%d)",
+           (long)upcomingSection, canMove, firstCell != nil, reorderGrip, musicTable.delaysContentTouches]);
+    check(!outer.delaysContentTouches && outer.panGestureRecognizer.enabled,
+          @"Music queue clears outer scroll view touch delay while mounted");
+    [musicList tableView:musicTable willBeginReorderingRowAtIndexPath:row(upcomingSection, 0)];
+    BOOL pausedDuringReorder = !outer.panGestureRecognizer.enabled;
+    [musicList tableView:musicTable moveRowAtIndexPath:row(upcomingSection, 0) toIndexPath:row(upcomingSection, 1)];
+    [musicList tableView:musicTable didEndReorderingRowAtIndexPath:row(upcomingSection, 1)];
+    check(pausedDuringReorder && outer.panGestureRecognizer.enabled &&
+          player.sentOverrideRestrictions && player.sentNextTracks.count == 2 &&
+          player.sentNextTracks[0] == moveB && player.sentNextTracks[1] == moveA,
+          @"Music queue pauses outer scroll pan during row reorder, submits moved track order, and restores pan on end");
+    check([[mixToggle valueForKey:@"on"] boolValue],
+          @"Music queue AutoMix toggle starts on when AutoMix and Spotify transitions are active");
+    stubTransitionSettings = (SGTransitionSettings){NO, NO, 0};
+    [NSNotificationCenter.defaultCenter postNotificationName:SGTransitionSettingsDidChangeNotification object:nil];
+    check(![[mixToggle valueForKey:@"on"] boolValue],
+          @"Music queue AutoMix toggle turns off when Spotify Playback disables both Automix and Crossfade");
+    [mixToggle sendActionsForControlEvents:UIControlEventTouchUpInside];
+    check(stubAutoMixApplies == 1 && stubAutoMixApplied && [[mixToggle valueForKey:@"on"] boolValue],
+          @"tapping the AutoMix toggle after Spotify disabled transitions re-applies AutoMix");
+    [musicPage willMoveToParentViewController:nil];
+    [musicPage.view removeFromSuperview];
+    [musicPage removeFromParentViewController];
+    [outer removeFromSuperview];
+    check(outer.delaysContentTouches && outer.panGestureRecognizer.enabled,
+          @"removing Music queue restores outer scroll view touch delay and pan");
     printf("queue checks: %d of %d right -- PASS\n", checked, checked);
     fflush(stdout);
     exit(0);

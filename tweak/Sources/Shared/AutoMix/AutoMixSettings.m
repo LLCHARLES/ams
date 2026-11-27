@@ -90,8 +90,8 @@ UIViewController *SGAutoMixSettingsPage(void) {
         playerOption(SGL(@"settings.automix.artwork.title", @"Artwork moves with the mix"), SGKeyAutoMixArtwork),
     ];
 
-    // Spotify's Automix covers only some playlists Spotify made; the user's own need its Mix button in the queue (#52).
-    NSString *note = SGL(@"settings.automix.footer.style", @"Beat-matched works only on some playlists Spotify made. For your own playlists, also turn on Mix, left of Shuffle in the queue.");
+    // Spotify's Automix covers only some playlists Spotify made; the user's own need its Mix toggle in Spotify's queue or the playlist's ⋯ menu (#52, #74).
+    NSString *note = SGL(@"settings.automix.footer.style", @"Beat-matched works only on some playlists Spotify made. For your own playlists, also turn on Mix in Spotify's queue or the playlist's ⋯ menu.");
     if (!SGAutoMixAccountAllows())
         note = [NSString stringWithFormat:@"%@ %@", SGL(@"settings.automix.footer.note", @"AutoMix needs Premium, or Spoof Premium under Premium, ads & privacy."), note];
     SGAutoMixPage *page = [[SGAutoMixPage alloc] initWithTitle:SGL(@"settings.automix.title", @"AutoMix") intro:nil sections:@[

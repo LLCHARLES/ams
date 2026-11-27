@@ -389,6 +389,73 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 @end
 #endif
 
+@class SGRQueueToggle;
+
+// The Music app's queue table: gripping a song's reorder control starts a drag at once rather than waiting through
+// UIScrollView's 150 ms touch delay (where a quick drag on iPad or inside Spotify's outer player scroll view turned
+// into scrolling instead of moving the row), while drags starting on the toggles or Clear still scroll the list.
+@interface SGRQueueTableView : UITableView
+@end
+
+@implementation SGRQueueTableView {
+    NSHashTable<UIScrollView *> *_outerDelays;
+    NSHashTable<UIScrollView *> *_pausedPans;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame style:(UITableViewStyle)style {
+    if (!(self = [super initWithFrame:frame style:style])) return nil;
+    self.delaysContentTouches = NO;
+    return self;
+}
+
+- (void)dealloc {
+    [self restoreOuterPans];
+    [self restoreOuterDelays];
+}
+
+- (BOOL)touchesShouldCancelInContentView:(UIView *)view {
+    if ([view isKindOfClass:UIButton.class] || [view isKindOfClass:NSClassFromString(@"SGRQueueToggle")]) return YES;
+    return [super touchesShouldCancelInContentView:view];
+}
+
+- (void)restoreOuterDelays {
+    for (UIScrollView *scroll in _outerDelays) scroll.delaysContentTouches = YES;
+    [_outerDelays removeAllObjects];
+}
+
+- (void)pauseOuterPans {
+    if (!_pausedPans) _pausedPans = [NSHashTable weakObjectsHashTable];
+    for (UIView *v = self.superview; v; v = v.superview) {
+        if (![v isKindOfClass:UIScrollView.class]) continue;
+        UIScrollView *scroll = (UIScrollView *)v;
+        if (!scroll.panGestureRecognizer.enabled || [_pausedPans containsObject:scroll]) continue;
+        scroll.panGestureRecognizer.enabled = NO;
+        [_pausedPans addObject:scroll];
+    }
+}
+
+- (void)restoreOuterPans {
+    for (UIScrollView *scroll in _pausedPans) scroll.panGestureRecognizer.enabled = YES;
+    [_pausedPans removeAllObjects];
+}
+
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    [self restoreOuterPans];
+    [self restoreOuterDelays];
+    if (!self.window) return;
+    if (!_outerDelays) _outerDelays = [NSHashTable weakObjectsHashTable];
+    for (UIView *v = self.superview; v; v = v.superview) {
+        if (![v isKindOfClass:UIScrollView.class]) continue;
+        UIScrollView *scroll = (UIScrollView *)v;
+        if (!scroll.delaysContentTouches) continue;
+        scroll.delaysContentTouches = NO;
+        [_outerDelays addObject:scroll];
+    }
+}
+
+@end
+
 @interface SGRPlayerQueueController : UITableViewController <SGPlayerStateObserver>
 // In the two column player's side column, or the Music app's page in the player, rather than a sheet: nothing to close.
 @property (nonatomic) BOOL embedded;
@@ -490,6 +557,16 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     _groups = @[];
     _pinnedSection = _heldSection = NSNotFound;
     return self;
+}
+
+- (void)loadView {
+    [super loadView];
+    if (_musicStyle) {
+        SGRQueueTableView *table = [[SGRQueueTableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
+        table.delegate = self;
+        table.dataSource = self;
+        self.tableView = table;
+    }
 }
 
 - (void)viewDidLoad {
@@ -1511,14 +1588,17 @@ static const CGFloat kMusicHistoryGap = 25;
     _dragGeneration++;
     _reordering = YES;
     _dragSnapshot = _snapshot;
+    if ([table isKindOfClass:SGRQueueTableView.class]) [(SGRQueueTableView *)table pauseOuterPans];
     if (_musicStyle) [self lift:[table cellForRowAtIndexPath:path]];
 }
 
 - (void)tableView:(UITableView *)table didEndReorderingRowAtIndexPath:(NSIndexPath *)path {
+    if ([table isKindOfClass:SGRQueueTableView.class]) [(SGRQueueTableView *)table restoreOuterPans];
     [self endReordering];
 }
 
 - (void)tableView:(UITableView *)table didCancelReorderingRowAtIndexPath:(NSIndexPath *)path {
+    if ([table isKindOfClass:SGRQueueTableView.class]) [(SGRQueueTableView *)table restoreOuterPans];
     [self endReordering];
 }
 
@@ -1874,6 +1954,15 @@ static UIImage *mixGlyph(void) {
 - (void)setHeadHeight:(CGFloat)height scrolled:(void (^)(CGFloat shift))scrolled;
 @end
 
+// Global AutoMix toggle state: reflects Spotify's own Playback transitions once read, so turning both Automix and
+// Crossfade off in Spotify's Playback settings turns the queue's toggle off too.
+static BOOL mixToggleActive(void) {
+    if (!SGFlag(SGKeyAutoMix, NO)) return NO;
+    SGTransitionSettings settings;
+    if (!SGTransitionSettingsRead(&settings)) return YES;
+    return settings.automix || (settings.crossfade && settings.milliseconds > 0);
+}
+
 @implementation SGRPlayerQueuePageController {
     CGFloat _headHeight;
     void (^_scrolled)(CGFloat shift);
@@ -1908,7 +1997,7 @@ static UIImage *mixGlyph(void) {
     _mix = [[SGRQueueToggle alloc] initWithSymbol:@"automix" title:SGL(@"settings.automix.title", @"AutoMix")];
     _mix.drawnGlyph = mixGlyph();
     _mix.onTap = ^{
-        BOOL on = !SGFlag(SGKeyAutoMix, NO);
+        BOOL on = !mixToggleActive();
         SGSetEnabled(SGKeyAutoMix, on);
         SGAutoMixApply(on);
         [weakSelf showOptions:YES];
@@ -2022,7 +2111,7 @@ static BOOL restricted(SPTPlayerState *state, NSString *name) {
     BOOL sleeping = SGSleepTimerCurrentMode() != SGSleepTimerOff;
     [_sleep setOn:sleeping animated:animated];
     _sleep.accessibilityValue = sleeping ? on : off;
-    BOOL mix = SGFlag(SGKeyAutoMix, NO);
+    BOOL mix = mixToggleActive();
     [_mix setOn:mix animated:animated];
     _mix.accessibilityValue = mix ? on : off;
     BOOL mixShown = SGAutoMixAccountAllows();

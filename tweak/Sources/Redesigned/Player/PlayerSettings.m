@@ -1241,7 +1241,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
                                                  @[SGL(@"settings.player.queue_style.spotify", @"Spotify"), SGL(@"settings.player.queue_style.music", @"Apple Music")],
                                                  SGRPlayerQueueStyleSpotify), @"playerQueueStyle");
     queueStyle.choiceNotes = @[SGL(@"settings.player.queue_style.spotify_note", @"Spotify's own queue screen opens over the player, where songs can be reordered and removed."),
-                               SGL(@"settings.player.queue_style.music_note", @"The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back.")];
+                               SGL(@"settings.player.queue_style.music_note", @"The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back. AutoMix controls global transitions; per-playlist Mix stays in the playlist's ⋯ menu.")];
     // On until switched off, as the Music app's header has only the grabber over the cover.
     SGModRow *hideContext = SGShownRow(SGL(@"settings.player.hide_context.title", @"Where it plays from"),
                                       SGL(@"settings.player.hide_context.subtitle", @"The artist, album or playlist name at the top of the player."),
