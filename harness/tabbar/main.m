@@ -51,11 +51,12 @@
 // A tab of the mod's own (Navbar.x), for `symbols`.
 @interface SGRTabItemView : UIControl
 @end
+#ifndef HARNESS_COMPOSED
 @implementation SGRTabItemView
 @end
+#endif
 NSString *const SGHarnessOwnTabTitle = @"Liked Songs";
-// An outline symbol, so its selected variant (heart.fill) can be told from it; with `hold`, house, the symbol Apple
-// symbols gives Home, so two tabs wear one symbol.
+// The custom tab uses heart and heart.fill, or the house SF Symbol for the Home hold check.
 NSString *SGHarnessOwnTabSymbol(void) {
     return [NSProcessInfo.processInfo.arguments containsObject:@"hold"] ? @"house" : @"heart";
 }
@@ -94,6 +95,7 @@ static __weak UIView *sgJamStrip;
 @property (nonatomic, strong) SGHarnessEncoreIcon *held;      // what the `icon` ivar refers to, kept alive here
 @property (nonatomic, strong) UIColor *foregroundColor, *activeForegroundColor;
 @property (nonatomic) BOOL isActive;
+@property (nonatomic, copy) dispatch_block_t onActiveLayout;
 @end
 @implementation SGHarnessGlyphView {
     CAShapeLayer *_shape;
@@ -118,6 +120,11 @@ static __weak UIView *sgJamStrip;
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
+    if (self.isActive && self.onActiveLayout) {
+        dispatch_block_t callback = self.onActiveLayout;
+        self.onActiveLayout = nil;
+        callback();
+    }
     SGHarnessEncoreIcon *shown = sgSwiftIcons && self.isActive ? self.held.active : self.held;
     UIColor *color = (self.isActive ? self.activeForegroundColor : nil) ?: self.foregroundColor ?: UIColor.whiteColor;
     CGRect box = CGRectInset(self.bounds, 3, 3);
@@ -1337,9 +1344,17 @@ static void samplePanel(SGHarnessChrome *chrome, UIViewPropertyAnimator *animati
     });
 }
 
+#ifdef HARNESS_COMPOSED
+#include "launch-check.inc"
+#endif
+
 - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)options {
     self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
     self.window.overrideUserInterfaceStyle = UIUserInterfaceStyleDark;
+#ifdef HARNESS_COMPOSED
+    runLaunch(self.window);
+    return;
+#endif
     SGHarnessChrome *chrome = [SGHarnessChrome new];
     self.window.rootViewController = chrome;
     [self.window makeKeyAndVisible];
@@ -1825,7 +1840,7 @@ int main(int argc, char *argv[]) {
     sgColorful = argc > 1 && (strcmp(argv[1], "fade") == 0 || strcmp(argv[1], "navsettings") == 0 ||
                               strcmp(argv[1], "glass") == 0 || strcmp(argv[1], "unsupported-tap") == 0);
     sgGlyphs = argc > 1 && (strcmp(argv[1], "glyphs") == 0 || strcmp(argv[1], "symbols") == 0);
-    sgSwiftIcons = sgGlyphs && argc > 2 && strcmp(argv[2], "swift") == 0;
+    sgSwiftIcons = argc > 2 && ((sgGlyphs && strcmp(argv[2], "swift") == 0) || strcmp(argv[2], "reentrant") == 0);
     sgSearch = argc > 1 && strcmp(argv[1], "search") == 0;
     Class glyphView = objc_allocateClassPair(SGHarnessGlyphView.class, "SPTEncoreIconView", 0);
     class_addIvar(glyphView, "icon", sizeof(void *), __builtin_ctz(sizeof(void *)), sgSwiftIcons ? "" : "@");

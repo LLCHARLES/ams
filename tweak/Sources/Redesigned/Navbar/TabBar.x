@@ -29,6 +29,7 @@ static char kItemSymbolKey;
 static char kGlyphKeysKey;
 static const NSUInteger kMinimumMinimizedTabs = 2;
 static __weak UIView *sg_stockBar;
+static NSUInteger sg_syncGeneration;
 static CGFloat sg_room, sg_glassHeight;   // see "room for the glass bar"
 // The split tabs the expanded row has (syncBar), and that row's glass in the window as the now playing card was last
 // told of it, CGRectNull for none (see "the glass row").
@@ -42,6 +43,10 @@ static BOOL sg_minimized, sg_keepApart;
 @interface SGRSystemTabBar : UITabBar <UITabBarDelegate, UIGestureRecognizerDelegate>
 @property (nonatomic, weak) UIView *stockBar;
 @property (nonatomic, copy) NSArray<UIView *> *sources;
+// Only the main bar schedules retries, including missing glyphs on its partner.
+@property (nonatomic, copy) NSArray<UIView *> *retrySources;
+@property (nonatomic) NSUInteger glyphRetries;
+@property (nonatomic, strong) NSTimer *glyphTimer;
 @property (nonatomic, weak) UILongPressGestureRecognizer *hold;
 @property (nonatomic) BOOL holding;
 // The other bar, when the split tabs have one of their own: a tab picked on one bar clears the other's.
@@ -63,6 +68,8 @@ static UIView *platterOf(UIView *bar);
 
 // The items the bar shows, left to right as Navbar/Navbar.x placed them.
 static NSArray<UIView *> *tabItems(UIView *tabBar) {
+    NSArray<UIView *> *composed = SGRComposedTabItems(tabBar);
+    if (composed.count) return composed;
     NSMutableArray<UIView *> *items = [NSMutableArray array];
     for (UIView *item in SGRowIn(tabBar).arrangedSubviews) {
         if (!item.hidden && item.bounds.size.width >= 20) [items addObject:item];
@@ -815,9 +822,9 @@ static void setGlyphs(UITabBarItem *item, UIImage *image, UIImage *selectedImage
 // glyph and gives the tab the width the two need as the bar takes the item, never again when the glyph comes later:
 // items handed over bare kept the width of the title alone, which the glyph then took 21 pt of (iPad Pro 11-inch,
 // iOS 26.5: "홈" 4 pt wide for 10.5, "만들기" 19.5 for 31.5, cut to "만…").
-static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideLabels) {
+static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideLabels, NSUInteger generation) {
     bar.tintColor = SGRAccent();
-    if (![sources isEqualToArray:bar.sources]) {
+    if (![sources isEqualToArray:bar.sources] || bar.items.count != sources.count) {
         NSMutableArray<UITabBarItem *> *items = [NSMutableArray array];
         for (UIView *source in sources) [items addObject:[[UITabBarItem alloc] initWithTitle:hideLabels ? nil : tabTitle(source) image:nil tag:items.count]];
         bar.sources = sources;
@@ -834,10 +841,9 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
         SGLogLong(@"navbar", out);
     }
 
-    // Drawing a glyph lays Spotify's row out, which comes back here (itemDidLayOut): a pass inside the one handing
-    // the items over again finds the bar empty and leaves it to that one.
+    // Drawing a glyph can lay Spotify's row out and start a newer syncBar pass.
     NSArray<UITabBarItem *> *barItems = bar.items;
-    if (barItems.count != sources.count) return NO;
+    if (generation != sg_syncGeneration || barItems.count != sources.count) return NO;
     BOOL missing = NO, drew = NO;
     for (NSUInteger i = 0; i < sources.count; i++) {
         UITabBarItem *item = barItems[i];
@@ -868,7 +874,13 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
             BOOL bare = !item.image;
             if (symbol && own) setGlyphs(item, symbolGlyph(symbol, NO), symbolGlyph(symbol, YES));
             else if (symbol) setGlyphs(item, stockGlyph(symbol, NO), stockGlyph(symbol, YES));
-            else setGlyphs(item, glyphOfIcon(live, NO), glyphOfIcon(live, YES));
+            else {
+                UIImage *plain = glyphOfIcon(live, NO);
+                if (generation != sg_syncGeneration) return NO;
+                UIImage *selected = glyphOfIcon(live, YES);
+                if (generation != sg_syncGeneration) return NO;
+                setGlyphs(item, plain, selected);
+            }
             drew |= bare && item.image;
             if (item.image && item.selectedImage) objc_setAssociatedObject(item, &kGlyphKeysKey, keys, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
@@ -880,13 +892,14 @@ static BOOL fillBar(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL hideL
         NSString *title = hideLabels ? nil : resolvedTitle;
         if (hideLabels ? item.title != nil : title.length && ![title isEqualToString:item.title]) item.title = title;
     }
-    if (drew) {
+    if (drew && generation == sg_syncGeneration && [bar.sources isEqualToArray:sources] && [bar.items isEqualToArray:barItems]) {
         // The same items again, which UIKit only measures anew once the bar has let go of them. The selection goes
         // with them and comes back, for a bar whose tab Spotify paints no selection for (selectActive).
         UITabBarItem *selected = bar.selectedItem;
         [bar setItems:@[] animated:NO];
+        if (generation != sg_syncGeneration) return NO;
         [bar setItems:barItems animated:NO];
-        bar.selectedItem = selected;
+        if (generation == sg_syncGeneration) bar.selectedItem = selected;
     }
     return missing;
 }
@@ -944,8 +957,32 @@ static void mirrorGradient(UIView *gradient) {
 static NSUInteger sg_barChange;
 static void handOver(void);
 
+static void retryMissingGlyphs(SGRSystemTabBar *bar, NSArray<UIView *> *sources, BOOL missing) {
+    if (!missing || ![bar.retrySources isEqualToArray:sources]) {
+        [bar.glyphTimer invalidate];
+        bar.glyphTimer = nil;
+        bar.glyphRetries = 0;
+        bar.retrySources = missing ? sources : nil;
+    }
+    if (!missing || bar.glyphTimer || bar.glyphRetries >= 40) return;
+    __weak SGRSystemTabBar *weakBar = bar;
+    bar.glyphTimer = [NSTimer scheduledTimerWithTimeInterval:.25 repeats:NO block:^(NSTimer *timer) {
+        SGRSystemTabBar *bar = weakBar;
+        UIView *stockBar = bar.stockBar;
+        if (bar.glyphTimer != timer) return;
+        bar.glyphTimer = nil;
+        if (!stockBar || stockBar != sg_stockBar || !stockBar.window) return;
+        bar.glyphRetries++;
+        syncBar(stockBar);
+    }];
+}
+
 static void syncBar(UIView *stockBar) {
-    sg_stockBar = stockBar;
+    NSUInteger generation = ++sg_syncGeneration;
+    if (sg_stockBar != stockBar) {
+        retryMissingGlyphs(objc_getAssociatedObject(sg_stockBar, &kBarKey), nil, NO);
+        sg_stockBar = stockBar;
+    }
 
     NSArray<UIView *> *sources = tabItems(stockBar);
     BOOL canForward = sources.count != 0;
@@ -956,6 +993,7 @@ static void syncBar(UIView *stockBar) {
     NSMapTable<CALayer *, id> *parentColors = objc_getAssociatedObject(stockBar, &kParentColorsKey);
     if (!canForward) {
         if (stockAppearance) {
+            retryMissingGlyphs(objc_getAssociatedObject(stockBar, &kBarKey), nil, NO);
             ++sg_barChange;
             handOver();
             sg_minimized = sg_keepApart = NO;
@@ -1079,17 +1117,17 @@ static void syncBar(UIView *stockBar) {
     // is made in and never again when the bar grows, so items made while a bar was still a circle kept "…" for
     // their names at full width (harness/tabbar, `names`).
     [host layoutIfNeeded];
-    BOOL missing = fillBar(bar, main, hideLabels);
-    if (apart.count) missing |= fillBar(apartBar, apart, hideLabels);
+    if (generation != sg_syncGeneration) return;
+    BOOL missing = fillBar(bar, main, hideLabels, generation);
+    if (generation != sg_syncGeneration) return;
+    if (apart.count) {
+        missing |= fillBar(apartBar, apart, hideLabels, generation);
+        if (generation != sg_syncGeneration) return;
+    }
     selectActive(bar, active);
     if (apart.count) selectActive(apartBar, active);
     // An icon view Spotify has not built yet is looked for again shortly, not on the next touch.
-    static NSUInteger retries;
-    if (missing && retries++ < 40) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            syncBar(stockBar);
-        });
-    }
+    retryMissingGlyphs(bar, sources, missing);
     if (host.superview != stockBar) [stockBar addSubview:host];
     else if (stockBar.subviews.lastObject != host) [stockBar bringSubviewToFront:host];
     noteGlassRow();
