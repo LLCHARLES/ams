@@ -52,23 +52,27 @@ def wait_for_app(pid, stdout, stderr, deadline, live):
 
 
 def launch(args):
-    with tempfile.TemporaryDirectory(prefix="sim-launch-") as tmp:
+    # launchd_sim cannot open paths in the host's per-user /var/folders temp directory.
+    device_tmp = subprocess.check_output(["xcrun", "simctl", "getenv", args.udid, "TMPDIR"],
+                                         text=True, timeout=args.timeout).strip()
+    with tempfile.TemporaryDirectory(prefix="sim-launch-", dir=device_tmp) as tmp:
         stdout, stderr = (Path(tmp).resolve() / name for name in ("stdout", "stderr"))
         cmd = ["xcrun", "simctl", "launch", "--wait-for-debugger", f"--stdout={stdout}", f"--stderr={stderr}"]
         if args.terminate_running_process:
             cmd.append("--terminate-running-process")
         deadline = time.monotonic() + args.timeout
-        try:
-            result = subprocess.run([*cmd, args.udid, args.bundle, *args.app_args],
-                                    stdout=subprocess.PIPE, text=True, timeout=args.timeout)
-            if result.returncode:
-                return result.returncode
-            pid = int(result.stdout.rsplit(":", 1)[1])
-            with stdout.open("rb") as out, stderr.open("rb") as err:
+        # Follow and drain the same inodes from before launch through the exit event.
+        with stdout.open("x+b") as out, stderr.open("x+b") as err:
+            try:
+                result = subprocess.run([*cmd, args.udid, args.bundle, *args.app_args],
+                                        stdout=subprocess.PIPE, text=True, timeout=args.timeout)
+                if result.returncode:
+                    return result.returncode
+                pid = int(result.stdout.rsplit(":", 1)[1])
                 status = wait_for_app(pid, out, err, deadline, args.live)
-        except BaseException:
-            subprocess.run(["xcrun", "simctl", "terminate", args.udid, args.bundle], timeout=30)
-            raise
+            except BaseException:
+                subprocess.run(["xcrun", "simctl", "terminate", args.udid, args.bundle], timeout=30)
+                raise
         if status < 0:
             print(f"{args.bundle} died by signal {-status} ({signal.strsignal(-status)})", file=sys.stderr)
             return 128 - status

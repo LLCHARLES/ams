@@ -30,6 +30,7 @@ int main(void) {
     struct sockaddr_in local = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK),
                                 .sin_port = htons(atoi(getenv("PROBE_PORT")))};
     char go;
+    write(STDOUT_FILENO, "ready\n", 6);
     if (connect(fd, (struct sockaddr *)&local, sizeof(local)) || read(fd, &go, 1) != 1) return 1;
     write(STDOUT_FILENO, "final stdout\n", 13);
     write(STDERR_FILENO, "final stderr\n", 13);
@@ -42,10 +43,14 @@ int main(void) {
             server.bind(("127.0.0.1", 0))
             server.listen()
             server.settimeout(120)
-            proc = subprocess.Popen([sys.executable, Path(__file__).with_name("sim-launch.py"), device, bundle],
+            # Exercise CI's host temp directory even from a shell with a writable scratch TMPDIR.
+            host_tmp = subprocess.check_output(["getconf", "DARWIN_USER_TEMP_DIR"], text=True).strip()
+            proc = subprocess.Popen([sys.executable, Path(__file__).with_name("sim-launch.py"), "--live", device, bundle],
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    env=dict(os.environ, SIMCTL_CHILD_PROBE_PORT=str(server.getsockname()[1])))
+                                    env=dict(os.environ, TMPDIR=host_tmp, SIMCTL_CHILD_PROBE_PORT=str(server.getsockname()[1])))
             try:
+                if proc.stdout.readline() != b"ready\n":
+                    raise RuntimeError(f"missing live probe output: {proc.stderr.read()!r}")
                 conn, _ = server.accept()
                 with conn:
                     conn.settimeout(30)

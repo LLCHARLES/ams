@@ -48,7 +48,13 @@ static void fixtureJSON(NSURL *file, id value) {
     CHECK([NSFileManager.defaultManager createDirectoryAtURL:file.URLByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil]);
     CHECK([[NSJSONSerialization dataWithJSONObject:value options:0 error:nil] writeToURL:file atomically:YES]);
 }
-static void clearFixture(NSURL *root) { CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]); }
+static void removeFixture(NSURL *root, const char *caller) {
+    NSError *error = nil;
+    BOOL removed = [NSFileManager.defaultManager removeItemAtURL:root error:&error];
+    if (!removed) fprintf(stderr, "%s: removing %s: %s\n", caller, root.fileSystemRepresentation, error.description.UTF8String);
+    CHECK(removed);
+}
+#define clearFixture(root) removeFixture(root, __func__)
 static NSUInteger fixtureCount(SGTranslationFiles *store) { return [[store summary:nil][@"count"] unsignedIntegerValue]; }
 static NSArray *fixtureRecords(SGTranslationFiles *store) {
     NSMutableArray *records = [NSMutableArray array];
@@ -695,6 +701,15 @@ static void checkColdDeletedAlias(void) {
     clearFixture(root);
 }
 
+// SGSavedRecords delivers its callback before it enqueues refreshSummary on the
+// serial store queue. Let the listing finish enqueueing, then let the summary
+// finish prepare: (which can recreate TranslationState). Empty-key reads are
+// synchronous queue barriers that do not open or create anything on disk.
+static void drainListingBeforeFixtureChange(void) {
+    SGLyricsSavedAI(@"notes", @"", @"ko");
+    SGLyricsSavedAI(@"notes", @"", @"ko");
+}
+
 static void checkColdReadFailure(void) {
     NSURL *root = SGLyricsTestCacheRoot();
     fixtureJSON([root URLByAppendingPathComponent:@"Legacy/Translations/broken.ko.json"], @[@"invalid legacy map"]);
@@ -711,6 +726,7 @@ static void checkColdReadFailure(void) {
         CHECK(warning.length); finished = YES;
     });
     waitFor(^BOOL { return finished; });
+    drainListingBeforeFixtureChange();
     clearFixture(root);
 }
 
@@ -742,6 +758,7 @@ static void checkFirstRecordRead(void) {
         listed = YES;
     });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     method_setImplementation(method, original);
     imp_removeBlock(gated);
     clearFixture(root);
@@ -754,6 +771,7 @@ static void checkStartupReclaimRetry(void) {
     __block BOOL listed = NO;
     SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(warning.length); listed = YES; });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     CHECK([NSFileManager.defaultManager removeItemAtURL:root error:nil]);
     NSURL *abandoned = [[root URLByAppendingPathComponent:@"TranslationImports"] URLByAppendingPathComponent:NSUUID.UUID.UUIDString];
     CHECK([NSFileManager.defaultManager createDirectoryAtURL:abandoned withIntermediateDirectories:YES attributes:nil error:nil]);
@@ -761,6 +779,7 @@ static void checkStartupReclaimRetry(void) {
     listed = NO;
     SGSavedRecords(nil, ^(NSArray *records, NSString *next, NSDictionary *summary, NSString *warning) { CHECK(!warning); listed = YES; });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     CHECK(![NSFileManager.defaultManager fileExistsAtPath:abandoned.path]);
     clearFixture(root);
 }
@@ -803,6 +822,7 @@ static void checkStartupUnlock(void) {
         CHECK(!warning && records.count == 1); listed = YES;
     });
     waitFor(^BOOL { return listed; });
+    drainListingBeforeFixtureChange();
     method_setImplementation(directories, original);
     CHECK(![NSFileManager.defaultManager fileExistsAtPath:[root URLByAppendingPathComponent:orphan].path]);
     imp_removeBlock(isolated);
