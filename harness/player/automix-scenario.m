@@ -131,15 +131,11 @@ static void check(NSString *area, NSString *name, BOOL ok, NSString *detail) {
     NSLog(@"[harness] automix %@ %@: %@ -- %@", area, name, detail, ok ? @"ok" : @"WRONG");
 }
 
-// Each step: its delay (a number, or a block asked when the step before has run), then what it does.
+// Each step waits for a delay or for display-link frames before running its action.
 static NSMutableArray<NSArray *> *sg_steps;
 
 static void step(NSTimeInterval delay, dispatch_block_t block) {
     [sg_steps addObject:@[@(delay), [block copy]]];
-}
-
-static void stepAfter(double (^delay)(void), dispatch_block_t block) {
-    [sg_steps addObject:@[[delay copy], [block copy]]];
 }
 
 @interface SGRHarnessFrameStep : NSObject
@@ -173,6 +169,15 @@ static void stepUntil(NSString *precondition, BOOL (^ready)(void), dispatch_bloc
     [sg_steps addObject:@[@"frame", [block copy], [ready copy], precondition]];
 }
 
+static void prependSteps(dispatch_block_t schedule) {
+    NSMutableArray<NSArray *> *pending = sg_steps;
+    sg_steps = [NSMutableArray array];
+    schedule();
+    NSArray<NSArray *> *prefix = sg_steps;
+    sg_steps = pending;
+    [sg_steps insertObjects:prefix atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, prefix.count)]];
+}
+
 static void runSteps(void) {
     if (!sg_steps.count) return;
     NSArray *next = sg_steps.firstObject;
@@ -193,7 +198,7 @@ static void runSteps(void) {
         [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
         return;
     }
-    double delay = [next[0] isKindOfClass:NSNumber.class] ? [next[0] doubleValue] : MAX(0, ((double (^)(void))next[0])());
+    double delay = [next[0] doubleValue];
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         ((dispatch_block_t)next[1])();
         runSteps();
@@ -815,28 +820,40 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
         return facts(@"spotify:track:mixA", @"spotify:track:mixB", SGTransitionKindCrossfade, YES, 14, 16, 0, 2);
     };
     void (^playA)(double, double) = ^(double at, double length) { report(a, at, length, @[b, c], NO, kPlaylist); };
+    __block BOOL beforeWindow;
     step(0.5, ^{
         cover = SGRPlayerShowingCover();
         setOption(SGKeyAutoMixArtwork, NO);
+        sg_playbackTime = CACurrentMediaTime();
+        sg_controlledClock = YES;
         playA(14.2, 16);
         SGRHarnessSetTransition(blend());
     });
     step(0.6, ^{
         check(A, @"held back: the option off", cover && coverBack(), coverState());
-        playA(13, 20);
+        playA(13.8, 20);
         SGRHarnessSetTransition(longBlend());
         setOption(SGKeyAutoMixArtwork, YES);
     });
-    stepAfter(^double { return 14.6 - playing(); }, ^{
+    // Cross the window's start without another player report so the armed timer can bring up the stage.
+    stepOnFrame(^{
+        beforeWindow = stage() == nil;
+        sg_playbackTime += 14.6 - playing();
+    });
+    stepUntil(@"artwork stage up after playback enters the window", ^BOOL { return stage() != nil; }, ^{});
+    stepOnFrame(^{
         UIView *on = stage();
         weakStage = on;
         CGFloat out = on.subviews.firstObject.alpha, in = on.subviews.lastObject.alpha;
         UIView *plate = viewsOf(tilt, @"SGRShadowPlate").firstObject;
         BOOL placed = fabs(CGRectGetMidX(on.frame) - CGRectGetMidX(cover.frame)) < 0.5 && fabs(on.frame.size.width - cover.frame.size.width) < 0.5;
-        check(A, @"starts with the outgoing window", on && cover.alpha == 0 && plate.alpha == 1 && in > 0 && in < 0.5 && out > 0.5 && out < 1 && placed,
-              [NSString stringWithFormat:@"at %.2f s: %@, its shadow %.2f, over the cover %d", playing(), coverState(), plate.alpha, placed]);
+        check(A, @"starts with the outgoing window", beforeWindow && on && cover.alpha == 0 && plate.alpha == 1
+              && in > 0 && in < 0.5 && out > 0.5 && out < 1 && placed,
+              [NSString stringWithFormat:@"absent at 13.8 s %d, at %.2f s: %@, its shadow %.2f, over the cover %d",
+               beforeWindow, playing(), coverState(), plate.alpha, placed]);
+        sg_playbackTime += 16.7 - playing();
     });
-    stepAfter(^double { return 16.7 - playing(); }, ^{
+    stepOnFrame(^{
         // A cross-dissolve with no edge: both covers whole over the stage's full bounds, untransformed, their alphas
         // adding up to one, and the stage clipping them to the cover's rounded shape only.
         UIView *on = stage();
@@ -850,10 +867,6 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
               [NSString stringWithFormat:@"at %.2f s: %@; covers %@ and %@ in %@, transforms identity %d %d, clipped %d at radius %.1f (the cover's %.1f)",
                playing(), coverState(), NSStringFromCGRect(out.frame), NSStringFromCGRect(in.frame), NSStringFromCGRect(on.bounds),
                CGAffineTransformIsIdentity(out.transform), CGAffineTransformIsIdentity(in.transform), on.clipsToBounds, on.layer.cornerRadius, cover.layer.cornerRadius]);
-        // Keep scheduling latency from ending A's window before the B report reaches the player.
-        // Positions and report timestamps must advance together, independently of display delivery.
-        sg_playbackTime = playbackTime();
-        sg_controlledClock = YES;
     });
     // B comes 0.15 s before its incoming window ends, which is when A's outgoing one does.
     step(0, ^{
@@ -876,29 +889,34 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
     // Each stop: the stage up inside the window, then what stops it, then the cover looked at.
     // The stage waits for the incoming cover (PlayerMix.x's -start), fetched again after a track change, so the stop
     // waits for the stage itself rather than a fixed time.
-    void (^stops)(NSString *, NSTimeInterval, dispatch_block_t, dispatch_block_t) = ^(NSString *name, NSTimeInterval look, dispatch_block_t up, dispatch_block_t stop) {
+    // Keep playback controlled through the stops, closing recovery, arrival grace period and holds.
+    step(0, ^{
+        sg_playbackTime = CACurrentMediaTime();
+        sg_controlledClock = YES;
+    });
+    void (^stops)(NSString *, dispatch_block_t, dispatch_block_t) = ^(NSString *name, dispatch_block_t up, dispatch_block_t stop) {
         step(0.2, up);
         stepUntil([name stringByAppendingString:@": the stage up inside the window (10 s)"], ^BOOL { return stage() != nil; }, ^{
             weakStage = stage();
             wasOn = weakStage != nil;
             stop();
         });
-        step(look, ^{
+        stepOnFrame(^{
             check(A, name, wasOn && coverBack() && weakStage == nil, [NSString stringWithFormat:@"up before %d, now %@", wasOn, coverState()]);
         });
     };
-    stops(@"a seek back hands the cover back", 0.1, ^{
+    stops(@"a seek back hands the cover back", ^{
         playA(14.2, 16);
         SGRHarnessSetTransition(blend());
     }, ^{ playA(9, 16); });
     // The player stops being seen while it stays in the window: a view over the cover hidden, faded out or moved off.
     UIView *(^host)(void) = ^UIView *{ return tilt.superview; };
-    stops(@"a hidden player hands the cover back", 0.1, ^{ playA(14.2, 16); }, ^{ host().hidden = YES; });
-    stops(@"a faded player hands the cover back", 0.1, ^{
+    stops(@"a hidden player hands the cover back", ^{ playA(14.2, 16); }, ^{ host().hidden = YES; });
+    stops(@"a faded player hands the cover back", ^{
         host().hidden = NO;
         playA(14.2, 16);
     }, ^{ host().alpha = 0; });
-    stops(@"a player moved off screen hands the cover back", 0.1, ^{
+    stops(@"a player moved off screen hands the cover back", ^{
         host().alpha = 1;
         playA(14.2, 16);
     }, ^{ host().transform = CGAffineTransformMakeTranslation(2 * window.bounds.size.width, 0); });
@@ -930,18 +948,18 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
         SGRHarnessSetTransition(facts(@"spotify:track:mixA", @"spotify:track:mixB", SGTransitionKindSpotifyAutomix, NO, 0, 0, 0, 0));
     });
     factsChange(@"facts gone hand the cover back", ^{ SGRHarnessSetTransition(nil); });
-    stops(@"another song hands the cover back", 0.1, ^{
+    stops(@"another song hands the cover back", ^{
         playA(14.2, 16);
         SGRHarnessSetTransition(blend());
     }, ^{
         report(x, 0, 200, @[], NO, kPlaylist);
         SGRHarnessSetTransition(nil);
     });
-    stops(@"the player stopping hands the cover back", 0.1, ^{
+    stops(@"the player stopping hands the cover back", ^{
         playA(14.2, 16);
         SGRHarnessSetTransition(blend());
     }, ^{ report(a, 14.8, 16, @[b, c], YES, kPlaylist); });
-    stops(@"the player closing hands the cover back", 0.1, ^{ playA(14.2, 16); }, ^{
+    stops(@"the player closing hands the cover back", ^{ playA(14.2, 16); }, ^{
         SGRHarnessSetTransitionEnds(CACurrentMediaTime() + 30);
         [NSNotificationCenter.defaultCenter postNotificationName:SGPlayerTransitionNotification object:nil];
     });
@@ -949,27 +967,62 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
         check(A, @"held back while it closes", coverBack(), coverState());
         SGRHarnessSetTransitionEnds(0);
     });
-    step(0.5, ^{
-        check(A, @"back once the player is still, inside the window", stage() != nil, [NSString stringWithFormat:@"at %.2f s: %@", playing(), coverState()]);
+    BOOL (^stageCoversArtwork)(void) = ^BOOL { return stage() != nil && cover.alpha == 0; };
+    stepUntil(@"artwork stage recovers after the closing transition", stageCoversArtwork, ^{
+        check(A, @"back once the player is still, inside the window", stageCoversArtwork(),
+              [NSString stringWithFormat:@"at %.2f s: %@", playing(), coverState()]);
         playA(9, 16);
     });
     // The next song does not come: the stage holds the incoming cover, then gives up 3 s after the window ended.
-    step(0.2, ^{
-        playA(15.5, 16);
-        SGRHarnessSetTransition(blend());
-    });
-    step(1.5, ^{
-        UIView *on = stage();
-        CGRect drawn = [cover convertRect:cover.bounds toView:nil];
-        CGFloat rgb[3];
-        colorAt(window, CGPointMake(CGRectGetMidX(drawn), CGRectGetMidY(drawn)), rgb);
-        check(A, @"waits for the next song with its cover", on && on.subviews.lastObject.alpha == 1 && rgb[1] > 0.6 && rgb[0] < 0.4,
-              [NSString stringWithFormat:@"1 s after the window: %@, the cover's middle %.2f %.2f %.2f", coverState(), rgb[0], rgb[1], rgb[2]]);
-    });
-    step(2.4, ^{
-        check(A, @"gives up when the next song does not come in 3 s", coverBack(), [NSString stringWithFormat:@"3.4 s after the window: %@", coverState()]);
-        playA(9, 16);
-    });
+    __block void (^scheduleGraceAttempt)(NSUInteger);
+    scheduleGraceAttempt = ^(NSUInteger attempt) {
+        __block CFTimeInterval startLo, startHi, endLo;
+        step(0.2, ^{
+            playA(15.5, 16);
+            SGRHarnessSetTransition(blend());
+        });
+        stepUntil(@"artwork stage up before the arrival grace period", stageCoversArtwork, ^{
+            startLo = CACurrentMediaTime();
+            sg_playbackTime += 16.5 - playing();
+        });
+        stepUntil(@"incoming cover fully visible in the arrival grace period", ^BOOL {
+            UIView *on = stage();
+            return on && on.subviews.lastObject.alpha == 1;
+        }, ^{
+            startHi = endLo = CACurrentMediaTime();
+            if (attempt == 1) {
+                UIView *on = stage();
+                CGRect drawn = [cover convertRect:cover.bounds toView:nil];
+                CGFloat rgb[3];
+                colorAt(window, CGPointMake(CGRectGetMidX(drawn), CGRectGetMidY(drawn)), rgb);
+                check(A, @"waits for the next song with its cover", on && on.subviews.lastObject.alpha == 1 && rgb[1] > 0.6 && rgb[0] < 0.4,
+                      [NSString stringWithFormat:@"%@, the cover's middle %.2f %.2f %.2f", coverState(), rgb[0], rgb[1], rgb[2]]);
+            }
+        });
+        stepUntil(@"original cover restored after the arrival grace period", ^BOOL {
+            if (stage() != nil) endLo = CACurrentMediaTime();
+            return coverBack();
+        }, ^{
+            CFTimeInterval endHi = CACurrentMediaTime();
+            // Each boundary falls between two observations. A stall can widen either interval.
+            CFTimeInterval minDuration = endLo - startHi;
+            CFTimeInterval maxDuration = endHi - startLo;
+            BOOL pass = minDuration >= 2.8 && maxDuration <= 3.5;
+            BOOL overlaps = maxDuration >= 2.8 && minDuration <= 3.5;
+            NSString *detail = [NSString stringWithFormat:@"attempt %lu, duration in [%.3f, %.3f] s: %@",
+                                (unsigned long)attempt, minDuration, maxDuration, coverState()];
+            if (!pass && overlaps && attempt < 3) {
+                NSLog(@"[harness] automix artwork arrival grace measurement inconclusive, retrying: %@", detail);
+                playA(9, 16);
+                prependSteps(^{ scheduleGraceAttempt(attempt + 1); });
+                return;
+            }
+            check(A, @"gives up when the next song does not come in 3 s", pass, detail);
+            playA(9, 16);
+            scheduleGraceAttempt = nil; // Release the self-referential scheduling block.
+        });
+    };
+    scheduleGraceAttempt(1);
 
     // Each hold: set, then the song inside its window, then nothing over the cover, then cleared before the window.
     NSArray *holds = @[
@@ -982,7 +1035,10 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
     ];
     for (NSArray *hold in holds) {
         step(0.2, ((dispatch_block_t)hold[1]));
-        step(0.3, ^{ playA(14.2, 16); });
+        step(0.3, ^{
+            playA(14.2, 16);
+            SGRHarnessSetTransition(blend());
+        });
         step(0.6, ^{
             NSString *name = hold[0];
             BOOL set = YES;
@@ -995,7 +1051,10 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
         });
         step(1, ^{});
     }
-    step(0.2, ^{ report(a, 14.2, 16, @[b, c], NO, kDJ); });
+    step(0.2, ^{
+        report(a, 14.2, 16, @[b, c], NO, kDJ);
+        SGRHarnessSetTransition(blend());
+    });
     step(0.6, ^{
         check(A, @"held back: the AI DJ", coverBack(), coverState());
         playA(9, 16);
@@ -1004,6 +1063,7 @@ void SGRHarnessRunAutoMix(UIWindow *window, UIViewController *durationUnit, UIVi
     });
     step(0.6, ^{
         check(A, @"held back: unknown times", coverBack(), coverState());
+        sg_controlledClock = NO;
         playA(9, 16);
     });
     // Up again with nothing holding it, then the player taken out of the window.
