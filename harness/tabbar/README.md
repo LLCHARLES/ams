@@ -17,6 +17,15 @@ checkout it sits in and links them with the real `Core/` and `SGRTokens.m`; `SRC
 hooks, the tab bar's composition and Mod Settings. iOS 27 ends an app with no scene delegate at
 launch, so the harness has one.
 
+For issue #72, `bar-check.sh` also builds with `HARNESS_COMPOSED=1` to link the real `Navbar.x`.
+The `launch` case begins with an unplaced Queue, hidden Create, and unpainted Home and Search.
+It checks the first mirror's order and selection, sends 60 layout passes before the first glyph retry,
+and inspects the image views UIKit displays after the stock URIs arrive. `launch late-ink` paints the
+original icons after the first retry. `launch replace-search` checks the retry budget after Spotify replaces a source.
+`launch reentrant` selects a replacement Search while Home's glyph is being drawn and checks that its retry renders
+the new glyph. `launch unlabeled` starts Home and Search without names. `launch replace-bar` retains the detached
+stock bar while the replacement is on screen and checks that only the visible bar can retry.
+
 The layout is the one 9.1.78 makes in a compact width, with the addresses it was read from:
 
 - `TabBarContainerImpl`'s view has a guide from 49 pt above its safe area's bottom to its bottom
@@ -179,15 +188,15 @@ not, its `isActive` picking the filled one. `symbols` (navsettings.m) checks App
 the mod's own (a mock under Navbar.x's `SGRTabItemView`, its icon `heart` from `SGTabIconView`) after Spotify's
 four, whose pages it hands TabBar.x as Navbar.x reads them off Spotify's list of tabs on 9.1.90 (`SGRSetNavbarStockURIs`).
 With the Tab bar page over the bar it asserts, on the bar, the page's preview and its list: off, Spotify's tabs show the
-mock's rings; switched on from the page, each of Spotify's four has a picture of its own, none its ring, Home's selected
-glyph differs from its plain one (house.fill) and Search's does not (magnifyingglass has no filled variant); the list
+mock's rings; switched on from the page, each of Spotify's four has a picture of its own, none its ring, Home keeps its Music house
+and Search keeps its magnifying glass when selected; the list
 read twice at once off the main thread, naming Home's page for Search and then Search's own, lays the bar out never off
 the main thread and once on it (stubs.m's `SGRRefreshTabBar` counts), and the bar draws Search as Home and then as
 before; switched off again, the rings as before; the tab of the mod's own the same picture throughout, and with the
 switch off and on its item on the bar and the preview the symbol itself (heart, heart.fill selected), shown at the size
 a plain `UITabBar` shows a tab given heart (28.7x25 pt on an iPhone 17 Pro, iOS 26.5). `symbols hold` (and `symbols hold rtl`, right to left) gives the tab of
-the mod's own house, the symbol Apple symbols gives Home, hides the names and switches Apple symbols on, so the two tabs
-show one glyph: a finger held on the tab of the mod's own opens nothing, held on Home Mod Settings once (stubs.m's
+the mod's own the house SF Symbol, hides the names and switches Apple symbols on. A finger held on the custom tab
+opens nothing, and a hold on Home opens Mod Settings once (stubs.m's
 `SGOpenModSettings` counts). stubs.m's `SGRRefreshTabBar` lays out
 nothing, so after each flip the check lays the bar out the way Navbar.x's does. `symbols show` holds the bar with the
 switch off and `symbols show on` with it on, and `symbols page` (`on`, and `list` scrolled to the tabs) the page over it,

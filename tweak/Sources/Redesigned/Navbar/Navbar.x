@@ -104,6 +104,7 @@ static UIView *iconView(NSDictionary *entry) {
     _icon = iconView(entry);
     // Encore's views lay themselves out from constraints; this one is placed by frame.
     _icon.translatesAutoresizingMaskIntoConstraints = YES;
+    _icon.frame = (CGRect){CGPointZero, sg_iconBox.size};
     [self addSubview:_icon];
 }
 
@@ -166,7 +167,7 @@ static NSString *stockID(UIView *item) {
     SGForEachView(item, ^(UIView *v) {
         if (!text && [v isKindOfClass:UILabel.class] && ((UILabel *)v).text.length) text = ((UILabel *)v).text;
     });
-    return text ?: NSStringFromClass(item.class);
+    return text;
 }
 
 static void measureItem(UIView *item) {
@@ -196,16 +197,26 @@ void SGRComposeTabBar(UIView *tabBar) {
     sg_navbarRoot = tabBar;
 
     NSMutableDictionary<NSString *, UIView *> *stockViews = [NSMutableDictionary dictionary];
+    NSMutableArray<UIView *> *stockItems = [NSMutableArray array];
+    NSMutableArray<NSString *> *labels = [NSMutableArray array];
     for (UIView *item in stack.arrangedSubviews) {
         if ([item isKindOfClass:SGRTabItemView.class]) continue;
         NSString *ident = stockID(item);
-        if (stockViews[ident]) continue;
-        stockViews[ident] = item;
+        if (ident) {
+            if (stockViews[ident]) continue;
+            stockViews[ident] = item;
+            [labels addObject:ident];
+        }
+        [stockItems addObject:item];
         measureItem(item);
-        if (!sg_stockOrder) sg_stockOrder = [NSMutableArray array];
-        if (![sg_stockOrder containsObject:ident]) [sg_stockOrder addObject:ident];
     }
-    if (sg_stockOrder && ![sg_stockOrder isEqualToArray:SGRNavbarStock()]) SGRSetNavbarStock(sg_stockOrder);
+    // Publish the names in Spotify's order once every item has one. The
+    // partially constructed row still contributes each individual view below.
+    if (labels.count && labels.count == stockItems.count) {
+        if (!sg_stockOrder) sg_stockOrder = [NSMutableArray array];
+        for (NSString *ident in labels) if (![sg_stockOrder containsObject:ident]) [sg_stockOrder addObject:ident];
+        if (![sg_stockOrder isEqualToArray:SGRNavbarStock()]) SGRSetNavbarStock(sg_stockOrder);
+    }
 
     NSMutableDictionary<NSString *, SGRTabItemView *> *custom = customItems(stack);
     NSMutableArray<UIView *> *wanted = [NSMutableArray array];
@@ -237,9 +248,10 @@ void SGRComposeTabBar(UIView *tabBar) {
     }
     // Tabs of Spotify's the list does not name — or named before Spotify had built them — keep
     // Spotify's own place, at the end, shown.
-    for (NSString *ident in sg_stockOrder) {
-        UIView *item = stockViews[ident];
-        if (!item || [wanted containsObject:item] || [splitStock containsObject:ident]) continue;
+    for (UIView *item in stockItems) {
+        if ([wanted containsObject:item]) continue;
+        NSString *ident = stockID(item);
+        if (ident && [splitStock containsObject:ident]) continue;
         item.hidden = NO;
         [wanted addObject:item];
     }
@@ -296,6 +308,16 @@ void SGRComposeTabBar(UIView *tabBar) {
         objc_setAssociatedObject(stack, &kOrderKey, order, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [stack setNeedsLayout];
     }
+}
+
+NSArray<UIView *> *SGRComposedTabItems(UIView *tabBar) {
+    UIStackView *stack = SGRowIn(tabBar);
+    NSArray<UIView *> *order = objc_getAssociatedObject(stack, &kOrderKey);
+    NSMutableArray<UIView *> *visible = [NSMutableArray arrayWithCapacity:order.count];
+    for (UIView *view in order) {
+        if (!view.hidden && view.superview == stack && [stack.arrangedSubviews containsObject:view]) [visible addObject:view];
+    }
+    return visible;
 }
 
 // Spotify placed the icon and the label for the width it measured (trees/test5.txt: x 28 in a

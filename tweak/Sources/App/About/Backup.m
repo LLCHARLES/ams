@@ -369,7 +369,7 @@ static void importSettings(NSDictionary *settings, NSUserDefaults *store, NSDict
     SGLog(@"import: set %lu keys, skipped %lu", (unsigned long)(settings.count - skipped), (unsigned long)skipped);
 }
 
-@interface SGSettingsPicker : NSObject <UIDocumentPickerDelegate>
+@interface SGSettingsPicker : NSObject <UIDocumentPickerDelegate, UIAdaptivePresentationControllerDelegate>
 @property (nonatomic, weak) UIViewController *presenter;
 @property (nonatomic, weak) UIDocumentPickerViewController *picker;
 @property (nonatomic) BOOL pending, reading;
@@ -377,6 +377,14 @@ static void importSettings(NSDictionary *settings, NSUserDefaults *store, NSDict
 @end
 
 static const NSUInteger kSettingsImportLimitBytes = 5 * 1024 * 1024;
+
+static BOOL settingsPresentationAttached(UIViewController *owner, UIViewController *modal) {
+    if (modal.presentingViewController) return YES;
+    for (UIViewController *page = owner; page; page = page.parentViewController) {
+        if (page.presentedViewController == modal) return YES;
+    }
+    return NO;
+}
 
 // The picker gives us a local copy. Reject a large file before reading it, and bound the stream too
 // so a file that grows after the size check cannot make the import allocate without a limit.
@@ -409,10 +417,6 @@ static NSDictionary *readSettingsFile(NSURL *url) {
 
 - (void)presentFile:(NSDictionary *)file {
     UIViewController *owner = self.presenter;
-    if (!SGDiagnosticsCanPresentFrom(owner)) {
-        [self finish];
-        return;
-    }
     NSString *title, *message;
     UIAlertAction *confirm = nil;
     if (file) {
@@ -429,34 +433,70 @@ static NSDictionary *readSettingsFile(NSURL *url) {
         message = SGL(@"settings.mod.backup.invalid_file.alert.message", @"Pick a file made by Export settings.");
     }
     UIAlertController *alert = showAlert(owner, title, message, confirm, ^{ [self finish]; });
-    if (owner.presentedViewController != alert) [self finish];
+    if (!settingsPresentationAttached(owner, alert)) {
+        SGLog(@"import: could not present the result alert");
+        [self finish];
+    }
+}
+
+- (void)presentFile:(NSDictionary *)file afterPicker:(UIDocumentPickerViewController *)picker
+           deadline:(NSTimeInterval)deadline dismissalStarted:(BOOL)dismissalStarted {
+    if (self.picker != picker || !self.reading) return;
+    UIViewController *owner = self.presenter;
+    if (!owner) {
+        SGLog(@"import: settings screen was released before the result alert");
+        [self finish];
+        return;
+    }
+    // A full-screen picker temporarily removes the settings view from the window.
+    BOOL inWindow = owner.viewIfLoaded.window != nil;
+    BOOL attached = settingsPresentationAttached(owner, picker);
+    BOOL dismissing = picker.isBeingDismissed;
+    if (inWindow && !attached && !dismissing && !picker.transitionCoordinator && SGDiagnosticsCanPresentFrom(owner)) {
+        [self presentFile:file];
+        return;
+    }
+    if (NSProcessInfo.processInfo.systemUptime >= deadline) {
+        SGLog(@"%@", inWindow ? @"import: presentation stayed busy until the result alert timed out"
+                              : @"import: settings view did not return to the window before the result alert timed out");
+        [self finish];
+        return;
+    }
+    if (dismissing) dismissalStarted = YES;
+    if (attached && !dismissalStarted) {
+        dismissalStarted = YES;
+        [picker dismissViewControllerAnimated:YES completion:nil];
+    }
+    // UIKit can clear the presentation context after its transition completion, or supply
+    // no coordinator for a remote picker. Recheck the actual hierarchy on a later main turn.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        [self presentFile:file afterPicker:picker deadline:deadline dismissalStarted:dismissalStarted];
+    });
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)picker {
-    if (self.picker == picker) [self finish];
+    if (self.picker == picker && !self.reading) [self finish];
+}
+
+- (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
+    if (presentationController.presentedViewController == self.picker && !self.reading) [self finish];
 }
 
 - (void)documentPicker:(UIDocumentPickerViewController *)picker didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     if (!self.pending || self.reading || self.picker != picker) return;
     self.reading = YES;
     NSURL *url = urls.firstObject;
-    // Finish the picker's own dismissal before reading, so even a tiny file cannot race it.
-    void (^read)(void) = ^{
-        if (self.picker != picker) return;
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSDictionary *file = readSettingsFile(url);
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (self.picker == picker) [self presentFile:file];
-            });
+    // Open the imported copy independently of UIKit's dismissal callbacks.
+    BOOL scoped = [url startAccessingSecurityScopedResource];
+    BOOL dismissalStarted = picker.isBeingDismissed;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSDictionary *file = readSettingsFile(url);
+        if (scoped) [url stopAccessingSecurityScopedResource];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self presentFile:file afterPicker:picker deadline:NSProcessInfo.processInfo.systemUptime + 3
+                dismissalStarted:dismissalStarted];
         });
-    };
-    if (picker.isBeingDismissed && picker.transitionCoordinator) {
-        [picker.transitionCoordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) { read(); }];
-    } else if (picker.presentingViewController) {
-        [picker dismissViewControllerAnimated:YES completion:read];
-    } else {
-        read();
-    }
+    });
 }
 
 @end
@@ -464,7 +504,18 @@ static NSDictionary *readSettingsFile(NSURL *url) {
 void SGImportSettings(UIViewController *presenter) {
     static SGSettingsPicker *delegate;
     if (!delegate) delegate = [SGSettingsPicker new];
-    if (delegate.pending || !SGDiagnosticsCanPresentFrom(presenter)) return;
+    if (delegate.pending && !delegate.reading) {
+        UIDocumentPickerViewController *previous = delegate.picker;
+        if (!previous || (!previous.isBeingPresented && !previous.isBeingDismissed &&
+                          !settingsPresentationAttached(delegate.presenter, previous))) {
+            [delegate finish];
+        }
+    }
+    if (delegate.pending) return;
+    if (!SGDiagnosticsCanPresentFrom(presenter)) {
+        SGLog(@"import: settings screen cannot present the picker");
+        return;
+    }
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:@[UTTypeJSON] asCopy:YES];
     delegate.pending = YES;
     delegate.presenter = presenter;
@@ -472,5 +523,10 @@ void SGImportSettings(UIViewController *presenter) {
     picker.delegate = delegate;
     SGPresentDark(picker);
     [presenter presentViewController:picker animated:YES completion:nil];
-    if (presenter.presentedViewController != picker) [delegate finish];
+    UIPresentationController *presentation = picker.presentationController;
+    if (!presentation.delegate) presentation.delegate = delegate;
+    if (!settingsPresentationAttached(presenter, picker)) {
+        SGLog(@"import: could not present the picker");
+        [delegate finish];
+    }
 }
