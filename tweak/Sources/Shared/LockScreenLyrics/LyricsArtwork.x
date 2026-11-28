@@ -20,6 +20,7 @@
 #import "Core/SGDataRoot.h"
 #import "LockScreenLyrics.h"
 #import "SGLyricsClip.h"
+#import "Shared/Fonts/Fonts.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/Lyrics/Lyrics.h"
 #import "Shared/LyricsTranslation/LyricsTranslation.h"
@@ -40,6 +41,7 @@ static const double kShortest = 2, kLongest = 8;
 @property (nonatomic) UIImage *cover;
 @property (nonatomic) SGLyricsClipStyle style;
 @property (nonatomic) SGLyricsClipLayout layout;
+@property (nonatomic) SGLyricsClipFont face;
 @property (nonatomic) SGLyricsClipTextSize textSize;
 @property (nonatomic) BOOL dimmed;           // Over the artwork dimmed whole (SGKeyLockScreenDimArtwork)
 @property (nonatomic) NSURL *motion;        // the moving artwork under the words, nil for the blurred cover
@@ -99,7 +101,7 @@ static NSURL *sg_coverURL;     // attempted once per track/source, including a f
 static NSString *sg_coverKey;  // content identity, including no-cover, in both disk and preview keys
 static NSUInteger sg_coverGeneration, sg_renderGeneration, sg_settingsRevision;
 static NSUInteger sg_prefetchGeneration = 1; // under sg_lock
-static BOOL sg_settingsPending;
+static BOOL sg_settingsPending, sg_widgetCoverChanged;   // main thread
 static NSString *sg_shownID;   // the artwork handed over last, nil for none; read on sg_queue too
 static NSString *sg_aheadID;   // the next line's artwork being drawn ahead, nil for none; under sg_lock
 static BOOL sg_aheadCostly;    // its clip has many frames (drawAhead); under sg_lock
@@ -214,14 +216,14 @@ static UIImage *previewFor(NSString *artworkID, SGLockLine *line, CGSize size) {
     BOOL miss = !preview;
     if (!preview) {
         BOOL tryMotion = line.motion && !motionFailed(line.motion);
-        CGImageRef frame = tryMotion ? SGLyricsClipMotionFrameWithTextSize(line.motion, line.previous, line.line, line.translation,
-                                                                          line.next, line.from, line.seconds, line.layout, line.textSize) : NULL;
+        CGImageRef frame = tryMotion ? SGLyricsClipMotionFrameWithFont(line.motion, line.previous, line.line, line.translation,
+                                                                          line.next, line.from, line.seconds, line.layout, line.textSize, line.face) : NULL;
         if (!frame) {
             if (!currentLine(line)) return nil;
             if (tryMotion) markMotionFailed(line.motion, artworkID);
             CGImageRef backdrop = newBackdrop(line, size);
-            frame = SGLyricsClipFrameWithTextSize(backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
-                                                  size, line.layout, line.textSize);
+            frame = SGLyricsClipFrameWithFont(backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
+                                                  size, line.layout, line.textSize, line.face);
             CGImageRelease(backdrop);
         }
         if (frame) preview = [UIImage imageWithCGImage:frame];
@@ -242,7 +244,7 @@ static UIImage *previewFor(NSString *artworkID, SGLockLine *line, CGSize size) {
 // On sg_queue. A clip drawn ahead is found on disk and handed over at once. Over moving artwork that will not
 // read, it is drawn over the selected background. The encoders ask `live` each frame, so a line sung or
 // skipped past while its clip is written stops there instead of encoding to the end for nobody.
-static BOOL writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
+static NSURL *writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
     // Once no, no for the rest of this write: seeking back to the line before the writer returns must not make
     // a stopped clip look like moving artwork that would not draw. The encoder's queue asks only while this
     // queue waits for it (writeReady), so the two never ask at once.
@@ -251,32 +253,32 @@ static BOOL writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
         if (!stopped && !(currentLine(line) && stillWanted(artworkID))) stopped = YES;
         return !stopped;
     };
-    if (!live()) return NO;
+    if (!live()) return nil;
     NSURL *file = clipFile(artworkID);
-    if (!file) return NO;
-    if ([NSFileManager.defaultManager fileExistsAtPath:file.path]) return YES;
+    if (!file) return nil;
+    if ([NSFileManager.defaultManager fileExistsAtPath:file.path]) return file;
     CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
     BOOL tryMotion = line.motion && !motionFailed(line.motion);
-    BOOL over = tryMotion && SGLyricsClipWriteOverMotionWithTextSize(file, line.motion, line.previous, line.line, line.translation,
-                                                                     line.next, line.from, line.seconds, line.layout, line.textSize, live);
-    if (!live()) return NO;
+    BOOL over = tryMotion && SGLyricsClipWriteOverMotionWithFont(file, line.motion, line.previous, line.line, line.translation,
+                                                                     line.next, line.from, line.seconds, line.layout, line.textSize, line.face, live);
+    if (!live()) return nil;
     if (tryMotion && !over) markMotionFailed(line.motion, artworkID);
     BOOL ok = over;
     if (!ok) {
         CGImageRef backdrop = newBackdrop(line, size);
-        ok = SGLyricsClipWriteWithTextSize(file, backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
-                                           size, line.style, line.layout, line.textSize, live);
+        ok = SGLyricsClipWriteWithFont(file, backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
+                                           size, line.style, line.layout, line.textSize, line.face, live);
         CGImageRelease(backdrop);
     }
     // Stopped for a line gone by: not a failure to log.
-    if (!live()) return NO;
+    if (!live()) return nil;
     // The first few of a launch of each kind, and any that fails: one a line would fill the log.
     static NSUInteger told[2];
     if (!ok || told[over]++ < 5) {
         SGLog(@"lock lyrics: %@ %@ in %.0f ms%@", artworkID, ok ? @"written" : @"not written", (CFAbsoluteTimeGetCurrent() - start) * 1000,
               over ? [NSString stringWithFormat:@", up to %.1f s of %@ from %.1f s", line.seconds, line.motion.lastPathComponent, line.from] : @"");
     }
-    return ok && live();
+    return ok && live() ? file : nil;
 }
 
 // The next line's preview and clip, drawn while this one shows: a line change then hands both over at once, where
@@ -321,17 +323,29 @@ static MPMediaItemAnimatedArtwork *artworkFor(NSString *artworkID, SGLockLine *l
         }
         videoAssetFileURLRequestHandler:^(CGSize wanted, void (^completion)(NSURL *)) {
             // A late ask for a line already gone by must not keep the next lines drawn ahead.
-            if (stillShown(artworkID)) sg_askedAt = CFAbsoluteTimeGetCurrent();
+            if (!currentLine(line) || !stillShown(artworkID)) { completion(nil); return; }
+            sg_askedAt = CFAbsoluteTimeGetCurrent();
             enqueueClip(^{
                 // A line already sung by the time its turn comes is not drawn.
                 if (!stillShown(artworkID)) {
                     completion(nil);
                     return;
                 }
-                BOOL ok = writeClip(artworkID, line, size);
-                completion(ok && stillShown(artworkID) ? clipFile(artworkID) : nil);
+                NSURL *url = writeClip(artworkID, line, size);
+                if (url && line.motion) {
+                    // A cache hit can follow an encode before main has processed its timer.
+                    // Check the playback clock at delivery for every moving-artwork request.
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (stillShown(artworkID)) tick();
+                        completion(currentLine(line) && stillShown(artworkID) ? url : nil);
+                    });
+                } else completion(currentLine(line) && stillShown(artworkID) ? url : nil);
             }, NO);
         }];
+    if (SGFlag(SGKeyLockScreenKeepWidgetCover, NO)) {
+        sg_stillArtwork = nil;
+        return artwork;
+    }
     MPMediaItemArtwork *still = sg_stillArtwork;
     if (!still) still = [[MPMediaItemArtwork alloc] initWithBoundsSize:size requestHandler:^UIImage *(CGSize wanted) {
         UIImage *ready = [sg_previews objectForKey:artworkID], *previous;
@@ -485,6 +499,18 @@ void SGLyricsArtworkSetMotion(NSString *uri, NSURL *file) {
     tickSoon();
 }
 
+static SGLyricsClipFont lyricsFont(void) {
+    switch (SGAppFontDrawn()) {
+        case SGAppFontRounded: return (SGLyricsClipFont){SGLyricsClipFontRounded, nil};
+        case SGAppFontSerif:   return (SGLyricsClipFont){SGLyricsClipFontSerif, nil};
+        case SGAppFontMono:    return (SGLyricsClipFont){SGLyricsClipFontMono, nil};
+        case SGAppFontCustom:  return (SGLyricsClipFont){SGLyricsClipFontFamily, SGAppFontFamilyDrawn(), SGAppFontImportRevisionDrawn()};
+        case SGAppFontFamily:
+        case SGAppFontLibrary: return (SGLyricsClipFont){SGLyricsClipFontFamily, SGAppFontFamilyDrawn()};
+        default:               return (SGLyricsClipFont){0};
+    }
+}
+
 static SGLyricsClipTextSize lyricsTextSize(void) {
     return SGLyricsClipNormalizedTextSize(SGInt(SGKeyLockScreenLyricsSize, SGLyricsClipTextMedium));
 }
@@ -492,7 +518,7 @@ static SGLyricsClipTextSize lyricsTextSize(void) {
 // What the artwork for line `index` shows, `resting` once its break has come (index -1, before the first line,
 // always rests). Over moving artwork, the stretch of song from when it shows until the next artwork does.
 static SGLockLine *lineAt(NSArray<SGKaraokeLine *> *lines, NSInteger index, BOOL resting, NSURL *motion,
-                          UIImage *cover, SGLyricsClipStyle style, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL dimmed,
+                          UIImage *cover, SGLyricsClipStyle style, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face, BOOL dimmed,
                           SGLyricsBackgroundStyle background, CGSize size) {
     SGLockLine *shown = [SGLockLine new];
     // Resting, the line sung is let go and the one coming shows alone. The line sung last shows over moving artwork
@@ -505,6 +531,7 @@ static SGLockLine *lineAt(NSArray<SGKaraokeLine *> *lines, NSInteger index, BOOL
     shown.style = style;
     shown.layout = layout;
     shown.textSize = textSize;
+    shown.face = face;
     shown.dimmed = dimmed;
     shown.motion = motion;
     shown.background = background;
@@ -623,7 +650,8 @@ static NSTimeInterval update(void) {
             style = SGLyricsClipStill;
         }
         SGLyricsClipTextSize textSize = lyricsTextSize();
-        NSString *look = SGLyricsClipLookWithTextSize(motion, style, layout, dimmed, textSize);
+        SGLyricsClipFont face = lyricsFont();
+        NSString *look = SGLyricsClipLookWithFont(motion, style, layout, dimmed, textSize, face);
         // A non-nil MPNowPlaying image is not evidence of a cover: it may be Spotify's
         // placeholder, or the previous same-title track's image. Load the current URI's
         // metadata through the shared loader instead. Until then the renderer gets nil.
@@ -670,18 +698,19 @@ static NSTimeInterval update(void) {
         NSString *reading = sg_readingKey;
         NSString *artworkID = [NSString stringWithFormat:@"%@-%ld%@%@%@-%@-%@-%@-%@", trackID, (long)index, resting ? @"r" : @"",
                                translationTag(translationAt(lines, index, resting)), reading, sg_lyricsKey, sg_coverKey, backgroundID, look];
-        if ([artworkID isEqualToString:sg_shownID]) return wait;
+        if ([artworkID isEqualToString:sg_shownID] && !sg_widgetCoverChanged) return wait;
+        sg_widgetCoverChanged = NO;
         if (![sg_shownID hasPrefix:trackID]) SGLog(@"lock lyrics: lines offered for %@", trackID);
         if (motion && ![sg_shownID hasSuffix:[@"-" stringByAppendingString:look]]) SGLog(@"lock lyrics: the lines of %@ over %@", trackID, motion.lastPathComponent);
         setShown(artworkID);
         SGLockMotionShowPlain(NO);
         SGNowPlayingSetExtras(@"lyrics", @{MPNowPlayingInfoProperty3x4AnimatedArtwork:
-                                               artworkFor(artworkID, lineAt(lines, index, resting, motion, sg_cover, style, layout, textSize, dimmed, background, size))},
+                                               artworkFor(artworkID, lineAt(lines, index, resting, motion, sg_cover, style, layout, textSize, face, dimmed, background, size))},
                               state.track.trackTitle);
         if (index + 1 < (NSInteger)lines.count) {
             NSString *ahead = [NSString stringWithFormat:@"%@-%ld%@%@-%@-%@-%@-%@", trackID, (long)index + 1,
                                translationTag(translationAt(lines, index + 1, NO)), reading, sg_lyricsKey, sg_coverKey, backgroundID, look];
-            drawAhead(ahead, lineAt(lines, index + 1, NO, motion, sg_cover, style, layout, textSize, dimmed, background, size));
+            drawAhead(ahead, lineAt(lines, index + 1, NO, motion, sg_cover, style, layout, textSize, face, dimmed, background, size));
         }
         return wait;
     }
@@ -781,6 +810,7 @@ static void startLyricsArtwork(BOOL replay) {
         static SGLyricsClipTextSize textSize;
         choice = SGLockScreenArtwork();
         __block NSString *background = choice == SGLockArtworkOff ? nil : SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
+        __block BOOL keepWidgetCover = SGFlag(SGKeyLockScreenKeepWidgetCover, NO);
         __block BOOL translation = SGFlag(SGKeyLockScreenTranslation, NO);
         __block NSString *reading = SGLyricsShownLineTag();
         // A translation saved while the player is paused has no tick to pick it up (Shared/LyricsTranslation).
@@ -827,7 +857,12 @@ static void startLyricsArtwork(BOOL replay) {
                 NSString *nowReading = SGLyricsShownLineTag();
                 BOOL changed = ![next isEqual:background] || nowStyle != style || nowLayout != layout || nowDim != dim || nowSize != textSize;
                 BOOL reread = ![nowReading isEqualToString:reading];
-                if (picked == choice && !changed && nowDelay == delay && nowTranslation == translation && !reread) return;
+                BOOL nowKeep = SGFlag(SGKeyLockScreenKeepWidgetCover, NO);
+                if (nowKeep != keepWidgetCover) {
+                    keepWidgetCover = nowKeep;
+                    // Same clip/preview ID, new offer with the requested ordinary artwork.
+                    sg_widgetCoverChanged = YES;
+                } else if (picked == choice && !changed && nowDelay == delay && nowTranslation == translation && !reread) return;
                 background = next;
                 style = nowStyle;
                 layout = nowLayout;

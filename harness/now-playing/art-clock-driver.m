@@ -31,3 +31,6 @@ static NSString *countArtworkHash(NSData *data) {
 }
 #define SGDataSHA256 countArtworkHash
 #include "LyricsArtwork.m"
+
+// A marker behind both system requests lets the test hold main until the cache-hit job has returned.
+void harnessAfterClipRequests(dispatch_block_t marker) { enqueueClip(marker, NO); }

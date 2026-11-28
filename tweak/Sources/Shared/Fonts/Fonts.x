@@ -11,6 +11,7 @@
 
 static SGAppFont sg_font;
 static NSString *sg_family;   // the chosen family: one iOS carries, or the imported one once Core Text has it
+static NSString *sg_importRevision;
 static NSCache<NSString *, UIFont *> *sg_made;   // the font made for each request of Spotify's: its name, size and weight
 
 // A font name ("SpotifyMixUI-Bold") or family name ("Spotify Mix UI", which is how Spotify's text components ask) of
@@ -171,6 +172,14 @@ SGAppFont SGAppFontDrawn(void) {
     return sg_font;
 }
 
+NSString *SGAppFontFamilyDrawn(void) {
+    return sg_family;
+}
+
+NSString *SGAppFontImportRevisionDrawn(void) {
+    return sg_importRevision;
+}
+
 NSArray<NSString *> *SGAppFontNames(void) {
     // Spotify's font is the default only in the native look; the redesign names it, as San Francisco is its default.
     NSString *spotify = SGRedesignedUI() ? @"Spotify Mix" : SGL(@"settings.font.choice.default", @"Default");
@@ -197,6 +206,7 @@ NSArray<NSString *> *SGAppFontFamilies(void) {
             sg_font = SGAppFontSpotify;
             return;
         }
+        sg_importRevision = [NSUserDefaults.standardUserDefaults stringForKey:SGKeyAppFontFilesRevision];
     }
     if (sg_font == SGAppFontFamily) {
         NSString *name = [NSUserDefaults.standardUserDefaults stringForKey:SGKeyAppFontFamily];

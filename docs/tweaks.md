@@ -689,7 +689,7 @@ Shared:
                   next line is coming, never its words, sides swapped right to left, the current bubble at most 4
                   lines and the previous 2 after shrinking to 0.6; Vinyl on #0E0E0E, a still record of 45 to 60% of the
                   visible width with the cover as its round label, a lighter rim and a soft glow, the current line in
-                  New York italic under it, the next line at 55% white; harness/lyrics-clip/ `scenes` and `regression.sh`). Over the artwork (last choice; default unchanged) keeps the cover sharp and
+                  New York italic under it by default, the next line at 55% white; harness/lyrics-clip/ `scenes` and `regression.sh`). Over the artwork (last choice; default unchanged) keeps the cover sharp and
                   centre-filled, with the previous line, current line and translation over a broad side-anchored
                   Gaussian gradient with no flat box or cutoff, plus a subtle text shadow. On white, the current
                   line keeps at least 4.5:1 contrast and the dimmed lines 3:1. Still holds it, Animated gently
@@ -713,14 +713,19 @@ Shared:
                   preview and clip are drawn ahead and a ready preview is handed over at once; from the thermal state Fair
                   up, a clip of many frames (over moving artwork, or Animated) is left for the lock screen's own ask, and
                   Low Power Mode draws nothing ahead. A clip being written stops as soon as its line is neither showing
-                  nor the one drawn ahead, rather than encoding to the end for nobody. From Serious up, and in Low Power
+                  nor the one drawn ahead. A freshly encoded on-demand motion clip checks the live line before
+                  delivery, so a late timer cannot hand back a clip for a line already sung. From Serious up, and in Low Power
                   Mode, the lines go Still over the cover (no motion, no breath) under their own ID, and the chosen look
                   comes back once the phone cools or Low Power Mode is off, paused too; reaching Fair or Low Power Mode
-                  also lets go of a many-frame clip queued or being drawn ahead. Each lyric ID owns one ordinary Now Playing artwork object, reused by ready-preview,
+                  also lets go of a many-frame clip queued or being drawn ahead. All lyric layouts follow the app font
+                  applied at launch. The artwork ID includes its design or family so a new choice redraws the clip.
+                  Each lyric ID normally owns one ordinary Now Playing artwork object, reused by ready-preview,
                   artist-row and Spotify/extras resends. Its synchronous handler uses a ready frame from this render
                   generation while a miss draws off main, never the plain cover. A new ID replaces the object;
                   turning lyrics off restores the
-                  native artwork. Picking it or another artwork applies at once.
+                  native artwork. Keep original widget cover (`spotifyglass.lockscreen.keepWidgetCover`, off by default)
+                  keeps Spotify’s cover in the widget and Control Center. It applies immediately and can briefly expose
+                  the cover between full-screen lyric clips. Picking another artwork mode also applies at once.
                   Moving artwork with lyrics (the choice's fifth value, 4) draws each line over the track's moving
                   artwork, which LockScreenMotion.x finds and hands over (SGLyricsArtworkSetMotion): the clip is the
                   stretch of the video the song is at while the line shows (its start taken round the video's length,
@@ -730,10 +735,10 @@ Shared:
                   rows behind the words are blurred (Accelerate's tent blur, 16% of the width across, at most 127
                   pixels) and faded in, every row of the cut is darkened in one pass (0.25, and 0.6 across the words,
                   up to 0.8 over a bright picture: by the brightest of four frames spread from the clip's first to its
-                  last, read once with an image generator before the clip is written, held for the clip, enough that
+                  last, shared between preview and video in a bounded cache keyed by file revision, stretch and text bounds, enough that
                   the brightest tenth behind the words comes to 0.22 of white; the preview judges the same stretch,
                   so it matches), and the words with a tight dark shadow are
-                  drawn on; the same exact 3:4 crop as the preview is copied row by row into the encoder's aligned,
+                  drawn on. The tent runs at half resolution. The exact 3:4 crop is composed directly into the encoder’s aligned,
                   IOSurface-backed buffer pool, preserving source color tags without scaling the already-drawn words.
                   The IDs end in a render-version token (changed whenever the drawing changes, so system-cached clips
                   from older renderers cannot return), the style, the layout and, over moving artwork, m and the first 16 characters of the

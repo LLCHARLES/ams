@@ -62,6 +62,7 @@ static void runImport(void) {
         SGSetInt(SGKeyAppFont, SGAppFontLibrary);
         [store setObject:@"fixture-library-a" forKey:SGKeyAppFontLibrary];
     }
+    NSString *previousRevision = [store stringForKey:SGKeyAppFontFilesRevision];
     page = [NSClassFromString(@"SGFontPage") new];
     id<UIDocumentPickerDelegate> picker = [NSClassFromString(@"SGFontPicker") new];
     [(id)picker setValue:[^{
@@ -94,6 +95,8 @@ static void runImport(void) {
                 break;
             case FontCheckCount: HARNESS_FAIL(@"unexpected scenario");
         }
+        NSString *installedRevision = [store stringForKey:SGKeyAppFontFilesRevision];
+        HARNESS_CHECK(installedRevision.length && ![installedRevision isEqual:previousRevision]);
         HARNESS_CHECK([SGRegisterCustomFont() isEqualToString:@"Chalkduster"]);
         HARNESS_CHECK([UIFont fontNamesForFamilyName:@"Chalkduster"].count > 0);
         HARNESS_CHECK([NSUserDefaults.standardUserDefaults arrayForKey:SGKeyAppFontFiles].count == 1);

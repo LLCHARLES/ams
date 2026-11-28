@@ -45,6 +45,9 @@ NSArray *SGLockScreenMotionRows(void) {
         size.visible = style.visible;
         SGModRow *translation = SGOptionRow(SGL(@"settings.lockscreen.translations.title", @"Translations"), SGL(@"settings.lockscreen.translations.subtitle", @"Under the line, when the lyrics have one or automatic translation makes one"), SGKeyLockScreenTranslation);
         translation.visible = style.visible;
+        SGModRow *widgetCover = SGOptionRow(SGL(@"settings.lockscreen.keep_widget_cover.title", @"Keep original widget cover"),
+            SGL(@"settings.lockscreen.keep_widget_cover.subtitle", @"Shows the album cover in the widget and Control Center. The cover may flash briefly in full screen when lines change."), SGKeyLockScreenKeepWidgetCover);
+        widgetCover.visible = style.visible;
         SGModRow *star = SGOptionRow(SGL(@"settings.lockscreen.star_switch.title", @"Switch with the star"), SGL(@"settings.lockscreen.star_switch.subtitle", @"The lock screen widget's star swaps the moving artwork for the lyrics "
                                                              @"and back. It takes the place of Spotify's like and dislike buttons"),
                                      SGKeyLockScreenStar);
@@ -66,6 +69,7 @@ NSArray *SGLockScreenMotionRows(void) {
             dim,
             size,
             translation,
+            widgetCover,
             star,
         ] mutableCopy];
         NSArray<SGModRow *> *background = SGLyricsBackgroundRows(@"spotifyglass.lockscreen.background");

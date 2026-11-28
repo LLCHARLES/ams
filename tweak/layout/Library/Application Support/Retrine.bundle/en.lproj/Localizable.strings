@@ -1221,6 +1221,8 @@
 "settings.lockscreen.artwork.title" = "Full-screen artwork";
 "settings.lockscreen.dim_artwork.subtitle" = "Blurs and darkens the whole artwork, moving artwork included, and floats the lyrics over it instead of shading only around them.";
 "settings.lockscreen.dim_artwork.title" = "Dim the whole artwork";
+"settings.lockscreen.keep_widget_cover.subtitle" = "Shows the album cover in the widget and Control Center. The cover may flash briefly in full screen when lines change.";
+"settings.lockscreen.keep_widget_cover.title" = "Keep original widget cover";
 "settings.lockscreen.lyrics_layout.choice.centered" = "Centered";
 "settings.lockscreen.lyrics_layout.choice.left" = "Left";
 "settings.lockscreen.lyrics_layout.choice.messages" = "Messages";

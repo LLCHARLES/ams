@@ -1329,6 +1329,8 @@
 "settings.lockscreen.lyrics_size.choice.large" = "크게";
 "settings.lockscreen.lyrics_size.choice.medium" = "보통";
 "settings.lockscreen.lyrics_size.choice.small" = "작게";
+"settings.lockscreen.keep_widget_cover.subtitle" = "잠금 화면 위젯과 제어 센터에 원래 앨범 커버를 유지합니다. 전체 화면에서 가사가 바뀔 때 커버가 잠깐 비칠 수 있습니다.";
+"settings.lockscreen.keep_widget_cover.title" = "위젯에 원래 커버 유지";
 "settings.lockscreen.lyrics_size.subtitle" = "잠금 화면에 표시할 가사와 번역의 글자 크기입니다.";
 "settings.lockscreen.lyrics_size.title" = "글자 크기";
 "settings.lockscreen.lyrics_style.choice.animated" = "움직임";

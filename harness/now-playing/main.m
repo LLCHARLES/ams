@@ -47,7 +47,7 @@ void SGMigrateKey(NSString *from, NSString *to) {}
 BOOL harnessActivityOn;
 BOOL SGFlag(NSString *key, BOOL fallback) {
     if ([key isEqual:SGKeyLiveActivity]) return harnessActivityOn;
-    if ([key isEqual:SGKeyLockScreenTranslation] || [key isEqual:SGKeyLiveActivityTranslation])
+    if ([key isEqual:SGKeyLockScreenKeepWidgetCover] || [key isEqual:SGKeyLockScreenTranslation] || [key isEqual:SGKeyLiveActivityTranslation])
         return [NSUserDefaults.standardUserDefaults boolForKey:key];
     return [key isEqual:SGKeyLockScreenLyrics] ? getenv("LSL") != NULL : fallback;
 }
