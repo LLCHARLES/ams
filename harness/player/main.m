@@ -3393,17 +3393,29 @@ static void installSettingsWorkProbes(void) {
         sg_lowPower = NO;
         [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
     });
+    __block BOOL backgroundRowsUpdated = NO;
     when(^BOOL { return hillsOn() != nil; }, ^{
         BOOL back = demo() && hillsOn();
+        [CATransaction begin];
+        [CATransaction setCompletionBlock:^{ backgroundRowsUpdated = YES; }];
         choose(@"Colors");   // The actual track lookup decides between Colors and Fluid.
         pick(SGRPlayerBackgroundFluid);
         BOOL ended = !demo() && !hillsOn() && !motionOn();
         pick(SGRPlayerBackgroundAnimated);
+        [CATransaction commit];
         [self expect:back && ended && !demo() && [playerNow() isEqualToString:playerBefore] && SGRHarnessPlayerCommands() == 0
                 step:@"Fluid ends the demo, and Animated again does not bring it back" detail:cardState()];
     });
     // Scrolled: compact, still under the bar, whole; the rows go under it.
-    step(0, ^{
+    __block CGPoint savedOffset;
+    __block NSIndexPath *markerPath;
+    __block UIView *marker;
+    when(^BOOL {
+        if (!backgroundRowsUpdated || table().hasUncommittedUpdates) return NO;
+        // The batch completion may scroll to the newly inserted rows.
+        if (@available(iOS 17.4, *)) { if (table().scrollAnimating) return NO; }
+        return YES;
+    }, ^{
         // Choosing the fallback reloads the table. Resolve that reload's row estimates
         // and inset adjustments before setting either measurement offset.
         [page().view layoutIfNeeded];
@@ -3421,30 +3433,50 @@ static void installSettingsWorkProbes(void) {
         [self expect:card().window && fabs(half - 358) < 1 && !halfway && fabs(height - 236) < 1 && fabs(cardTop() - barFoot() - 8) < 1 && !clipping
                 step:@"scrolled: the card shrinking whole, then compact under the bar" detail:[NSString stringWithFormat:@"halfway %.0f (%@); %@, height %.0f; %@", half,
                                                        halfway ?: @"whole", pinned(), height, clipping ?: @"every part in its band"]];
-        CGPoint savedOffset = table().contentOffset;
-        SGModRow *row = rowTitled(@"Header glass");
-        UITableViewCell *cell = cellOf(row);
-        CGRect rowFrame = [table() rectForRowAtIndexPath:pathOf(row)];
-        // A visible-color marker on an actual row, scrolled under the status/navigation region.
-        UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(20, 0, 80, cell.contentView.bounds.size.height)];
+        savedOffset = table().contentOffset;
+        markerPath = pathOf(rowTitled(@"Header glass"));
+        HARNESS_CHECK(markerPath);
+        CGRect rowFrame = [table() rectForRowAtIndexPath:markerPath];
+        CGFloat belowPreview = CGRectGetMaxY(card().superview.frame) - table().bounds.origin.y + 40;
+        [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - belowPreview) animated:NO];
+        [page().view setNeedsLayout];
+        [page().view layoutIfNeeded];
+        [table() layoutIfNeeded];
+        // cellOf scrolls to the bottom; resolve the cell at the measurement offset instead.
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
+        HARNESS_CHECK(cell.window);
+        marker = [[UIView alloc] initWithFrame:CGRectMake(20, 0, 80, cell.contentView.bounds.size.height)];
         marker.backgroundColor = UIColor.magentaColor;
         [cell.contentView addSubview:marker];
-        CGFloat belowPreview = CGRectGetMaxY([card() convertRect:card().bounds toView:table()]) - table().bounds.origin.y + 40;
-        [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - belowPreview) animated:NO];
-        [table() layoutIfNeeded];
+    });
+    when(^BOOL {
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
+        if (!cell.window || marker.superview != cell.contentView) return NO;
+        for (CALayer *layer = marker.layer; layer; layer = layer.superlayer) {
+            if (layer.animationKeys.count || layer.presentationLayer.opacity < 0.999) return NO;
+            if (layer == table().layer) return YES;
+        }
+        return NO;
+    }, ^{
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
         CGPoint exposedPoint = [marker convertPoint:CGPointMake(40, marker.bounds.size.height / 2) toView:table()];
+        HARNESS_CHECK(CGRectContainsPoint(table().bounds, exposedPoint) && exposedPoint.y > CGRectGetMaxY(card().superview.frame));
         NSString *exposed = pixelAtPoint(table(), exposedPoint);
+        CGRect rowFrame = [table() rectForRowAtIndexPath:markerPath];
         [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - 50) animated:NO];
+        [page().view setNeedsLayout];
+        [page().view layoutIfNeeded];
         [table() layoutIfNeeded];
         CGPoint point = [marker convertPoint:CGPointMake(40, marker.bounds.size.height / 2) toView:table()];
         UIView *hit = [table() hitTest:point withEvent:nil];
         CGFloat screenY = point.y - table().bounds.origin.y;
         NSString *color = pixelAtPoint(table(), point);
-        [self expect:cell.window && screenY > 0 && screenY < 116 && [exposed isEqualToString:@"255,0,255,255"]
+        [self expect:cell.window && [table() cellForRowAtIndexPath:markerPath] == cell && screenY > 0 && screenY < 116 && [exposed isEqualToString:@"255,0,255,255"]
                      && [color isEqualToString:@"0,0,0,255"] && ![hit isDescendantOfView:cell]
                 step:@"scrolled rows above the preview bottom are neither visible nor hit-testable"
               detail:[NSString stringWithFormat:@"row y %.0f, exposed %@, covered %@, hit %@", screenY, exposed, color, NSStringFromClass(hit.class)]];
         [marker removeFromSuperview];
+        marker = nil;
         [table() setContentOffset:savedOffset animated:NO];
         [table() layoutIfNeeded];
     });
