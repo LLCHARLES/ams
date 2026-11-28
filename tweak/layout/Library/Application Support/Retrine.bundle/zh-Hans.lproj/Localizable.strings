@@ -1222,6 +1222,8 @@
 "settings.lockscreen.artwork.title" = "全屏封面";
 "settings.lockscreen.dim_artwork.subtitle" = "模糊并调暗整张封面（包括动态封面），让歌词浮于其上，而不是只在歌词周围加深阴影。";
 "settings.lockscreen.dim_artwork.title" = "调暗整个封面";
+"settings.lockscreen.keep_widget_cover.subtitle" = "在小组件和控制中心显示专辑封面。全屏下切换歌词行时，封面可能会短暂闪现。";
+"settings.lockscreen.keep_widget_cover.title" = "保留小组件原始封面";
 "settings.lockscreen.low_data.subtitle" = "动态封面，每首最多约 7 MB。适用于 Retrine 中所有动态封面。";
 "settings.lockscreen.low_data.title" = "在低数据模式下下载";
 "settings.lockscreen.lyrics_layout.choice.centered" = "居中";
@@ -1232,6 +1234,11 @@
 "settings.lockscreen.lyrics_layout.choice.vinyl" = "黑胶唱片";
 "settings.lockscreen.lyrics_layout.subtitle" = "歌词的显示位置。“海报”仅显示较大的当前歌词行。";
 "settings.lockscreen.lyrics_layout.title" = "布局";
+"settings.lockscreen.lyrics_size.choice.large" = "大";
+"settings.lockscreen.lyrics_size.choice.medium" = "中";
+"settings.lockscreen.lyrics_size.choice.small" = "小";
+"settings.lockscreen.lyrics_size.subtitle" = "锁屏上歌词和翻译的文字大小。";
+"settings.lockscreen.lyrics_size.title" = "文字大小";
 "settings.lockscreen.lyrics_style.choice.animated" = "动态";
 "settings.lockscreen.lyrics_style.choice.still" = "静态";
 "settings.lockscreen.lyrics_style.subtitle" = "每行仍只绘制一次；“动态”会轻柔地移动所选背景。在封面无法移动时生效。";
@@ -2572,7 +2579,7 @@
 "settings.player.behind.black" = "黑色";
 "settings.player.behind.photo" = "你的照片";
 "settings.player.behind.title" = "播放器后方";
-"settings.player.bg_desc.animated" = "歌曲的 Canvas 或专辑动态封面，否则为 Fluid。播放器的 ⋯ 菜单可在此项、Fluid 和可视化效果之间切换。";
+"settings.player.bg_desc.animated" = "有可用时播放歌曲的 Canvas 或专辑的动态封面。播放器的 ⋯ 菜单可在此项、Fluid 和可视化效果之间切换。";
 "settings.player.bg_desc.black" = "纯黑色，不显示封面。";
 "settings.player.bg_desc.colors" = "封面的色彩，缓缓流动。";
 "settings.player.bg_desc.fluid" = "封面本身，模糊并缓慢旋转。歌曲暂停时会静止。";
@@ -2669,7 +2676,7 @@
 "settings.player.music_icons.title" = "音乐 App 图标";
 "settings.player.new_slider.title" = "新进度滑块";
 "settings.player.no_clip.cover" = "封面";
-"settings.player.no_clip.footer" = "全屏封面会像剪辑一样用封面铺满屏幕。低电量模式和减弱动态效果会保留封面图像。";
+"settings.player.no_clip.footer" = "全屏封面会用专辑封面铺满屏幕。在低电量模式或减弱动态效果时，封面背景保持静止。";
 "settings.player.no_clip.full_screen" = "全屏封面";
 "settings.player.no_clip.title" = "无片段的歌曲";
 "settings.player.not_playing" = "未播放";
@@ -2691,6 +2698,7 @@
 "settings.player.queue.title" = "接下来播放";
 "settings.player.queue.up_next" = "接下来播放";
 "settings.player.queue_and_devices.title" = "队列与设备";
+"settings.player.queue_history.title" = "在队列中显示最近播放的歌曲";
 "settings.player.queue_bottom_sheet.title" = "以底部面板显示队列";
 "settings.player.queue_devices.title" = "队列与设备";
 "settings.player.queue_flip.title" = "队列翻转过渡";
