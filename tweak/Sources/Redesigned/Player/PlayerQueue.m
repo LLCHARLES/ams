@@ -396,11 +396,35 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 
 @class SGRQueueToggle;
 
+@interface SGRQueueAttachedTable : UITableView
+@property (nonatomic, copy) void (^visibilityChanged)(void);
+@end
+
+@implementation SGRQueueAttachedTable
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (self.visibilityChanged) self.visibilityChanged();
+}
+
+- (void)setHidden:(BOOL)hidden {
+    BOOL changed = self.hidden != hidden;
+    [super setHidden:hidden];
+    if (changed && self.visibilityChanged) self.visibilityChanged();
+}
+@end
+
+static BOOL queueViewIsVisible(UIView *view) {
+    if (!view.window || !SGRArtworkAppIsActive()) return NO;
+    for (; view; view = view.superview) {
+        if (view.hidden) return NO;
+    }
+    return YES;
+}
+
 // The Music app's queue table: gripping a song's reorder control starts a drag at once rather than waiting through
 // UIScrollView's 150 ms touch delay (where a quick drag on iPad or inside Spotify's outer player scroll view turned
 // into scrolling instead of moving the row), while drags starting on the toggles or Clear still scroll the list.
-@interface SGRQueueTableView : UITableView
-@property (nonatomic, copy) void (^onDetach)(void);
+@interface SGRQueueTableView : SGRQueueAttachedTable
 @end
 
 @implementation SGRQueueTableView {
@@ -462,10 +486,7 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 - (void)didMoveToWindow {
     [super didMoveToWindow];
     [self restoreOuterDelays];
-    if (!self.window) {
-        if (self.onDetach) self.onDetach();
-        return;
-    }
+    if (!self.window) return;
     if (!_outerDelays) _outerDelays = [NSHashTable weakObjectsHashTable];
     for (UIView *v = self.superview; v; v = v.superview) {
         if (![v isKindOfClass:UIScrollView.class]) continue;
@@ -483,6 +504,7 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 @property (nonatomic) BOOL embedded;
 // Drawn the Music app's way, for its page in the player (SGRPlayerQueuePage).
 @property (nonatomic, readonly) BOOL musicStyle;
+@property (nonatomic, copy) void (^visibilityChanged)(void);
 - (instancetype)initMusicStyle;
 // The Music app's page: the room over the toggles where the player's thumbnail and title stand (PlayerLyrics.x), the
 // toggles, and what is told how far the list has moved from where it rests (positive as it scrolls up), so the thumbnail
@@ -497,7 +519,15 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 // Back to rest at once, unless a finger is on the list.
 - (void)goToRest;
 - (void)placeAtUpcomingForcingLayout:(BOOL)forceLayout;
+- (void)updateQueueVisibility;
 @end
+
+static NSArray *reportKey(SPTPlayerState *state) {
+    id revision = queueValue(state, @"queueRevision");
+    if (!revision || ![SGPlayerInstance() respondsToSelector:@selector(fetchQueue:on:)]) return nil;
+    NSArray *queueKey = @[queueValue(state, @"playbackId") ?: NSNull.null, revision];
+    return @[queueKey, trackIdentity(state.track) ?: SGURIString(state.track.URI) ?: @""];
+}
 
 @implementation SGRPlayerQueueController {
     NSArray<SPTPlayerTrack *> *_tracks;
@@ -505,7 +535,8 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     NSArray<SPTPlayerTrack *> *_history;
     BOOL _showsHistory;
     SPTPlayerTrack *_current;
-    NSArray *_reportedKey;
+    NSArray *_reportedKey, *_completedKey;
+    BOOL _needsSync, _disappeared;
     BOOL _fetching;
     NSUInteger _fetchGeneration;
     UILabel *_empty;
@@ -587,15 +618,14 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 }
 
 - (void)loadView {
-    [super loadView];
-    if (_musicStyle) {
-        SGRQueueTableView *table = [[SGRQueueTableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped];
-        table.delegate = self;
-        table.dataSource = self;
-        __weak typeof(self) weakSelf = self;
-        table.onDetach = ^{ [weakSelf finishReordering]; };
-        self.tableView = table;
-    }
+    SGRQueueAttachedTable *table = _musicStyle
+        ? [[SGRQueueTableView alloc] initWithFrame:CGRectZero style:UITableViewStyleGrouped]
+        : [[SGRQueueAttachedTable alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
+    table.delegate = self;
+    table.dataSource = self;
+    __weak typeof(self) weakSelf = self;
+    table.visibilityChanged = ^{ [weakSelf tableVisibilityChanged]; };
+    self.tableView = table;
 }
 
 - (void)viewDidLoad {
@@ -640,16 +670,25 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     _covers = [NSCache new];
     _coming = [NSMutableDictionary dictionary];
     self.tableView.accessibilityIdentifier = @"retrine.queue";
-    [self takeState:SGPlayerState()];
+    SPTPlayerState *state = SGPlayerState();
+    _reportedKey = reportKey(state);
+    _needsSync = YES;
+    [self showPlayerState:state key:_reportedKey];
     SGAddPlayerStateObserver(self);
     // Both are posted on the main thread.
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
     [center addObserver:self selector:@selector(showBlend) name:SGAutoMixTransitionDidChangeNotification object:nil];
     [center addObserver:self selector:@selector(showBlend) name:SGAutoMixPlayerOptionsDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(suspendQueue) name:UIApplicationWillResignActiveNotification object:nil];
+    [center addObserver:self selector:@selector(syncVisibleQueue) name:UIApplicationDidBecomeActiveNotification object:nil];
 }
 
 // Only the upcoming section owns the transition from current to next, never History.
 - (void)showBlend {
+    if (![self queueIsVisible]) {
+        [self suspendQueue];
+        return;
+    }
     if (_reordering) return;
     NSString *text = blendInto(_tracks.firstObject);
     if (_musicStyle) {
@@ -691,13 +730,49 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
-// Coming on screen, first or again with its rows kept, in a window already (viewWillAppear: is too early for one): each
-// row shown asks for its cover, one set up off screen or cancelled when the list went away included (coverOf: asks
-// nothing for a cover in or on its way), and takes it as it lands.
+- (BOOL)queueIsVisible {
+    return !_disappeared && queueViewIsVisible(self.viewIfLoaded);
+}
+
+- (void)suspendQueue {
+    _needsSync = YES;
+    _fetchGeneration++;
+    _fetching = NO;
+    _snapshot = nil;
+    _completedKey = nil;
+    _returnGeneration++;
+    _returning = NO;
+    _heldShow = nil;
+    [self stopCoversExcept:nil];
+}
+
+- (void)syncVisibleQueue {
+    if (![self queueIsVisible]) return;
+    if (_reportedKey && !_fetching && ![_reportedKey isEqual:_completedKey]) _needsSync = YES;
+    if (_needsSync) [self takeState:SGPlayerState()];
+    for (NSIndexPath *path in self.tableView.indexPathsForVisibleRows) [self coverOf:[self trackAt:path]];
+}
+
+- (void)updateQueueVisibility {
+    if ([self queueIsVisible]) {
+        [self syncVisibleQueue];
+    } else {
+        [self suspendQueue];
+        [self finishReordering];
+    }
+}
+
+- (void)tableVisibilityChanged {
+    if (self.viewIfLoaded.window) _disappeared = NO;
+    [self updateQueueVisibility];
+    if (self.visibilityChanged) self.visibilityChanged();
+}
+
 - (void)viewIsAppearing:(BOOL)animated {
     [super viewIsAppearing:animated];
-    [self updateHistoryVisibility];
-    for (NSIndexPath *path in self.tableView.indexPathsForVisibleRows) [self coverOf:[self trackAt:path]];
+    _disappeared = NO;
+    [self syncVisibleQueue];
+    if ([self queueIsVisible]) [self updateHistoryVisibility];
 }
 
 - (void)viewWillDisappear:(BOOL)animated {
@@ -705,10 +780,10 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
     [self finishReordering];
 }
 
-// Closed, or the side column gone: no row waits for a cover, and viewIsAppearing: asks again for the rows shown.
 - (void)viewDidDisappear:(BOOL)animated {
     [super viewDidDisappear:animated];
-    [self stopCoversExcept:nil];
+    _disappeared = YES;
+    [self suspendQueue];
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection *)previous {
@@ -717,13 +792,6 @@ static NSArray<NSString *> *signatureOf(NSArray<SPTPlayerTrack *> *tracks) {
 }
 
 #pragma mark - the player
-
-static NSArray *reportKey(SPTPlayerState *state) {
-    id revision = queueValue(state, @"queueRevision");
-    if (!revision || ![SGPlayerInstance() respondsToSelector:@selector(fetchQueue:on:)]) return nil;
-    NSArray *queueKey = @[queueValue(state, @"playbackId") ?: NSNull.null, revision];
-    return @[queueKey, trackIdentity(state.track) ?: SGURIString(state.track.URI) ?: @""];
-}
 
 - (void)showPlayerState:(SPTPlayerState *)state key:(NSArray *)key {
     BOOL keepHistory = _musicStyle && key && [historyKey(_current) isEqualToString:historyKey(state.track)];
@@ -734,13 +802,25 @@ static NSArray *reportKey(SPTPlayerState *state) {
 }
 
 - (void)takeState:(SPTPlayerState *)state {
+    if (![self queueIsVisible]) {
+        [self suspendQueue];
+        return;
+    }
     NSArray *key = reportKey(state);
+    BOOL needsSync = _needsSync;
+    _needsSync = NO;
     if ([_reportedKey isEqual:key]) {
-        [self updateHistoryVisibility];
+        if (needsSync) {
+            [self showPlayerState:state key:key];
+            if (!_fetching && ![_completedKey isEqual:key]) [self refreshQueue];
+        } else {
+            [self updateHistoryVisibility];
+        }
         return;
     }
     _reportedKey = key;
     _snapshot = nil;
+    _completedKey = nil;
     [self showPlayerState:state key:key];
     if (key && !_fetching) [self refreshQueue];
 }
@@ -1402,6 +1482,10 @@ static const CGFloat kSnapDistance = 200;
 }
 
 - (void)refreshQueue {
+    if (![self queueIsVisible]) {
+        [self suspendQueue];
+        return;
+    }
     id<SGRQueuePlayer> player = SGPlayerInstance();
     if (![player respondsToSelector:@selector(fetchQueue:on:)]) {
         [self restorePlayerStateRetrying:NO];
@@ -1414,6 +1498,7 @@ static const CGFloat kSnapDistance = 200;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         typeof(self) self = weakSelf;
         if (!self || generation != self->_fetchGeneration) return;
+        if (![self queueIsVisible]) { [self suspendQueue]; return; }
         BOOL retry = self->_optimisticMove || (self->_reportedKey && ![self->_reportedKey isEqual:reported]);
         self->_fetchGeneration++;
         self->_fetching = NO;
@@ -1422,6 +1507,7 @@ static const CGFloat kSnapDistance = 200;
     [player fetchQueue:^(id<SGRQueueSnapshot> queue) {
         typeof(self) self = weakSelf;
         if (!self || generation != self->_fetchGeneration || !self->_fetching) return;
+        if (![self queueIsVisible]) { [self suspendQueue]; return; }
         self->_fetching = NO;
         if (self->_reportedKey != reported) {
             // A newer state is already on screen. Fetch for that report, not the one that just completed.
@@ -1440,6 +1526,7 @@ static const CGFloat kSnapDistance = 200;
         }
         // Spotify can answer the post-drop fetch before applying setQueue. Keep the optimistic
         // rows and leave the deadline armed until a new revision, even if this read looks editable.
+        self->_completedKey = reported;
         if ([self->_submittedKey isEqual:reported.firstObject]) return;
         self->_fetchGeneration++;
         if (self->_musicStyle) {
@@ -1484,7 +1571,7 @@ static UIImage *coverPlaceholder(void) {
     if (!uri) return nil;
     UIImage *cover = [_covers objectForKey:uri];
     if (cover) return cover;
-    if (_coming[uri] || !self.viewIfLoaded.window) return nil;
+    if (_coming[uri] || ![self queueIsVisible]) return nil;
     __weak typeof(self) weakSelf = self;
     NSProgress *coming = SGRPlayerTrackCover(track, YES, ^(UIImage *image) {
         typeof(self) self = weakSelf;
@@ -1492,7 +1579,7 @@ static UIImage *coverPlaceholder(void) {
         [self->_coming removeObjectForKey:uri];
         if (!image) return;
         [self->_covers setObject:image forKey:uri];
-        if (self.isViewLoaded) [self showCoverOf:uri];
+        if ([self queueIsVisible]) [self showCoverOf:uri];
     });
     // Nil when there was nothing to fetch, `done` having run already.
     if (coming) _coming[uri] = coming;
@@ -1749,6 +1836,12 @@ static const CGFloat kMusicHistoryGap = 25;
     // UIKit can have moved a row even though the snapshot changed and no command was sent.
     if (!_movedRow) _signature = nil;
     _movedRow = NO;
+    if (![self queueIsVisible]) {
+        _heldShow = nil;
+        _coversChangedDuringReorder = NO;
+        _needsSync = YES;
+        return;
+    }
     [self applyHeldTracks];
     [self takeState:SGPlayerState()];
     if (!_signature) [self showTracks:_tracks past:_history current:_current];
@@ -1806,13 +1899,15 @@ static const CGFloat kMusicHistoryGap = 25;
     _snapshot = nil;
     _signature = [self signature];
     NSArray *submitted = _reportedKey;
+    NSUInteger generation = _fetchGeneration;
     sendMove(snapshot, next);
     // A queue command can be rejected without changing the reported revision. Reconcile from a fresh
     // Spotify snapshot in that case too. Until it arrives the grips stay drawn but no lift has a write base.
     __weak typeof(self) weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         typeof(self) self = weakSelf;
-        if (self && self->_submittedKey == submitted.firstObject && self->_reportedKey == submitted && !self->_fetching) [self refreshQueue];
+        if (self && self->_fetchGeneration == generation && !self->_fetching &&
+            self->_submittedKey == submitted.firstObject && self->_reportedKey == submitted) [self refreshQueue];
     });
 }
 
@@ -2101,6 +2196,23 @@ static BOOL mixToggleActive(void) {
     return settings.automix || (settings.crossfade && settings.milliseconds > 0);
 }
 
+@interface SGRQueuePageView : UIView
+@property (nonatomic, copy) void (^visibilityChanged)(void);
+@end
+
+@implementation SGRQueuePageView
+- (void)didMoveToWindow {
+    [super didMoveToWindow];
+    if (self.visibilityChanged) self.visibilityChanged();
+}
+
+- (void)setHidden:(BOOL)hidden {
+    BOOL changed = self.hidden != hidden;
+    [super setHidden:hidden];
+    if (changed && self.visibilityChanged) self.visibilityChanged();
+}
+@end
+
 @implementation SGRPlayerQueuePageController {
     CGFloat _headHeight;
     void (^_scrolled)(CGFloat shift);
@@ -2109,6 +2221,20 @@ static BOOL mixToggleActive(void) {
     UIView *_holder;
     CAGradientLayer *_fade;
     SGRPlayerQueueController *_list;
+    BOOL _needsOptionsSync;
+}
+
+- (void)loadView {
+    SGRQueuePageView *view = [SGRQueuePageView new];
+    __weak typeof(self) weakSelf = self;
+    view.visibilityChanged = ^{ [weakSelf pageVisibilityChanged]; };
+    self.view = view;
+}
+
+- (void)pageVisibilityChanged {
+    [_list updateQueueVisibility];
+    if (queueViewIsVisible(self.viewIfLoaded)) [self syncOptionsIfNeeded];
+    else _needsOptionsSync = YES;
 }
 
 - (void)viewDidLoad {
@@ -2151,6 +2277,7 @@ static BOOL mixToggleActive(void) {
     _list = [[SGRPlayerQueueController alloc] initMusicStyle];
     // The toggles ride in the list, under the room the player's thumbnail and title stand in.
     _list.controls = _toggles;
+    _list.visibilityChanged = ^{ [weakSelf syncOptionsIfNeeded]; };
     _list.headHeight = _headHeight;
     _list.scrolled = _scrolled;
     [self addChildViewController:_list];
@@ -2159,7 +2286,22 @@ static BOOL mixToggleActive(void) {
     [self.view addSubview:_holder];
     [self showOptions:NO];
     SGAddPlayerStateObserver(self);
-    [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(transitionsChanged) name:SGTransitionSettingsDidChangeNotification object:nil];
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserver:self selector:@selector(transitionsChanged) name:SGTransitionSettingsDidChangeNotification object:nil];
+    [center addObserver:self selector:@selector(resumeOptions) name:UIApplicationDidBecomeActiveNotification object:nil];
+}
+
+- (void)resumeOptions {
+    [self showOptions:NO];
+}
+
+- (void)syncOptionsIfNeeded {
+    if (_needsOptionsSync) [self showOptions:NO];
+}
+
+- (void)viewIsAppearing:(BOOL)animated {
+    [super viewIsAppearing:animated];
+    [self syncOptionsIfNeeded];
 }
 
 - (void)transitionsChanged {
@@ -2209,6 +2351,7 @@ static BOOL mixToggleActive(void) {
 
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
+    [self syncOptionsIfNeeded];
     CGRect bounds = self.view.bounds;
     CGRect list = bounds;
     if (!CGRectEqualToRect(_holder.frame, list)) _holder.frame = list;
@@ -2235,7 +2378,11 @@ static BOOL restricted(SPTPlayerState *state, NSString *name) {
 // only for an account that has it. Dimmed with nothing to play, or where Spotify does not allow the change, the way the
 // Music app dims a toggle it cannot use.
 - (void)showOptions:(BOOL)animated {
-    if (!self.isViewLoaded) return;
+    if (!queueViewIsVisible(self.viewIfLoaded)) {
+        _needsOptionsSync = YES;
+        return;
+    }
+    _needsOptionsSync = NO;
     SPTPlayerState *state = SGPlayerState();
     SPTPlayerOptions *options = state.options;
     BOOL playable = state.track != nil, track = options.repeatingTrack, context = options.repeatingContext;

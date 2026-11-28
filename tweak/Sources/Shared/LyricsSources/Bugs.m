@@ -71,12 +71,25 @@ static void lyrics(SGLyricsRequestContext *context, NSString *song, BOOL timed, 
     });
 }
 
+// Main queue only. All tracks share the search host’s refusal window.
+static NSTimeInterval sg_searchRefusedUntil;
+
 SGLyricsAsk SGBugsAsk = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *)) {
     if (!NSThread.isMainThread) { dispatch_async(dispatch_get_main_queue(), ^{ SGBugsAsk(query, done); }); return; }
     if (!SGLyricsMatchKey(query.title).length || !SGLyricsMatchKey(query.artist).length) { done(nil); return; }
+    if (NSProcessInfo.processInfo.systemUptime < sg_searchRefusedUntil) {
+        [query.requestContext noteFailure:YES];
+        done(nil);
+        return;
+    }
+    sg_searchRefusedUntil = 0;
     NSURL *url = SGLyricsURL(@"https://m.bugs.co.kr/api/getSearchList", @{@"type": @"track", @"query": [NSString stringWithFormat:@"%@ %@", query.title, SGLyricsLeadArtist(query.artist)], @"page": @"1", @"size": @"30"});
     SGLyricsSourceRequestIn(query.requestContext, url, nil, nil, ^(NSData *data, NSInteger status) {
         id root = status == 200 && data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+        if (status == 403) {
+            sg_searchRefusedUntil = NSProcessInfo.processInfo.systemUptime + SGLyricsCredentialPauseSeconds;
+            [query.requestContext noteFailure:YES];
+        }
         id list = SGLyricsField(root, @"list");
         if (status == 200 && ![list isKindOfClass:NSArray.class]) [query.requestContext noteFailure:YES];
         if ([list isKindOfClass:NSArray.class] && ![list count])

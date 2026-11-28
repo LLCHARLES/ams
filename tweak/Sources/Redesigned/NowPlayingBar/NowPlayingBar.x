@@ -23,6 +23,7 @@
 // well, so the card is the painted view that holds the track and has no strip in it. The strip stays out
 // of the card's glass and gets a pane of its own above it, since its own paint goes clear with the rest.
 #import "Core/SGCore.h"
+#import "Redesigned/Kit/SGRField.h"
 #import "Redesigned/Kit/SGRRepaint.h"
 #import "Redesigned/Kit/SGRGlass.h"
 #import "Redesigned/Kit/SGRTokens.h"
@@ -744,6 +745,7 @@ static NSArray<SGRBarCapsuleButton *> *makeCapsuleButtons(void) {
 // Shuffle and repeat as the player reports them: lit in the accent while on, repeat's glyph with its 1 while it
 // repeats the track, and VoiceOver told which. Dimmed with nothing to play.
 static void showPlayerOptions(void) {
+    if (!SGRArtworkAppIsActive()) return;
     SGRBarCapsuleButton *shuffle = sg_shuffle, *repeat = sg_repeat;
     if (!shuffle.window && !repeat.window) return;
     SPTPlayerState *state = SGPlayerState();
@@ -767,6 +769,9 @@ static void showPlayerOptions(void) {
 @end
 
 @implementation SGRBarOptionsWatcher
+- (void)appDidBecomeActive {
+    showPlayerOptions();
+}
 - (void)playerStateDidChange:(SPTPlayerState *)state {
     showPlayerOptions();
 }
@@ -1424,6 +1429,8 @@ static SGRBarOptionsWatcher *sg_optionsWatcher;
     } else SGLog(@"TouchPassthroughView not found, its hooks are inactive");
     sg_optionsWatcher = [SGRBarOptionsWatcher new];
     SGAddPlayerStateObserver(sg_optionsWatcher);
+    [NSNotificationCenter.defaultCenter addObserver:sg_optionsWatcher selector:@selector(appDidBecomeActive)
+                                                name:UIApplicationDidBecomeActiveNotification object:nil];
     sg_showTitles = showTitlesEnabled();
     for (NSString *name in @[SGSimplifyTitlesDidChangeNotification, SGTranslatedTitleDidChangeNotification,
                              SGTitleTranslationSettingsDidChangeNotification]) {

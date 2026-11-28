@@ -442,7 +442,7 @@ static void receivedResponse(id delegate, NSURLSession *session, NSURLSessionDat
         forward(response, handler);
         return;
     }
-    SGLyricsFetch(state.track, ^(SGLyricsResult *chain) {
+    SGLyricsFetchForSpotify(state.track, ^(SGLyricsResult *chain) {
         answerHeld(delegate, session, task, state, chain, response, handler, forward);
     });
 }
@@ -472,7 +472,7 @@ static void finishSpotify(id delegate, NSURLSession *session, NSURLSessionDataTa
         forward(nil);
         return;
     }
-    SGLyricsFetch(state.track, ^(SGLyricsResult *chain) {
+    SGLyricsFetchForSpotify(state.track, ^(SGLyricsResult *chain) {
         if (!currentChoice(state)) { forward(staleChoiceError()); return; }
         NSData *page = decide(state.track, chain, body, NO, coloursIn(body));
         give(delegate, session, task, state, page ?: body);

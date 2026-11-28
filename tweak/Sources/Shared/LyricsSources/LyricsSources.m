@@ -29,6 +29,16 @@ static NSString *const kLegacyNetEase = @"spotifyglass.neteaseWordTiming";
 @implementation SGLyricsLink
 @end
 
+// Only an interrupted prefetch carries its completed provider replies into the next walk.
+@interface SGLyricsResult ()
+@property (nonatomic) BOOL resumed;
+@property (nonatomic, copy) NSDictionary<NSString *, id> *prefetchReplies;
+@end
+
+@interface SGLyricsQuery ()
+@property (nonatomic, copy) NSDictionary<NSString *, id> *prefetchReplies;
+@end
+
 @implementation SGLyricsResult
 @end
 
@@ -89,6 +99,11 @@ static SGLyricsRequestContext *invoke(SGLyricsRequestContext *context, SGLyricsP
 }
 
 SGLyricsRequestContext *SGLyricsInvoke(SGLyricsProvider *provider, SGLyricsQuery *query, BOOL (^current)(void), void (^done)(SGLyricsResult *, BOOL)) {
+    id cached = provider.key ? query.prefetchReplies[provider.key] : nil;
+    if (cached) {
+        done(cached == NSNull.null ? nil : cached, NO);
+        return SGLyricsRequestContext.new;
+    }
     return invoke(SGLyricsRequestContext.new, provider, query, current, done);
 }
 
@@ -958,14 +973,16 @@ static void publishAnswer(SGLyricsWalk *walk, BOOL settled) {
     NSArray *keeperLines = SGKaraokeLinesForTrack(track);
     NSArray *shown = keeperLines ?: displayed.karaokeLines;
     BOOL playing = [track isEqualToString:sg_playing ?: SGKaraokePlayingTrack()];
-    BOOL upgrade = answer.karaokeLines.count && (!shown.count
-        || SGKaraokeLinesTiming(answer.karaokeLines) < SGKaraokeLinesTiming(shown));
+    SGKaraokeTiming answerTiming = SGKaraokeLinesTiming(answer.karaokeLines);
+    SGKaraokeTiming shownTiming = SGKaraokeLinesTiming(shown);
+    BOOL upgrade = answer.karaokeLines.count && (!shown.count || answerTiming < shownTiming);
     BOOL same = SGLyricsSameSheet(displayed, answer) && (!keeperLines.count
-        || (SGKaraokeLinesTiming(shown) == SGKaraokeLinesTiming(answer.karaokeLines)
-            && [SGLyricsCreditFor(track) isEqual:answer.provider]));
+        || (shownTiming == answerTiming && [SGLyricsCreditFor(track) isEqual:answer.provider]));
     // Hedged answers are provisional: priority can still change during the initial walk.
     // Recovery after a finished walk retains the existing next-playback replacement rule.
-    BOOL selecting = !walk.concurrent && !walk.finished;
+    // While replaying cached providers, retain the displayed timing until selection catches up.
+    BOOL selecting = !walk.concurrent && !walk.finished &&
+        (!walk.query.prefetchReplies || (answer.karaokeLines.count && answerTiming <= shownTiming));
     BOOL defer = playing && shown.count && !upgrade && !same && !selecting;
     if (settled) {
         walk.settled = YES;
@@ -1231,10 +1248,6 @@ static void recoverLater(SGLyricsWalk *walk) {
 
 static void step(SGLyricsWalk *walk) {
     if (!currentWalk(walk)) return;
-    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive && !SGLyricsBackgroundNeeded()) {
-        walk.deferred = YES;
-        return;
-    }
     SGLyricsQuery *query = walk.query;
     SGLyricsResult *merged = walk.merged;
     // A source that learned the name lets earlier sources search before type first settles a tie.
@@ -1257,8 +1270,8 @@ static void step(SGLyricsWalk *walk) {
         if (!walk.inFlight.count) finish(walk);
         return;
     }
-    if (walk.answered && merged.synced && merged.karaokeLines.count &&
-        UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
+    if (UIApplication.sharedApplication.applicationState != UIApplicationStateActive &&
+        (!SGLyricsBackgroundNeeded() || (walk.answered && merged.synced && merged.karaokeLines.count))) {
         walk.deferred = YES;
         return;
     }
@@ -1411,6 +1424,9 @@ static void startWalk(NSString *trackID, SGLyricsQuery *query) {
     walk.sequence = [NSMutableArray array];
     walk.generation = SGLyricsPinGeneration(trackID);
     walk.lease = [SGLyricsLease new];
+    SGLyricsResult *kept = [sg_kept[trackID] isKindOfClass:SGLyricsResult.class] ? sg_kept[trackID] : nil;
+    query.prefetchReplies = kept.prefetchReplies;
+    walk.answered = kept.provisional && !walk.waiting.count;
     walk.advance = [sg_advance containsObject:trackID];
     SGLyricsRetire(trackID);
     sg_walks[trackID] = walk;
@@ -1474,7 +1490,12 @@ static void whenNamed(NSString *trackID, NSTimeInterval waited, NSMutableArray *
     });
 }
 
-static void fetchLyrics(NSString *trackID, BOOL advance, void (^done)(SGLyricsResult *result)) {
+typedef NS_ENUM(NSUInteger, SGLyricsFetchPurpose) {
+    SGLyricsConsumer, SGLyricsAdvance, SGLyricsSpotifyPage
+};
+
+static void fetchLyrics(NSString *trackID, SGLyricsFetchPurpose purpose, void (^done)(SGLyricsResult *result)) {
+    BOOL advance = purpose == SGLyricsAdvance;
     setUp();
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!trackID.length) {
@@ -1494,11 +1515,22 @@ static void fetchLyrics(NSString *trackID, BOOL advance, void (^done)(SGLyricsRe
         id kept = sg_kept[trackID];
         if (kept || (walk.budgetReached && walk.answered && currentWalk(walk))) {
             done(kept == NSNull.null ? nil : kept);
+            // Delivery can synchronously pin or reload this track. Only its current sheet may resume.
+            if (!advance && [kept isKindOfClass:SGLyricsResult.class] && [kept provisional] && ![kept resumed] &&
+                kept == sg_kept[trackID] && !sg_walks[trackID] && !sg_waiting[trackID]) {
+                [kept setResumed:YES];
+                sg_waiting[trackID] = [NSMutableArray array];
+                whenNamed(trackID, 0, sg_waiting[trackID]);
+            }
             return;
         }
         NSMutableArray *waiting = sg_waiting[trackID];
         if (waiting) {
             [waiting addObject:[done copy]];
+            return;
+        }
+        if (purpose != SGLyricsConsumer && !walk && SGKaraokeSourceRetryPaused(trackID)) {
+            done(nil);
             return;
         }
         sg_waiting[trackID] = [NSMutableArray arrayWithObject:[done copy]];
@@ -1508,7 +1540,11 @@ static void fetchLyrics(NSString *trackID, BOOL advance, void (^done)(SGLyricsRe
 }
 
 void SGLyricsFetch(NSString *trackID, void (^done)(SGLyricsResult *result)) {
-    fetchLyrics(trackID, NO, done);
+    fetchLyrics(trackID, SGLyricsConsumer, done);
+}
+
+void SGLyricsFetchForSpotify(NSString *trackID, void (^done)(SGLyricsResult *result)) {
+    fetchLyrics(trackID, SGLyricsSpotifyPage, done);
 }
 
 BOOL SGLyricsPlaybackRequestsActive(void) {
@@ -1572,8 +1608,22 @@ void SGLyricsResumeDeferred(void) {
 void SGLyricsCancelPrefetch(NSString *trackID) {
     if (!trackID.length) return;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (![sg_advance containsObject:trackID] && !sg_walks[trackID].advance) return;
-        [sg_advance removeObject:trackID];
+        SGLyricsWalk *walk = sg_walks[trackID];
+        if (![sg_advance containsObject:trackID] && !walk.advance) return;
+        if (walk && ownsWalk(walk) && !walk.settled && walk.merged.synced &&
+            walk.merged.texts.count && walk.merged.karaokeLines.count) {
+            SGLyricsResult *answer = playbackAnswer(walk, walk.merged);
+            answer.provisional = YES;
+            NSMutableDictionary *replies = [NSMutableDictionary dictionary];
+            for (NSString *key in walk.sequence) {
+                if ([walk.started containsObject:key] && ![walk.inFlight containsObject:key] &&
+                    ![walk.failures containsObject:key]) replies[key] = walk.answers[key] ?: NSNull.null;
+            }
+            answer.prefetchReplies = replies;
+            trimKept(trackID);
+            sg_kept[trackID] = answer;
+            @synchronized (sg_missing) { [sg_missing removeObject:trackID]; }
+        }
         SGLyricsRetire(trackID);
         [sg_waiting removeObjectForKey:trackID];
     });
@@ -1586,7 +1636,7 @@ BOOL SGLyricsMayHave(NSString *trackID) {
 
 void SGLyricsPrefetch(NSString *trackID) {
     if (!trackID.length) return;
-    fetchLyrics(trackID, YES, ^(SGLyricsResult *result) {});
+    fetchLyrics(trackID, SGLyricsAdvance, ^(SGLyricsResult *result) {});
 }
 
 NSInteger SGLyricsSpotifyHas(NSString *trackID) {

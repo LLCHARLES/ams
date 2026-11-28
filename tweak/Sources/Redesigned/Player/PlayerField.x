@@ -322,6 +322,7 @@ static UIImage *settledCover(UIScrollView *list) {
 }
 
 static void publishCover(void) {
+    if (!SGRArtworkAppIsActive()) return;
     UIImage *cover = settledCover(sg_coverList);
     if (!cover) return;
     NSString *uri = SGURIString(SGPlayerState().track.URI);
@@ -381,6 +382,7 @@ static char kTrackMetadataKey;
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
     SGRPlayerHoldField();
+    if (!SGRArtworkAppIsActive()) return;
     NSString *track = SGURIString(state.track.URI);
     if (!track || [track isEqualToString:_track]) return;
     _track = track;
@@ -424,6 +426,7 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
         dispatch_async(dispatch_get_main_queue(), ^{
             visibilityChanged();
             resumeCoverAccent();
+            if (SGRPlayerIsVisible()) publishCover();
         });
     }];
     sg_coverWatcher = [SGRPlayerCoverWatcher new];

@@ -165,6 +165,25 @@ static void checkCapsule(void) {
         for (UIButton *button in @[sg_shuffle, sg_repeat]) {
             HARNESS_CHECK([button.tintColor getRed:&r green:&g blue:&b alpha:&a] && g > r && g > b);
         }
+        // A repeat-only report must wait while inactive, then update on activation and on the next active report.
+        UIApplication *app = UIApplication.sharedApplication;
+        Method method = class_getInstanceMethod(app.class, @selector(applicationState));
+        __block UIApplicationState appState = UIApplicationStateInactive;
+        IMP replacement = imp_implementationWithBlock(^UIApplicationState(id owner) { return appState; });
+        IMP original = method_setImplementation(method, replacement);
+        sg_state.options.repeatingContext = NO;
+        sg_state.options.repeatingTrack = YES;
+        [sg_optionsWatcher playerStateDidReport:sg_state];
+        HARNESS_CHECK([sg_repeat.accessibilityValue isEqual:@"All"]);
+        appState = UIApplicationStateActive;
+        [sg_optionsWatcher appDidBecomeActive];
+        HARNESS_CHECK([sg_repeat.accessibilityValue isEqual:@"One"]);
+        method_setImplementation(method, original);
+        imp_removeBlock(replacement);
+        sg_state.options.repeatingTrack = NO;
+        sg_state.options.repeatingContext = YES;
+        [sg_optionsWatcher playerStateDidReport:sg_state];
+        HARNESS_CHECK([sg_repeat.accessibilityValue isEqual:@"All"]);
         if (!getenv("HARNESS_OPTIONS_ACTIVE")) {
             [sg_shuffle sendActionsForControlEvents:UIControlEventTouchUpInside];
             [sg_repeat sendActionsForControlEvents:UIControlEventTouchUpInside];

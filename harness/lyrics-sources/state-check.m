@@ -2616,6 +2616,26 @@ static void checkPickRaces(NSUInteger only) {
     SGLyricsSetOrder(@[@"musixmatch"]);
 }
 
+static void checkDonorDuringBackoff(NSString *track) {
+    SGLyricsNoteSpotifyHas(track, NO);
+    NSURL *url = [NSURL URLWithString:[@"https://spclient.wg.spotify.com/color-lyrics/v2/track/" stringByAppendingString:track]];
+    HarnessTask *task = [HarnessTask new];
+    task.originalRequest = task.currentRequest = donorRequestFor([NSURLRequest requestWithURL:url]);
+    CHECK([donorFor(task.originalRequest) isEqual:track]);
+    NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc] initWithURL:task.currentRequest.URL
+        statusCode:200 HTTPVersion:@"HTTP/2" headerFields:nil];
+    __block NSUInteger forwarded = 0;
+    receivedResponse(nil, nil, (id)task, response, ^(NSURLSessionResponseDisposition choice) {
+        CHECK(choice == NSURLSessionResponseAllow);
+    }, ^(NSURLResponse *given, SGDisposition handler) {
+        CHECK([(NSHTTPURLResponse *)given statusCode] == 404);
+        forwarded++;
+        handler(NSURLSessionResponseAllow);
+    });
+    drainReplies();
+    CHECK(forwarded == 1 && !sg_walks[track] && !sg_providerReply && !SGLyricsKeptAnswer(track));
+}
+
 static void checkBackgroundSkip(void) {
     sg_backgroundConsumer = YES;
     id oldPlayer = sg_player;
@@ -2733,7 +2753,7 @@ static void checkBackgroundSkip(void) {
     CHECK(sg_open && !SGRPlayerLyricsNone() && !sg_losses[key]);
     // Exhaust the new path while playing and paused, with and without Spotify headers.
     // A same-track state update or a reader's tick is not a recovery signal.
-    for (NSString *signal in @[@"activation", @"replay", @"explicit"]) {
+    for (NSString *signal in @[@"activation", @"replay", @"explicit", @"retry"]) {
         [sg_heldClocks removeAllObjects];
         sg_spclientHeaders = [signal isEqual:@"explicit"] ? nil : @{};
         state.isPaused = ![signal isEqual:@"activation"];
@@ -2754,6 +2774,8 @@ static void checkBackgroundSkip(void) {
             answer(nil);
             pumpUntil(^BOOL { return !SGKaraokeLooking(key); });
             CHECK(!SGKaraokeLinesForTrack(key) && !SGLyricsKeptAnswer(key));
+            pumpUntil(^BOOL { return sg_sourceRetries[key].unsignedIntegerValue == attempt + 1; });
+            checkDonorDuringBackoff(key);
             if (attempt < 4) {
                 CHECK(sg_heldClocks.count == 1);
                 lastRetry = sg_heldClocks.firstObject; [sg_heldClocks removeAllObjects];
@@ -2779,7 +2801,8 @@ static void checkBackgroundSkip(void) {
         } else if ([signal isEqual:@"replay"]) {
             state.track = nil; [sourceWatcher playerStateDidChange:(id)state];
             state.track = track; [sourceWatcher playerStateDidChange:(id)state];
-        } else SGKaraokeAskAgain(key);
+        } else if ([signal isEqual:@"retry"]) SGLyricsRetry(key);
+        else SGKaraokeAskAgain(key);
         pumpUntil(^BOOL { return sg_providerReply != nil && SGKaraokeLooking(key); });
         CHECK(!sg_sourceRetries[key]);
         sg_providerReply(SGLrcLibRecordResult(@{@"syncedLyrics": @"[00:01]Recovery signal worked"}));
@@ -3409,6 +3432,118 @@ static void checkBackgroundTimedDelivery(void) {
     puts("background delivery: plain replies do not prevent later timed providers in either scheduler");
 }
 
+static void checkInactiveInOrderDelivery(void) {
+    RecoveryFixture *fixture = [RecoveryFixture new];
+    SGLyricsSetOrder(@[@"musixmatch", @"unison"]);
+    SGSetInt(SGKeyLyricsAskMode, 0);
+    SGSetEnabled(SGKeyLyricsPreferWordTiming, NO);
+    sg_virtualSeconds = 0;
+    sg_virtualTimers = [NSMutableDictionary dictionary];
+    NSString *track = fixtureTrackID();
+    HarnessLyricsTrack *metadata = [HarnessLyricsTrack new];
+    metadata.trackTitle = @"In order"; metadata.artistName = @"Singer";
+    metadata.URI = [@"spotify:track:" stringByAppendingString:track];
+    SGKaraokeRememberTrack((id)metadata, track);
+    __block NSUInteger deliveries = 0;
+    SGLyricsFetch(track, ^(SGLyricsResult *result) {
+        CHECK(result.synced && [result.provider isEqual:@"First line"]);
+        deliveries++;
+    });
+    pumpUntil(^BOOL { return fixture.held.count == 1; });
+    sg_testApplication.applicationState = UIApplicationStateInactive;
+    CHECK(!SGLyricsBackgroundNeeded());
+    [fixture reply:@"musixmatch" track:track result:madeUpLyrics(@"First line", SGKaraokeTimingLine) failed:NO];
+    CHECK(deliveries == 1 && !fixture.held.count && sg_virtualSeconds == 0);
+    advanceTimers(SGLyricsWalkBudgetSeconds);
+    CHECK(deliveries == 1 && !fixture.held.count);
+    sg_testApplication.applicationState = UIApplicationStateActive;
+    SGKaraokeForgetLyrics(track);
+    sg_virtualTimers = nil;
+    [fixture restore];
+}
+
+static void checkCancelledTimedPrefetch(BOOL inactiveConsumer, BOOL higherPriority) {
+    RecoveryFixture *fixture = [RecoveryFixture new];
+    SGSetInt(SGKeyLyricsAskMode, 1);
+    SGLyricsSetOrder(higherPriority ? @[@"unison", @"musixmatch", @"netease"] : @[@"musixmatch", @"unison"]);
+    SGLyricsProvider *unison = SGLyricsProviderFor(@"unison");
+    SGLyricsAsk holdUnison = unison.ask;
+    __block NSUInteger unisonRequests = 0;
+    unison.ask = ^(SGLyricsQuery *query, void (^done)(SGLyricsResult *)) {
+        unisonRequests++;
+        holdUnison(query, done);
+    };
+    NSString *track = fixtureTrackID();
+    HarnessLyricsTrack *metadata = [HarnessLyricsTrack new];
+    metadata.trackTitle = @"Prefetched"; metadata.artistName = @"Singer";
+    metadata.URI = [@"spotify:track:" stringByAppendingString:track];
+    SGKaraokeRememberTrack((id)metadata, track);
+    id previousPlayer = sg_player;
+    HarnessPlayer *player = [HarnessPlayer new];
+    HarnessLyricsState *state = [HarnessLyricsState new];
+    state.track = metadata; player.state = state; sg_player = player;
+    SGLyricsPlaybackChanged(track);
+    NSString *first = [track stringByAppendingString:@"musixmatch"], *next = [track stringByAppendingString:@"unison"];
+    sg_virtualSeconds = 0;
+    sg_virtualTimers = [NSMutableDictionary dictionary];
+    SGLyricsPrefetch(track);
+    pumpUntil(^BOOL { return fixture.held[higherPriority ? next : first] != nil; });
+    advanceTimers(SGLyricsHedgeDelaySeconds);
+    CHECK(fixture.held[next] && fixture.held[first]);
+    sg_testApplication.applicationState = UIApplicationStateInactive;
+    [fixture reply:@"musixmatch" track:track result:madeUpLyrics(@"First line", SGKaraokeTimingLine) failed:NO];
+    CHECK(sg_walks[track].deferred && [SGLyricsKeptAnswer(track) provisional]);
+    SGLyricsCancelPrefetch(track);
+    drainReplies();
+    SGLyricsResult *partial = SGLyricsKeptAnswer(track);
+    CHECK(!sg_walks[track] && partial.provisional && [partial.provider isEqual:@"First line"]);
+    CHECK(!SGLyricsMayPersist(track, partial) && !recoveryDisk(track));
+    void (^late)(SGLyricsResult *, BOOL) = fixture.held[next];
+    [fixture.held removeObjectForKey:next];
+    if (!inactiveConsumer) sg_testApplication.applicationState = UIApplicationStateActive;
+    SGLyricsPrefetch(track);
+    drainReplies();
+    CHECK(!sg_walks[track] && !fixture.held.count);
+    __block NSUInteger deliveries = 0;
+    for (NSUInteger i = 0; i < 2; i++) SGLyricsFetch(track, ^(SGLyricsResult *answer) {
+        CHECK(answer.provisional && [answer.provider isEqual:@"First line"]);
+        CHECK(SGKaraokeKeepSourceLines(track, answer.karaokeLines, answer));
+        deliveries++;
+    });
+    drainReplies();
+    if (inactiveConsumer) {
+        CHECK(deliveries == 2 && unisonRequests == 1 && !fixture.held.count);
+        CHECK([SGKaraokeLineText(SGKaraokeLinesForTrack(track).firstObject) isEqual:@"First line"]);
+        SGKaraokeTrackWatcher *watcher = [SGKaraokeTrackWatcher new];
+        sg_testApplication.applicationState = UIApplicationStateActive;
+        CHECK([SGKaraokePlayingTrack() isEqual:track]);
+        [watcher becameActive:nil];
+        drainReplies();
+    }
+    // Replay the lower-priority cached answer while the higher-priority request is outstanding.
+    if (higherPriority) advanceTimers(sg_virtualSeconds + SGLyricsHedgeDelaySeconds);
+    CHECK(deliveries == 2 && unisonRequests == 2 && fixture.held.count == (higherPriority ? 2 : 1) && fixture.held[next]);
+    late(madeUpLyrics(@"Stale words", SGKaraokeTimingWords), NO);
+    drainReplies();
+    CHECK([[(SGLyricsResult *)SGLyricsKeptAnswer(track) provider] isEqual:@"First line"]);
+    NSString *winner = higherPriority ? @"Preferred line" : @"Fresh words";
+    [fixture reply:@"unison" track:track result:madeUpLyrics(winner, higherPriority ? SGKaraokeTimingLine : SGKaraokeTimingWords) failed:NO];
+    if (higherPriority) {
+        // The last provider is still outstanding when the currently playing sheet changes.
+        CHECK([SGLyricsKeptAnswer(track) provisional]);
+        CHECK([SGKaraokeLineText(SGKaraokeLinesForTrack(track).firstObject) isEqual:winner]);
+        [fixture reply:@"netease" track:track result:nil failed:NO];
+    }
+    SGLyricsResult *settled = SGLyricsKeptAnswer(track);
+    CHECK(!settled.provisional && [settled.provider isEqual:winner] && deliveries == 2);
+    CHECK([SGKaraokeLineText(SGKaraokeLinesForTrack(track).firstObject) isEqual:winner]);
+    CHECK(!sg_walks[track].pending && unisonRequests == 2);
+    sg_player = previousPlayer;
+    SGKaraokeForgetLyrics(track);
+    sg_virtualTimers = nil;
+    [fixture restore];
+}
+
 static void checkUpNext(void) {
     NSString *previousID = sg_lastSeenID;
     SPTPlayerTrack *previousTrack = sg_lastSeen;
@@ -3551,6 +3686,10 @@ int main(void) {
         if (getenv("RETRINE_STORE_ONLY")) { checkStoredTranslationLanguage(); return 0; }
         checkAsyncLRCLIBPick();
         checkBackgroundTimedDelivery();
+        checkInactiveInOrderDelivery();
+        checkCancelledTimedPrefetch(NO, NO);
+        checkCancelledTimedPrefetch(YES, NO);
+        checkCancelledTimedPrefetch(NO, YES);
         checkUpNext();
         if (aheadOnly) { puts("lyrics up-next: replacement, coalescing, stale result and foreground gate passed"); return 0; }
         checkTranslationDelivery();

@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 #import "Core/SGCore.h"
 #import "Shared/Player/PlayerState.h"
 #import "Shared/Player/SleepTimer.h"
@@ -54,6 +55,8 @@
 @property NSArray<SPTPlayerTrack *> *sentNextTracks;
 @property BOOL sentOverrideRestrictions;
 @property NSUInteger moves;
+@property NSUInteger fetches;
+@property (copy) NSString *fetchedRevision;
 @property BOOL delayFetch;
 @property (copy) void (^reply)(id);
 @end
@@ -63,6 +66,8 @@
     return [super respondsToSelector:selector];
 }
 - (void)fetchQueue:(void (^)(id))callback on:(dispatch_queue_t)queue {
+    self.fetches++;
+    self.fetchedRevision = ((QueueState *)SGPlayerState()).queueRevision;
     if (self.delayFetch) self.reply = callback;
     else callback(self.currentQueue);
 }
@@ -524,6 +529,120 @@ static void checkQueueDrag(SGRPlayerQueueController *list, UIViewController *pag
     [host removeGestureRecognizer:disabled];
 }
 
+static const NSNotificationName kQueueTestResign = @"queue.check.resign";
+static const NSNotificationName kQueueTestActivate = @"queue.check.activate";
+
+static void loadQueuePageWithTestLifecycle(UIViewController *page) {
+    // Catalyst's scene machinery also consumes UIKit's real lifecycle notifications. Reposting activation
+    // while it is already active raises an exception. Redirect only the list's registrations to test names.
+    SEL selector = @selector(addObserver:selector:name:object:);
+    Method method = class_getInstanceMethod(NSNotificationCenter.class, selector);
+    IMP original = method_getImplementation(method);
+    Class listClass = NSClassFromString(@"SGRPlayerQueueController");
+    IMP replacement = imp_implementationWithBlock(^(NSNotificationCenter *center, id observer, SEL action, NSString *name, id object) {
+        if ([observer isKindOfClass:listClass]) {
+            if ([name isEqual:UIApplicationWillResignActiveNotification]) name = kQueueTestResign;
+            if ([name isEqual:UIApplicationDidBecomeActiveNotification]) name = kQueueTestActivate;
+        }
+        ((void (*)(id, SEL, id, SEL, NSString *, id))original)(center, selector, observer, action, name, object);
+    });
+    method_setImplementation(method, replacement);
+    [page loadViewIfNeeded];
+    method_setImplementation(method, original);
+    imp_removeBlock(replacement);
+}
+
+static void checkQueueVisibility(SGRPlayerQueueController *list, UIViewController *page, UIScrollView *outer) {
+    screen.view.hidden = YES;
+    NSArray *submitted = [list valueForKey:@"submittedKey"];
+    check(submitted != nil, @"the visibility fixture has a submitted queue move");
+    NSUInteger fetches = player.fetches;
+    UITableView *table = list.tableView;
+    table.hidden = YES;
+    report(@"hidden-1");
+    report(@"hidden-2");
+    check(player.fetches == fetches && [[list valueForKey:@"submittedKey"] isEqual:submitted] &&
+          [list valueForKey:@"snapshot"] == nil,
+          @"hidden reports defer RPC and keep the submitted revision");
+    report(submitted.lastObject);
+    table.hidden = NO;
+    check(player.fetches == ++fetches && [player.fetchedRevision isEqual:submitted.lastObject] &&
+          [[list valueForKey:@"submittedKey"] isEqual:submitted] && [list valueForKey:@"snapshot"] == nil,
+          @"unhiding fetches the current revision once without allowing a duplicate move");
+
+    UIApplication *app = UIApplication.sharedApplication;
+    Method method = class_getInstanceMethod(app.class, @selector(applicationState));
+    __block UIApplicationState appState = UIApplicationStateInactive;
+    IMP replacement = imp_implementationWithBlock(^UIApplicationState(id owner) { return appState; });
+    IMP original = method_setImplementation(method, replacement);
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center postNotificationName:kQueueTestResign object:nil];
+    report(@"inactive-1");
+    report(@"inactive-2");
+    check(player.fetches == fetches && [[list valueForKey:@"submittedKey"] isEqual:submitted],
+          @"inactive reports defer RPC and keep the submitted revision");
+    appState = UIApplicationStateActive;
+    [center postNotificationName:kQueueTestActivate object:nil];
+    check(player.fetches == ++fetches && [player.fetchedRevision isEqual:@"inactive-2"] &&
+          [list valueForKey:@"snapshot"] != nil, @"activation fetches only the latest inactive revision");
+    player.delayFetch = YES;
+    report(@"in-flight");
+    void (^firstReply)(id) = player.reply;
+    player.reply = nil;
+    check(firstReply && player.fetches == ++fetches, @"first same-revision RPC is in flight");
+    appState = UIApplicationStateInactive;
+    [center postNotificationName:kQueueTestResign object:nil];
+    check(![[list valueForKey:@"fetching"] boolValue] && [list valueForKey:@"snapshot"] == nil,
+          @"the registered resign observer invalidates the in-flight request");
+    appState = UIApplicationStateActive;
+    [center postNotificationName:kQueueTestActivate object:nil];
+    void (^freshReply)(id) = player.reply;
+    player.reply = nil;
+    check(freshReply && player.fetches == ++fetches && [player.fetchedRevision isEqual:@"in-flight"],
+          @"the registered activation observer refetches the same revision once");
+    QueueSnapshot *stale = [player.currentQueue copy];
+    stale.nextTracks = @[];
+    firstReply(stale);
+    check([[list valueForKey:@"fetching"] boolValue] && [list valueForKey:@"snapshot"] == nil,
+          @"the old callback cannot consume the new request");
+    freshReply(player.currentQueue);
+    firstReply(stale);
+    check([list valueForKey:@"snapshot"] == player.currentQueue && player.fetches == fetches,
+          @"the late old callback leaves the fresh editable snapshot intact");
+    player.delayFetch = NO;
+    method_setImplementation(method, original);
+    imp_removeBlock(replacement);
+
+    UIControl *mix = [page valueForKey:@"mix"];
+    check([[mix valueForKey:@"on"] boolValue], @"parent visibility fixture starts with AutoMix on");
+    page.view.hidden = YES;
+    check([list valueForKey:@"snapshot"] == nil, @"hiding the page immediately clears the list snapshot");
+    QueueTrack *latest = song(@"page-latest", @"Latest while page hidden");
+    NSArray *originalTracks = player.currentQueue.nextTracks;
+    player.currentQueue.nextTracks = @[latest];
+    stubTransitionSettings = (SGTransitionSettings){NO, NO, 0};
+    report(@"page-hidden-1");
+    report(@"page-hidden-2");
+    check(player.fetches == fetches && [[mix valueForKey:@"on"] boolValue],
+          @"reports while only the parent is hidden defer RPC and options");
+    page.view.hidden = NO;
+    NSInteger section = list.tableView.numberOfSections - 1;
+    check(player.fetches == ++fetches && [player.fetchedRevision isEqual:@"page-hidden-2"] &&
+          [list valueForKey:@"snapshot"] == player.currentQueue && [list trackAt:row(section, 0)] == latest &&
+          ![[mix valueForKey:@"on"] boolValue],
+          @"unhiding the parent restores latest rows, editable snapshot and options without another report");
+    player.currentQueue.nextTracks = originalTracks;
+
+    [page.view removeFromSuperview];
+    report(@"detached-1");
+    report(@"detached-2");
+    check(player.fetches == fetches, @"detached reports do not fetch");
+    [outer addSubview:page.view];
+    check(player.fetches == ++fetches && [player.fetchedRevision isEqual:@"detached-2"],
+          @"reattachment fetches only the latest detached revision");
+    screen.view.hidden = NO;
+}
+
 static void run(void) {
     fetchedCover = [[[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(8, 8)] imageWithActions:^(UIGraphicsImageRendererContext *context) {}];
     player = [QueuePlayer new];
@@ -537,6 +656,7 @@ static void run(void) {
     screen = [NSClassFromString(@"SGRPlayerQueueController") new];
     window.rootViewController = [[UINavigationController alloc] initWithRootViewController:screen];
     [screen loadViewIfNeeded];
+    until(@"attached queue receives its first snapshot", ^BOOL { return titles(2).count == 2; });
     check([titles(0) isEqual:@[@"Earlier", @"Recent"]] && [titles(1) isEqual:@[@"Current"]] &&
           [titles(2) isEqual:@[@"First occurrence", @"Second occurrence"]], @"Spotify History appears chronologically above current and Up Next");
     UITableView *table = screen.tableView;
@@ -660,10 +780,11 @@ static void run(void) {
         [table.delegate tableView:table willDisplayCell:prepared forRowAtIndexPath:path];
     until(@"prepared row shows fetched cover", ^BOOL { return shown(path) == fetchedCover; });
     check(shown(path) == fetchedCover, @"redisplay of the prepared row retries and shows its failed cover");
-    // The closed Music page still receives Spotify's queue snapshots (the DJ may have no next track).
+    // The closed Music page lays out the local empty state without fetching a snapshot.
     MusicQueueCheck *music = [[MusicQueueCheck alloc] initMusicStyle];
     player.withoutQueueAPI = NO;
     player.currentQueue.nextTracks = @[];
+    [state setValue:@[] forKey:@"future"];
     UITableView *closedTable = music.tableView;
     closedTable.frame = CGRectMake(0, 0, 402, 446);
     do {
@@ -693,6 +814,7 @@ static void run(void) {
     outer.delaysContentTouches = YES;
     [window.rootViewController.view addSubview:outer];
     [window.rootViewController addChildViewController:musicPage];
+    loadQueuePageWithTestLifecycle(musicPage);
     musicPage.view.frame = outer.bounds;
     [outer addSubview:musicPage.view];
     [musicPage didMoveToParentViewController:window.rootViewController];
@@ -734,6 +856,7 @@ static void run(void) {
     [mixToggle sendActionsForControlEvents:UIControlEventTouchUpInside];
     check(stubAutoMixApplies == 1 && stubAutoMixApplied && [[mixToggle valueForKey:@"on"] boolValue],
           @"tapping the AutoMix toggle after Spotify disabled transitions re-applies AutoMix");
+    checkQueueVisibility(musicList, musicPage, outer);
     checkQueueDrag(musicList, musicPage, outer, past);
     [musicPage willMoveToParentViewController:nil];
     [musicPage.view removeFromSuperview];

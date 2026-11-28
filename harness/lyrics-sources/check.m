@@ -10,6 +10,7 @@
 #import "Shared/LyricsSources/LyricsSources.h"
 #import "Core/SGPrefs.h"
 #import <Security/Security.h>
+#import <objc/runtime.h>
 
 // Real provider behavior, with no access to the user's Keychain.
 static NSString *sg_testARL;
@@ -131,6 +132,30 @@ static id awaitReply(void (^ask)(void (^done)(id)), BOOL *answeredAtOnce) {
     waiting = NO;
     CHECK(answered);
     return answer;
+}
+
+static void checkBugsSearchCooldown(void) {
+    __block NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    Method uptime = class_getInstanceMethod(NSProcessInfo.processInfo.class, @selector(systemUptime));
+    IMP clock = imp_implementationWithBlock(^NSTimeInterval(id self) { return now; });
+    IMP original = method_setImplementation(uptime, clock);
+    NSUInteger initial = sg_sourceRequests;
+    sg_sourceAnswer = ^id(NSURL *url, NSDictionary *headers, NSData *body, NSInteger *status) {
+        CHECK([url.host isEqual:@"m.bugs.co.kr"]);
+        if (sg_sourceRequests == initial + 1) { *status = 403; return nil; }
+        return @{@"list": @[]};
+    };
+    for (NSUInteger attempt = 0; attempt < 3; attempt++) {
+        SGLyricsQuery *query = [SGLyricsQuery new];
+        query.artist = @"Singer"; query.title = [NSString stringWithFormat:@"Song %lu", (unsigned long)attempt];
+        query.requestContext = [SGLyricsRequestContext new];
+        CHECK(!awaitReply(^(void (^done)(id)) { SGBugsAsk(query, done); }, nil));
+        CHECK(query.requestContext.failed == (attempt < 2));
+        CHECK(sg_sourceRequests == initial + (attempt < 2 ? 1 : 2));
+        now += attempt == 0 ? SGLyricsCredentialPauseSeconds - 1 : 1;
+    }
+    method_setImplementation(uptime, original);
+    imp_removeBlock(clock);
 }
 
 static NSArray<NSDictionary *> *searchAnswer(NSString *title, NSString *artist, NSInteger seconds) {
@@ -540,6 +565,7 @@ static void checkNewSources(void) {
     };
     SGBugsAsk(query, ^(SGLyricsResult *r) { CHECK(NSThread.isMainThread); got = r; calls++; });
     CHECK(calls == 1 && plain == 1 && got && !got.synced);
+    checkBugsSearchCooldown();
     __block NSUInteger genieRequests = 0;
     sg_sourceAnswer = ^id(NSURL *url, NSDictionary *headers, NSData *body, NSInteger *status) {
         genieRequests++;
