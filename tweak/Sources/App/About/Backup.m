@@ -232,7 +232,7 @@ static Class settingClass(NSString *key, NSDictionary *registered) {
             "redesign.lyrics.keepAwake redesign.lyrics.landscape redesign.lyricsPronunciation redesign.lyricsTranslation redesign.navbar redesign.navbar.fade redesign.navbar.hideLabels "
             "redesign.navbar.minimize redesign.navbar.symbols redesign.nowPlayingBar.artworkShape redesign.nowPlayingBar.inlineConnect redesign.nowPlayingBar.nextButton "
             "redesign.pageTitleWhenScrolled redesign.pageZoom redesign.pages.coverBeside redesign.plainCheck redesign.playInPageColour redesign.player.animatedStill "
-            "redesign.player.animatedVisualizer redesign.player.holdNoClip redesign.player.background redesign.player.background.artwork redesign.player.followsCover redesign.player.headerGlass "
+            "redesign.player.animatedVisualizer redesign.player.holdNoClip redesign.player.noClipBackground redesign.player.background redesign.player.background.artwork redesign.player.followsCover redesign.player.headerGlass "
             "redesign.player.hideContext redesign.player.hideRepeat redesign.player.hideShuffle redesign.player.landscape redesign.player.lyricLine redesign.player.movingBackground "
             "redesign.player.musicIcons redesign.player.queueHistory redesign.player.rollingDigits redesign.player.starAdd redesign.player.volume redesign.playlist.coverViewer redesign.playlist.creatorLine "
             "redesign.playlist.creatorPicture redesign.playlist.description redesign.playlist.menuSortMix redesign.savedMark redesign.search.glassCards showCacheLimit simplifyTitles "

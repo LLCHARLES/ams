@@ -53,7 +53,7 @@ typedef NS_ENUM(NSInteger, SGRPlayerBackgroundKind) {
     SGRPlayerBackgroundBlack,      // pure black, nothing of the artwork (PlayerBackdrop.m)
     SGRPlayerBackgroundPhoto,      // a photo of the user's own, darkened for the text over it (PlayerBackdrop.m)
 };
-// The player's ⋯ menu switches between Fluid, Animated and Visualizer, which share the Fluid field, without a restart.
+// The player's ⋯ menu switches between Fluid, Animated and Visualizer, without a restart.
 SGRPlayerBackgroundKind SGRPlayerBackground(void);
 // Main-thread choices from the page and menu. Each choice advances the generation, even when the kind
 // stays the same, so an asynchronous Photo choice cannot override a later choice.
@@ -67,6 +67,11 @@ static inline BOOL SGRPlayerBackgroundFromArtwork(SGRPlayerBackgroundKind kind) 
 // "Artwork" goes back to. Written by the Player page as a segment is picked.
 #define SGRKeyPlayerArtworkBackground @"spotifyglass.redesign.player.background.artwork"
 SGRPlayerBackgroundKind SGRPlayerArtworkBackground(void);
+#define SGRKeyPlayerNoClipBackground @"spotifyglass.redesign.player.noClipBackground"
+SGRPlayerBackgroundKind SGRPlayerNoClipBackground(void);
+void SGRSetPlayerNoClipBackground(SGRPlayerBackgroundKind kind);
+// The preview can simulate a missing clip independently of the playing track.
+void SGRPlayerConfigureField(SGRArtworkField *field, BOOL withoutClip);
 // The Player page stored another choice: the clip and the Visualizer follow it at once (PlayerMotion.x).
 void SGRPlayerBackgroundDidChange(void);
 // The names of the artwork's choices, Still to Visualizer, in order: the Player page's segments.
@@ -94,8 +99,7 @@ void SGRPlayerPickPhoto(UIViewController *from, void (^done)(BOOL stored));
 
 // The field behind the player, nil until the player has laid out once (PlayerField.x).
 SGRArtworkField *SGRPlayerField(void);
-// Holds the field still, or lets it move, for what is over it now: a paused song, an Animated artwork clip, the
-// Visualizer (PlayerField.x).
+// Sync the live field with the current clip lookup and hold its motion when paused or covered.
 void SGRPlayerHoldField(void);
 
 #pragma mark - the player's margins and rhythm

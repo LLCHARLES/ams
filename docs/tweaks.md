@@ -2605,7 +2605,7 @@ Turning on Hide About keeps the line under the name; ArtistSections.x,
 harness/artist/listeners-check.py). The Player page leads with a pinned miniature of the whole player showing the
 current or last song (480 pt, shrinking to 236 pt as the page scrolls, opaque above the rows; with Star add button on,
 the star before the ⋯ as the player draws it), whose Without a clip
-pill shows, for Animated and Auto, what a song without a clip would show, never sending a playback command
+pill previews the selected Animated fallback without sending a playback command
 (PlayerSettings.m; preview lookups are tied to the shown track and torn down with the page, SGRPlayerMotionPreviewStop,
 SGRPlayerVisualiserPreviewStop; harness/player/settings-check.sh). Its Buttons card has Shuffle, Repeat and Video chips.
 The Controls section has Lyrics Line, Rolling time digits, Star add button and Music app icons beside Header glass, Volume and Follow the cover.
@@ -2688,20 +2688,23 @@ for each new track while the Visualizer is on screen with the app in front and n
 kept under `spotifyglass.visualizer.shuffle.home` and comes back when shuffle is switched off. Visualizer motion pauses
 while hidden, backgrounded, in Low Power Mode, under serious heat (unless Ignore heat warnings,
 `spotifyglass.visualizer.ignoreHeat`, off) or during player transitions,
-and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`). Song without a clip (one
-choice: Cover art, Full-screen cover or Visualizer, written through the two keys below; Cover art also offers
-Keep background still, off by default)
-appears while Animated is chosen (Visualizer when there's no clip, `spotifyglass.redesign.player.animatedVisualizer`, off: once the track's clip lookup has answered
-none, the Visualizer stands where the clip would be, taken down by a later clip or a new track, the ordinary cover
-under Low Power Mode, Reduce Motion or the heat stand-down; it and the full-screen cover turn each other off, the
-full-screen cover kept when both are found on; harness/player/ `autoviz`. The full-screen cover,
-`spotifyglass.redesign.player.animatedStill`, off: a track with no clip
-shows the cover Spotify already drew, 300 px wide or more, where the clip would be, cropped to 4:3 at most, dimmed and
-blurred behind the lyrics as a clip is, under a black scrim of 45 % at the top fading out 76 pt below the safe area;
-a later clip replaces it, Black and Your Photo win, and Low Power Mode, Reduce Motion or serious heat keeps the ordinary cover;
-PlayerMotion.x, harness/player/ `still`),
-while Fluid is chosen a Style menu, Light or Smooth (spotifyglass.redesign.fluid.renderer, offered where Metal exists),
-its sliders and a red Reset (Redesigned/Kit/SGRFluid.h, spotifyglass.redesign.fluid.*).
+and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`).
+Animated offers five choices for **Song without a clip**: Still, Colors, Fluid, Full-screen cover and Visualizer.
+Still, Colors and Fluid use `SGRKeyPlayerNoClipBackground` (`spotifyglass.redesign.player.noClipBackground`).
+Fluid is the default, including for older settings and out-of-range values. **Keep background still** is off by
+default and appears only for Colors and Fluid. The selected fallback applies when the lookup confirms there is
+no clip. A pending lookup or a square clip playing in the cover keeps Fluid behind the player.
+Visualizer (`spotifyglass.redesign.player.animatedVisualizer`, off by default) appears after a confirmed miss.
+A later clip or a new track takes it down. Low Power Mode, Reduce Motion or the heat limit keeps the ordinary cover.
+Full-screen cover (`spotifyglass.redesign.player.animatedStill`, off by default) uses the cover Spotify already
+drew when it is at least 300 px wide. It crops to 4:3 at most and dims and blurs behind lyrics as a clip does.
+A 45% black scrim fades out 76 pt below the safe area. A later clip replaces the cover. Black and Your Photo take
+precedence, and Low Power Mode, Reduce Motion or serious heat keeps the ordinary cover. The two switches turn
+each other off. When an older installation has both enabled, Full-screen cover wins (PlayerMotion.x,
+harness/player/ `autoviz` and `still`).
+Choosing Fluid as the main background shows its sliders and a red Reset. Where Metal is available, the Style
+menu offers Light or Smooth (`spotifyglass.redesign.fluid.renderer`). Redesigned/Kit/SGRFluid.h defines the
+`spotifyglass.redesign.fluid.*` settings.
 Light turns preblurred Core Animation copies, with no Metal renderer or music analysis; it is what shows where Metal is
 missing. Smooth, the default, draws on the GPU (Redesigned/Kit/SGRFluidGPU.m):
 three copies of the cover, 1.4, 0.7 and 0.7 units across (a unit half the visible rect's height on a phone) at (0, 0),

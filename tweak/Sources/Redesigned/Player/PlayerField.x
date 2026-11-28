@@ -111,6 +111,7 @@ static NSUInteger sg_backgroundGeneration;
 NSUInteger SGRSetPlayerBackground(SGRPlayerBackgroundKind kind) {
     NSUInteger generation = ++sg_backgroundGeneration;
     SGSetInt(SGRKeyPlayerBackground, kind);
+    SGRPlayerHoldField();
     return generation;
 }
 
@@ -125,6 +126,26 @@ SGRPlayerBackgroundKind SGRPlayerArtworkBackground(void) {
     return last >= SGRPlayerBackgroundStill && last <= SGRPlayerBackgroundVisualiser ? last : SGRPlayerBackgroundColours;
 }
 
+static SGRPlayerBackgroundKind noClipKind(NSInteger value) {
+    return value >= SGRPlayerBackgroundStill && value <= SGRPlayerBackgroundFluid ? value : SGRPlayerBackgroundFluid;
+}
+
+SGRPlayerBackgroundKind SGRPlayerNoClipBackground(void) {
+    return noClipKind(SGInt(SGRKeyPlayerNoClipBackground, SGRPlayerBackgroundFluid));
+}
+
+void SGRSetPlayerNoClipBackground(SGRPlayerBackgroundKind kind) {
+    SGSetInt(SGRKeyPlayerNoClipBackground, noClipKind(kind));
+    SGRPlayerHoldField();
+}
+
+void SGRPlayerConfigureField(SGRArtworkField *field, BOOL withoutClip) {
+    SGRPlayerBackgroundKind kind = SGRPlayerArtworkBackground();
+    if (kind == SGRPlayerBackgroundAnimated) kind = withoutClip ? SGRPlayerNoClipBackground() : SGRPlayerBackgroundFluid;
+    field.flows = kind == SGRPlayerBackgroundColours;
+    field.fluid = kind == SGRPlayerBackgroundFluid || kind == SGRPlayerBackgroundVisualiser;
+}
+
 NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
     return @[SGL(@"settings.player.background.still", @"Still"), SGL(@"settings.player.background.colors", @"Colors"),
              SGL(@"settings.player.background.fluid", @"Fluid"), SGL(@"settings.player.background.animated", @"Animated"),
@@ -133,21 +154,26 @@ NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
 
 BOOL SGRPlayerNoClipHoldEnabled(void) {
     return SGHidden(SGRKeyPlayerHoldNoClip) && SGRPlayerBackground() == SGRPlayerBackgroundAnimated &&
-        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn();
+        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn() && SGRPlayerNoClipBackground() != SGRPlayerBackgroundStill;
 }
 
 // A paused song holds the colors still, the way it rests the cover (PlayerArtwork.x), and so does what lies over
 // the field: an animated artwork's clip, which covers it (PlayerMotion.x), or the Visualizer's hills, which are
 // the one thing moving.
-static BOOL fieldHeld(void) {
+static BOOL fieldHeld(BOOL withoutClip) {
     return sg_field.offscreen || SGPlayerState().isPaused ||
         SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing() ||
-        (SGRPlayerNoClipHoldEnabled() && SGRPlayerTrackHasNoClip());
+        (withoutClip && SGRPlayerNoClipHoldEnabled());
 }
 
 void SGRPlayerHoldField(void) {
+    if (!sg_field) return;
+    BOOL withoutClip = SGRPlayerTrackHasNoClip();
     updateFieldVisibility(SGRPlayerIsVisible());
-    sg_field.motionHeld = fieldHeld();
+    // Still and Colors as the main background keep their restart policy. All live modes
+    // re-read the field when settings change or a lookup begins or finishes.
+    if (SGRPlayerBackground() >= SGRPlayerBackgroundFluid) SGRPlayerConfigureField(sg_field, withoutClip);
+    sg_field.motionHeld = fieldHeld(withoutClip);
 }
 
 #pragma mark - the field
@@ -207,10 +233,9 @@ static SGRArtworkField *fieldIn(UIView *plane) {
     field.backdropCovered = !SGRPlayerBackgroundFromArtwork(SGRPlayerBackground());
     field.showsBackdrop = YES;
     // Under black or a photo the field is made as the artwork's last choice, so going back to it needs no restart.
-    SGRPlayerBackgroundKind background = SGRPlayerArtworkBackground();
-    field.flows = background == SGRPlayerBackgroundColours;
-    field.fluid = background >= SGRPlayerBackgroundFluid;
-    field.motionHeld = fieldHeld();
+    BOOL withoutClip = SGRPlayerTrackHasNoClip();
+    SGRPlayerConfigureField(field, withoutClip);
+    field.motionHeld = fieldHeld(withoutClip);
     field.bleed = kBleed;
     objc_setAssociatedObject(plane, &kFieldKey, field, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     sg_field = field;

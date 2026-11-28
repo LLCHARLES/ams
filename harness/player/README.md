@@ -234,7 +234,7 @@ come late, out of order, or not at all.
   video starts at the cover's bottom edge and reaches the screen's foot. `HARNESS_MOTION_SCREENSHOT=1`
   holds the checked player at 0.736 seconds for a comparison capture.
 - `motion` is Animated artwork. The clip, `HARNESS_CANVAS_FILE` (any mp4, `harness/fluid-clip` writes one),
-  is served as the track's Canvas before the player's background has laid out; then the background lays
+  is available as the track's Canvas before the player opens. The field requests it when the background lays
   out, the lyrics open and close, the background is built again, and the ⋯ menu's switch goes off, on, and
   off with the player out of its window. Each step is checked (the clip on the field, the cover hidden, the
   poster under the video and the Fluid field held under it, the foot and the blur, the thumbnail, the clip
@@ -250,7 +250,7 @@ come late, out of order, or not at all.
   Fluid and gives it back once off. Reported Serious heat also clears the clip, and cooling to Nominal brings it
   back. A track change with the app made to report the background takes the clip
   away at once, with no fade. The foot checks retain the seam-to-bottom geometry and require opaque
-  colors. A synthetic poster with green above its last 3% of rows and a red left half and blue right half in
+  colors. A synthetic poster with green above its lower quarter and a red left half and blue right half in
   those rows checks that the real motion view renders a foot red at its left edge and blue at its right,
   blended across the middle (issue #39) rather than meeting in a hard edge as stretched pixel columns would
   (issue #40), and with nothing of the green above. A gray poster checks that the picture gets darker from
@@ -267,18 +267,17 @@ come late, out of order, or not at all.
   the edition of that same name before the standard album, then a 429 and the next album finding nothing at once
   with nothing asked. The log ends with `catalog checks: n of 5 right -- PASS` or `FAIL`.
 
-- `settings` opens the redesign's Player page (`PlayerSettings.m`, with the real `Settings/` framework) over the
-  player at 3 s, with the clip of `motion` in. It checks the card leads the page with the five backgrounds'
-  segmented control under it, every name whole, the Mini player section's three rows are on the page, and then,
-  as the control picks each in turn, that the card shows Animated (the clip, the sources and Low Data Mode's rows
-  in), Fluid, Colors, Still, Visualizer (the hills over Fluid held still) and Animated again, with a note for
-  each and the header the same height throughout. The log ends with `settings checks: n of 8 right -- PASS` or
-  `FAIL`.
+- `settings` opens the Player page over a playing clip and selects each Song without a clip option.
+  With Colors selected it moves from a square clip to a confirmed miss and back, checking both fields
+  during lookup and playback. It checks the Still and Colors fallbacks, switching the main background
+  to Still and then Fluid, the hold switch, and the existing Full-screen cover and Visualizer preferences.
+  It also covers Low Power Mode, the pinned card's layout and accessibility, and cleanup when the page closes.
+  Run `sh harness/player/settings-check.sh` for the scenario verdict.
 - `preview` opens the Player page with the background Still at launch, so the player looks up no clip, and picks
   Animated on it. The card looks the track's clip up itself: nothing is asked for before the page or while Still
   shows, the card is Fluid while the clip comes (`HARNESS_CANVAS_DELAY`, 2 s), then the clip is in it with its
   poster and the field held, the player still without one, and the file in the store, where `SGMotionFile` finds
-  it without asking the server again. Fluid and then Animated again bring it back at once. The clip's address is
+  it without asking the server again. Picking Fluid and then Animated again brings the stored clip back after the poster is ready. The clip's address is
   the run's own, so the store never has it from a run before. The log ends with
   `preview checks: n of 7 right -- PASS` or `FAIL`; on the sources before the fix it read 5 of 7.
 - `card` plays nothing and opens the Player page at 1 s, then logs the card's title, artist and cover size: with

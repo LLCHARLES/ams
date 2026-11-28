@@ -85,7 +85,7 @@ static NSArray<NSString *> *backgroundNotes(void) {
         SGL(@"settings.player.bg_desc.still", @"The cover, blurred and held still."),
         SGL(@"settings.player.bg_desc.colors", @"The cover's colors, drifting slowly."),
         SGL(@"settings.player.bg_desc.fluid", @"The cover itself, blurred and slowly turning. It rests while a song is paused."),
-        SGL(@"settings.player.bg_desc.animated", @"The song's Canvas or the album's moving cover, else Fluid. The player's ⋯ menu switches between this, Fluid and Visualizer."),
+        SGL(@"settings.player.bg_desc.animated", @"Play the song's Canvas or the album's moving cover when available. The player's ⋯ menu switches between this, Fluid and Visualizer."),
         SGL(@"settings.player.bg_desc.visualizer", @"The song's sound in Hills, Bars, Nebula or Halo, or its synced lyrics in Lyrics, Poster or Cut, over Fluid held still. Choose a style below; it settles on pause or silence."),
         SGL(@"settings.player.bg_desc.black", @"Pure black, nothing of the cover."),
         SGL(@"settings.player.bg_desc.photo", @"A photo of your own, darkened so the words over it stay easy to read."),
@@ -105,20 +105,25 @@ static NSInteger segmentOf(SGRPlayerBackgroundKind kind) {
 
 #pragma mark - Song without a clip
 
-// What Animated shows for a song with no clip: the cover art over Fluid, the cover full screen (SGRKeyPlayerAnimatedStill)
-// or the Visualizer (SGRKeyPlayerAnimatedVisualiser). No key of its own: the two switches are it, both off the cover art.
-typedef NS_ENUM(NSInteger, SGRNoClip) { SGRNoClipCover, SGRNoClipFullScreen, SGRNoClipVisualiser };
+typedef NS_ENUM(NSInteger, SGRNoClip) {
+    SGRNoClipStill = SGRPlayerBackgroundStill,
+    SGRNoClipColours = SGRPlayerBackgroundColours,
+    SGRNoClipFluid = SGRPlayerBackgroundFluid,
+    SGRNoClipFullScreen,
+    SGRNoClipVisualiser,
+};
 
 static NSArray<NSString *> *noClipNames(void) {
-    return @[SGL(@"settings.player.no_clip.cover", @"Cover art"), SGL(@"settings.player.no_clip.full_screen", @"Full-screen cover"),
-             SGRPlayerBackgroundNames()[SGRPlayerBackgroundVisualiser]];
+    NSArray *backgrounds = SGRPlayerBackgroundNames();
+    return @[backgrounds[SGRPlayerBackgroundStill], backgrounds[SGRPlayerBackgroundColours], backgrounds[SGRPlayerBackgroundFluid],
+             SGL(@"settings.player.no_clip.full_screen", @"Full-screen cover"), backgrounds[SGRPlayerBackgroundVisualiser]];
 }
 
 // The full-screen cover wins over the Visualizer, as SGRPlayerReconcileFallbackSwitches keeps it, so both saved on by an
 // older build read as the full-screen cover without anything stored here.
 static SGRNoClip noClipStored(void) {
     if (SGRPlayerStillOn()) return SGRNoClipFullScreen;
-    return SGRPlayerAnimatedVisualiserOn() ? SGRNoClipVisualiser : SGRNoClipCover;
+    return SGRPlayerAnimatedVisualiserOn() ? SGRNoClipVisualiser : (SGRNoClip)SGRPlayerNoClipBackground();
 }
 
 // One switch turned on at most, the other one first turned off and followed by the player, so the two are never on
@@ -140,6 +145,7 @@ static void pickNoClip(SGRNoClip choice) {
         SGSetEnabled(SGRKeyPlayerAnimatedVisualiser, YES);
         SGRPlayerAnimatedVisualiserChanged();
     }
+    if (choice <= SGRNoClipFluid) SGRSetPlayerNoClipBackground((SGRPlayerBackgroundKind)choice);
     SGRPlayerReconcileFallbackSwitches();
 }
 
@@ -450,7 +456,10 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     SPTPlayerState *state = SGPlayerState();
     SGShownTrack *shown = SGShownTrackNow();
     // Advance before asking for artwork: a last-song image can answer synchronously from its cache.
-    if (_track != shown.uri && ![_track isEqualToString:shown.uri]) _generation++;
+    if (_track != shown.uri && ![_track isEqualToString:shown.uri]) {
+        _generation++;
+        _previewMiss = NO;
+    }
     _track = shown.uri;
     _title.text = shown.title ?: SGL(@"settings.player.not_playing", @"Not Playing");
     _artist.text = shown.artist ?: @"";
@@ -495,6 +504,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     _field.covered = !_active || _backdrop != nil || !_still.hidden || _motion != nil;
     _field.motionHeld = !_active || _paused || _motion != nil || _visualiser != nil || _backdrop != nil || !_still.hidden ||
         (_demo && !noClipMotionAllowed()) || ((_demo || _previewMiss) && SGRPlayerNoClipHoldEnabled());
+    if (_active) SGRPlayerConfigureField(_field, _demo || _previewMiss);
 }
 
 - (BOOL)demoAvailable {
@@ -503,7 +513,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
 
 // What the demo shows: the choice, or the cover art where motion is not allowed.
 - (SGRNoClip)demoShows {
-    return noClipMotionAllowed() ? noClipStored() : SGRNoClipCover;
+    return noClipMotionAllowed() ? noClipStored() : (SGRNoClip)SGRPlayerNoClipBackground();
 }
 
 - (void)toggleDemo {
@@ -551,7 +561,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
     SGRPlayerBackgroundKind kind = SGRPlayerBackground();
     if (!self.demoAvailable) _demo = NO;   // another background ends the demo
     if (kind != SGRPlayerBackgroundAnimated || _demo) SGRPlayerMotionPreviewStop();
-    SGRNoClip shows = _demo ? [self demoShows] : SGRNoClipCover;
+    SGRNoClip shows = _demo ? [self demoShows] : SGRNoClipStill;
     NSString *track = _track;
     NSUInteger generation = _generation;
     __weak SGRPlayerPreview *weakSelf = self;
@@ -567,10 +577,7 @@ static CGRect mixRect(CGRect a, CGRect b, CGFloat t) {
         }
     };
     // Black or the photo lies over a field made as the artwork's last choice, as in the player.
-    SGRPlayerBackgroundKind look = SGRPlayerArtworkBackground();
     void (^apply)(void) = ^{
-        self->_field.flows = look == SGRPlayerBackgroundColours;
-        self->_field.fluid = look >= SGRPlayerBackgroundFluid;
         [self->_backdrop removeFromSuperview];
         self->_backdrop = SGRPlayerBackdropPreview();
         if (self->_backdrop) [self->_background insertSubview:self->_backdrop aboveSubview:self->_field];
@@ -1147,11 +1154,11 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     backgrounds.accessibilityLabel = SGL(@"settings.player.background.a11y", @"Background");
     backgrounds.apportionsSegmentWidthsByContent = YES;
 
-    // What a song with no clip shows under Animated, from the two switches that are it; a pick shows it on the card.
+    // What a song with no clip shows under Animated, also shown on the card when picked.
     SGModRow *noClip = SGMenuRow(SGL(@"settings.player.no_clip.title", @"Song without a clip"), noClipNames(), ^NSString *{
         return noClipNames()[noClipStored()];
     }, ^(NSInteger index) {
-        if (index < SGRNoClipCover || index > SGRNoClipVisualiser) return;
+        if (index < SGRNoClipStill || index > SGRNoClipVisualiser) return;
         pickNoClip(index);
         SGRPlayerHoldField();
         [weakPlayerPage noClipPicked];
@@ -1159,7 +1166,10 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     noClip.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated; };
     noClip.searchIdentifier = @"spotifyglass.redesign.player.noClip";
     SGModRow *holdNoClip = SGOptionRow(SGL(@"settings.player.no_clip.hold", @"Keep background still"), nil, SGRKeyPlayerHoldNoClip);
-    holdNoClip.visible = ^BOOL { return SGRPlayerBackground() == SGRPlayerBackgroundAnimated && noClipStored() == SGRNoClipCover; };
+    holdNoClip.visible = ^BOOL {
+        SGRNoClip choice = noClipStored();
+        return SGRPlayerBackground() == SGRPlayerBackgroundAnimated && (choice == SGRNoClipColours || choice == SGRNoClipFluid);
+    };
     holdNoClip.changed = ^(BOOL on) {
         SGRPlayerHoldField();
         [weakPlayerPage.preview holdField];
@@ -1272,7 +1282,7 @@ UIViewController *SGRPlayerSettingsPage(NSArray *more) {
     NSMutableArray<SGModSection *> *sections = [NSMutableArray arrayWithObjects:
         SGSection(nil, @[behind, choosePhoto]),
         SGNotedSection(nil, @[noClip, holdNoClip],
-                       SGL(@"settings.player.no_clip.footer", @"Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.")),
+                       SGL(@"settings.player.no_clip.footer", @"Full-screen cover fills the screen with the album cover. In Low Power Mode or with Reduce Motion, the artwork background stays still.")),
         SGSection(nil, @[visualiserStyle, visualizers]),
         SGNotedSection(nil, fluid, SGL(@"settings.player.fluid.footer", @"Smooth lets the cover flow and carries the next song's cover in through it, "
                                    @"using a little more battery. Brightness above 100% can make white text harder to read. A paused song holds the "
