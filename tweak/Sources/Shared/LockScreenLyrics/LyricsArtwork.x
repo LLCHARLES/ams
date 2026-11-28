@@ -40,6 +40,7 @@ static const double kShortest = 2, kLongest = 8;
 @property (nonatomic) UIImage *cover;
 @property (nonatomic) SGLyricsClipStyle style;
 @property (nonatomic) SGLyricsClipLayout layout;
+@property (nonatomic) SGLyricsClipTextSize textSize;
 @property (nonatomic) BOOL dimmed;           // Over the artwork dimmed whole (SGKeyLockScreenDimArtwork)
 @property (nonatomic) NSURL *motion;        // the moving artwork under the words, nil for the blurred cover
 @property (nonatomic) double from, seconds;   // where in the song the clip starts and how long it is
@@ -213,14 +214,14 @@ static UIImage *previewFor(NSString *artworkID, SGLockLine *line, CGSize size) {
     BOOL miss = !preview;
     if (!preview) {
         BOOL tryMotion = line.motion && !motionFailed(line.motion);
-        CGImageRef frame = tryMotion ? SGLyricsClipMotionFrame(line.motion, line.previous, line.line, line.translation, line.next, line.from,
-                                                               line.seconds, line.layout) : NULL;
+        CGImageRef frame = tryMotion ? SGLyricsClipMotionFrameWithTextSize(line.motion, line.previous, line.line, line.translation,
+                                                                          line.next, line.from, line.seconds, line.layout, line.textSize) : NULL;
         if (!frame) {
             if (!currentLine(line)) return nil;
             if (tryMotion) markMotionFailed(line.motion, artworkID);
             CGImageRef backdrop = newBackdrop(line, size);
-            frame =SGLyricsClipFrameWithLayout(backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next, size,
-                                                line.layout);
+            frame = SGLyricsClipFrameWithTextSize(backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
+                                                  size, line.layout, line.textSize);
             CGImageRelease(backdrop);
         }
         if (frame) preview = [UIImage imageWithCGImage:frame];
@@ -256,15 +257,15 @@ static BOOL writeClip(NSString *artworkID, SGLockLine *line, CGSize size) {
     if ([NSFileManager.defaultManager fileExistsAtPath:file.path]) return YES;
     CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
     BOOL tryMotion = line.motion && !motionFailed(line.motion);
-    BOOL over = tryMotion && SGLyricsClipWriteOverMotion(file, line.motion, line.previous, line.line, line.translation, line.next, line.from,
-                                                         line.seconds, line.layout, live);
+    BOOL over = tryMotion && SGLyricsClipWriteOverMotionWithTextSize(file, line.motion, line.previous, line.line, line.translation,
+                                                                     line.next, line.from, line.seconds, line.layout, line.textSize, live);
     if (!live()) return NO;
     if (tryMotion && !over) markMotionFailed(line.motion, artworkID);
     BOOL ok = over;
     if (!ok) {
         CGImageRef backdrop = newBackdrop(line, size);
-        ok =SGLyricsClipWriteWithLayout(file, backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
-                                         size, line.style, line.layout, live);
+        ok = SGLyricsClipWriteWithTextSize(file, backdrop, line.cover.CGImage, line.previous, line.line, line.translation, line.next,
+                                           size, line.style, line.layout, line.textSize, live);
         CGImageRelease(backdrop);
     }
     // Stopped for a line gone by: not a failure to log.
@@ -484,10 +485,14 @@ void SGLyricsArtworkSetMotion(NSString *uri, NSURL *file) {
     tickSoon();
 }
 
+static SGLyricsClipTextSize lyricsTextSize(void) {
+    return SGLyricsClipNormalizedTextSize(SGInt(SGKeyLockScreenLyricsSize, SGLyricsClipTextMedium));
+}
+
 // What the artwork for line `index` shows, `resting` once its break has come (index -1, before the first line,
 // always rests). Over moving artwork, the stretch of song from when it shows until the next artwork does.
 static SGLockLine *lineAt(NSArray<SGKaraokeLine *> *lines, NSInteger index, BOOL resting, NSURL *motion,
-                          UIImage *cover, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed,
+                          UIImage *cover, SGLyricsClipStyle style, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL dimmed,
                           SGLyricsBackgroundStyle background, CGSize size) {
     SGLockLine *shown = [SGLockLine new];
     // Resting, the line sung is let go and the one coming shows alone. The line sung last shows over moving artwork
@@ -499,6 +504,7 @@ static SGLockLine *lineAt(NSArray<SGKaraokeLine *> *lines, NSInteger index, BOOL
     shown.cover = cover;
     shown.style = style;
     shown.layout = layout;
+    shown.textSize = textSize;
     shown.dimmed = dimmed;
     shown.motion = motion;
     shown.background = background;
@@ -616,7 +622,8 @@ static NSTimeInterval update(void) {
             motion = nil;
             style = SGLyricsClipStill;
         }
-        NSString *look = SGLyricsClipLook(motion, style, layout, dimmed);
+        SGLyricsClipTextSize textSize = lyricsTextSize();
+        NSString *look = SGLyricsClipLookWithTextSize(motion, style, layout, dimmed, textSize);
         // A non-nil MPNowPlaying image is not evidence of a cover: it may be Spotify's
         // placeholder, or the previous same-title track's image. Load the current URI's
         // metadata through the shared loader instead. Until then the renderer gets nil.
@@ -669,12 +676,12 @@ static NSTimeInterval update(void) {
         setShown(artworkID);
         SGLockMotionShowPlain(NO);
         SGNowPlayingSetExtras(@"lyrics", @{MPNowPlayingInfoProperty3x4AnimatedArtwork:
-                                               artworkFor(artworkID, lineAt(lines, index, resting, motion, sg_cover, style, layout, dimmed, background, size))},
+                                               artworkFor(artworkID, lineAt(lines, index, resting, motion, sg_cover, style, layout, textSize, dimmed, background, size))},
                               state.track.trackTitle);
         if (index + 1 < (NSInteger)lines.count) {
             NSString *ahead = [NSString stringWithFormat:@"%@-%ld%@%@-%@-%@-%@-%@", trackID, (long)index + 1,
                                translationTag(translationAt(lines, index + 1, NO)), reading, sg_lyricsKey, sg_coverKey, backgroundID, look];
-            drawAhead(ahead, lineAt(lines, index + 1, NO, motion, sg_cover, style, layout, dimmed, background, size));
+            drawAhead(ahead, lineAt(lines, index + 1, NO, motion, sg_cover, style, layout, textSize, dimmed, background, size));
         }
         return wait;
     }
@@ -771,6 +778,7 @@ static void startLyricsArtwork(BOOL replay) {
         static _Atomic(SGLockArtwork) choice; // main is the sole writer
         static NSInteger style, layout, delay;
         static BOOL dim;
+        static SGLyricsClipTextSize textSize;
         choice = SGLockScreenArtwork();
         __block NSString *background = choice == SGLockArtworkOff ? nil : SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
         __block BOOL translation = SGFlag(SGKeyLockScreenTranslation, NO);
@@ -799,6 +807,7 @@ static void startLyricsArtwork(BOOL replay) {
         layout = SGInt(SGKeyLockScreenLyricsLayout, SGLyricsClipLeft);
         // Dimming the whole artwork changes only Over the artwork's lines.
         dim = layout == SGLyricsClipOverArtwork && SGFlag(SGKeyLockScreenDimArtwork, NO);
+        textSize = lyricsTextSize();
         delay = SGKaraokeDelayMs();
         [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil queue:nil
                                                     usingBlock:^(NSNotification *note) {
@@ -811,17 +820,19 @@ static void startLyricsArtwork(BOOL replay) {
                 if (enabling && picked == SGLockArtworkOff) return;
                 NSInteger nowStyle = SGInt(SGKeyLockScreenLyricsStyle, SGLyricsClipStill), nowDelay = SGKaraokeDelayMs();
                 NSInteger nowLayout = SGInt(SGKeyLockScreenLyricsLayout, SGLyricsClipLeft);
+                SGLyricsClipTextSize nowSize = lyricsTextSize();
                 BOOL nowDim = nowLayout == SGLyricsClipOverArtwork && SGFlag(SGKeyLockScreenDimArtwork, NO);
                 NSString *next = SGLyricsBackgroundIdentity(SGLyricsBackgroundRead(@"spotifyglass.lockscreen.background"));
                 BOOL nowTranslation = SGFlag(SGKeyLockScreenTranslation, NO);
                 NSString *nowReading = SGLyricsShownLineTag();
-                BOOL changed = ![next isEqual:background] || nowStyle != style || nowLayout != layout || nowDim != dim;
+                BOOL changed = ![next isEqual:background] || nowStyle != style || nowLayout != layout || nowDim != dim || nowSize != textSize;
                 BOOL reread = ![nowReading isEqualToString:reading];
                 if (picked == choice && !changed && nowDelay == delay && nowTranslation == translation && !reread) return;
                 background = next;
                 style = nowStyle;
                 layout = nowLayout;
                 dim = nowDim;
+                textSize = nowSize;
                 delay = nowDelay;
                 translation = nowTranslation;
                 reading = nowReading;

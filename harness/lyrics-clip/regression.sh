@@ -7,7 +7,7 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/lyrics-regression.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 OUT=${OUT:-$WORK/shots}
 xcrun clang -fobjc-arc -O2 -Wno-deprecated-declarations -I "$SRC" \
-    -DCTFrameDraw=SGLyricsHarnessDrawFrame -DCGBitmapContextCreate=SGLyricsHarnessCreateContext \
+    -DCTLineCreateTruncatedLine=SGLyricsHarnessTruncatedLine -DCTFrameDraw=SGLyricsHarnessDrawFrame -DCGBitmapContextCreate=SGLyricsHarnessCreateContext \
     -DSGLyricsBackgroundCreate=SGLyricsHarnessBackground -Dmalloc=SGLyricsHarnessMalloc \
     -Dfree=SGLyricsHarnessFree -DCGImageCreateWithImageInRect=SGLyricsHarnessCrop -DCGImageRelease=SGLyricsHarnessRelease \
     -c "$SRC/Shared/LockScreenLyrics/SGLyricsClip.m" -o "$WORK/renderer.o"

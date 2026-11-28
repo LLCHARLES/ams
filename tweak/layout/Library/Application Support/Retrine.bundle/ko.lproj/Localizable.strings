@@ -1326,6 +1326,11 @@
 "settings.lockscreen.lyrics_layout.choice.poster" = "포스터";
 "settings.lockscreen.lyrics_layout.subtitle" = "가사가 놓이는 위치입니다. '포스터'는 현재 줄만 크게 표시합니다.";
 "settings.lockscreen.lyrics_layout.title" = "레이아웃";
+"settings.lockscreen.lyrics_size.choice.large" = "크게";
+"settings.lockscreen.lyrics_size.choice.medium" = "보통";
+"settings.lockscreen.lyrics_size.choice.small" = "작게";
+"settings.lockscreen.lyrics_size.subtitle" = "잠금 화면에 표시할 가사와 번역의 글자 크기입니다.";
+"settings.lockscreen.lyrics_size.title" = "글자 크기";
 "settings.lockscreen.lyrics_style.choice.animated" = "움직임";
 "settings.lockscreen.lyrics_style.choice.still" = "정지";
 "settings.lockscreen.lyrics_style.subtitle" = "'정지'는 각 줄을 한 번만 그립니다. '움직임'은 선택한 배경을 부드럽게 움직입니다. 움직이는 아트워크를 사용할 수 없을 때 적용됩니다.";

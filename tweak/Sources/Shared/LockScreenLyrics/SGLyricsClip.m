@@ -12,7 +12,15 @@
 #import "Shared/LyricsBackground/LyricsBackground.h"
 
 // Change this token whenever the drawn picture changes: the system caches artwork across app builds.
-static NSString *const kRenderVersion = @"r2";
+static NSString *const kRenderVersion = @"r3";
+
+static CGFloat textScale(SGLyricsClipTextSize size) {
+    switch (SGLyricsClipNormalizedTextSize(size)) {
+        case SGLyricsClipTextSmall: return 0.78;
+        case SGLyricsClipTextLarge: return 1.22;
+        default: return 1.0;
+    }
+}
 
 // IMG_1800 shows the whole 3:4 frame across the screen, not a centre crop. Its text centre places
 // the frame's top about 10% down a 1179x2556 screen. Map screen-safe heights into that frame once;
@@ -25,17 +33,17 @@ static const CGFloat kSafeScreenTop = 0.17, kSafeScreenBottom = 0.65, kTextScree
 static const CGFloat kMargin = 0.08, kColumn = 0.84;
 // Poster sets the line kPosterScale of the size in a heavy weight (UIFontWeightHeavy's trait), alone; its
 // translation keeps the size it has under the other layouts.
-static const CGFloat kPosterScale = 1.6, kPosterWeight = 0.56;
+static const CGFloat kPosterScale = 1.32, kPosterWeight = 0.56;
 // The words' size as a share of the width, made smaller down to kSmallest of it while they run taller
 // than kTallest of the height.
-static const CGFloat kFont = 0.047;
+static const CGFloat kFont = 0.070;
 static const CGFloat kSmallest = 0.6;
 static const CGFloat kTallest = 0.4;
 // The lines either side of the line (the next, and over moving artwork the one sung last) in the regular weight
 // at this share of its size, kNextAlpha white, kNextGap of the line's size from it.
-static const CGFloat kNextScale = 0.6, kNextAlpha = 0.5, kNextGap = 0.5;
+static const CGFloat kNextScale = 0.62, kNextAlpha = 0.5, kNextGap = 0.5;
 // A translation sits close under its line, in the regular weight at this share of the line's size and this white.
-static const CGFloat kTranslationScale = 0.62, kTranslationAlpha = 0.8, kTranslationGap = 0.15;
+static const CGFloat kTranslationScale = 0.68, kTranslationAlpha = 0.8, kTranslationGap = 0.15;
 // OverArtwork: a continuous side-anchored Gaussian, without a rectangular core or cutoff.
 // Reaches are in frame widths; the vertical reach grows with the text block.
 static const CGFloat kArtworkScrimAlpha = 0.94, kArtworkSideReach = 1.8, kArtworkVerticalReach = 0.6;
@@ -322,7 +330,7 @@ static void drawCut(CTFrameRef frame, NSAttributedString *words, CGContextRef co
 // gradient behind them.
 // YES with no image is an intentional rest; NO means rendering failed.
 static BOOL newWords(NSString *previous, NSString *line, NSString *translation, NSString *next, CGSize size,
-                     SGLyricsClipLayout layout, BOOL scrim, CGRect *drawn, CGImageRef *result) {
+                     SGLyricsClipLayout layout, CGFloat fontScale, BOOL scrim, CGRect *drawn, CGImageRef *result) {
     *result = NULL;
     // Over the artwork keeps the line sung last above the line instead of the next, which shows only at a rest.
     if (layout == SGLyricsClipOverArtwork && line.length) next = nil;
@@ -336,7 +344,7 @@ static BOOL newWords(NSString *previous, NSString *line, NSString *translation, 
         if (line.length) next = nil;
     }
     CGFloat screen = size.width, width = round(screen * kColumn);
-    CGFloat fontSize = size.width * kFont, lineSize = layout == SGLyricsClipPoster ? fontSize * kPosterScale : fontSize;
+    CGFloat fontSize = size.width * kFont * fontScale, lineSize = layout == SGLyricsClipPoster ? fontSize * kPosterScale : fontSize;
     CTFramesetterRef setter = NULL;
     NSAttributedString *words = nil;
     CGFloat height = 0, top = 0;
@@ -510,7 +518,7 @@ static BOOL rightToLeft(NSString *text) {
 // Messages: from the top, the line sung last (theirs, on the left), the line (mine, on the right) and while a next
 // line is coming the typing dots (theirs), never its words; sides swapped for words written right to left. The stack
 // ends at kLowest and grows up; held to their lines the bubbles stay far below kTop at any size.
-static void drawMessages(CGContextRef context, NSString *previous, NSString *line, NSString *next, CGSize size) {
+static void drawMessages(CGContextRef context, NSString *previous, NSString *line, NSString *next, CGSize size, CGFloat fontScale) {
     CGFloat W = size.width, H = size.height, stack = W * (1 - 2 * kMessagesSide);
     CGFloat left = (size.width - W) / 2 + W * kMessagesSide;
     CGFloat padX = W * kBubblePadX, padY = W * kBubblePadY, gap = W * kBubbleGap, inside = stack * kBubbleWidth - 2 * padX;
@@ -526,7 +534,7 @@ static void drawMessages(CGContextRef context, NSString *previous, NSString *lin
     CGSize content[3] = {CGSizeZero, CGSizeZero, CGSizeZero};
     CGFloat fontSize = 0, lineHeight = 0;
     for (CGFloat scale = 1; scale >= kSmallest - 0.01; scale -= 0.1) {
-        fontSize = W * kBubbleFont * scale;
+        fontSize = W * kBubbleFont * fontScale * scale;
         lineHeight = fontSize * kBubbleLineHeight;
         CTFontRef font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, fontSize, NULL);
         BOOL held = YES;
@@ -618,7 +626,7 @@ static NSAttributedString *vinylWords(NSString *line, NSString *next, CGFloat W,
 }
 
 // Vinyl: the record, and under it the line and the next one.
-static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NSString *next, CGSize size) {
+static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NSString *next, CGSize size, CGFloat fontScale) {
     CGFloat W = size.width, H = size.height, middle = size.width / 2;
     CGFloat glow = round(W * kGlow), gap = round(W * kRecordGap), width = round(W * kColumn);
     // The band less the glow's reach above and below, so what is centred in it is centred in the band.
@@ -628,7 +636,7 @@ static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NS
     // The record as large as it may be with the words at their full size under it. In what is left the words, as
     // Left does, are set smaller until they fit; past the smallest size the next line goes, and last the line ends in
     // an ellipsis after the whole lines that fit.
-    NSAttributedString *words = vinylWords(line, next, W, 1);
+    NSAttributedString *words = vinylWords(line, next, W, fontScale);
     CGFloat full = words.length ? sizeOf(words, width).height + 1 + gap : 0;
     CGFloat diameter = round(MIN(MAX(room - full, W * kRecordLeast), W * kRecordMost)), wordsRoom = room - diameter - gap, tall = 0;
     for (int step = 0; step < 2 && words.length; step++) {
@@ -637,7 +645,7 @@ static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NS
             next = nil;
         }
         for (CGFloat scale = 1; scale >= kSmallest - 0.01; scale -= 0.1) {
-            words = vinylWords(line, next, W, scale);
+            words = vinylWords(line, next, W, fontScale * scale);
             tall = sizeOf(words, width).height + 1;
             if (tall <= wordsRoom) break;
         }
@@ -700,11 +708,11 @@ static void drawVinyl(CGContextRef context, CGImageRef cover, NSString *line, NS
 
 // A scene's whole picture, the size of the clip.
 static CGImageRef newScene(CGImageRef cover, NSString *previous, NSString *line, NSString *next, CGSize size,
-                           SGLyricsClipLayout layout) CF_RETURNS_RETAINED {
+                           SGLyricsClipLayout layout, CGFloat fontScale) CF_RETURNS_RETAINED {
     CGContextRef context = newContext(size, NULL, 0);
     if (!context) return NULL;
-    if (layout == SGLyricsClipMessages) drawMessages(context, previous, line, next, size);
-    else drawVinyl(context, cover, line, next, size);
+    if (layout == SGLyricsClipMessages) drawMessages(context, previous, line, next, size, fontScale);
+    else drawVinyl(context, cover, line, next, size, fontScale);
     CGImageRef image = CGBitmapContextCreateImage(context);
     CGContextRelease(context);
     return image;
@@ -713,13 +721,13 @@ static CGImageRef newScene(CGImageRef cover, NSString *previous, NSString *line,
 // What goes over the backdrop: a scene's picture, or the words; Over the artwork's under their scrim when it has no
 // backdrop, as the cover then shows sharp.
 static BOOL newPicture(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line, NSString *translation,
-                       NSString *next, CGSize size, SGLyricsClipLayout layout, CGImageRef *picture) {
+                       NSString *next, CGSize size, SGLyricsClipLayout layout, CGFloat fontScale, CGImageRef *picture) {
     if (SGLyricsClipIsScene(layout)) {
-        *picture = newScene(cover, previous, line, next, size, layout);
+        *picture = newScene(cover, previous, line, next, size, layout, fontScale);
         return *picture != NULL;
     }
     BOOL over = layout == SGLyricsClipOverArtwork;
-    return newWords(over ? previous : nil, line, translation, next, size, layout, over && !backdrop, NULL, picture);
+    return newWords(over ? previous : nil, line, translation, next, size, layout, fontScale, over && !backdrop, NULL, picture);
 }
 
 static CGImageRef newBackdrop(CGImageRef backdrop, CGImageRef cover, CGSize size, SGLyricsClipLayout layout) CF_RETURNS_RETAINED {
@@ -738,8 +746,13 @@ static void drawFrame(CGContextRef context, CGImageRef backdrop, CGImageRef word
 
 CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                        NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) {
+    return SGLyricsClipFrameWithTextSize(backdrop, cover, previous, line, translation, next, size, layout, SGLyricsClipTextMedium);
+}
+
+CGImageRef SGLyricsClipFrameWithTextSize(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) {
     CGImageRef words;
-    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, &words)) return NULL;
+    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, textScale(textSize), &words)) return NULL;
     CGImageRef background = newBackdrop(backdrop, cover, size, layout);
     CGContextRef context = newContext(size, NULL, 0);
     CGImageRef frame = NULL;
@@ -801,7 +814,7 @@ static BOOL writeReady(AVAssetWriter *writer, AVAssetWriterInput *input, CMTime 
 
 static BOOL writeLayoutPartial(NSURL *partial, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     AVAssetWriter *writer = [AVAssetWriter assetWriterWithURL:partial fileType:AVFileTypeMPEG4 error:nil];
     if (!writer) return NO;
     // A scene has no backdrop to breathe: one frame, held as long as the loop.
@@ -831,7 +844,7 @@ static BOOL writeLayoutPartial(NSURL *partial, CGImageRef backdrop, CGImageRef c
     if (![writer startWriting]) return NO;
     [writer startSessionAtSourceTime:kCMTimeZero];
     CGImageRef words;
-    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, &words)) {
+    if (!newPicture(backdrop, cover, previous, line, translation, next, size, layout, textScale(textSize), &words)) {
         [writer cancelWriting];
         return NO;
     }
@@ -878,8 +891,14 @@ static BOOL publishClip(NSURL *file, BOOL (^writePartial)(NSURL *)) {
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
                                  SGLyricsClipLayout layout, BOOL (^current)(void)) {
+    return SGLyricsClipWriteWithTextSize(file, backdrop, cover, previous, line, translation, next, size, style, layout, SGLyricsClipTextMedium, current);
+}
+
+BOOL SGLyricsClipWriteWithTextSize(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                 NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     return publishClip(file, ^BOOL(NSURL *partial) {
-        return writeLayoutPartial(partial, backdrop, cover, previous, line, translation, next, size, style, layout, current);
+        return writeLayoutPartial(partial, backdrop, cover, previous, line, translation, next, size, style, layout, textSize, current);
     });
 }
 
@@ -953,9 +972,9 @@ static void freeOver(Over over) {
 }
 
 static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
-                     SGLyricsClipLayout layout) {
+                     SGLyricsClipLayout layout, CGFloat fontScale) {
     Over over = {0};
-    if (!newWords(previous, line, translation, next, motion.cut, layout, NO, &over.drawn, &over.words)) return over;
+    if (!newWords(previous, line, translation, next, motion.cut, layout, fontScale, NO, &over.drawn, &over.words)) return over;
     size_t rows = (size_t)motion.cut.height;
     over.keep = malloc(rows * sizeof(uint16_t));
     if (!over.keep) goto failed;
@@ -978,7 +997,7 @@ static Over makeOver(Motion motion, NSString *previous, NSString *line, NSString
     if (!over.words) return over;
     // A font size past the margin newWords leaves about the words, itself a font size, and faded in over both, so
     // every line is on picture blurred whole and the blur's edge is gentle and away from them.
-    CGFloat reach = round(motion.cut.width * kFont);
+    CGFloat reach = round(motion.cut.width * kFont * fontScale);
     over.soft = CGRectIntersection(CGRectMake(cut.origin.x, cut.origin.y + over.drawn.origin.y - reach, cut.size.width,
                                               over.drawn.size.height + 2 * reach), cut);
     size_t width = (size_t)over.soft.size.width, height = (size_t)over.soft.size.height;
@@ -1205,11 +1224,16 @@ static BOOL eachFrame(AVURLAsset *asset, AVAssetTrack *track, Motion motion, dou
 
 CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSString *line, NSString *translation, NSString *next,
                                    double from, double seconds, SGLyricsClipLayout layout) {
+    return SGLyricsClipMotionFrameWithTextSize(motionFile, previous, line, translation, next, from, seconds, layout, SGLyricsClipTextMedium);
+}
+
+CGImageRef SGLyricsClipMotionFrameWithTextSize(NSURL *motionFile, NSString *previous, NSString *line, NSString *translation, NSString *next,
+                                   double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:motionFile options:nil];
     Motion motion;
     AVAssetTrack *track = motionTrack(asset, &motion);
     if (!track) return NULL;
-    __block Over over = makeOver(motion, previous, line, translation, next, layout);
+    __block Over over = makeOver(motion, previous, line, translation, next, layout, textScale(textSize));
     // As the clip judges its band.
     if (!over.keep) return NULL;
     fitBand(asset, motion, &over, from, MIN(seconds, motion.length));
@@ -1232,7 +1256,7 @@ CGImageRef SGLyricsClipMotionFrame(NSURL *motionFile, NSString *previous, NSStri
 }
 
 static BOOL writeMotionPartial(NSURL *partial, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:motionFile options:nil];
     Motion motion;
     AVAssetTrack *track = motionTrack(asset, &motion);
@@ -1258,7 +1282,7 @@ static BOOL writeMotionPartial(NSURL *partial, NSURL *motionFile, NSString *prev
         }];
     if (![writer startWriting]) return NO;
     [writer startSessionAtSourceTime:kCMTimeZero];
-    __block Over over = makeOver(motion, previous, line, translation, next, layout);
+    __block Over over = makeOver(motion, previous, line, translation, next, layout, textScale(textSize));
     if (!over.keep) {
         [writer cancelWriting];
         return NO;
@@ -1319,15 +1343,25 @@ static BOOL writeMotionPartial(NSURL *partial, NSURL *motionFile, NSString *prev
 
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
                                  NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
+    return SGLyricsClipWriteOverMotionWithTextSize(file, motionFile, previous, line, translation, next, from, seconds, layout, SGLyricsClipTextMedium, current);
+}
+
+BOOL SGLyricsClipWriteOverMotionWithTextSize(NSURL *file, NSURL *motionFile, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     return publishClip(file, ^BOOL(NSURL *partial) {
-        return writeMotionPartial(partial, motionFile, previous, line, translation, next, from, seconds, layout, current);
+        return writeMotionPartial(partial, motionFile, previous, line, translation, next, from, seconds, layout, textSize, current);
     });
 }
 
 NSString *SGLyricsClipLook(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed) {
+    return SGLyricsClipLookWithTextSize(motion, style, layout, dimmed, SGLyricsClipTextMedium);
+}
+
+NSString *SGLyricsClipLookWithTextSize(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed, SGLyricsClipTextSize textSize) {
+    long sizeIndex = (long)SGLyricsClipNormalizedTextSize(textSize);
     NSString *dim = dimmed ? @"d" : @"";
-    if (!motion) return [NSString stringWithFormat:@"%@-%ldl%ld%@", kRenderVersion, (long)style, (long)layout, dim];
+    if (!motion) return [NSString stringWithFormat:@"%@-%ldl%ld%@z%ld", kRenderVersion, (long)style, (long)layout, dim, sizeIndex];
     NSString *name = motion.lastPathComponent.stringByDeletingPathExtension;
-    return [NSString stringWithFormat:@"%@-m%@s%ldl%ld%@", kRenderVersion, name.length > 16 ? [name substringToIndex:16] : name, (long)style,
-            (long)layout, dim];
+    return [NSString stringWithFormat:@"%@-m%@s%ldl%ld%@z%ld", kRenderVersion, name.length > 16 ? [name substringToIndex:16] : name, (long)style,
+            (long)layout, dim, sizeIndex];
 }

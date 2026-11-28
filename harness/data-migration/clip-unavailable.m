@@ -1,6 +1,6 @@
-#define SGLyricsClipWriteWithLayout fixtureWriteWithLayout
+#define SGLyricsClipWriteWithTextSize fixtureWriteWithLayout
 #import "../now-playing/artwork.m"
-#undef SGLyricsClipWriteWithLayout
+#undef SGLyricsClipWriteWithTextSize
 #import "Core/SGDataRoot.h"
 
 // The now-playing drivers define these around their own copies of the generated sources; this binary links
@@ -9,9 +9,9 @@ NSUInteger harnessArtworkHashes;
 BOOL harnessCoverRevisions(UIImage *a, UIImage *b) { return NO; }
 
 // Fail normally rather than feeding nil to a real encoder and raising a crash dialog.
-BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+BOOL SGLyricsClipWriteWithTextSize(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     check(NO, @"unavailable clip destination reached the encoder");
     return NO;
 }

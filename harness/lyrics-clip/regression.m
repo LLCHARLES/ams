@@ -44,7 +44,13 @@ CGContextRef SGLyricsHarnessCreateContext(void *data, size_t width, size_t heigh
     return CGBitmapContextCreate(data, width, height, bits, stride, space, info);
 }
 static CGFloat drawnColumnWidth, longestDrawnLine;
-static CFIndex drawnLineCount;
+static CFIndex drawnLineCount, drawnTextLength;
+static NSUInteger truncations;
+CTLineRef SGLyricsHarnessTruncatedLine(CTLineRef line, double width, CTLineTruncationType type, CTLineRef token) {
+    CTLineRef result = CTLineCreateTruncatedLine(line, width, type, token);
+    if (result && type == kCTLineTruncationEnd && token) truncations++;
+    return result;
+}
 // Interpose only the framework draw boundary in the harness. Measure the actual shaped CTLines
 // delivered by production, then call Core Text unchanged; no copy of the layout algorithm.
 void SGLyricsHarnessDrawFrame(CTFrameRef frame, CGContextRef context) {
@@ -52,6 +58,7 @@ void SGLyricsHarnessDrawFrame(CTFrameRef frame, CGContextRef context) {
     drawnColumnWidth = CGRectGetWidth(CGPathGetBoundingBox(CTFrameGetPath(frame)));
     CFArrayRef lines = CTFrameGetLines(frame);
     drawnLineCount = CFArrayGetCount(lines);
+    drawnTextLength = CTFrameGetVisibleStringRange(frame).length;
     longestDrawnLine = 0;
     for (CFIndex i = 0; i < drawnLineCount; i++) {
         CTLineRef line = CFArrayGetValueAtIndex(lines, i);
@@ -91,7 +98,7 @@ static CGImageRef solid(CGFloat value) {
 static CGImageRef render(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                          NSString *translation, CGSize size, SGLyricsClipLayout layout) {
     drawnColumnWidth = longestDrawnLine = 0;
-    drawnLineCount = 0;
+    drawnLineCount = drawnTextLength = 0;
 #ifdef SG_BASELINE
     return SGLyricsClipFrameWithLayout(backdrop, line, translation, nil, size, layout);
 #else
@@ -130,6 +137,44 @@ static CGRect bounds(CGImageRef image) {
     }
     return CGRectMake(left, top, right - left + 1, bottom - top + 1);
 }
+#ifndef SG_BASELINE
+static void checkTextSizes(CGImageRef blank, CGSize size) {
+    NSString *overflow = [@"" stringByPaddingToLength:4000 withString:@"夜空に光る星を数えながら" startingAtIndex:0];
+    for (SGLyricsClipLayout layout = SGLyricsClipLeft; layout <= SGLyricsClipOverArtwork; layout++) {
+        CGFloat previousWidth = 0;
+        for (SGLyricsClipTextSize choice = SGLyricsClipTextSmall; choice <= SGLyricsClipTextLarge; choice++) {
+            longestDrawnLine = 0;
+            CGImageRef shortLine = SGLyricsClipFrameWithTextSize(blank, NULL, nil, @"Hold", nil, nil, size, layout, choice);
+            check(shortLine && longestDrawnLine > previousWidth,
+                  [NSString stringWithFormat:@"short line grows with text size (layout %ld, size %ld)", (long)layout, (long)choice]);
+            previousWidth = longestDrawnLine;
+            CGImageRelease(shortLine);
+
+            truncations = 0;
+            CGImageRef longLine = SGLyricsClipFrameWithTextSize(blank, NULL, @"Before", overflow, @"번역",
+                                                                @"After", size, layout, choice);
+            CGRect ink = longLine ? bounds(longLine) : CGRectZero;
+            CGFloat screenPerPixel = 1179.0 / (2556 * size.width);
+            check(truncations && ink.size.height > 0 && .10 + CGRectGetMinY(ink) * screenPerPixel >= .17
+                  && .10 + CGRectGetMaxY(ink) * screenPerPixel <= .65,
+                  [NSString stringWithFormat:@"overflow ends in an ellipsis inside the safe band (layout %ld, size %ld)",
+                   (long)layout, (long)choice]);
+            CGImageRelease(longLine);
+        }
+    }
+    for (int moving = 0; moving <= 1; moving++) {
+        NSURL *source = moving ? [NSURL fileURLWithPath:@"/motion.mp4"] : nil;
+        NSMutableSet *looks = [NSMutableSet set];
+        for (SGLyricsClipTextSize choice = SGLyricsClipTextSmall; choice <= SGLyricsClipTextLarge; choice++)
+            [looks addObject:SGLyricsClipLookWithTextSize(source, SGLyricsClipStill, SGLyricsClipLeft, NO, choice)];
+        NSString *medium = SGLyricsClipLookWithTextSize(source, SGLyricsClipStill, SGLyricsClipLeft, NO, SGLyricsClipTextMedium);
+        check(looks.count == 3 && [SGLyricsClipLook(source, SGLyricsClipStill, SGLyricsClipLeft, NO) isEqual:medium] &&
+              [SGLyricsClipLookWithTextSize(source, SGLyricsClipStill, SGLyricsClipLeft, NO, -1) isEqual:medium] &&
+              [SGLyricsClipLookWithTextSize(source, SGLyricsClipStill, SGLyricsClipLeft, NO, 3) isEqual:medium],
+              source ? @"motion IDs distinguish all sizes and default to Medium" : @"still IDs distinguish all sizes and default to Medium");
+    }
+}
+#endif
 static double linear(double v) { return v <= .04045 ? v / 12.92 : pow((v + .055) / 1.055, 2.4); }
 
 int main(int argc, char **argv) {
@@ -178,10 +223,14 @@ int main(int argc, char **argv) {
             }
         }
         CGImageRef blank = SGLyricsBackgroundCreate(black, size, (SGLyricsBackgroundStyle){SGLyricsBackgroundCover, 0, 0, 0});
+#ifndef SG_BASELINE
+        if (!renderingOnly) checkTextSizes(blank, size);
+#endif
         for (SGLyricsClipLayout layout = SGLyricsClipLeft; layout <= SGLyricsClipPoster; layout++) {
             CGImageRef words = render(blank, black, previous, line, translation, size, layout);
             if (layout != SGLyricsClipPoster)
-                check(drawnLineCount == 3, [NSString stringWithFormat:@"reported sentence wraps naturally: two English lines and one Korean line (%ld)", (long)drawnLineCount]);
+                check(drawnLineCount > 2 && drawnTextLength >= (CFIndex)(line.length + 1 + translation.length),
+                      [NSString stringWithFormat:@"reported lyric and translation both fit with natural wrapping (%ld lines)", (long)drawnLineCount]);
             CGRect b = bounds(words);
             CGFloat screen = size.width, left = 0;
             CGFloat screenTop = .10 + b.origin.y / size.width * 1179 / 2556;
@@ -226,6 +275,21 @@ int main(int argc, char **argv) {
 #ifndef SG_BASELINE
         if (!renderingOnly && written) {
             NSURL *leased = [NSURL fileURLWithPath:@(argv[2])];
+            CGFloat previousWidth = 0;
+            for (SGLyricsClipTextSize choice = SGLyricsClipTextSmall; choice <= SGLyricsClipTextLarge; choice++) {
+                longestDrawnLine = 0;
+                CGImageRef preview = SGLyricsClipMotionFrameWithTextSize(video, nil, @"Hold", nil, nil, 0, 2,
+                                                                         SGLyricsClipLeft, choice);
+                CGFloat previewWidth = longestDrawnLine;
+                longestDrawnLine = 0;
+                BOOL encoded = SGLyricsClipWriteOverMotionWithTextSize(leased, video, nil, @"Hold", nil, nil, 0, 2,
+                                                                      SGLyricsClipLeft, choice, nil);
+                check(preview && encoded && previewWidth > previousWidth && fabs(longestDrawnLine - previewWidth) < 1,
+                      [NSString stringWithFormat:@"motion preview and clip share the selected text size (%ld)", (long)choice]);
+                CGImageRelease(preview);
+                previousWidth = previewWidth;
+                [NSFileManager.defaultManager removeItemAtURL:leased error:nil];
+            }
             NSData *original = [@"leased clip" dataUsingEncoding:NSUTF8StringEncoding];
             check([original writeToURL:leased atomically:YES], @"existing clip seeded");
             BOOL replaced = SGLyricsClipWriteOverMotion(leased, video, nil, line, nil, nil, 0, 2, SGLyricsClipLeft, nil);

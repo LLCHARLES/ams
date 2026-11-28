@@ -37,6 +37,12 @@ NSArray *SGLockScreenMotionRows(void) {
         dim.visible = ^BOOL {
             return SGLockArtworkShowsLyrics(SGLockScreenArtwork()) && SGInt(SGKeyLockScreenLyricsLayout, SGLyricsClipLeft) == SGLyricsClipOverArtwork;
         };
+        SGModRow *size = SGChoiceRow(SGL(@"settings.lockscreen.lyrics_size.title", @"Text size"),
+                                     SGL(@"settings.lockscreen.lyrics_size.subtitle", @"Size of the lyrics and translation on the lock screen."),
+                                     SGKeyLockScreenLyricsSize, @[SGL(@"settings.lockscreen.lyrics_size.choice.small", @"Small"),
+                                                                  SGL(@"settings.lockscreen.lyrics_size.choice.medium", @"Medium"),
+                                                                  SGL(@"settings.lockscreen.lyrics_size.choice.large", @"Large")], SGLyricsClipTextMedium);
+        size.visible = style.visible;
         SGModRow *translation = SGOptionRow(SGL(@"settings.lockscreen.translations.title", @"Translations"), SGL(@"settings.lockscreen.translations.subtitle", @"Under the line, when the lyrics have one or automatic translation makes one"), SGKeyLockScreenTranslation);
         translation.visible = style.visible;
         SGModRow *star = SGOptionRow(SGL(@"settings.lockscreen.star_switch.title", @"Switch with the star"), SGL(@"settings.lockscreen.star_switch.subtitle", @"The lock screen widget's star swaps the moving artwork for the lyrics "
@@ -58,6 +64,7 @@ NSArray *SGLockScreenMotionRows(void) {
             style,
             layout,
             dim,
+            size,
             translation,
             star,
         ] mutableCopy];

@@ -1229,6 +1229,11 @@
 "settings.lockscreen.lyrics_layout.choice.vinyl" = "Vinyl";
 "settings.lockscreen.lyrics_layout.subtitle" = "Where the lyrics sit. Poster shows the line alone, larger.";
 "settings.lockscreen.lyrics_layout.title" = "Layout";
+"settings.lockscreen.lyrics_size.choice.large" = "Large";
+"settings.lockscreen.lyrics_size.choice.medium" = "Medium";
+"settings.lockscreen.lyrics_size.choice.small" = "Small";
+"settings.lockscreen.lyrics_size.subtitle" = "Size of the lyrics and translation on the lock screen.";
+"settings.lockscreen.lyrics_size.title" = "Text size";
 "settings.lockscreen.lyrics_style.choice.animated" = "Animated";
 "settings.lockscreen.lyrics_style.choice.still" = "Still";
 "settings.lockscreen.lyrics_style.subtitle" = "Still draws each line once; Animated gently moves the selected background. Applies when moving artwork is unavailable.";

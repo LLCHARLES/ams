@@ -258,15 +258,15 @@ CGImageRef SGLyricsClipBackdrop(CGImageRef cover, CGSize size) {
     return CGImageRetain(cover ?: blue.CGImage);
 }
 CGImageRef harnessPublicationFrame(NSString *, CGImageRef);
-CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
-                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) {
+CGImageRef SGLyricsClipFrameWithTextSize(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) {
     return harnessPublicationFrame(line, backdrop);
 }
 CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
     return CGImageRetain(cover ?: blue.CGImage);
 }
-NSString *SGLyricsClipLook(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed) {
-    return [NSString stringWithFormat:@"style%ldl%ld%@%@", (long)style, (long)layout, dimmed ? @"d" : @"", motion ? motion.lastPathComponent : @""];
+NSString *SGLyricsClipLookWithTextSize(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed, SGLyricsClipTextSize textSize) {
+    return [NSString stringWithFormat:@"style%ldl%ldz%ld%@%@", (long)style, (long)layout, (long)textSize, dimmed ? @"d" : @"", motion ? motion.lastPathComponent : @""];
 }
 static BOOL writeFrame(NSURL *file, CGImageRef frame) {
     NSData *data = UIImagePNGRepresentation([UIImage imageWithCGImage:frame]);
@@ -301,17 +301,17 @@ static BOOL recordClip(NSURL *file, NSString *line, NSString *translation, BOOL 
     }
     return YES;
 }
-BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+BOOL SGLyricsClipWriteWithTextSize(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     return recordClip(file, line, translation, current) && writeFrame(file, backdrop);
 }
-BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
+BOOL SGLyricsClipWriteOverMotionWithTextSize(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void)) {
     return recordClip(file, line, translation, current) && writeFrame(file, blue.CGImage);
 }
-CGImageRef SGLyricsClipMotionFrame(NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                   NSString *next, double from, double seconds, SGLyricsClipLayout layout) { return CGImageRetain(blue.CGImage); }
+CGImageRef SGLyricsClipMotionFrameWithTextSize(NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                   NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) { return CGImageRetain(blue.CGImage); }
 BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) { return writeFrame(out, blue.CGImage); }
 CGImageRef SGFluidClipFrame(CGImageRef cover, CGSize size) { return CGImageRetain(cover); }
 BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size) { return writeFrame(file, cover); }
@@ -989,7 +989,19 @@ void artworkChecks(void) {
     report();
     NSURL *styleNext = video(artwork());
     check(styleNext && ![styleNext isEqual:nextFile], @"style change creates a distinct prefetched disk clip");
+    id beforeResize = artwork();
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSDictionary *savedDomain = [defaults volatileDomainForName:NSArgumentDomain];
+    NSMutableDictionary *resized = [savedDomain mutableCopy];
+    resized[SGKeyLockScreenLyricsSize] = @(SGLyricsClipTextLarge);
+    [defaults setVolatileDomain:resized forName:NSArgumentDomain];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+    HARNESS_AWAIT(artwork() && [name(artwork()) containsString:@"z2"]);
+    NSURL *largerFile = video(artwork());
+    check(state.isPaused && largerFile && ![largerFile isEqual:styleNext] && !preview(beforeResize),
+          @"changing text size while paused replaces the current clip and retires its old preview");
     choose(SGLockArtworkOff);
+    [defaults setVolatileDomain:savedDomain forName:NSArgumentDomain];
     nativeInfo(nil);
     drainMain();
     check(!artwork(), @"late now-playing info cannot revive disabled lyrics");

@@ -289,7 +289,33 @@ BOOL SGHarnessWarning;
 }
 @end
 
+static void lockScreenSizeChoiceChecks(void) {
+    SGModRow *size = nil;
+    for (SGModRow *row in SGLockScreenMotionRows()) {
+        if ([row.title isEqual:SGL(@"settings.lockscreen.lyrics_size.title", @"Text size")]) size = row;
+    }
+    HARNESS_CHECK(size.value && size.page);
+    UITableViewController *page = (id)size.page();
+    UITableView *table = page.tableView;
+    HARNESS_CHECK([page tableView:table numberOfRowsInSection:0] == 3);
+    for (NSNumber *stored in @[@(-1), @3, @0, @1, @2]) {
+        SGSetInt(SGKeyLockScreenLyricsSize, stored.integerValue);
+        NSInteger expected = stored.integerValue < 0 || stored.integerValue >= 3 ? 1 : stored.integerValue;
+        for (NSInteger index = 0; index < 3; index++) {
+            NSIndexPath *path = [NSIndexPath indexPathForRow:index inSection:0];
+            UITableViewCell *cell = [page tableView:table cellForRowAtIndexPath:path];
+            HARNESS_CHECK((cell.accessoryView != nil) == (index == expected));
+            if (index == expected) HARNESS_CHECK([size.value() isEqual:((UIListContentConfiguration *)cell.contentConfiguration).text]);
+        }
+        HARNESS_CHECK(SGInt(SGKeyLockScreenLyricsSize, 1) == stored.integerValue);
+    }
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:SGKeyLockScreenLyricsSize];
+    SGPrefsChanged();
+    NSLog(@"[harness] lock screen text size choice PASS");
+}
+
 static void refactorChecks(void) {
+    if (@available(iOS 26.0, *)) lockScreenSizeChoiceChecks();
     UITableViewController *gestures = (id)SGGesturesSettingsPage();
     UITableView *gestureTable = gestures.tableView;
     NSIndexPath *split = [NSIndexPath indexPathForRow:0 inSection:1];

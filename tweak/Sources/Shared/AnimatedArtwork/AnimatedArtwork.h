@@ -30,6 +30,8 @@ static inline BOOL SGLockArtworkShowsLyrics(SGLockArtwork artwork) {
 #define SGKeyLockScreenLyricsStyle @"spotifyglass.lockscreen.lyricsStyle"
 // Where the lyrics sit, stored as the index of SGLyricsClipLayout (Left unless changed).
 #define SGKeyLockScreenLyricsLayout @"spotifyglass.lockscreen.lyricsLayout"
+// Size of the lyrics in every layout, stored as SGLyricsClipTextSize (Medium by default).
+#define SGKeyLockScreenLyricsSize @"spotifyglass.lockscreen.lyricsSize"
 // Off until switched on: Over the artwork blurs and darkens the whole artwork, moving artwork included, and the
 // lines float over it, instead of a shade beside them over the cover kept sharp (SGLyricsClipDimmedArtwork).
 #define SGKeyLockScreenDimArtwork @"spotifyglass.lockscreen.dimArtwork"

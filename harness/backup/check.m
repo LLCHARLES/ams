@@ -249,6 +249,7 @@ static void runChecks(void) {
         HARNESS_CHECK([portable[@"spotifyglass.registered"] isEqual:@2] && [portable[@"spotifyglass.flag.bad"] isEqual:@YES] &&
             [portable[@"spotifyglass.artistBlock.list"] count] == 1 && !portable[@"spotifyglass.motion.sources"]);
         NSDictionary *choices = @{@"spotifyglass.homeGradientTint":@3, @"spotifyglass.homeGradientStrength":@2,
+            @"spotifyglass.lockscreen.lyricsSize":@2,
             @"spotifyglass.homeGradientHeight":@1, @"spotifyglass.navbar.layout":@[@{@"id":@"home", @"hidden":@NO}],
             @"spotifyglass.navbar.split":@[@"home"], @"spotifyglass.redesign.fluid.speed":@125,
             @"spotifyglass.lyrics.pip.original.size":@64, @"spotifyglass.lyrics.pip.original.weight":@2,

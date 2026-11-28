@@ -218,7 +218,7 @@ static Class settingClass(NSString *key, NSDictionary *registered) {
             "redesign.haptics.music redesign.haptics.music.strength redesign.haptics.music.follows redesign.liveActivity redesign.liveActivity.view "
             "lockscreen.motion lyrics.typeFirst hideExplicit homeGradient language likelyAIBadges liveActivity liveActivity.alignment liveActivity.artwork liveActivity.colors liveActivity.progressBar "
             "liveActivity.textSize liveActivity.translation liveActivity.view liveActivity.withoutLyrics loadAhead lockScreenLyrics lockScreenLyrics.line lockscreen.artwork "
-            "lockscreen.dimArtwork lockscreen.lyricsLayout lockscreen.lyricsStyle lockscreen.star lockscreen.star.back lockscreen.translation lossless lyrics.appleIntelligence "
+            "lockscreen.dimArtwork lockscreen.lyricsLayout lockscreen.lyricsSize lockscreen.lyricsStyle lockscreen.star lockscreen.star.back lockscreen.translation lossless lyrics.appleIntelligence "
             "lyrics.askMode lyrics.besideEevee lyrics.bingTranslate lyrics.culturalNotes lyrics.googleTranslate lyrics.offline lyrics.pip lyrics.pip.alignment lyrics.pip.info "
             "lyrics.pip.layout lyrics.pronunciationNotation lyrics.translateEverySong lyrics.translateOnDevice lyrics.translateTitles lyricsAllTracks lyricsCard lyricsCredit "
             "lyricsDelay lyricsFurigana lyricsJapaneseKana lyricsMeanings lyricsPreferWordTiming lyricsPronunciationHangul lyricsRomanised lyricsSimulateWords lyricsTranslationLanguage "
