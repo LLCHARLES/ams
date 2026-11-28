@@ -108,7 +108,8 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     CALayer *_backdrop;
     SGRFlowLayer *_flow;
     SGRFluidLayer *_fluidLayer;
-    BOOL _watching;
+    BOOL _watching, _deferredPalette;
+    id _activeObserver;
     UIColor *_color;          // the color asked for
     UIColor *_shownColor;     // and the one _solid paints for it (-fieldColor)
     UIColor *_paletteColor;   // the last palette's field color, shown again when the override goes
@@ -116,7 +117,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     UIImage *_image;
     NSString *_identity;
     NSUInteger _generation;
-    BOOL _read;
+    BOOL _read, _clipCovered;
 }
 
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -141,6 +142,11 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     _backdrop.contentsGravity = kCAGravityResize;
     _backdrop.hidden = YES;
     [self.layer addSublayer:_backdrop];
+    __weak SGRArtworkField *weakSelf = self;
+    _activeObserver = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf becameActive]; });
+        }];
     return self;
 }
 
@@ -188,16 +194,18 @@ UIColor *SGRFieldShownColor(UIColor *color) {
 - (void)setFluid:(BOOL)fluid {
     if (fluid == _fluid) return;
     _fluid = fluid;
-    if (fluid) self.flows = NO;
     if (fluid && !_fluidLayer) {
         _fluidLayer = [SGRFluidLayer layer];
+        _fluidLayer.hidden = YES;
         [self.layer insertSublayer:_fluidLayer above:_solid];
     }
-    // The fluid field is the whole picture, as the moving one is.
-    [self updateMotion];
+    // Turning off Colours also updates motion, which may uncover a retained Fluid layer.
+    if (fluid) {
+        if (_image) [_fluidLayer setArtwork:_image animated:NO];
+        self.flows = NO;
+    }
     _black.hidden = fluid || _flows;
     if (fluid) _backdrop.hidden = YES;
-    if (fluid && _image) [_fluidLayer setArtwork:_image animated:NO];
     if (!fluid && !_flows) [self readPaletteAnimated:NO];
     [self watch];
     [self updateMotion];
@@ -229,9 +237,29 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     [self updateMotion];
 }
 
+- (void)setOffscreen:(BOOL)offscreen {
+    if (_offscreen == offscreen) return;
+    _offscreen = offscreen;
+    [self updateMotion];
+}
+
 - (void)setCovered:(BOOL)covered {
-    if (covered == _covered) return;
-    _covered = covered;
+    if (covered == _clipCovered) return;
+    _clipCovered = covered;
+    [self updateCoverage];
+}
+
+- (BOOL)covered {
+    return _clipCovered || _backdropCovered;
+}
+
+- (void)setBackdropCovered:(BOOL)covered {
+    if (covered == _backdropCovered) return;
+    _backdropCovered = covered;
+    [self updateCoverage];
+}
+
+- (void)updateCoverage {
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
     [self updateMotion];
@@ -242,7 +270,7 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     if (_watching || (!_flows && !_fluid)) return;
     _watching = YES;
     NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
-    for (NSNotificationName name in @[UIApplicationDidBecomeActiveNotification, UIApplicationWillResignActiveNotification,
+    for (NSNotificationName name in @[UIApplicationWillResignActiveNotification,
                                       NSProcessInfoPowerStateDidChangeNotification, NSProcessInfoThermalStateDidChangeNotification,
                                       UIAccessibilityReduceMotionStatusDidChangeNotification]) {
         [center addObserver:self selector:@selector(updateMotionSoon) name:name object:nil];
@@ -250,7 +278,13 @@ UIColor *SGRFieldShownColor(UIColor *color) {
     SGRObservePlayerTransition(self, ^(id owner) { [owner updateMotion]; });
 }
 
+- (void)becameActive {
+    if (_deferredPalette && SGRArtworkAppIsActive()) [self readPaletteAnimated:NO];
+    [self updateMotion];
+}
+
 - (void)dealloc {
+    if (_activeObserver) [NSNotificationCenter.defaultCenter removeObserver:_activeObserver];
     [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
@@ -261,14 +295,15 @@ UIColor *SGRFieldShownColor(UIColor *color) {
 
 - (void)updateMotion {
     if (!_flow && !_fluidLayer) return;
-    // Keep the last frame for the switcher snapshot; only motion needs the app to be active.
-    BOOL front = UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
-    BOOL visible = self.window && !self.hidden;
-    _fluidLayer.hidden = !_fluid || _covered || !visible;
+    // Keep the last frame for the switcher snapshot.
+    BOOL front = SGRArtworkAppIsActive();
+    BOOL visible = self.window && !self.hidden && !_offscreen;
+    BOOL covered = self.covered;
+    _fluidLayer.hidden = !_fluid || covered || !visible;
     BOOL may = visible && front && !SGRPlayerIsTransitioning() && !SGRReduceMotion()
             && !SGRMotionHeldForPowerOrHeat() && !_motionHeld;
-    _fluidLayer.moving = may && _fluid && !_covered;
-    BOOL moving = may && _flows && !_covered && !_flow.hidden;
+    _fluidLayer.moving = may && _fluid && !covered;
+    BOOL moving = may && _flows && !covered && !_flow.hidden;
     if (!_flow || moving == _flow.moving) return;
     _flow.moving = moving;
     static NSUInteger logged;
@@ -322,6 +357,8 @@ UIColor *SGRFieldShownColor(UIColor *color) {
 - (void)readPaletteAnimated:(BOOL)animated {
     NSUInteger generation = ++_generation;
     if (!_image) return;
+    _deferredPalette = !SGRArtworkAppIsActive();
+    if (_deferredPalette) return;
     SGRPaletteRequest request = {.flow = _flows, .mainColor = _mainColor};
     if (_showsBackdrop && !_flows && !_fluid) request.backdropSize = CGSizeMake(self.bounds.size.width > 0 ? self.bounds.size.width : 402, [self backdropHeightNow]);
     __weak SGRArtworkField *weakSelf = self;

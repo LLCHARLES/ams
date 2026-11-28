@@ -1,6 +1,7 @@
 #import <CoreImage/CoreImage.h>
 #import "Core/SGCore.h"
 #import "SGRFluid.h"
+#import "SGRField.h"
 #import "SGRFluidGPU.h"
 #import "SGRTokens.h"
 #import "SGRBackdropInk.h"
@@ -196,7 +197,7 @@ static UIImage *blurred(UIImage *image, BOOL contrast, CGFloat relativeSigma, CG
         imageByApplyingFilter:@"CIGaussianBlur" withInputParameters:@{kCIInputRadiusKey: @(radius)}];
     static CIContext *context;
     static dispatch_once_t once;
-    // Covers are prepared even offscreen; leave GPU submission to the visible renderer.
+    // Leave GPU submission to the visible renderer.
     dispatch_once(&once, ^{
         CGColorSpaceRef encoded = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
         context = [CIContext contextWithOptions:@{kCIContextWorkingColorSpace: (__bridge id)encoded,
@@ -309,7 +310,8 @@ NSData *SGRFluidGradeTable(int side) {
     CGRect _laidOutFor;
     SGRFluidGPULayer *_gpu;   // Smooth, under the copies; nil while Light is chosen
     BOOL _gpuShown;           // its first frame is on screen and the copies are hidden
-    BOOL _requestedHidden, _preparing, _awaitingCoveredBlur;
+    BOOL _requestedHidden, _preparing, _awaitingCoveredBlur, _deferredPrepare;
+    id _activeObserver;
 }
 
 - (instancetype)init {
@@ -337,10 +339,16 @@ NSData *SGRFluidGradeTable(int side) {
     // Posted on the main thread by the Player page's sliders, so the change applies at once.
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(settingsChanged)
         name:SGRFluidSettingsDidChangeNotification object:nil];
+    __weak SGRFluidLayer *weakSelf = self;
+    _activeObserver = [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+        object:nil queue:nil usingBlock:^(NSNotification *note) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf resumePreparation]; });
+        }];
     return self;
 }
 
 - (void)dealloc {
+    if (_activeObserver) [NSNotificationCenter.defaultCenter removeObserver:_activeObserver];
     [NSNotificationCenter.defaultCenter removeObserver:self];
 }
 
@@ -353,9 +361,11 @@ NSData *SGRFluidGradeTable(int side) {
 
 // The same cover blurred again, for a new Blur, Saturation, Brightness or contrast.
 - (void)reblur {
-    UIImage *source = _source;
-    _source = nil;
-    [self setArtwork:source animated:NO];
+    if (_source) [self prepareArtworkAnimated:NO];
+}
+
+- (void)resumePreparation {
+    if (_deferredPrepare && !_requestedHidden && SGRArtworkAppIsActive()) [self prepareArtworkAnimated:NO];
 }
 
 // Warp is how far from the middle the smaller copies sit, and how much they show (opaque at the standard 100 %): at
@@ -390,7 +400,7 @@ NSData *SGRFluidGradeTable(int side) {
         __weak SGRFluidLayer *weakSelf = self;
         __weak SGRFluidGPULayer *weakGPU = _gpu;
         _gpu.drawn = ^{ [weakSelf gpuDrew:weakGPU]; };
-        _gpu.held = self.hidden;
+        _gpu.held = self.hidden || _awaitingCoveredBlur;
         _gpu.moving = _moving;
         [self setNeedsLayout];
         if (_cover) [_gpu setCover:_cover.CGImage animated:NO];
@@ -445,8 +455,12 @@ NSData *SGRFluidGradeTable(int side) {
             [self showCopies];
         }
     }
-    [super setHidden:hidden || _awaitingCoveredBlur];
-    _gpu.held = self.hidden;
+    // While inactive keep an already visible frame for the app switcher. On return,
+    // keep the GPU held and the old artwork concealed until the new copies are ready.
+    BOOL keepSnapshot = _deferredPrepare && !self.hidden && !SGRArtworkAppIsActive();
+    [super setHidden:hidden || (_awaitingCoveredBlur && !keepSnapshot)];
+    _gpu.held = self.hidden || _awaitingCoveredBlur;
+    if (!hidden) [self resumePreparation];
 }
 
 - (BOOL)moving {
@@ -518,10 +532,22 @@ NSData *SGRFluidGradeTable(int side) {
 - (void)setArtwork:(UIImage *)image animated:(BOOL)animated {
     if (!image || image == _source) return;
     _source = image;
-    _preparing = YES;
-    if (self.hidden) _awaitingCoveredBlur = YES;
-    BOOL needsCover = _gpu != nil;
+    [self prepareArtworkAnimated:animated];
+}
+
+- (void)prepareArtworkAnimated:(BOOL)animated {
     NSUInteger generation = ++_generation;
+    _deferredPrepare = _requestedHidden || !SGRArtworkAppIsActive();
+    if (_deferredPrepare) {
+        _preparing = NO;
+        _awaitingCoveredBlur = YES;
+        _gpu.held = YES;
+        return;
+    }
+    UIImage *image = _source;
+    _preparing = YES;
+    if (_awaitingCoveredBlur) [super setHidden:YES];
+    BOOL needsCover = _gpu != nil;
     BOOL contrast = SGRIncreaseContrast();
     // The blur in points on screen, as the Music app's (kBackdropSigma at the standard Blur), as a radius on the large
     // copy's cover: it is kCopy[0].side units across, a unit half the visible rect's longer side.
@@ -532,7 +558,11 @@ NSData *SGRFluidGradeTable(int side) {
     CGFloat saturation = SGRFluidValue(SGRFluidSaturation) / 100.0;
     CGFloat gain = SGRFluidValue(SGRFluidBrightness) / 100.0;
     __weak SGRFluidLayer *weakSelf = self;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+#ifdef SGR_FLUID_FRAME_PROBE
+    extern void SGRProbeFluidPreparation(SGRFluidLayer *);
+    SGRProbeFluidPreparation(self);
+#endif
+    dispatch_block_t prepare = ^{
         CGFloat lowerLight = 0, largeScale = 0, smallScale = 0;
         UIImage *blur = blurred(image, contrast, points / (kCopy[0].side * longer), saturation, gain, &lowerLight, &largeScale);
         // The smaller copies are half the large one's size, so their cover is blurred twice as far for the same blur
@@ -559,7 +589,13 @@ NSData *SGRFluidGradeTable(int side) {
             layer->_awaitingCoveredBlur = NO;
             [layer setHidden:layer->_requestedHidden];
         });
-    });
+    };
+#ifdef SGR_ARTWORK_PREPARE_PROBE
+    extern void SGRProbeScheduleFluid(UIImage *, dispatch_block_t);
+    SGRProbeScheduleFluid(image, prepare);
+#else
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), prepare);
+#endif
 }
 
 - (void)show:(UIImage *)blur small:(UIImage *)small lowerLight:(CGFloat)lowerLight animated:(BOOL)animated {

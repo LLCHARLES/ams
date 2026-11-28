@@ -198,14 +198,16 @@ void SGRPlayerBackdropLaidOut(SGRArtworkField *field) {
     if (!field) return;
     SGRPlayerBackdropView *view = objc_getAssociatedObject(field, &kBackdropKey);
     if (SGRPlayerBackgroundFromArtwork(SGRPlayerBackground())) {
+        field.backdropCovered = NO;
         if (!view) return;
         [view removeFromSuperview];
         objc_setAssociatedObject(field, &kBackdropKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        field.covered = NO;
         SGRPlayerHoldField();
         SGLog(@"redesign player: black or the photo taken away, the artwork behind the player");
         return;
     }
+    // Creating and attaching the backdrop can reenter player layout. Hold Fluid first.
+    field.backdropCovered = YES;
     BOOL made = !view;
     if (made) {
         view = [[SGRPlayerBackdropView alloc] initWithFrame:field.bounds];
@@ -228,7 +230,6 @@ void SGRPlayerBackdropLaidOut(SGRArtworkField *field) {
         view.screen = shown;
         [view setNeedsLayout];
     }
-    field.covered = YES;
 }
 
 BOOL SGRPlayerBackdropShowing(void) {

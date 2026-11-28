@@ -25,4 +25,7 @@ still backdrop after leaving Fluid, including repeated round trips and a late Fl
 layer's drift: at rest until started, moved by its own steps with no window to animate it, held when
 stopped and carried on from there. The palette
 service, player-transition observer and Fluid renderer are test doubles; no Spotify or GPU run is implied.
-The temporary executable and its debug symbols are removed on exit.
+The same script checks the still field and the player’s cover accent across inactive track changes, with
+out-of-order palette replies. Its second executable runs the production Fluid renderer, checks its drawable
+sizes, and controls when preparation jobs run. Hidden and inactive changes must queue no work, activation
+and uncover must schedule only the latest cover, and a paused, visible layer must still prepare it.

@@ -385,10 +385,15 @@ come late, out of order, or not at all.
   0.5, 1 and 2 s after it (each read's own time logged, with whether Smooth shows and the number of Metal layers),
   compared with the band read about 4 s after; the read a second after must match it. It
   also changes a paused field's cover while detached and while resigning active: neither change should upload a texture
-  or start a display link. It samples Smooth's first drawable on attachment and reactivation, including an interrupted
+  or start a display link. Detached artwork waits for attachment before blur or upload. When a replacement
+  arrives under a clip, uncover keeps the previous cover hidden until the replacement blur is ready.
+  It samples Smooth's first drawable on attachment and reactivation, including an interrupted
   crossfade with no further track change, and checks that the photo-covered settings preview submits no frame. It also
   checks that Inactive keeps the last Smooth frame visible without submitting, and that a background artwork change
   submits nothing either. A playing field must stop submitting after a motion hold settles.
+  Fresh portrait players opened with a black or photo background must schedule zero Fluid preparations. Two track
+  changes under an opaque landscape window must also schedule zero portrait preparations. Closing the window must
+  schedule just one and present the latest cover on the first portrait drawable.
   `fluid-fragment-check.sh` separately checks Metal's active texture bindings for settled and fading copies.
 
 - `automix` is AutoMix's transitions in the player (`PlayerMix.x`, with `PlayerControls.x`, `PlayerQueue.m` and

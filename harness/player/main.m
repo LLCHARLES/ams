@@ -5941,7 +5941,13 @@ static NSUInteger metalLayersIn(CALayer *layer) {
 }
 
 static __weak CAMetalLayer *captureLayer;
-static char failUpright;
+static char failUpright, preparationCountKey;
+static NSUInteger fluidPreparations(CALayer *fluid) {
+    return [objc_getAssociatedObject(fluid, &preparationCountKey) unsignedIntegerValue];
+}
+void SGRProbeFluidPreparation(SGRFluidLayer *fluid) {
+    objc_setAssociatedObject(fluid, &preparationCountKey, @(fluidPreparations(fluid) + 1), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 BOOL SGRProbeFailUprightCover(UIImage *cover) { return objc_getAssociatedObject(cover, &failUpright) != nil; }
 extern NSUInteger SGRHarnessSpectrumReaders(void);
 static int presentedPixel[3];
@@ -6082,6 +6088,7 @@ static double bandDiff(NSData *a, NSData *b) {
     Method appState = class_getInstanceMethod(UIApplication.class, @selector(applicationState));
     __block IMP originalState, simulatedState;
     __block UIApplicationState lifecycleState;
+    __block id snapshotTexture;
     __block UIView *card;
     step(0, ^{
         SGRSetFluidRenderer(SGRFluidRendererSmooth);
@@ -6089,10 +6096,8 @@ static double bandDiff(NSData *a, NSData *b) {
         [probe layoutIfNeeded];
         gpu = (SGRFluidGPULayer *)fluidLayerIn(probe.layer).sublayers.firstObject;
         [probe setArtwork:solid(UIColor.redColor) identity:@"detached" animated:YES];
-    });
-    when(PLAYER_GATE([gpu valueForKey:@"toPicture"]), ^{
-        [self expect:[gpu valueForKey:@"toPicture"] != nil && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
-                step:@"detached artwork prepared without a Metal texture or ticker" detail:state()];
+        [self expect:![gpu valueForKey:@"toPicture"] && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+                step:@"detached artwork awaits attachment without a texture or ticker" detail:state()];
         captureNextFrame(gpu);
         [self.window addSubview:probe];
     });
@@ -6113,17 +6118,18 @@ static double bandDiff(NSData *a, NSData *b) {
         [self expect:captureLayer == gpu step:@"settled field does not submit another frame" detail:state()];
         captureNextFrame(gpu);
         [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+        snapshotTexture = [gpu valueForKey:@"to"];
         lifecycleState = UIApplicationStateInactive;
         simulatedState = imp_implementationWithBlock(^UIApplicationState(id app) { return lifecycleState; });
         originalState = method_setImplementation(appState, simulatedState);
         [probe setArtwork:solid(UIColor.blueColor) identity:@"inactive" animated:YES];
     });
     step(1, ^{
-        [self expect:!gpu.superlayer.hidden && !gpu.hidden && captureLayer == gpu && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+        [self expect:!gpu.superlayer.hidden && !gpu.hidden && captureLayer == gpu && [gpu valueForKey:@"to"] == snapshotTexture && ![gpu valueForKey:@"link"]
                 step:@"inactive field keeps its frame without a submission or ticker" detail:state()];
         lifecycleState = UIApplicationStateBackground;
         [probe setArtwork:solid(UIColor.blueColor) identity:@"background" animated:YES];
-        [self expect:captureLayer == gpu && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+        [self expect:captureLayer == gpu && [gpu valueForKey:@"to"] == snapshotTexture && ![gpu valueForKey:@"link"]
                 step:@"background artwork submits no frame or ticker" detail:state()];
         method_setImplementation(appState, originalState);
         imp_removeBlock(simulatedState);
@@ -6149,6 +6155,9 @@ static double bandDiff(NSData *a, NSData *b) {
         // Hold Metal submissions through the screenshot so a later drawable cannot satisfy it.
         [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
         probe.covered = NO;
+        [self expect:gpu.superlayer.hidden step:@"old cover stays concealed during preparation" detail:state()];
+    });
+    when(PLAYER_GATE(!gpu.superlayer.hidden), ^{
         NSData *surface = fieldBand(probe);
         const uint8_t *pixel = (const uint8_t *)surface.bytes + 4 * (40 + 28 * 80);
         [self expect:pixel[0] > pixel[1] && pixel[0] > pixel[2]
@@ -6248,6 +6257,63 @@ static double bandDiff(NSData *a, NSData *b) {
         captureLayer = nil;
         [card setValue:@NO forKey:@"active"];
         [card removeFromSuperview];
+    });
+    step(0, ^{
+        SGRSetPlayerBackground(SGRPlayerBackgroundFluid);
+        [self->_background viewWillAppear:NO];
+        [self->_background viewDidLayoutSubviews];
+        [self->_background viewDidAppear:NO];
+        HARNESS_CHECK(SGRPlayerIsVisible() && !SGRPlayerField().covered);
+        SGRPlayerShowLandscape(YES);
+    });
+    __block CALayer *portraitFluid;
+    __block NSUInteger portraitBefore;
+    when(PLAYER_GATE(SGRPlayerLandscapeCovers(self.window)), ^{
+        portraitFluid = fluidLayerIn(SGRPlayerField().layer);
+        portraitBefore = fluidPreparations(portraitFluid);
+        SGRHarnessSetTrack(@"spotify:track:landscapeB", nil, YES);
+        SGRSetNowPlayingArtwork(solid(UIColor.greenColor), @"spotify:track:landscapeB", SGRArtworkQualityHigh);
+        SGRHarnessSetTrack(@"spotify:track:landscapeC", nil, YES);
+        SGRSetNowPlayingArtwork(solid(UIColor.blueColor), @"spotify:track:landscapeC", SGRArtworkQualityHigh);
+    });
+    when(PLAYER_GATE([colorName([portraitFluid valueForKey:@"source"]) isEqual:@"blue"]), ^{
+        [self expect:portraitFluid.hidden && fluidPreparations(portraitFluid) == portraitBefore
+                step:@"opaque landscape skips portrait blur on track changes" detail:state()];
+        captureNextFrame((id)portraitFluid.sublayers.firstObject);
+        SGRPlayerShowLandscape(NO);
+        [self expect:fluidPreparations(portraitFluid) == portraitBefore + 1
+                step:@"closing landscape starts one portrait blur" detail:[NSString stringWithFormat:
+                    @"same field %d visible %d offscreen %d covered %d hidden %d deferred %@ before %lu after %lu window %@ field %@",
+                    portraitFluid == fluidLayerIn(SGRPlayerField().layer), SGRPlayerIsVisible(), SGRPlayerField().offscreen,
+                    SGRPlayerField().covered, portraitFluid.hidden, [portraitFluid valueForKey:@"deferredPrepare"],
+                    (unsigned long)portraitBefore, (unsigned long)fluidPreparations(portraitFluid), NSStringFromCGRect(self.window.bounds),
+                    NSStringFromCGRect([SGRPlayerField() convertRect:SGRPlayerField().bounds toView:self.window])]];
+    });
+    when(PLAYER_GATE(capturedPixel), ^{
+        [self expect:presentedPixel[2] > MAX(presentedPixel[0], presentedPixel[1]) && !portraitFluid.hidden &&
+                     fluidPreparations(portraitFluid) == portraitBefore + 1
+                step:@"portrait returns on the latest blue frame" detail:state()];
+    });
+    step(0, ^{
+        HARNESS_CHECK(SGRNowPlayingArtwork(NULL, NULL));
+        for (NSNumber *kind in @[@(SGRPlayerBackgroundBlack), @(SGRPlayerBackgroundPhoto)]) {
+            SGRSetPlayerBackground(kind.integerValue);
+            UIViewController *background = [_TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController new];
+            background.view.frame = self.window.bounds;
+            [self.window addSubview:background.view];
+            [background viewWillAppear:NO];
+            [background viewDidLayoutSubviews];
+            [background viewDidAppear:NO];
+            SGRArtworkField *field = SGRPlayerField();
+            CALayer *fluid = fluidLayerIn(field.layer);
+            [self expect:field.superview == background.view && field.window && field.covered && fluid &&
+                         [fluid valueForKey:@"source"] && fluidPreparations(fluid) == 0
+                    step:kind.integerValue == SGRPlayerBackgroundBlack ? @"first black field skips blur" : @"first photo field skips blur"
+                  detail:[NSString stringWithFormat:@"own %d window %d covered %d source %d queued %lu",
+                          field.superview == background.view, field.window != nil, field.covered, [fluid valueForKey:@"source"] != nil,
+                          (unsigned long)fluidPreparations(fluid)]];
+            [background.view removeFromSuperview];
+        }
     });
     step(0, ^{
         NSLog(@"[harness] renderer checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
