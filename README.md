@@ -1,122 +1,120 @@
 <p align="right"><b>한국어</b> · <a href="README.en.md">English</a></p>
 
-<p align="center">
-  <img src="docs/icon.png" width="128" alt="Retrine 아이콘">
-</p>
+<p align="center"><img src="docs/icon.png" width="128" alt="Retrine 앱 아이콘"></p>
 
 <h1 align="center">Retrine</h1>
 
 <p align="center">
-  <b>Liquid Glass로 다시 만든 iOS용 Spotify.</b><br>
-  탈옥 없이, 직접 준비한 복호화된 Spotify IPA에 주입하는 트윅입니다.
+  <strong>iOS용 Spotify에 Liquid Glass 플레이어와 싱크 가사를 더합니다.</strong><br>
+  직접 준비한 Spotify IPA를 빌드하고 서명해 탈옥 없이 사용하세요.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Spotify-9.1.90%20%7C%209.2.0%20%7C%209.2.2-1ED760?style=for-the-badge&logo=spotify&logoColor=white" alt="Spotify 9.1.90 | 9.2.0 | 9.2.2">
-  <img src="https://img.shields.io/badge/Redesign-iOS%2026%2B-000000?style=for-the-badge&logo=apple&logoColor=white" alt="재설계: iOS 26+">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=for-the-badge" alt="라이선스: GPL-3.0"></a>
+  <img src="https://img.shields.io/badge/Spotify-9.1.90%20%7C%209.2.0%20%7C%209.2.2-16834B" alt="Spotify 9.1.90 | 9.2.0 | 9.2.2">
+  <img src="https://img.shields.io/badge/Redesign-iOS%2026%2B-4B5363" alt="Redesign · iOS 26+">
+  <img src="https://img.shields.io/badge/Native-iOS%2016.1%2B-4B5363" alt="Native · iOS 16.1+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-526A86" alt="GPL-3.0"></a>
+  <a href="https://github.com/oneulddu/Retrine/releases"><img src="https://img.shields.io/github/v/release/oneulddu/Retrine?label=Release&amp;color=526A86" alt="GitHub Release"></a>
 </p>
 
 <p align="center">
+  <a href="#두-가지-화면">화면 비교</a> ·
+  <a href="#플레이어와-가사">플레이어와 가사</a> ·
   <a href="#직접-빌드하기">빌드</a> ·
   <a href="#서명과-번들-id">서명</a> ·
-  <a href="#wireguard--프록시">WireGuard</a> ·
   <a href="docs/tweaks.md">개발 문서</a> ·
   <a href="https://github.com/oneulddu/Retrine/issues/new/choose">버그 제보</a>
 </p>
 
+Retrine은 [Vitrine](https://github.com/My-Name-Is-Jeff/vitrine)에서 갈라져 나온 Theos 트윅(Objective-C + Logos)입니다. **완성된 IPA는 배포하지 않습니다.** 지원 버전의 복호화된 Spotify IPA를 준비해 GitHub Actions나 Mac에서 빌드하세요.
+
+## 화면 미리보기
+
+<table align="center">
+  <tr>
+    <td align="center"><a href="docs/screenshots/now-playing.webp"><img src="docs/screenshots/now-playing.webp" width="192" alt="전체 화면 가사"></a><br><sub>전체 화면 가사</sub></td>
+    <td align="center"><a href="docs/screenshots/album.webp"><img src="docs/screenshots/album.webp" width="192" alt="앨범"></a><br><sub>앨범</sub></td>
+    <td align="center"><a href="docs/screenshots/playlist.webp"><img src="docs/screenshots/playlist.webp" width="192" alt="플레이리스트"></a><br><sub>플레이리스트</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><a href="docs/screenshots/queue.webp"><img src="docs/screenshots/queue.webp" width="192" alt="재생 대기열"></a><br><sub>재생 대기열</sub></td>
+    <td align="center"><a href="docs/screenshots/live-activity.webp"><img src="docs/screenshots/live-activity.webp" width="192" alt="잠금 화면의 Live Activity"></a><br><sub>잠금 화면의 Live Activity</sub></td>
+    <td align="center"><a href="docs/screenshots/home.webp"><img src="docs/screenshots/home.webp" width="192" alt="홈"></a><br><sub>홈</sub></td>
+  </tr>
+</table>
+
+## 두 가지 화면
+
+**모드 설정 → 재설계 UI**에서 화면을 고르고 Spotify를 다시 엽니다. 모드 설정은 탭 바의 **홈을 길게 누르거나**, 사이드 메뉴 첫 줄 또는 Spotify 설정 맨 아래에서 열 수 있습니다.
+
+| | 재설계 화면 | Spotify 기본 화면 |
+|---|---|---|
+| 지원 환경 | iOS 26 이상 · Liquid Glass | iOS 16.1 이상 · Spotify의 기존 화면 |
+| 탐색 | 글래스 탭 바·검색창·재생 바, 탭 분리(Split Tabs) | 화면 요소 숨기기, 글래스 헤더 버튼 |
+| 화면 구성 | 간결한 홈, 색을 입힌 글래스 검색 카테고리, 큰 제목 하나로 정리한 보관함. 앨범·플레이리스트·아티스트 페이지에는 시스템 메뉴를 여는 ⋯ 버튼이 고정됩니다. | 홈 그라데이션, AMOLED 모드와 강조 색상을 각각 선택할 수 있습니다. |
+| 플레이어 | Apple Music 스타일 가사, 선택 가능한 Apple Music 대기열, 검은 바탕에 Spotify·Apple Music·사용자 지정 강조 색상 | Spotify의 플레이어와 탐색 방식을 유지합니다. |
+
+재설계 화면에서는 기본 화면용 트윅이 꺼집니다. 광고·개인정보 보호, 가사 소스, 제스처, 차단 목록, 진동, 속도·피치, Live Activity는 두 화면에서 함께 쓸 수 있습니다.
+
+설정 검색으로 원하는 항목을 바로 찾을 수 있습니다. 직접 둘러볼 때는 **모양 및 탐색**, **화면**, **오디오 및 재생**, **Spotify 외부 및 기기**, **개인정보 보호, 네트워크 및 다운로드**, **고급 및 정보**의 여섯 구역을 이용하세요.
+
+**앱 아이콘**은 **화면 모양 → 앱 아이콘**에서 여섯 가지 중 고를 수 있습니다.
+
 <p align="center">
-  <img src="docs/screenshots/now-playing.webp" width="16%" alt="가사가 표시된 전체 화면 플레이어">
-  <img src="docs/screenshots/album.webp" width="16%" alt="앨범">
-  <img src="docs/screenshots/playlist.webp" width="16%" alt="플레이리스트">
-  <img src="docs/screenshots/queue.webp" width="16%" alt="재생 대기열">
-  <img src="docs/screenshots/live-activity.webp" width="16%" alt="잠금 화면의 Live Activity">
-  <img src="docs/screenshots/home.webp" width="16%" alt="홈">
+  <img src="icons/Retrine.png" width="56" alt="Retrine">
+  <img src="icons/Retrine_Glacier.png" width="56" alt="Retrine Glacier">
+  <img src="icons/Retrine_Emerald.png" width="56" alt="Retrine Emerald">
+  <img src="icons/Retrine_Ember.png" width="56" alt="Retrine Ember">
+  <img src="icons/Retrine_Twilight.png" width="56" alt="Retrine Twilight">
+  <img src="icons/20th_Anniversary.png" width="56" alt="20th Anniversary">
 </p>
 
-> [!NOTE]
-> **Retrine은 [Vitrine](https://github.com/My-Name-Is-Jeff/vitrine)의 포크입니다.**
+## 플레이어와 가사
 
-## 소개
+재설계 플레이어에서는 앨범 커버와 가사, 대기열을 한 화면에서 오갈 수 있습니다. 가사 화면에는 항상 Apple Music 스타일이 적용됩니다. 글자 크기, 줄 간격, 블러, 글로우, 웨이브를 프리셋과 실시간 미리보기로 조정할 수 있습니다.
 
-Retrine은 iOS용 Spotify를 Liquid Glass로 새로 단장하는 Theos 트윅(Objective-C + Logos)입니다. 직접
-준비한 복호화된 Spotify IPA에 주입하고 본인 인증서로 서명해서 쓰기 때문에 탈옥이 필요 없습니다.
+| 플레이어 배경 | 화면에 보이는 것 |
+|---|---|
+| Still · Colors | Still은 흐린 앨범 커버를 고정하고, Colors는 커버에서 뽑은 색을 천천히 움직입니다. |
+| Fluid | 커버가 흐르듯 움직이다가 일시 정지하면 멈춥니다. 지원 기기에서는 GPU로 그리는 Smooth를 선택할 수 있습니다. |
+| Animated | 곡의 Canvas나 앨범의 움직이는 커버를 보여 줍니다. 클립이 없는 곡은 Fluid 위의 커버, 전체 화면 커버, Visualizer 중에서 고릅니다. |
+| Visualizer | Hills·Bars·Nebula·Halo는 소리에 반응하고, Lyrics·Poster·Cut은 싱크 가사에 맞춰 움직입니다. |
+| Black · Your Photo | 검은 배경이나 직접 고른 사진을 씁니다. 사진은 가사가 잘 읽히도록 어둡게 표시됩니다. |
 
-Retrine이 포크한 Vitrine은 Vojtěch Škopek의 [spoti.pw](https://github.com/skopevoj/spoti.pw)를 포크한
-프로젝트입니다. GPL-3.0으로 공개된 마지막 버전인 0.21.1(커밋 `c790445`, 2026-09-23)에서 갈라져 나와
-그 뒤로 계속 수정되었습니다.
+**재생 대기열.** iPhone의 기본 대기열은 Spotify 방식입니다. **모드 설정 → 플레이어 → 대기열**에서 **Apple Music**을 고르고 Spotify를 다시 시작하면 플레이어 안에서 셔플·반복·수면 타이머·AutoMix를 조작하고 곡 옆 손잡이를 끌어 순서를 바꿀 수 있습니다.
 
-**IPA는 배포하지 않습니다.** 직접 준비한 Spotify IPA로 브라우저에서 GitHub Actions를 돌리거나 Mac에서
-직접 빌드하세요.
+같은 플레이어 설정에서 최근 재생 목록을 표시하거나 숨길 수 있습니다. 대기열의 **지우기**는 이 화면에 표시된 항목만 숨기며, Spotify 계정의 청취 기록은 유지됩니다.
 
-## 기능
+**iPad.** 가로 폭이 넉넉한 화면에서는 가로·세로 방향 모두 커버와 컨트롤이 한쪽에, 가사나 대기열이 다른 쪽에 놓입니다. 캡슐형 미니 플레이어에는 커버·제목·재생 버튼 옆에 셔플·반복·가사·대기열이 있습니다.
 
-모드 설정(Mod Settings) 맨 위의 **재설계 UI**(Redesigned UI) 스위치로 두 가지 화면 중 하나를 고릅니다.
-이 설정은 앱을 실행할 때 한 번 읽습니다.
+### 가사와 오프라인 저장
 
-- **재설계(Redesign)**: 처음부터 새로 만든 Liquid Glass 화면입니다. 기본 화면용 트윅은 하나도 실행되지 않습니다.
-- **Spotify 기본 화면**: Spotify 화면은 그대로 두고 그 위에 트윅을 얹습니다. 숨기기 스위치, 글래스 헤더
-  버튼, 홈 그라데이션, AMOLED, 강조 색상 등을 쓸 수 있습니다.
+- 가사 소스를 순서대로 또는 동시에 조회합니다. 단어별 타이밍을 제공하는 소스에서는 단어 단위로 따라갈 수 있고, 재설계 플레이어의 ⋯에서 현재 곡의 소스를 바꿀 수 있습니다.
+- 가사를 기기에 저장해 오프라인에서 읽을 수 있습니다. Pixie를 쓰면 다운로드한 곡의 가사도 자동으로 저장하도록 설정할 수 있습니다.
+- 발음은 라틴 문자·한글로, 일본어는 로마자·히라가나로 표시할 수 있습니다. 번역은 Apple 번역, Apple Intelligence 또는 본인 API 키를 쓰는 Gemini를 지원합니다. 노래방 모드는 기기에서 곡의 보컬을 줄입니다.
+- 잠금 화면에는 현재 가사 한 줄을, iOS 26에서는 전체 화면 아트워크로 가사를 표시할 수 있습니다.
 
-Spotify 화면을 직접 그리지 않는 기능(광고, 개인정보 보호, 가사 소스, 제스처, 아티스트 차단, 진동, 속도와
-피치, Live Activity)은 두 화면에서 똑같이 동작합니다. 모드 설정은 탭 바의 홈을 길게 누르거나, 사이드
-메뉴의 첫 줄 또는 Spotify 설정의 맨 아래 줄에서 열 수 있습니다.
+<details>
+<summary>지원하는 가사 소스</summary>
 
-### 재설계: Liquid Glass와 Apple Music 스타일 플레이어
+가져온 가사, Spicy Lyrics, BiniLyrics, LyricsPlus, Musixmatch, Unison, Deezer, NetEase, PetitLyrics, LRCLIB, Bugs, Genie, QQ Music, KuGou, Genius.
 
-- 글래스 탭 바, 검색창, 재생 바와 탭 분리(Split Tabs)
-- 새로 디자인한 전체 화면 플레이어와 가사 화면. Apple Music 스타일 가사가 늘 켜져 있고, 실시간 미리보기와
-  스타일 프리셋(글자 크기, 줄 간격, 블러, 글로우, 웨이브)을 제공합니다
-- 군더더기를 덜어낸 홈, 색을 입힌 글래스 위의 검색 카테고리, 큰 제목 하나로 정리한 보관함, 그리고 음악
-  앱처럼 배치한 플레이리스트·앨범·아티스트 페이지(고정된 ⋯ 버튼이 시스템 메뉴를 엽니다)
-- 전체 검은 배경과 별도 강조 색상(Spotify, Apple Music, 사용자 지정)
+</details>
 
-### iPad
+### 두 화면의 공통 기능
 
-- 가로 폭이 넓은(regular width) iPad에서는 확장 플레이어가 두 열로 나뉩니다. 한쪽에는 앨범 아트와
-  컨트롤이, 다른 쪽에는 가사나 재생 대기열이 놓이며 가로·세로 방향 모두 같습니다
-- 재생 바는 캡슐형 미니 플레이어가 되어 앨범 아트, 제목, 재생 버튼 옆에 셔플·반복·가사·대기열 버튼이 붙습니다
-
-### 가사
-
-- 여러 가사 소스를 순서대로 또는 한꺼번에 조회합니다: 가져온 가사(imported lyrics), Spicy Lyrics,
-  BiniLyrics, LyricsPlus, Musixmatch, Unison, Deezer, NetEase, PetitLyrics, LRCLIB, Bugs, Genie,
-  QQ Music, KuGou, Genius
-- 소스가 지원하면 단어 단위 싱크를 씁니다. 재설계 화면에서는 플레이어의 ⋯에서 지금 재생 중인 곡의 가사
-  소스를 바꿀 수 있습니다
-- 발음 표기(라틴 문자 또는 한글, 일본어는 로마자 또는 히라가나)와 번역(Apple 번역, Apple Intelligence,
-  본인 API 키를 쓰는 Gemini)
-- 잠금 화면에 현재 가사 줄을 표시하고, iOS 26에서는 가사를 잠금 화면의 전체 화면 아트워크로 보여 줍니다
-- 노래방(Karaoke): 기기에서 직접 곡의 보컬 소리를 줄여 줍니다
-
-### 광고와 Premium 상태
-
-- **광고 숨기기**, **업셀 숨기기**, **Premium 위장**(EeveeSpotify Reincarnated에서 가져옴). 첫 실행
-  안내 화면의 **광고 없음** 스위치 하나로 세 가지를 한 번에 켤 수 있습니다
-- Premium 위장을 켜면 DJ를 온전히 쓸 수 있고, 앨범 페이지에 **대기열에 추가**가 생깁니다
-
-### 재생과 오디오
-
-- 오디오 효과: 그래픽 EQ, 프리셋, AutoEq 헤드폰 보정, 리버브, 크로스피드 등
-- Spotify 자체의 Automix와 크로스페이드를 한 페이지에서 설정, 속도와 피치 조절
-- 진동: 컨트롤을 누를 때의 햅틱 피드백과 iOS 음악 햅틱(Music Haptics) 지원
-- 플레이어의 더블 탭 영역, AirPods 머리 제스처
-- 차단한 아티스트와 곡 건너뛰기, 팟캐스트용 SponsorBlock(기본값은 꺼짐)
-- 기기에만 저장되는 청취 통계, 텔레메트리 차단, 공유 링크의 추적 정보 제거
-
-### Live Activity
-
-- 잠금 화면과 Dynamic Island(iOS 17 이상)에서 지금 부르는 가사 줄, 다음 곡 목록, 또는 재생 컨트롤·
-  대기열·잠자기 타이머가 있는 컨트롤 화면 중 하나를 보여 줍니다
-
-### 앱 내 WireGuard / 프록시
-
-- Spotify 트래픽을 앱 안에서만 WireGuard나 프록시로 보냅니다. 직접 설정하기 전에는 꺼져 있으니
-  먼저 [주의 사항](#wireguard--프록시)을 읽어 주세요
+| 기능 | 할 수 있는 일 |
+|---|---|
+| 재생과 오디오 | 그래픽 EQ와 프리셋, AutoEq 헤드폰 보정, 리버브, 크로스피드, 속도·피치를 조절합니다. Spotify의 Automix와 크로스페이드도 한 페이지에서 설정합니다. |
+| 제스처와 진동 | 플레이어의 더블 탭 영역, AirPods 머리 제스처, 컨트롤 햅틱과 iOS 음악 햅틱을 지원합니다. |
+| 차단과 개인정보 | 차단한 곡·아티스트를 건너뜁니다. 팟캐스트용 SponsorBlock은 기본으로 꺼져 있습니다. 청취 통계는 기기에만 저장하며, 텔레메트리를 차단하고 공유 링크에서 추적 정보를 지울 수 있습니다. |
+| 광고와 Premium 상태 | 첫 실행의 **광고 없음**으로 광고 숨기기·업셀 숨기기·Premium 위장을 함께 켭니다. Premium 위장을 켜면 전체 DJ 기능과 앨범 페이지의 **대기열에 추가**를 쓸 수 있습니다. |
+| Live Activity | iOS 17 이상에서 잠금 화면과 Dynamic Island에 현재 가사, 다음 곡 목록 또는 재생·대기열·수면 타이머 컨트롤을 표시합니다. |
+| 네트워크 | Spotify 앱 안에서 WireGuard나 프록시를 사용할 수 있습니다. 직접 설정한 뒤 켜야 합니다. [적용 범위와 한계](#wireguard--프록시) |
 
 ## 요구 사항
 
-| | |
+| 항목 | 지원 범위 |
 |---|---|
 | Spotify | **9.1.90**, **9.2.0**(배포 기준 버전), **9.2.2**의 복호화된 IPA. 다른 버전에서는 경고를 표시하지만 실행을 막지는 않습니다. |
 | 재설계 화면 | **iOS 26 이상** |
@@ -140,9 +138,9 @@ Live Activity, 백그라운드 음악 햅틱, Connect 로컬 기기 검색이 �
 ### GitHub Actions로 빌드 (Mac 불필요)
 
 1. 이 저장소를 포크하고, 포크한 저장소의 **Actions** 탭에서 Actions를 켭니다.
-2. **Build IPA from your own Spotify IPA** 워크플로를 열고 **Run workflow**를 누릅니다.
+2. 포크의 **Actions → Build IPA from your own Spotify IPA → Run workflow**를 선택합니다.
 3. 아래 입력값을 채우고 실행합니다.
-4. 실행이 끝나면 해당 실행의 **Artifacts**에서 `retrine.ipa`를 내려받습니다.
+4. 기본값을 사용했다면 완료된 실행의 **Artifacts → retrine.ipa**를 받아 압축을 풉니다. `filebin`을 골랐다면 실행 요약의 다운로드 링크를 엽니다.
 
 | 입력값 | 기본값 | 설명 |
 |---|---|---|
@@ -152,6 +150,7 @@ Live Activity, 백그라운드 음악 햅틱, Connect 로컬 기기 검색이 �
 | Include app-local WireGuard / proxy | 켜짐 | 라우팅 요구 사항은 [WireGuard](#wireguard--프록시) 항목을 참고하세요. |
 | Include Pixie native downloads | 켜짐 | 지원 대상인 9.2.0, 9.2.2 또는 9.1.90 빌드와 정확히 일치해야 합니다. |
 | Bundle ID | `app.retrine.player` | 서명할 App ID와 같아야 하며, 앱 확장 ID도 이를 따라갑니다. Spotify의 ID를 유지하려면 `com.spotify.client`를 직접 입력합니다. [서명](#서명과-번들-id) 항목을 참고하세요. |
+| macOS runner | `macos-latest` | `macos-latest`(Apple Silicon)와 `macos-26-intel`(Intel)은 모두 Xcode 26.6을 사용합니다. 30초 안에 러너가 배정되지 않으면 같은 커밋으로 다른 러너에서 다시 시도합니다. 최대 다섯 번 전환한 뒤에는 마지막 러너를 기다립니다. |
 
 내려받은 파일은 먼저 검사하므로, HTML 로그인 페이지나 중간에 끊긴 파일이면 바로 실패합니다.
 
@@ -181,7 +180,7 @@ make release NO_PLUGINS=1    # 앱 확장 모두 제거
 make install                 # 빌드 후 본인 인증서로 서명해 기기에 설치
 ```
 
-Mac에서 빌드하면 번들 ID를 따로 지정하지 않는 한 Spotify의 `com.spotify.client`가 유지됩니다. 바꾸려면
+Mac에서 `make release`로 만든 IPA는 번들 ID를 따로 지정하지 않으면 Spotify의 `com.spotify.client`를 유지합니다. 바꾸려면
 환경 변수로 지정합니다: `BUNDLE_ID=<본인 App ID> make release` (GitHub Actions 빌드의 기본값은
 `BUNDLE_ID=app.retrine.player`입니다.)
 
@@ -199,21 +198,24 @@ Mac에서 빌드하면 번들 ID를 따로 지정하지 않는 한 Spotify의 `c
 
 ## 서명과 번들 ID
 
-- **GitHub Actions 빌드의 기본 ID는 `app.retrine.player`입니다.** 정식 Spotify와 별개의 앱으로 설치됩니다.
-- **Spotify의 ID(`com.spotify.client`)로 빌드하면** 정식 Spotify 위에 덮어 설치되어 이를 대체합니다. 무료
-  Apple ID로 서명하면 그 ID가 본인 Apple 계정에 등록됩니다. 무료 계정의 서명이 막혔다는 제보가 최근
-  늘었고 원인은 확인되지 않았지만, 그래서 기본값에서는 뺐습니다.
-- **예전 기본값으로 설치한 앱이 있다면** 새 기본값으로 빌드한 IPA는 별개의 앱으로 설치되어 로그인과
-  설정, 다운로드가 넘어오지 않습니다. 기존 앱을 그대로 업데이트하려면 `com.spotify.client`를 직접 입력하세요.
-- **번들 ID는 인증서의 App ID와 같아야 합니다.** 앱 확장 ID도 이를 따라갑니다. 일치하지 않아도
-  앱은 동작하지만 잠금 화면의 플레이어를 눌러도 앱이 열리지 않으며, 첫 실행 때 어떤 ID를 써야 하는지
-  알려 줍니다.
-- Feather에서는 App ID를 **Identifier**에 붙여 넣고 **PPQ protection**은 꺼 두세요. AltStore, SideStore,
-  Sideloadly는 알아서 맞춰 줍니다.
-- **무료 Apple ID**는 등록할 수 있는 App ID 수가 제한되어 있고 앱 확장마다 App ID가 하나씩 필요하므로,
-  대개 **Remove every app extension**을 켜야 합니다. 이 경우 Live Activity, Open in Retrine 공유 동작,
-  Spotify 자체의 위젯·Siri·알림 확장도 함께 빠집니다.
-- 무료 Apple ID 서명은 7일 동안 유효합니다. 만료 날짜는 모드 설정에서 확인할 수 있습니다.
+| 번들 ID | 설치 결과 |
+|---|---|
+| `app.retrine.player` · GitHub Actions 기본값 | 정식 Spotify와 나란히 설치됩니다. 예전 기본값으로 설치한 앱의 로그인·설정·다운로드는 새 앱으로 넘어오지 않습니다. |
+| `com.spotify.client` · Mac의 `make release` 기본값 | 최종 서명 ID가 `com.spotify.client`이면 정식 Spotify를 대체합니다. 예전 기본값으로 설치한 Retrine을 업데이트할 때도 이 ID로 서명하세요. |
+
+Mac에서 `make install`을 실행하면 프로비저닝 프로필에 명시된 App ID로 다시 서명합니다. 와일드카드 프로필이면 IPA의 번들 ID를 유지합니다.
+
+**번들 ID를 서명 인증서의 App ID와 맞추세요.** 앱 확장 ID도 이를 따릅니다. ID가 달라도 앱은 실행되지만 잠금 화면의 플레이어를 눌러 앱을 열 수 없습니다. 첫 실행 안내에서 필요한 ID를 확인할 수 있습니다.
+
+<details>
+<summary>서명 도구와 무료 Apple ID</summary>
+
+- Feather에서는 App ID를 **Identifier**에 넣고 **PPQ protection**을 끕니다. AltStore, SideStore, Sideloadly는 자동으로 설정합니다.
+- 무료 Apple ID 서명은 **7일** 동안 유효합니다. 모드 설정에서 만료일을 확인하세요.
+- 무료 계정은 등록할 수 있는 App ID 수가 제한되고 확장마다 ID가 하나씩 필요하므로, 대개 **Remove every app extension**을 켜야 합니다. 이 경우 Live Activity, Open in Retrine 공유 동작, Spotify의 위젯·Siri·알림 확장도 함께 빠집니다.
+- 무료 계정으로 `com.spotify.client`에 서명하면 해당 ID가 본인 Apple 계정에 등록됩니다. 일부 무료 계정에서 서명이 막혔다는 제보가 늘어 GitHub Actions 기본값을 변경했습니다. 원인은 확인되지 않았습니다.
+
+</details>
 
 ## WireGuard / 프록시
 
@@ -262,8 +264,8 @@ Mac에서 최신 코드를 받아 `make release`를 실행하세요.
 
 ## 크레딧
 
-- 원작 프로젝트: Vojtěch Škopek의 [spoti.pw](https://github.com/skopevoj/spoti.pw)
-- Retrine이 포크한 프로젝트: [Vitrine](https://github.com/My-Name-Is-Jeff/vitrine)
+Retrine의 기반인 [Vitrine](https://github.com/My-Name-Is-Jeff/vitrine)은 Vojtěch Škopek의 [spoti.pw](https://github.com/skopevoj/spoti.pw)에서 갈라져 나왔습니다. 출발점은 GPL-3.0으로 공개된 마지막 버전인 0.21.1(커밋 `c790445`, 2026-09-23)입니다.
+
 - 주입은 [cyan](https://github.com/asdfzxcvbn/pyzule-rw), 빌드는 [Theos](https://theos.dev)가 맡고,
   화면 구조(view tree)는 [FLEX](https://github.com/FLEXTool/FLEX)(`vendor/`에 있는 hopeless의 AutoFLEX
   빌드)로 살펴봅니다

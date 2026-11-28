@@ -5,6 +5,8 @@
 #import "Shared/LocalFiles/LocalFiles.h"
 #import "Shared/Player/PlayerEvents.h"
 #import "SGRBridges.h"
+#import "SGRField.h"
+#include <stdatomic.h>
 #import "SGRedesign.h"
 #import "SGRRestyle.h"
 
@@ -23,6 +25,22 @@ static NSString *sg_wantedURI, *sg_wantedKey;
 // these while another picture is wanted is showing the last track's.
 static NSMapTable<UIImage *, NSString *> *sg_published;
 static NSURLSessionDataTask *sg_fetch;
+static atomic_ulong sg_fetchGeneration;
+static BOOL sg_pendingFetch, sg_resignedActive;
+
+static BOOL artworkIsActive(void) {
+    return !sg_resignedActive && SGRArtworkAppIsActive();
+}
+
+static void cancelFetch(void) {
+    atomic_fetch_add(&sg_fetchGeneration, 1);
+    [sg_fetch cancel];
+    sg_fetch = nil;
+}
+
+static BOOL canPublishFetch(unsigned long generation) {
+    return generation == atomic_load(&sg_fetchGeneration) && artworkIsActive();
+}
 
 // Retries of a fetch that failed, and how long before each.
 static const NSTimeInterval kFetchRetry = 2;
@@ -101,10 +119,15 @@ static NSURLSession *artworkSession(void) {
 
 // A stored cover is read and decoded off the main thread; there is nothing to try again.
 static void loadStoredPicture(NSString *key, NSURL *url) {
+    unsigned long generation = atomic_load(&sg_fetchGeneration);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (generation != atomic_load(&sg_fetchGeneration)) return;
         UIImage *image = [UIImage imageWithContentsOfFile:url.path];
+        if (generation != atomic_load(&sg_fetchGeneration)) return;
         image = image.imageByPreparingForDisplay ?: image;
+        if (generation != atomic_load(&sg_fetchGeneration)) return;
         dispatch_async(dispatch_get_main_queue(), ^{
+            if (!canPublishFetch(generation)) return;
             if (!image) artworkLog(@"%@ not read, the screens stand in", key);
             else if ([key isEqualToString:sg_wantedKey]) publish(image, key, SGRArtworkQualityExact);
         });
@@ -116,24 +139,24 @@ static void fetchPicture(NSString *key, NSURL *url, NSUInteger attempt) {
         loadStoredPicture(key, url);
         return;
     }
+    unsigned long generation = atomic_load(&sg_fetchGeneration);
     CFTimeInterval started = CACurrentMediaTime();
     sg_fetch = [artworkSession() dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error.code == NSURLErrorCancelled || generation != atomic_load(&sg_fetchGeneration)) return;
         NSInteger status = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse *)response).statusCode : 0;
         UIImage *image = data.length && status == 200 ? [UIImage imageWithData:data] : nil;
+        if (generation != atomic_load(&sg_fetchGeneration)) return;
         // Decoded here, off the main thread, rather than on the first frame that draws it.
         image = image.imageByPreparingForDisplay ?: image;
+        if (generation != atomic_load(&sg_fetchGeneration)) return;
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (error.code == NSURLErrorCancelled) return;
-            // A newer track asked for another picture meanwhile: this one would put the old one back.
-            if (![key isEqualToString:sg_wantedKey]) {
-                artworkLog(@"%@ came after the track moved on to %@, dropped", key, sg_wantedKey);
-                return;
-            }
+            if (!canPublishFetch(generation)) return;
+            sg_fetch = nil;
             if (!image) {
                 artworkLog(@"%@ not fetched (%ld, %@), attempt %lu", key, (long)status, error.localizedDescription, (unsigned long)attempt + 1);
                 if (attempt + 1 >= kFetchAttempts) return;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kFetchRetry * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    if ([key isEqualToString:sg_wantedKey] && !([sg_artworkKey isEqualToString:key] && sg_artworkQuality == SGRArtworkQualityExact)) {
+                    if (canPublishFetch(generation) && !([sg_artworkKey isEqualToString:key] && sg_artworkQuality == SGRArtworkQualityExact)) {
                         fetchPicture(key, url, attempt + 1);
                     }
                 });
@@ -168,29 +191,41 @@ static BOOL publishLocalCover(void) {
 static void followPlayer(void) {
     SPTPlayerTrack *track = SGPlayerState().track;
     NSString *uri = SGURIString(track.URI);
-    if (!uri) return;
+    if (!uri) {
+        if (sg_wantedURI) cancelFetch();
+        sg_wantedURI = sg_wantedKey = nil;
+        return;
+    }
+    BOOL active = artworkIsActive();
+    BOOL resume = active && sg_pendingFetch;
     // The same track is looked at again only while its metadata has named no picture yet.
-    if ([uri isEqualToString:sg_wantedURI] && ![sg_wantedKey hasPrefix:@"track:"]) return;
+    if (!resume && (active || sg_pendingFetch) && [uri isEqualToString:sg_wantedURI] &&
+        ![sg_wantedKey hasPrefix:@"track:"]) return;
     sg_wantedURI = uri;
     NSURL *url = nil;
     // A track whose metadata names no picture is its own key: only the screens can show it then.
     NSString *key = pictureOf(track, &url) ?: [@"track:" stringByAppendingString:uri];
     BOOL samePicture = [key isEqualToString:sg_wantedKey];
     sg_wantedKey = key;
+    if (!active) {
+        if (!sg_pendingFetch || !samePicture) cancelFetch();
+        sg_pendingFetch = YES;
+        return;
+    }
+    sg_pendingFetch = NO;
     // Two tracks may name the same cover. Keep its pixels and quality, but publish who it now belongs
     // to before either reuse path returns, including a return to an exact cover still on screen.
     if (sg_artwork && [key isEqualToString:sg_artworkKey] && ![uri isEqualToString:sg_artworkURI])
         publish(sg_artwork, key, sg_artworkQuality);
-    if (samePicture) return;
-    [sg_fetch cancel];
-    sg_fetch = nil;
+    if (samePicture && !resume) return;
+    cancelFetch();
     if ([key isEqualToString:sg_artworkKey] && sg_artworkQuality == SGRArtworkQualityExact) return;
     if (url) fetchPicture(key, url, 0);
     else publishLocalCover();
 }
 
 void SGRSetNowPlayingArtwork(UIImage *image, NSString *trackURI, SGRArtworkQuality quality) {
-    if (!image || !trackURI) return;
+    if (!image || !trackURI || !artworkIsActive()) return;
     followPlayer();
     // Read for a track that is no longer playing.
     if (![trackURI isEqualToString:sg_wantedURI]) return;
@@ -233,6 +268,7 @@ static char kBarCardKey, kBarImageKey;
 static __weak UIView *sg_barView;
 
 static void publishBarArtwork(void) {
+    if (!artworkIsActive()) return;
     followPlayer();
     if (publishLocalCover()) return;
     UIView *card = SGRFindByIdentifier(sg_barView, @"SPTNowPlayingBar", &kBarCardKey);
@@ -247,21 +283,36 @@ static void publishBarArtwork(void) {
     SGRSetNowPlayingArtwork(image, uri, SGRArtworkQualityLow);
 }
 
-// The bar sets its picture when the image has loaded, which lays nothing out, so a track change looks
-// again a few times while the picture comes in. One that loads later still is the fetch's to bring.
+// The bar sets its picture without laying out when the image arrives. Check again after a track
+// change or activation while the bar catches up.
 @interface SGRBarArtworkWatcher : NSObject <SGPlayerStateObserver>
+- (void)invalidatePendingReads;
 @end
 
 @implementation SGRBarArtworkWatcher {
     NSString *_track;
+    NSUInteger _generation;
+}
+
+- (void)invalidatePendingReads {
+    _generation++;
+    _track = nil;
 }
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
+    if (!artworkIsActive()) return;
     NSString *track = SGURIString(state.track.URI);
     if (!track || [track isEqualToString:_track]) return;
     _track = track;
+    NSUInteger generation = ++_generation;
     for (NSNumber *delay in @[@0, @0.3, @1, @2.5]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ publishBarArtwork(); });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (generation != self->_generation || !artworkIsActive() ||
+                ![track isEqualToString:SGURIString(SGPlayerState().track.URI)]) return;
+            if (sg_artworkQuality == SGRArtworkQualityExact && [track isEqualToString:sg_artworkURI] &&
+                [sg_wantedKey isEqualToString:sg_artworkKey]) return;
+            publishBarArtwork();
+        });
     }
 }
 
@@ -328,6 +379,18 @@ void SGRObservePlayerTransition(id owner, void (^changed)(id owner)) {
     SGAddPlayerStateObserver(sg_follower);
     sg_barWatcher = [SGRBarArtworkWatcher new];
     SGAddPlayerStateObserver(sg_barWatcher);
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center addObserverForName:UIApplicationWillResignActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        sg_resignedActive = YES;
+        [sg_barWatcher invalidatePendingReads];
+        sg_pendingFetch = YES;
+        cancelFetch();
+    }];
+    [center addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        sg_resignedActive = NO;
+        followPlayer();
+        [sg_barWatcher playerStateDidChange:SGPlayerState()];
+    }];
     // A cover picked or removed for the local file playing changes the picture with no new track, so the
     // track is looked at again. Posted on the main thread.
     [NSNotificationCenter.defaultCenter addObserverForName:SGLocalFileEditsDidChangeNotification object:nil queue:nil

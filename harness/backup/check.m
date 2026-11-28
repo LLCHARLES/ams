@@ -224,6 +224,7 @@ static void runChecks(void) {
         [NSUserDefaults.standardUserDefaults registerDefaults:historyDefaults];
         [store registerDefaults:historyDefaults];
         NSDictionary *install = @{base:@"https://local.example", @"spotifyglass.font.files":@[@"old.ttf"],
+                                  @"spotifyglass.font.files.revision":@"installed",
                                   SGKeySearchRecents:@[@[@"page.mod"]], SGKeySeenNew:@{@"reportProblem":@YES},
                                   @"spotifyglass.localFiles.lrcLinks":@{@"track":@"kept.lrc"}};
         [store setPersistentDomain:install forName:suite];
@@ -232,7 +233,7 @@ static void runChecks(void) {
             "\"spotifyglass.unrecognized\":12,\"spotifyglass.registered\":\"no\","
             "\"spotifyglass.lyrics.openai.baseURL\":\"https://other.example\","
             "\"spotifyglass.settings.seenNew\":{},"
-            "\"spotifyglass.font.files\":[\"other.ttf\"],\"spotifyglass.localFiles.lrcLinks\":{},"
+            "\"spotifyglass.font.files\":[\"other.ttf\"],\"spotifyglass.font.files.revision\":\"other\",\"spotifyglass.localFiles.lrcLinks\":{},"
             "\"spotifyglass.dsp.convolver.file\":\"other.wav\",\"spotifyglass.redesign.untested\":true,"
             "\"spotifyglass.sponsorblock.enabled\":true}}" dataUsingEncoding:NSUTF8StringEncoding];
         importSettings([NSJSONSerialization JSONObjectWithData:json options:0 error:nil][@"settings"], store, install);
@@ -249,13 +250,14 @@ static void runChecks(void) {
         HARNESS_CHECK([portable[@"spotifyglass.registered"] isEqual:@2] && [portable[@"spotifyglass.flag.bad"] isEqual:@YES] &&
             [portable[@"spotifyglass.artistBlock.list"] count] == 1 && !portable[@"spotifyglass.motion.sources"]);
         NSDictionary *choices = @{@"spotifyglass.homeGradientTint":@3, @"spotifyglass.homeGradientStrength":@2,
+            @"spotifyglass.lockscreen.lyricsSize":@2, @"spotifyglass.lockscreen.keepWidgetCover":@YES,
             @"spotifyglass.homeGradientHeight":@1, @"spotifyglass.navbar.layout":@[@{@"id":@"home", @"hidden":@NO}],
             @"spotifyglass.navbar.split":@[@"home"], @"spotifyglass.redesign.fluid.speed":@125,
             @"spotifyglass.lyrics.pip.original.size":@64, @"spotifyglass.lyrics.pip.original.weight":@2,
             @"spotifyglass.lyrics.pip.pronunciation.size":@16, @"spotifyglass.lyrics.pip.pronunciation.weight":@0,
             @"spotifyglass.lyrics.pip.translation.size":@48, @"spotifyglass.lyrics.pip.translation.weight":@3,
             @"spotifyglass.redesign.fluid.renderer":@1, @"spotifyglass.redesign.haptics.controls.strength":@2,
-            SGRKeyPlayerHoldNoClip:@YES, @"spotifyglass.redesign.liveActivity":@YES, @"spotifyglass.flag.bad":@NO};
+            SGRKeyPlayerNoClipBackground:@(SGRPlayerBackgroundColours), SGRKeyPlayerHoldNoClip:@YES, @"spotifyglass.redesign.liveActivity":@YES, @"spotifyglass.flag.bad":@NO};
         NSMutableDictionary *snapshot = [choices mutableCopy];
         [snapshot addEntriesFromDictionary:install];
         snapshot[@"spotifyglass.unknown.unschematized"] = @[];

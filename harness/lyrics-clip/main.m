@@ -437,7 +437,8 @@ int main(int argc, char **argv) {
                                                                 size, SGLyricsClipPoster);
             double small = wordsIn(alone, backdrop, kWordsFrom, kWordsTo), large = wordsIn(poster, backdrop, kWordsFrom, kWordsTo);
             CGRect a = litBounds(alone, backdrop), p = litBounds(poster, backdrop);
-            check(p.size.height > a.size.height * 1.45 && large > small * 2,
+            double leftDensity = small / (a.size.width * a.size.height), posterDensity = large / (p.size.width * p.size.height);
+            check(fabs(p.size.height / a.size.height - 1.32) < .1 && posterDensity > leftDensity,
                   [NSString stringWithFormat:@"Poster's line is larger and heavier (%.0f px tall, %.2f%% lit; Left %.0f px, %.2f%%)",
                    p.size.height, large * 100, a.size.height, small * 100]);
             check(fabs(CGRectGetMinX(p) - CGRectGetMinX(a)) < size.width * 0.01, @"Poster is left-aligned as Left is");

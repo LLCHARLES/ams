@@ -7,9 +7,13 @@
 
 void SGRBackdropInkSetSource(UIView *source) {}
 
+static BOOL landscapeCovers;
+static BOOL SGRPlayerLandscapeCovers(UIWindow *window) { return landscapeCovers; }
+
 static UIView *screen;
 static CGRect drawn;
 @interface SGRArtworkField : UIView
+@property (nonatomic) BOOL offscreen;
 @end
 @implementation SGRArtworkField
 - (UIWindow *)window { return (UIWindow *)screen; }
@@ -46,6 +50,12 @@ int main(void) { @autoreleasepool {
     HARNESS_CHECK(!covered);
     [morph tearDown];
     HARNESS_CHECK(covered); // no later layout or touch, and no second run-loop turn
+    landscapeCovers = YES;
+    visibilityChanged();
+    HARNESS_CHECK(field.offscreen);
+    landscapeCovers = NO;
+    visibilityChanged();
+    HARNESS_CHECK(!field.offscreen);
     puts("settled field: covered mini notified after the late opening morph");
     return 0;
 } }

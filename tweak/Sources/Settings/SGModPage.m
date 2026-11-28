@@ -96,6 +96,13 @@ SGModRow *SGPageRow(NSString *title, UIViewController *(^page)(void)) {
     return row;
 }
 
+static NSUInteger selectedChoiceIndex(NSString *key, NSUInteger count, NSInteger fallback) {
+    if (!count) return NSNotFound;
+    NSInteger index = SGInt(key, fallback);
+    if (index >= 0 && (NSUInteger)index < count) return (NSUInteger)index;
+    return fallback >= 0 && (NSUInteger)fallback < count ? (NSUInteger)fallback : 0;
+}
+
 // The list a choice row opens: the names it was given, each over its note where it has one, a green
 // checkmark against the one set. Picking one writes the index, tells the row, and goes back, where the row
 // it came from reads the new name out and the page it sits on rebuilds around it.
@@ -158,7 +165,7 @@ SGModRow *SGPageRow(NSString *title, UIViewController *(^page)(void)) {
     NSUInteger index = (NSUInteger)path.row;
     SGFillCell(cell, _choices[index], index < _notes.count ? _notes[index] : nil, nil, nil);
     cell.selectionStyle = UITableViewCellSelectionStyleDefault;
-    if (path.row == SGInt(_key, _fallback)) {
+    if (index == selectedChoiceIndex(_key, _choices.count, _fallback)) {
         UIImageView *tick = SGSymbolView(@"checkmark", 13, UIImageSymbolWeightSemibold, 16);
         tick.tintColor = SGGreen();
         cell.accessoryView = tick;
@@ -185,8 +192,8 @@ SGModRow *SGChoiceRow(NSString *title, NSString *subtitle, NSString *key, NSArra
     row.subtitle = subtitle;
     row.choice = YES;
     row.value = ^NSString *{
-        NSInteger index = SGInt(key, fallback);
-        return index >= 0 && index < (NSInteger)choices.count ? choices[(NSUInteger)index] : choices.firstObject;
+        NSUInteger index = selectedChoiceIndex(key, choices.count, fallback);
+        return index == NSNotFound ? nil : choices[index];
     };
     __weak SGModRow *weakRow = row;
     row.page = ^UIViewController *{

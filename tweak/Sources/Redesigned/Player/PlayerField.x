@@ -57,8 +57,14 @@ CGRect SGRSettledPlayerRect(UIWindow *window) {
     return window && window == sg_coveredWindow ? sg_coveredRect : CGRectNull;
 }
 
+static void updateFieldVisibility(BOOL visible) {
+    // A separate window can hide the portrait player while its own view stays onscreen.
+    sg_field.offscreen = !visible || SGRPlayerLandscapeCovers(sg_field.window);
+}
+
 static void visibilityChanged(void) {
     BOOL visible = SGRPlayerIsVisible();
+    updateFieldVisibility(visible);
     BOOL sampling = visible && sg_appeared && UIApplication.sharedApplication.applicationState == UIApplicationStateActive;
     SGRBackdropInkSetSource(sampling ? sg_field : nil);
     UIWindow *window = sg_appeared && visible && !sg_followedMorph ? sg_field.window : nil;
@@ -105,6 +111,7 @@ static NSUInteger sg_backgroundGeneration;
 NSUInteger SGRSetPlayerBackground(SGRPlayerBackgroundKind kind) {
     NSUInteger generation = ++sg_backgroundGeneration;
     SGSetInt(SGRKeyPlayerBackground, kind);
+    SGRPlayerHoldField();
     return generation;
 }
 
@@ -119,6 +126,26 @@ SGRPlayerBackgroundKind SGRPlayerArtworkBackground(void) {
     return last >= SGRPlayerBackgroundStill && last <= SGRPlayerBackgroundVisualiser ? last : SGRPlayerBackgroundColours;
 }
 
+static SGRPlayerBackgroundKind noClipKind(NSInteger value) {
+    return value >= SGRPlayerBackgroundStill && value <= SGRPlayerBackgroundFluid ? value : SGRPlayerBackgroundFluid;
+}
+
+SGRPlayerBackgroundKind SGRPlayerNoClipBackground(void) {
+    return noClipKind(SGInt(SGRKeyPlayerNoClipBackground, SGRPlayerBackgroundFluid));
+}
+
+void SGRSetPlayerNoClipBackground(SGRPlayerBackgroundKind kind) {
+    SGSetInt(SGRKeyPlayerNoClipBackground, noClipKind(kind));
+    SGRPlayerHoldField();
+}
+
+void SGRPlayerConfigureField(SGRArtworkField *field, BOOL withoutClip) {
+    SGRPlayerBackgroundKind kind = SGRPlayerArtworkBackground();
+    if (kind == SGRPlayerBackgroundAnimated) kind = withoutClip ? SGRPlayerNoClipBackground() : SGRPlayerBackgroundFluid;
+    field.flows = kind == SGRPlayerBackgroundColours;
+    field.fluid = kind == SGRPlayerBackgroundFluid || kind == SGRPlayerBackgroundVisualiser;
+}
+
 NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
     return @[SGL(@"settings.player.background.still", @"Still"), SGL(@"settings.player.background.colors", @"Colors"),
              SGL(@"settings.player.background.fluid", @"Fluid"), SGL(@"settings.player.background.animated", @"Animated"),
@@ -127,31 +154,40 @@ NSArray<NSString *> *SGRPlayerBackgroundNames(void) {
 
 BOOL SGRPlayerNoClipHoldEnabled(void) {
     return SGHidden(SGRKeyPlayerHoldNoClip) && SGRPlayerBackground() == SGRPlayerBackgroundAnimated &&
-        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn();
+        !SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn() && SGRPlayerNoClipBackground() != SGRPlayerBackgroundStill;
 }
 
 // A paused song holds the colors still, the way it rests the cover (PlayerArtwork.x), and so does what lies over
 // the field: an animated artwork's clip, which covers it (PlayerMotion.x), or the Visualizer's hills, which are
 // the one thing moving.
-static BOOL fieldHeld(void) {
-    return !SGRPlayerIsVisible() || SGRPlayerLandscapeCovers(sg_field.window) || SGPlayerState().isPaused ||
+static BOOL fieldHeld(BOOL withoutClip) {
+    return sg_field.offscreen || SGPlayerState().isPaused ||
         SGRPlayerMotionShowing() || SGRPlayerVisualiserShowing() || SGRPlayerBackdropShowing() ||
-        (SGRPlayerNoClipHoldEnabled() && SGRPlayerTrackHasNoClip());
+        (withoutClip && SGRPlayerNoClipHoldEnabled());
 }
 
 void SGRPlayerHoldField(void) {
-    sg_field.motionHeld = fieldHeld();
+    if (!sg_field) return;
+    BOOL withoutClip = SGRPlayerTrackHasNoClip();
+    updateFieldVisibility(SGRPlayerIsVisible());
+    // Still and Colors as the main background keep their restart policy. All live modes
+    // re-read the field when settings change or a lookup begins or finishes.
+    if (SGRPlayerBackground() >= SGRPlayerBackgroundFluid) SGRPlayerConfigureField(sg_field, withoutClip);
+    sg_field.motionHeld = fieldHeld(withoutClip);
 }
 
 #pragma mark - the field
 
 // Follow the cover: the most colorful of the cover's five colors (its quarters and the whole), once per artwork. A
 // white wall behind a pink subject has the wall as the whole's color, too gray to give an accent.
-static void followCover(UIImage *image, NSString *identity) {
-    static NSString *followed;
-    if (!SGRPlayerFollowsCover() || !image || (identity && [identity isEqualToString:followed])) return;
-    followed = identity;
+static UIImage *sg_deferredCover;
+static NSString *sg_followedCoverID;
+static NSUInteger sg_coverGeneration;
+
+static void readCoverAccent(UIImage *image) {
+    NSUInteger generation = sg_coverGeneration;
     [SGRPalette paletteForImage:image request:(SGRPaletteRequest){.flow = YES} completion:^(SGRPalette *palette) {
+        if (generation != sg_coverGeneration) return;
         UIColor *best = nil;
         CGFloat bestSaturation = -1;
         for (UIColor *color in palette.flowColors) {
@@ -165,6 +201,23 @@ static void followCover(UIImage *image, NSString *identity) {
     }];
 }
 
+static void followCover(UIImage *image, NSString *identity) {
+    if (!SGRPlayerFollowsCover() || !image) return;
+    if (!sg_deferredCover && identity && [identity isEqualToString:sg_followedCoverID]) return;
+    sg_followedCoverID = [identity copy];
+    sg_coverGeneration++;
+    if (!SGRArtworkAppIsActive()) {
+        sg_deferredCover = image;
+        return;
+    }
+    sg_deferredCover = nil;
+    readCoverAccent(image);
+}
+
+static void resumeCoverAccent(void) {
+    if (sg_deferredCover && SGRArtworkAppIsActive()) followCover(sg_deferredCover, sg_followedCoverID);
+}
+
 static void showArtwork(SGRArtworkField *field, BOOL animated) {
     NSString *identity = nil;
     UIImage *image = SGRNowPlayingArtwork(NULL, &identity);
@@ -176,12 +229,13 @@ static SGRArtworkField *fieldIn(UIView *plane) {
     SGRArtworkField *field = objc_getAssociatedObject(plane, &kFieldKey);
     if (field) return field;
     field = [[SGRArtworkField alloc] initWithFrame:plane.bounds];
+    field.offscreen = YES;
+    field.backdropCovered = !SGRPlayerBackgroundFromArtwork(SGRPlayerBackground());
     field.showsBackdrop = YES;
     // Under black or a photo the field is made as the artwork's last choice, so going back to it needs no restart.
-    SGRPlayerBackgroundKind background = SGRPlayerArtworkBackground();
-    field.flows = background == SGRPlayerBackgroundColours;
-    field.fluid = background >= SGRPlayerBackgroundFluid;
-    field.motionHeld = fieldHeld();
+    BOOL withoutClip = SGRPlayerTrackHasNoClip();
+    SGRPlayerConfigureField(field, withoutClip);
+    field.motionHeld = fieldHeld(withoutClip);
     field.bleed = kBleed;
     objc_setAssociatedObject(plane, &kFieldKey, field, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     sg_field = field;
@@ -221,8 +275,12 @@ static SGRArtworkField *fieldIn(UIView *plane) {
     if (!plane || plane.bounds.size.height < 200) return;
     SGRArtworkField *field = fieldIn(plane);
     sg_field = field;
-    if (field.superview != plane) [plane addSubview:field];
-    else if (plane.subviews.lastObject != field) [plane bringSubviewToFront:field];
+    if (field.superview != plane) {
+        // didMoveToWindow can resume a deferred cover during addSubview:. Give the field
+        // its opaque backdrop (or the clip's actual fade state) before it reaches the window.
+        if (!field.covered && SGRPlayerMotionShowing()) SGRPlayerMotionFieldLaidOut();
+        [plane addSubview:field];
+    } else if (plane.subviews.lastObject != field) [plane bringSubviewToFront:field];
     if (!CGRectEqualToRect(field.frame, plane.bounds)) field.frame = plane.bounds;
     visibilityChanged();
     // Before the clip's: taking black or the photo away uncovers the field, which a clip then covers again.
@@ -264,6 +322,7 @@ static UIImage *settledCover(UIScrollView *list) {
 }
 
 static void publishCover(void) {
+    if (!SGRArtworkAppIsActive()) return;
     UIImage *cover = settledCover(sg_coverList);
     if (!cover) return;
     NSString *uri = SGURIString(SGPlayerState().track.URI);
@@ -323,6 +382,7 @@ static char kTrackMetadataKey;
 
 - (void)playerStateDidChange:(SPTPlayerState *)state {
     SGRPlayerHoldField();
+    if (!SGRArtworkAppIsActive()) return;
     NSString *track = SGURIString(state.track.URI);
     if (!track || [track isEqualToString:_track]) return;
     _track = track;
@@ -363,7 +423,11 @@ static SGRPlayerCoverWatcher *sg_coverWatcher;
         SGRBackdropInkSetSource(nil);
     }];
     [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
-        visibilityChanged();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            visibilityChanged();
+            resumeCoverAccent();
+            if (SGRPlayerIsVisible()) publishCover();
+        });
     }];
     sg_coverWatcher = [SGRPlayerCoverWatcher new];
     SGAddPlayerStateObserver(sg_coverWatcher);

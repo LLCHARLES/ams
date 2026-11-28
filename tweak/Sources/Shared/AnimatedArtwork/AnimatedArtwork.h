@@ -30,12 +30,15 @@ static inline BOOL SGLockArtworkShowsLyrics(SGLockArtwork artwork) {
 #define SGKeyLockScreenLyricsStyle @"spotifyglass.lockscreen.lyricsStyle"
 // Where the lyrics sit, stored as the index of SGLyricsClipLayout (Left unless changed).
 #define SGKeyLockScreenLyricsLayout @"spotifyglass.lockscreen.lyricsLayout"
+// Size of the lyrics in every layout, stored as SGLyricsClipTextSize (Medium by default).
+#define SGKeyLockScreenLyricsSize @"spotifyglass.lockscreen.lyricsSize"
 // Off until switched on: Over the artwork blurs and darkens the whole artwork, moving artwork included, and the
 // lines float over it, instead of a shade beside them over the cover kept sharp (SGLyricsClipDimmedArtwork).
 #define SGKeyLockScreenDimArtwork @"spotifyglass.lockscreen.dimArtwork"
 // Off until switched on: the line's translation, where the lyrics have one (or automatic translation makes
 // one), shows smaller under the line. Read on each tick, so a change applies at once.
 #define SGKeyLockScreenTranslation @"spotifyglass.lockscreen.translation"
+#define SGKeyLockScreenKeepWidgetCover @"spotifyglass.lockscreen.keepWidgetCover"
 // Off until switched on: the lock screen widget's star switches the choice between a choice with lyrics and
 // one without (LockScreenStar.x), and takes the place of Spotify's like and dislike buttons. StarBack is the
 // choice the star left, to go back to.

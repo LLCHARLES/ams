@@ -15,6 +15,7 @@
 "settings.player.queue.sleep.left" = "수면 타이머, %@ 남음";
 "settings.player.queue.sleep.minutes" = "%ld분";
 "settings.player.queue.sleep.track" = "곡이 끝나면";
+"settings.player.queue_history.title" = "대기열에 최근 재생한 곡 표시";
 "settings.player.queue_style.music" = "Apple Music";
 "settings.player.queue_style.music_note" = "Apple Music처럼 대기열이 플레이어 안에서 작은 커버 아래에 열리고, 그 위에 셔플, 반복, 수면 타이머, AutoMix가 있습니다. 곡의 손잡이를 끌어 순서를 바꿀 수 있습니다. 버튼을 다시 누르면 커버가 돌아옵니다. AutoMix 버튼은 전역 곡 전환을 켜고 끄며, 플레이리스트별 믹스는 플레이리스트 화면의 ⋯ 메뉴에서 설정합니다.";
 "settings.player.queue_style.spotify" = "Spotify";
@@ -1325,6 +1326,13 @@
 "settings.lockscreen.lyrics_layout.choice.poster" = "포스터";
 "settings.lockscreen.lyrics_layout.subtitle" = "가사가 놓이는 위치입니다. '포스터'는 현재 줄만 크게 표시합니다.";
 "settings.lockscreen.lyrics_layout.title" = "레이아웃";
+"settings.lockscreen.lyrics_size.choice.large" = "크게";
+"settings.lockscreen.lyrics_size.choice.medium" = "보통";
+"settings.lockscreen.lyrics_size.choice.small" = "작게";
+"settings.lockscreen.keep_widget_cover.subtitle" = "잠금 화면 위젯과 제어 센터에 원래 앨범 커버를 유지합니다. 전체 화면에서 가사가 바뀔 때 커버가 잠깐 비칠 수 있습니다.";
+"settings.lockscreen.keep_widget_cover.title" = "위젯에 원래 커버 유지";
+"settings.lockscreen.lyrics_size.subtitle" = "잠금 화면에 표시할 가사와 번역의 글자 크기입니다.";
+"settings.lockscreen.lyrics_size.title" = "글자 크기";
 "settings.lockscreen.lyrics_style.choice.animated" = "움직임";
 "settings.lockscreen.lyrics_style.choice.still" = "정지";
 "settings.lockscreen.lyrics_style.subtitle" = "'정지'는 각 줄을 한 번만 그립니다. '움직임'은 선택한 배경을 부드럽게 움직입니다. 움직이는 아트워크를 사용할 수 없을 때 적용됩니다.";
@@ -2598,7 +2606,7 @@
 "settings.player.behind.black" = "검정";
 "settings.player.behind.photo" = "내 사진";
 "settings.player.behind.title" = "플레이어 뒤";
-"settings.player.bg_desc.animated" = "노래의 Canvas 또는 앨범의 움직이는 커버를 표시하며, 둘 다 없으면 플루이드를 표시합니다. 플레이어의 ⋯ 메뉴에서 배경을 플루이드나 비주얼라이저로 전환할 수 있습니다.";
+"settings.player.bg_desc.animated" = "노래에 Canvas나 움직이는 앨범 커버가 있으면 재생합니다. 플레이어의 ⋯ 메뉴에서 배경을 플루이드나 비주얼라이저로 전환할 수 있습니다.";
 "settings.player.bg_desc.black" = "커버 없이 완전한 검정입니다.";
 "settings.player.bg_desc.colors" = "커버의 색상이 천천히 움직입니다.";
 "settings.player.bg_desc.fluid" = "커버 자체가 흐리게 처리되어 천천히 회전합니다. 노래가 일시 정지되면 멈춥니다.";
@@ -2689,9 +2697,8 @@
 "settings.player.music_icons.subtitle" = "컨트롤 아래에 Spotify 아이콘 대신 음악 앱의 가사, AirPlay, 대기열 아이콘을 표시하고, AI DJ 버튼을 파형으로 바꿉니다.";
 "settings.player.music_icons.title" = "음악 앱 아이콘";
 "settings.player.new_slider.title" = "새로운 진행 슬라이더";
-"settings.player.no_clip.cover" = "커버 아트";
 "settings.player.no_clip.hold" = "배경 움직임 멈추기";
-"settings.player.no_clip.footer" = "전체 화면 커버는 클립처럼 커버가 화면을 가득 채웁니다. 저전력 모드와 동작 줄이기에서는 커버 아트를 유지합니다.";
+"settings.player.no_clip.footer" = "전체 화면 커버는 앨범 커버로 화면을 가득 채웁니다. 저전력 모드나 동작 줄이기를 켜면 배경이 움직이지 않습니다.";
 "settings.player.no_clip.full_screen" = "전체 화면 커버";
 "settings.player.no_clip.title" = "클립이 없는 노래";
 "settings.player.not_playing" = "재생 중이 아님";

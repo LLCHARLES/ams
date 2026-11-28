@@ -47,7 +47,7 @@ void SGMigrateKey(NSString *from, NSString *to) {}
 BOOL harnessActivityOn;
 BOOL SGFlag(NSString *key, BOOL fallback) {
     if ([key isEqual:SGKeyLiveActivity]) return harnessActivityOn;
-    if ([key isEqual:SGKeyLockScreenTranslation] || [key isEqual:SGKeyLiveActivityTranslation])
+    if ([key isEqual:SGKeyLockScreenKeepWidgetCover] || [key isEqual:SGKeyLockScreenTranslation] || [key isEqual:SGKeyLiveActivityTranslation])
         return [NSUserDefaults.standardUserDefaults boolForKey:key];
     return [key isEqual:SGKeyLockScreenLyrics] ? getenv("LSL") != NULL : fallback;
 }
@@ -129,7 +129,7 @@ NSInteger SGKaraokeDelayMs(void) { return harnessTrackOffset + [NSUserDefaults.s
 // Only the translation check selects the translated artist row.
 static BOOL sg_showTranslation;
 NSInteger SGInt(NSString *key, NSInteger fallback) {
-    if ([key isEqual:SGKeyLiveActivityView] || [key isEqual:SGKeyLockScreenLyricsStyle]) {
+    if ([key isEqual:SGKeyLiveActivityView] || [key isEqual:SGKeyLockScreenLyricsStyle] || [key isEqual:SGKeyLockScreenLyricsSize]) {
         id value = [NSUserDefaults.standardUserDefaults objectForKey:key];
         return value ? [value integerValue] : fallback;
     }

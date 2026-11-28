@@ -1,6 +1,7 @@
 // Shared by the real album and artist harness apps. Only AVFoundation's
 // asynchronous boundaries are held; the queue, decoder and compositor are real.
 #import <AVFoundation/AVFoundation.h>
+#import <CoreImage/CoreImage.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import <mach/mach.h>
@@ -177,6 +178,38 @@ static void awaitPausedFrame(UIView *h) {
     });
 }
 
+static void awaitLastFrame(UIView *h) {
+    awaitPausedFrame(h);
+    // This scenario runs inside one main-thread callback. Submit the reveal
+    // before polling its presentation; shot()'s flush would come too late.
+    [CATransaction flush];
+    CALayer *clip = surface(h);
+    AVPlayerLayer *video = [h valueForKeyPath:@"clip.video"];
+    double appearanceDeadline = CACurrentMediaTime() + 45;
+    while ([clip animationForKey:@"fade"] || [video animationForKey:@"opacity"] ||
+           clip.presentationLayer.opacity < 0.999 || video.presentationLayer.opacity < 0.999) {
+        if (CACurrentMediaTime() >= appearanceDeadline)
+            HARNESS_FAIL(@"clip opacity %g/%g animations %@; video opacity %g/%g animations %@",
+                         clip.opacity, clip.presentationLayer.opacity, clip.animationKeys,
+                         video.opacity, video.presentationLayer.opacity, video.animationKeys);
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    CIContext *reader = [CIContext contextWithOptions:nil];
+    untilMotion(@"green frame 3 displayed", ^BOOL {
+        // Only frame 3 has a green field. Read the displayed surface without
+        // consuming the video output that the suspension path will freeze.
+        CVPixelBufferRef pixel = [video copyDisplayedPixelBuffer];
+        if (!pixel) return NO;
+        CIImage *image = [CIImage imageWithCVPixelBuffer:pixel];
+        uint8_t rgba[4] = {0};
+        [reader render:image toBitmap:rgba rowBytes:4
+                bounds:CGRectMake(image.extent.size.width / 4, image.extent.size.height / 4, 1, 1)
+                format:kCIFormatRGBA8 colorSpace:nil];
+        CVPixelBufferRelease(pixel);
+        return rgba[1] > 2 * rgba[0] && rgba[1] > 2 * rgba[2];
+    });
+}
+
 static void exerciseMotion(UINavigationController *nav, BOOL artist) {
     // Start sampling after a completed page entrance, not while SpringBoard
     // is still scaling the launching window into its final pixel coordinates.
@@ -322,6 +355,7 @@ static void exerciseMotion(UINavigationController *nav, BOOL artist) {
         AVPlayerItem *item = visible.currentItem;
         return sought && [((AVPlayerItemVideoOutput *)[h valueForKeyPath:@"clip.output"]) hasNewPixelBufferForItemTime:item.currentTime];
     });
+    awaitLastFrame(h);
     shot(@"last", h);
     holdClock = YES;
     postMotion(UIApplicationDidBecomeActiveNotification);

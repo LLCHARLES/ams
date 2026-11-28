@@ -12,6 +12,16 @@
 // Threading: main thread only; the palette work it starts runs off it.
 #import <UIKit/UIKit.h>
 
+// Standalone artwork harnesses have no UIApplication.
+#ifdef SGR_ARTWORK_PREPARE_PROBE
+BOOL SGRArtworkAppIsActive(void);
+#else
+static inline BOOL SGRArtworkAppIsActive(void) {
+    UIApplication *app = UIApplication.sharedApplication;
+    return !app || app.applicationState == UIApplicationStateActive;
+}
+#endif
+
 // Posted on the main thread by a field whose color changed, with the field as the object and the
 // new color under "color".
 extern NSNotificationName const SGRFieldColorDidChangeNotification;
@@ -39,8 +49,13 @@ extern NSNotificationName const SGRFieldPaletteDidChangeNotification;
 @property (nonatomic) BOOL motionHeld;
 // Covered by something opaque the owner lays over the whole of the bounds (the player's Animated artwork
 // clip): the Fluid copies are hidden rather than composited under it for nothing, and come back where they
-// were when it is NO again. Set it only once the cover is opaque, and back before it starts to fade.
+// were when uncovered. Set the clip hold once it is opaque and release it before it fades.
+// Reading covered includes the independent Black or Photo backdrop hold.
 @property (nonatomic) BOOL covered;
+// Black and Photo have their own opaque view. A clip going away cannot uncover it.
+@property (nonatomic) BOOL backdropCovered;
+// The player can leave the screen while its background view is still in a window.
+@property (nonatomic) BOOL offscreen;
 // The backdrop's height in points from the top of the bounds; 0 is the window's height.
 @property (nonatomic) CGFloat backdropHeight;
 // The color the field paints: the one asked for (SGRNeutralField until a color arrives) as the redesign shows it

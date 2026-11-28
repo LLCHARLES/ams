@@ -1221,6 +1221,8 @@
 "settings.lockscreen.artwork.title" = "Full-screen artwork";
 "settings.lockscreen.dim_artwork.subtitle" = "Blurs and darkens the whole artwork, moving artwork included, and floats the lyrics over it instead of shading only around them.";
 "settings.lockscreen.dim_artwork.title" = "Dim the whole artwork";
+"settings.lockscreen.keep_widget_cover.subtitle" = "Shows the album cover in the widget and Control Center. The cover may flash briefly in full screen when lines change.";
+"settings.lockscreen.keep_widget_cover.title" = "Keep original widget cover";
 "settings.lockscreen.lyrics_layout.choice.centered" = "Centered";
 "settings.lockscreen.lyrics_layout.choice.left" = "Left";
 "settings.lockscreen.lyrics_layout.choice.messages" = "Messages";
@@ -1229,6 +1231,11 @@
 "settings.lockscreen.lyrics_layout.choice.vinyl" = "Vinyl";
 "settings.lockscreen.lyrics_layout.subtitle" = "Where the lyrics sit. Poster shows the line alone, larger.";
 "settings.lockscreen.lyrics_layout.title" = "Layout";
+"settings.lockscreen.lyrics_size.choice.large" = "Large";
+"settings.lockscreen.lyrics_size.choice.medium" = "Medium";
+"settings.lockscreen.lyrics_size.choice.small" = "Small";
+"settings.lockscreen.lyrics_size.subtitle" = "Size of the lyrics and translation on the lock screen.";
+"settings.lockscreen.lyrics_size.title" = "Text size";
 "settings.lockscreen.lyrics_style.choice.animated" = "Animated";
 "settings.lockscreen.lyrics_style.choice.still" = "Still";
 "settings.lockscreen.lyrics_style.subtitle" = "Still draws each line once; Animated gently moves the selected background. Applies when moving artwork is unavailable.";
@@ -2596,7 +2603,7 @@
 "settings.player.behind.black" = "Black";
 "settings.player.behind.photo" = "Your Photo";
 "settings.player.behind.title" = "Behind the Player";
-"settings.player.bg_desc.animated" = "The song's Canvas or the album's moving cover, else Fluid. The player's ⋯ menu switches between this, Fluid and Visualizer.";
+"settings.player.bg_desc.animated" = "Play the song's Canvas or the album's moving cover when available. The player's ⋯ menu switches between this, Fluid and Visualizer.";
 "settings.player.bg_desc.black" = "Pure black, nothing of the cover.";
 "settings.player.bg_desc.colors" = "The cover's colors, drifting slowly.";
 "settings.player.bg_desc.fluid" = "The cover itself, blurred and slowly turning. It rests while a song is paused.";
@@ -2692,8 +2699,7 @@
 "settings.player.music_icons.subtitle" = "The Music app's lyrics, AirPlay and queue icons under the controls, and the AI DJ's button as a waveform, in place of Spotify's.";
 "settings.player.music_icons.title" = "Music app icons";
 "settings.player.new_slider.title" = "New progress slider";
-"settings.player.no_clip.cover" = "Cover art";
-"settings.player.no_clip.footer" = "Full-screen cover fills the screen with the cover the way a clip does. Low Power Mode and Reduce Motion keep the cover art.";
+"settings.player.no_clip.footer" = "Full-screen cover fills the screen with the album cover. In Low Power Mode or with Reduce Motion, the artwork background stays still.";
 "settings.player.no_clip.full_screen" = "Full-screen cover";
 "settings.player.no_clip.hold" = "Keep background still";
 "settings.player.no_clip.title" = "Song without a clip";
@@ -2731,6 +2737,7 @@
 "settings.player.queue_bottom_sheet.title" = "Queue as a bottom sheet";
 "settings.player.queue_devices.title" = "Queue & devices";
 "settings.player.queue_flip.title" = "Queue flip transition";
+"settings.player.queue_history.title" = "Show recently played songs in queue";
 "settings.player.queue_style.music" = "Apple Music";
 "settings.player.queue_style.music_note" = "The queue opens inside the player under a small cover, with shuffle, repeat, sleep timer and AutoMix above it, as in Apple Music. Drag a song's grip to move it. Tap the button again to bring the cover back. AutoMix controls global transitions; per-playlist Mix stays in the playlist's ⋯ menu.";
 "settings.player.queue_style.spotify" = "Spotify";

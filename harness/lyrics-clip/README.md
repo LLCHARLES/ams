@@ -95,8 +95,10 @@ least 30% and enough for 4.5:1 and 3.3:1 on white, bright, dark and colourful co
 over its two stand-in videos.
 The harness observes the actual Core Text frames at the draw boundary: Left, Centered, Poster, Vinyl
 and Over the artwork each have an 84%-wide column, and a long sentence's longest shaped line must
-exceed 70% of the visible width. Font size and fitting rules are unchanged. The reported Left/Centered
-fixture naturally occupies two English lines and one Korean line, not the previous forced three/two.
+exceed 70% of the visible width. The reported lyric and Korean translation must both fit with natural line breaks.
+At 393 pt wide, Medium starts at 27.5 pt for the line, 18.7 pt for the translation and 17.1 pt for the next
+line in Left and Centered. Small and Large scale every layout to 78% and 122% of Medium before fitting.
+Each size is checked for a growing short line, safe truncation on overflow, and a distinct artwork ID.
 `OUT=<directory>` keeps its review PNGs; otherwise all outputs are temporary.
 `REVIEW_ONLY=1 SRC=<snapshot>` renders reference PNGs without running assertions.
 These are native Mac commands, not simulator apps.

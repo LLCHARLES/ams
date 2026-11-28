@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <CommonCrypto/CommonDigest.h>
 #import "artwork.h"
+#import "Shared/Fonts/Fonts.h"
 #import "../sha256-fixture.h"
 #import "Shared/AnimatedArtwork/AnimatedArtwork.h"
 #import "Shared/AnimatedArtwork/SGFluidClip.h"
@@ -253,20 +254,23 @@ void SGMotionMakeFile(NSURL *file, BOOL (^write)(void), void (^done)(BOOL)) {
         done([NSFileManager.defaultManager fileExistsAtPath:file.path] || write());
     });
 }
+SGAppFont SGAppFontDrawn(void) { return SGAppFontSystem; }
+NSString *SGAppFontFamilyDrawn(void) { return nil; }
+NSString *SGAppFontImportRevisionDrawn(void) { return nil; }
 CGSize SGLyricsClipSize(CGFloat pixels) { return CGSizeMake(24, 32); }
 CGImageRef SGLyricsClipBackdrop(CGImageRef cover, CGSize size) {
     return CGImageRetain(cover ?: blue.CGImage);
 }
 CGImageRef harnessPublicationFrame(NSString *, CGImageRef);
-CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
-                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) {
+CGImageRef SGLyricsClipFrameWithFont(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face) {
     return harnessPublicationFrame(line, backdrop);
 }
 CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) {
     return CGImageRetain(cover ?: blue.CGImage);
 }
-NSString *SGLyricsClipLook(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed) {
-    return [NSString stringWithFormat:@"style%ldl%ld%@%@", (long)style, (long)layout, dimmed ? @"d" : @"", motion ? motion.lastPathComponent : @""];
+NSString *SGLyricsClipLookWithFont(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed, SGLyricsClipTextSize textSize, SGLyricsClipFont face) {
+    return [NSString stringWithFormat:@"style%ldl%ldz%ld%@%@", (long)style, (long)layout, (long)textSize, dimmed ? @"d" : @"", motion ? motion.lastPathComponent : @""];
 }
 static BOOL writeFrame(NSURL *file, CGImageRef frame) {
     NSData *data = UIImagePNGRepresentation([UIImage imageWithCGImage:frame]);
@@ -301,17 +305,17 @@ static BOOL recordClip(NSURL *file, NSString *line, NSString *translation, BOOL 
     }
     return YES;
 }
-BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+BOOL SGLyricsClipWriteWithFont(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
-                                 SGLyricsClipLayout layout, BOOL (^current)(void)) {
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face, BOOL (^current)(void)) {
     return recordClip(file, line, translation, current) && writeFrame(file, backdrop);
 }
-BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void)) {
+BOOL SGLyricsClipWriteOverMotionWithFont(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face, BOOL (^current)(void)) {
     return recordClip(file, line, translation, current) && writeFrame(file, blue.CGImage);
 }
-CGImageRef SGLyricsClipMotionFrame(NSURL *motion, NSString *previous, NSString *line, NSString *translation,
-                                   NSString *next, double from, double seconds, SGLyricsClipLayout layout) { return CGImageRetain(blue.CGImage); }
+CGImageRef SGLyricsClipMotionFrameWithFont(NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                   NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face) { return CGImageRetain(blue.CGImage); }
 BOOL SGMotionClipShape(NSURL *file, CGFloat ratio, NSURL *out) { return writeFrame(out, blue.CGImage); }
 CGImageRef SGFluidClipFrame(CGImageRef cover, CGSize size) { return CGImageRetain(cover); }
 BOOL SGFluidClipWrite(NSURL *file, CGImageRef cover, CGSize size) { return writeFrame(file, cover); }
@@ -445,6 +449,7 @@ void HarnessArtDispatch(dispatch_queue_t queue, dispatch_block_t block) {
     if (countingPoster && queue == dispatch_get_main_queue()) posterHandoffs++;
     dispatch_async(queue, block);
 }
+extern void harnessAfterClipRequests(dispatch_block_t marker);
 extern int64_t harnessRowDelay;
 extern BOOL harnessPlaying;
 extern double harnessRate;
@@ -960,6 +965,22 @@ void artworkChecks(void) {
           @"late cover uses a distinct disk file while the coverless file still exists");
     check(sameImage(red, [UIImage imageWithContentsOfFile:coveredFile.path]),
           @"the new disk file contains the real cover");
+    MPMediaItemArtwork *nativeCoverObject = MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo[MPMediaItemPropertyArtwork];
+    check(nativeCoverObject && nativeCoverObject != harnessSystem()[MPMediaItemPropertyArtwork], @"lyrics supply the ordinary artwork by default");
+    NSUserDefaults *prefs = NSUserDefaults.standardUserDefaults;
+    NSDictionary *originalDomain = [prefs volatileDomainForName:NSArgumentDomain];
+    NSMutableDictionary *keepDomain = [originalDomain mutableCopy];
+    keepDomain[SGKeyLockScreenKeepWidgetCover] = @YES;
+    [prefs setVolatileDomain:keepDomain forName:NSArgumentDomain];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+    HARNESS_AWAIT(harnessSystem()[MPMediaItemPropertyArtwork] == nativeCoverObject);
+    check([name(artwork()) isEqual:name(covered)] && [video(artwork()) isEqual:coveredFile],
+          @"keeping the widget cover preserves the paused line's animated offer and video");
+    [prefs setVolatileDomain:originalDomain forName:NSArgumentDomain];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+    HARNESS_AWAIT(harnessSystem()[MPMediaItemPropertyArtwork] != nativeCoverObject && harnessSystem()[MPMediaItemPropertyArtwork]);
+    check([name(artwork()) isEqual:name(covered)] && MPNowPlayingInfoCenter.defaultCenter.nowPlayingInfo[MPMediaItemPropertyArtwork] == nativeCoverObject,
+          @"switching back restores the lyric still and retains the native source cover");
     position = 12000;
     report();
     id next = artwork();
@@ -989,7 +1010,19 @@ void artworkChecks(void) {
     report();
     NSURL *styleNext = video(artwork());
     check(styleNext && ![styleNext isEqual:nextFile], @"style change creates a distinct prefetched disk clip");
+    id beforeResize = artwork();
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    NSDictionary *savedDomain = [defaults volatileDomainForName:NSArgumentDomain];
+    NSMutableDictionary *resized = [savedDomain mutableCopy];
+    resized[SGKeyLockScreenLyricsSize] = @(SGLyricsClipTextLarge);
+    [defaults setVolatileDomain:resized forName:NSArgumentDomain];
+    [NSNotificationCenter.defaultCenter postNotificationName:NSUserDefaultsDidChangeNotification object:nil];
+    HARNESS_AWAIT(artwork() && [name(artwork()) containsString:@"z2"]);
+    NSURL *largerFile = video(artwork());
+    check(state.isPaused && largerFile && ![largerFile isEqual:styleNext] && !preview(beforeResize),
+          @"changing text size while paused replaces the current clip and retires its old preview");
     choose(SGLockArtworkOff);
+    [defaults setVolatileDomain:savedDomain forName:NSArgumentDomain];
     nativeInfo(nil);
     drainMain();
     check(!artwork(), @"late now-playing info cannot revive disabled lyrics");
@@ -1182,6 +1215,33 @@ void artworkChecks(void) {
     HARNESS_AWAIT([name(artwork()) containsString:animatedLook]);
     check([name(artwork()) containsString:animatedLook], @"Low Power Mode going off while paused brings the chosen style back");
     [NSUserDefaults.standardUserDefaults setVolatileDomain:@{} forName:NSArgumentDomain];
+
+    track(@"late-motion", SGLockArtworkMotionLyrics, file,
+          @[lineOf(@"Late", 0, 900), lineOf(@"Now", 1000, 1900)]);
+    SGLyricsArtworkSetMotion(SGURIString(state.track.URI), file);
+    HARNESS_AWAIT([name(artwork()) containsString:file.lastPathComponent]);
+    id late = artwork();
+    clipEntered = dispatch_semaphore_create(0);
+    clipRelease = dispatch_semaphore_create(0);
+    @synchronized (cacheRoot) { heldClip = @"Late"; }
+    __block NSUInteger deliveries = 0, expiredURLs = 0;
+    Video lateVideo = objc_getAssociatedObject(late, &videoKey);
+    void (^delivered)(NSURL *) = ^(NSURL *url) {
+        dispatch_async(dispatch_get_main_queue(), ^{ deliveries++; if (url) expiredURLs++; });
+    };
+    lateVideo(CGSizeMake(24, 32), delivered);
+    check(dispatch_semaphore_wait(clipEntered, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
+          @"on-demand moving artwork is encoding the first line");
+    lateVideo(CGSizeMake(24, 32), delivered);
+    dispatch_semaphore_t drained = dispatch_semaphore_create(0);
+    harnessAfterClipRequests(^{ dispatch_semaphore_signal(drained); });
+    position = 1100; // No report or timer callback while the encode was running.
+    dispatch_semaphore_signal(clipRelease);
+    check(dispatch_semaphore_wait(drained, dispatch_time(DISPATCH_TIME_NOW, HarnessWaitSeconds * (int64_t)NSEC_PER_SEC)) == 0,
+          @"both clip requests finished their serial work before main could refresh the clock");
+    HARNESS_AWAIT(deliveries == 2);
+    check(!expiredURLs && ![name(artwork()) isEqual:name(late)] && video(artwork()) != nil,
+          @"overlapping encode and cache-hit requests both discard the expired motion URL");
 
     NSArray *seekLines = @[lineOf(@"Held", 0, 900), lineOf(@"Passed", 1000, 1900),
         lineOf(@"Obsolete", 2000, 2900), lineOf(@"Demand", 3000, 3900), lineOf(@"Wanted", 4000, 4900)];

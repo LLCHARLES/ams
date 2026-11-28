@@ -769,7 +769,20 @@ static void checkShownTitle(dispatch_block_t next) {
 
 static void runSplits(void);
 static void run(void) {
-    if (getenv("HARNESS_CAPSULE")) { checkCapsule(); return; }
+    if (getenv("HARNESS_CAPSULE")) {
+        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+            checkCapsule();
+        } else {
+            NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+            __block id active = [center addObserverForName:UIApplicationDidBecomeActiveNotification
+                object:nil queue:nil usingBlock:^(NSNotification *note) {
+                    [NSNotificationCenter.defaultCenter removeObserver:active];
+                    active = nil;
+                    checkCapsule();
+                }];
+        }
+        return;
+    }
     checkShownTitle(^{ runSplits(); });
 }
 static void runSplits(void) {

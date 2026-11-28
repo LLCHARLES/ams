@@ -11,6 +11,28 @@ typedef NS_ENUM(NSInteger, SGLyricsClipStyle) {
     SGLyricsClipAnimated,    // the cover breathes behind the words, in a loop; a scene's one frame is held as long
 };
 
+typedef NS_ENUM(NSInteger, SGLyricsClipTextSize) {
+    SGLyricsClipTextSmall = 0,
+    SGLyricsClipTextMedium,
+    SGLyricsClipTextLarge,
+};
+
+// A process font snapshot, independent of UIKit and the app font hooks. A zero value preserves
+// each layout’s original typography. Only Family uses familyName.
+typedef NS_ENUM(NSInteger, SGLyricsClipFontKind) {
+    SGLyricsClipFontSystem, SGLyricsClipFontRounded, SGLyricsClipFontSerif, SGLyricsClipFontMono, SGLyricsClipFontFamily,
+};
+
+typedef struct {
+    SGLyricsClipFontKind kind;
+    NSString *familyName;
+    NSString *importRevision;   // installed generation of an imported family, nil for other fonts
+} SGLyricsClipFont;
+
+static inline SGLyricsClipTextSize SGLyricsClipNormalizedTextSize(NSInteger value) {
+    return value >= SGLyricsClipTextSmall && value <= SGLyricsClipTextLarge ? (SGLyricsClipTextSize)value : SGLyricsClipTextMedium;
+}
+
 // Where the words sit. Every layout keeps them between the clock and the media controls: a block too tall even
 // at the smallest size lets go of the line sung last, then the next, then the translation, and last ends the line
 // in an ellipsis after as many whole lines as fit. Stored by index (SGKeyLockScreenLyricsLayout): new ones go last.
@@ -49,11 +71,21 @@ CGImageRef SGLyricsClipDimmedArtwork(CGImageRef cover, CGSize size) CF_RETURNS_R
 // (SGLyricsClipDimmedArtwork), else over `cover` sharp under a local scrim.
 CGImageRef SGLyricsClipFrameWithLayout(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                        NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout) CF_RETURNS_RETAINED;
+CGImageRef SGLyricsClipFrameWithTextSize(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) CF_RETURNS_RETAINED;
+CGImageRef SGLyricsClipFrameWithFont(CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                       NSString *translation, NSString *next, CGSize size, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face) CF_RETURNS_RETAINED;
 // Writes H.264 on a worker, replacing `file` only after completion. `current`, if supplied, is
 // checked between encoder frames; NO cancels an obsolete render without publishing it.
 BOOL SGLyricsClipWriteWithLayout(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
                                  NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
                                  SGLyricsClipLayout layout, BOOL (^current)(void));
+BOOL SGLyricsClipWriteWithTextSize(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                 NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void));
+BOOL SGLyricsClipWriteWithFont(NSURL *file, CGImageRef backdrop, CGImageRef cover, NSString *previous, NSString *line,
+                                 NSString *translation, NSString *next, CGSize size, SGLyricsClipStyle style,
+                                 SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face, BOOL (^current)(void));
 // The same in the Left layout.
 static inline CF_RETURNS_RETAINED CGImageRef SGLyricsClipFrame(CGImageRef backdrop, NSString *line, NSString *translation,
                                                                NSString *next, CGSize size) {
@@ -74,12 +106,22 @@ static inline BOOL SGLyricsClipWrite(NSURL *file, CGImageRef backdrop, NSString 
 // stretch, rather than a band behind the words.
 BOOL SGLyricsClipWriteOverMotion(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
                                  NSString *next, double from, double seconds, SGLyricsClipLayout layout, BOOL (^current)(void));
-// The end of a line's artwork ID, so a clip kept under it is the one wanted: the render version, the style, which a clip falling
+BOOL SGLyricsClipWriteOverMotionWithTextSize(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, BOOL (^current)(void));
+BOOL SGLyricsClipWriteOverMotionWithFont(NSURL *file, NSURL *motion, NSString *previous, NSString *line, NSString *translation,
+                                 NSString *next, double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face, BOOL (^current)(void));
+// The end of a line's artwork ID, so a clip kept under it is the one wanted: the render version, the text size, the style, which a clip falling
 // back to the cover is drawn in, and the layout, d when Over the artwork is dimmed whole, and with moving artwork m and the
 // first 16 characters of its file's name (the store names files by a SHA-1 of their address), so another video for the
 // track redraws the line showing.
 NSString *SGLyricsClipLook(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed);
+NSString *SGLyricsClipLookWithTextSize(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed, SGLyricsClipTextSize textSize);
+NSString *SGLyricsClipLookWithFont(NSURL *motion, SGLyricsClipStyle style, SGLyricsClipLayout layout, BOOL dimmed, SGLyricsClipTextSize textSize, SGLyricsClipFont face);
 // That clip's first frame, for the preview image, NULL where the clip would not be written. The same `from` and
 // `seconds` as the clip's, as the darkness behind the words is judged across that stretch of the video.
 CGImageRef SGLyricsClipMotionFrame(NSURL *motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
                                    double from, double seconds, SGLyricsClipLayout layout) CF_RETURNS_RETAINED;
+CGImageRef SGLyricsClipMotionFrameWithTextSize(NSURL *motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
+                                   double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize) CF_RETURNS_RETAINED;
+CGImageRef SGLyricsClipMotionFrameWithFont(NSURL *motion, NSString *previous, NSString *line, NSString *translation, NSString *next,
+                                   double from, double seconds, SGLyricsClipLayout layout, SGLyricsClipTextSize textSize, SGLyricsClipFont face) CF_RETURNS_RETAINED;

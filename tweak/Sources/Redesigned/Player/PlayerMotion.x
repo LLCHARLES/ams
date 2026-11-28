@@ -1329,7 +1329,7 @@ static NSUInteger sg_begun;   // counts the walks begun, so a poster read for an
 static NSString *sg_noClip;   // the track whose walk found no clip, until another walk begins
 
 BOOL SGRPlayerTrackHasNoClip(void) {
-    return [sg_noClip isEqualToString:SGURIString(SGPlayerState().track.URI)];
+    return sg_noClip && [sg_noClip isEqualToString:SGURIString(SGPlayerState().track.URI)];
 }
 static NSString *sg_stillOf;   // the identity of the cover sg_motion shows as a still; nil while it is a clip or none
 // The clip sg_motion plays and its poster, for the Player page's showcase (SGRPlayerMotionPreview).

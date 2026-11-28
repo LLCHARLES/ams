@@ -689,7 +689,7 @@ Shared:
                   next line is coming, never its words, sides swapped right to left, the current bubble at most 4
                   lines and the previous 2 after shrinking to 0.6; Vinyl on #0E0E0E, a still record of 45 to 60% of the
                   visible width with the cover as its round label, a lighter rim and a soft glow, the current line in
-                  New York italic under it, the next line at 55% white; harness/lyrics-clip/ `scenes` and `regression.sh`). Over the artwork (last choice; default unchanged) keeps the cover sharp and
+                  New York italic under it by default, the next line at 55% white; harness/lyrics-clip/ `scenes` and `regression.sh`). Over the artwork (last choice; default unchanged) keeps the cover sharp and
                   centre-filled, with the previous line, current line and translation over a broad side-anchored
                   Gaussian gradient with no flat box or cutoff, plus a subtle text shadow. On white, the current
                   line keeps at least 4.5:1 contrast and the dimmed lines 3:1. Still holds it, Animated gently
@@ -713,14 +713,19 @@ Shared:
                   preview and clip are drawn ahead and a ready preview is handed over at once; from the thermal state Fair
                   up, a clip of many frames (over moving artwork, or Animated) is left for the lock screen's own ask, and
                   Low Power Mode draws nothing ahead. A clip being written stops as soon as its line is neither showing
-                  nor the one drawn ahead, rather than encoding to the end for nobody. From Serious up, and in Low Power
+                  nor the one drawn ahead. A freshly encoded on-demand motion clip checks the live line before
+                  delivery, so a late timer cannot hand back a clip for a line already sung. From Serious up, and in Low Power
                   Mode, the lines go Still over the cover (no motion, no breath) under their own ID, and the chosen look
                   comes back once the phone cools or Low Power Mode is off, paused too; reaching Fair or Low Power Mode
-                  also lets go of a many-frame clip queued or being drawn ahead. Each lyric ID owns one ordinary Now Playing artwork object, reused by ready-preview,
+                  also lets go of a many-frame clip queued or being drawn ahead. All lyric layouts follow the app font
+                  applied at launch. The artwork ID includes its design or family so a new choice redraws the clip.
+                  Each lyric ID normally owns one ordinary Now Playing artwork object, reused by ready-preview,
                   artist-row and Spotify/extras resends. Its synchronous handler uses a ready frame from this render
                   generation while a miss draws off main, never the plain cover. A new ID replaces the object;
                   turning lyrics off restores the
-                  native artwork. Picking it or another artwork applies at once.
+                  native artwork. Keep original widget cover (`spotifyglass.lockscreen.keepWidgetCover`, off by default)
+                  keeps Spotify’s cover in the widget and Control Center. It applies immediately and can briefly expose
+                  the cover between full-screen lyric clips. Picking another artwork mode also applies at once.
                   Moving artwork with lyrics (the choice's fifth value, 4) draws each line over the track's moving
                   artwork, which LockScreenMotion.x finds and hands over (SGLyricsArtworkSetMotion): the clip is the
                   stretch of the video the song is at while the line shows (its start taken round the video's length,
@@ -730,10 +735,10 @@ Shared:
                   rows behind the words are blurred (Accelerate's tent blur, 16% of the width across, at most 127
                   pixels) and faded in, every row of the cut is darkened in one pass (0.25, and 0.6 across the words,
                   up to 0.8 over a bright picture: by the brightest of four frames spread from the clip's first to its
-                  last, read once with an image generator before the clip is written, held for the clip, enough that
+                  last, shared between preview and video in a bounded cache keyed by file revision, stretch and text bounds, enough that
                   the brightest tenth behind the words comes to 0.22 of white; the preview judges the same stretch,
                   so it matches), and the words with a tight dark shadow are
-                  drawn on; the same exact 3:4 crop as the preview is copied row by row into the encoder's aligned,
+                  drawn on. The tent runs at half resolution. The exact 3:4 crop is composed directly into the encoder’s aligned,
                   IOSurface-backed buffer pool, preserving source color tags without scaling the already-drawn words.
                   The IDs end in a render-version token (changed whenever the drawing changes, so system-cached clips
                   from older renderers cannot return), the style, the layout and, over moving artwork, m and the first 16 characters of the
@@ -2605,7 +2610,7 @@ Turning on Hide About keeps the line under the name; ArtistSections.x,
 harness/artist/listeners-check.py). The Player page leads with a pinned miniature of the whole player showing the
 current or last song (480 pt, shrinking to 236 pt as the page scrolls, opaque above the rows; with Star add button on,
 the star before the ⋯ as the player draws it), whose Without a clip
-pill shows, for Animated and Auto, what a song without a clip would show, never sending a playback command
+pill previews the selected Animated fallback without sending a playback command
 (PlayerSettings.m; preview lookups are tied to the shown track and torn down with the page, SGRPlayerMotionPreviewStop,
 SGRPlayerVisualiserPreviewStop; harness/player/settings-check.sh). Its Buttons card has Shuffle, Repeat and Video chips.
 The Controls section has Lyrics Line, Rolling time digits, Star add button and Music app icons beside Header glass, Volume and Follow the cover.
@@ -2688,20 +2693,23 @@ for each new track while the Visualizer is on screen with the app in front and n
 kept under `spotifyglass.visualizer.shuffle.home` and comes back when shuffle is switched off. Visualizer motion pauses
 while hidden, backgrounded, in Low Power Mode, under serious heat (unless Ignore heat warnings,
 `spotifyglass.visualizer.ignoreHeat`, off) or during player transitions,
-and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`). Song without a clip (one
-choice: Cover art, Full-screen cover or Visualizer, written through the two keys below; Cover art also offers
-Keep background still, off by default)
-appears while Animated is chosen (Visualizer when there's no clip, `spotifyglass.redesign.player.animatedVisualizer`, off: once the track's clip lookup has answered
-none, the Visualizer stands where the clip would be, taken down by a later clip or a new track, the ordinary cover
-under Low Power Mode, Reduce Motion or the heat stand-down; it and the full-screen cover turn each other off, the
-full-screen cover kept when both are found on; harness/player/ `autoviz`. The full-screen cover,
-`spotifyglass.redesign.player.animatedStill`, off: a track with no clip
-shows the cover Spotify already drew, 300 px wide or more, where the clip would be, cropped to 4:3 at most, dimmed and
-blurred behind the lyrics as a clip is, under a black scrim of 45 % at the top fading out 76 pt below the safe area;
-a later clip replaces it, Black and Your Photo win, and Low Power Mode, Reduce Motion or serious heat keeps the ordinary cover;
-PlayerMotion.x, harness/player/ `still`),
-while Fluid is chosen a Style menu, Light or Smooth (spotifyglass.redesign.fluid.renderer, offered where Metal exists),
-its sliders and a red Reset (Redesigned/Kit/SGRFluid.h, spotifyglass.redesign.fluid.*).
+and is restrained by Reduce Motion (harness/player/ `shuffle`, `heat`).
+Animated offers five choices for **Song without a clip**: Still, Colors, Fluid, Full-screen cover and Visualizer.
+Still, Colors and Fluid use `SGRKeyPlayerNoClipBackground` (`spotifyglass.redesign.player.noClipBackground`).
+Fluid is the default, including for older settings and out-of-range values. **Keep background still** is off by
+default and appears only for Colors and Fluid. The selected fallback applies when the lookup confirms there is
+no clip. A pending lookup or a square clip playing in the cover keeps Fluid behind the player.
+Visualizer (`spotifyglass.redesign.player.animatedVisualizer`, off by default) appears after a confirmed miss.
+A later clip or a new track takes it down. Low Power Mode, Reduce Motion or the heat limit keeps the ordinary cover.
+Full-screen cover (`spotifyglass.redesign.player.animatedStill`, off by default) uses the cover Spotify already
+drew when it is at least 300 px wide. It crops to 4:3 at most and dims and blurs behind lyrics as a clip does.
+A 45% black scrim fades out 76 pt below the safe area. A later clip replaces the cover. Black and Your Photo take
+precedence, and Low Power Mode, Reduce Motion or serious heat keeps the ordinary cover. The two switches turn
+each other off. When an older installation has both enabled, Full-screen cover wins (PlayerMotion.x,
+harness/player/ `autoviz` and `still`).
+Choosing Fluid as the main background shows its sliders and a red Reset. Where Metal is available, the Style
+menu offers Light or Smooth (`spotifyglass.redesign.fluid.renderer`). Redesigned/Kit/SGRFluid.h defines the
+`spotifyglass.redesign.fluid.*` settings.
 Light turns preblurred Core Animation copies, with no Metal renderer or music analysis; it is what shows where Metal is
 missing. Smooth, the default, draws on the GPU (Redesigned/Kit/SGRFluidGPU.m):
 three copies of the cover, 1.4, 0.7 and 0.7 units across (a unit half the visible rect's height on a phone) at (0, 0),

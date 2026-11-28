@@ -6,6 +6,7 @@
 // The imported family: its files' names in Application Support/Retrine/Font, and the family name read from them.
 // SGKeyAppFontFile is the single file of an import from before families, moved to the list on first use.
 #define SGKeyAppFontFiles @"spotifyglass.font.files"
+#define SGKeyAppFontFilesRevision @"spotifyglass.font.files.revision"
 #define SGKeyAppFontName @"spotifyglass.font.name"
 #define SGKeyAppFontFile @"spotifyglass.font.file"
 // The family chosen under More fonts, by its name ("Avenir Next").
@@ -30,6 +31,8 @@ SGAppFont SGAppFontChosen(void);
 // The font the app draws in for this launch (Fonts.x reads the choice once): the choice, or Spotify's when a family it
 // names was not there. Text the mod sets in the system font is drawn in it, except when this is Spotify's.
 SGAppFont SGAppFontDrawn(void);
+NSString *SGAppFontFamilyDrawn(void);   // registered family for this launch
+NSString *SGAppFontImportRevisionDrawn(void);   // captured with the imported family at launch
 NSArray<NSString *> *SGAppFontNames(void);   // the five built in, by SGAppFont
 NSArray<NSString *> *SGAppFontFamilies(void);   // More fonts: the families this iPhone has of a fixed few
 // Main-thread async font choices: raw enum/family/library values, including absence. Completion may

@@ -204,8 +204,12 @@ BOOL SGLyricsEnabled(void);   // any source at all is on
 
 // Asks the sources in order and merges what they give, on the main queue. nil when none had lyrics.
 void SGLyricsFetch(NSString *trackID, void (^done)(SGLyricsResult *result));
+// A Spotify page may join ongoing work, respecting the keeper’s backoff before starting more.
+void SGLyricsFetchForSpotify(NSString *trackID, void (^done)(SGLyricsResult *result));
 // Main queue. A failed lookup is not a catalog miss; good kept lines always take precedence.
 BOOL SGLyricsLoadFailed(NSString *trackID);
+// Main queue. The keeper owns the retry clock, including the exhausted request mark.
+BOOL SGKaraokeSourceRetryPaused(NSString *trackID);
 void SGLyricsNoteLoadFailure(NSString *trackID, BOOL failed);
 void SGLyricsNoteSpotifyLoadFailure(NSString *trackID, BOOL failed);
 void SGLyricsRetry(NSString *trackID);

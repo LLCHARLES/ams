@@ -22,9 +22,19 @@ UIColor *SGRFieldColorFor(UIColor *color) { return color; }
 @end
 
 static NSMutableArray<void (^)(void)> *pending;
+// During the inactive-track check the still field asks for a backdrop and the accent asks for flow.
+static NSMutableArray<UIImage *> *fieldRequests, *accentRequests;
+static BOOL active = YES;
+BOOL SGRArtworkAppIsActive(void) { return active; }
+static NSUInteger accents;
+static BOOL SGRPlayerFollowsCover(void) { return YES; }
+static void SGRPlayerSetCoverAccent(UIColor *color) { accents++; }
+#include "follow-cover.inc"
 
 @implementation SGRPalette
 + (void)paletteForImage:(UIImage *)image request:(SGRPaletteRequest)request completion:(void (^)(SGRPalette *))completion {
+    if (request.flow) [accentRequests addObject:image];
+    else [fieldRequests addObject:image];
     SGRPalette *palette = [SGRPalette new];
     palette.fieldColor = request.flow ? UIColor.cyanColor : UIColor.redColor;
     if (request.backdropSize.width > 0) {
@@ -178,6 +188,38 @@ int main(void) {
         deliver(takeReplies());
         check(covered && showsBackdrop(fluid, image),
               "a completed still backdrop returns after another Fluid round trip");
+        // A still-only field never registered the motion observers. It must resume too.
+        SGRArtworkField *still = [[SGRArtworkField alloc] initWithFrame:field.bounds];
+        still.showsBackdrop = YES;
+        [still setArtwork:image identity:@"first" animated:NO];
+        followCover(image, @"first");
+        NSArray *late = takeReplies();
+        fieldRequests = [NSMutableArray array];
+        accentRequests = [NSMutableArray array];
+        active = NO;
+        UIImage *second = [UIImage imageWithCGImage:image.CGImage];
+        UIImage *latest = [renderer imageWithActions:^(UIGraphicsImageRendererContext *context) {
+            [UIColor.redColor setFill];
+            UIRectFill(CGRectMake(0, 0, 8, 8));
+        }];
+        [still setArtwork:second identity:@"second" animated:NO];
+        followCover(second, @"second");
+        [still setArtwork:latest identity:@"latest" animated:NO];
+        followCover(latest, @"latest");
+        check(!pending.count, "inactive track changes request neither a field palette nor a cover accent");
+        active = YES;
+        for (int i = 0; i < 2; i++) {
+            [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+            resumeCoverAccent();
+        }
+        __block BOOL resumed = NO;
+        dispatch_async(dispatch_get_main_queue(), ^{ resumed = YES; });
+        while (!resumed) spin(.01);
+        check(fieldRequests.count == 1 && fieldRequests.firstObject == latest, "activation reads one field palette for the last cover");
+        check(accentRequests.count == 1 && accentRequests.firstObject == latest, "activation reads one accent for the last cover");
+        deliver(takeReplies());
+        deliver(late);
+        check(showsBackdrop(still, latest) && accents == 1, "late field and accent replies cannot overwrite the last cover");
         checkDrift();
         printf("%d failed\n", failures);
         return failures ? 1 : 0;

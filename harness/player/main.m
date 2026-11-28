@@ -16,17 +16,17 @@
 //              checked by color at the end of each step; the log says PASS or FAIL
 //     landscape the landscape lyrics at 3 s, a line's meanings over them, a pause and a resume; each
 //              step logs whether the controls are up and what a touch on the lines lands on
-//     motion   Animated artwork: a clip (HARNESS_CANVAS_FILE, an mp4) that comes in before the player has
-//              laid out, then the field, the lyrics, a field built again, the menu's switch and the player
-//              closed, each step checked; the log ends with motion checks n of m right -- PASS or FAIL
+//     motion   Animated artwork: a clip (HARNESS_CANVAS_FILE, an mp4) requested when the player opens,
+//              the lyrics, a rebuilt field, the menu's switch and the player closing; the log ends with
+//              motion checks n of m right -- PASS or FAIL
 //     still    Animated's full-screen cover for a track with no clip: off first, then on, the 300 px rule, a late
 //              cover, two quick skips, a late clip, black, the photo, the Visualizer and Low Power Mode; the log ends
 //              with still checks n of m right -- PASS or FAIL
 //     catalog  Apple Music's catalog behind a stub: the search term without the edition, the album of the same
 //              name first, and the pause after a 429; the log says PASS or FAIL
 //     settings the redesign's Player page (PlayerSettings.m) over the player with the clip of `motion`: Song
-//              without a clip read from its two switches and each choice leaving the other off, the card pinned
-//              and shrinking as the rows scroll, its demo, the card refreshed for another track with late clips
+//              without a clip read from its field choice and two switches, the pinned card shrinking
+//              as the rows scroll, its demo, the card refreshed for another track with late clips
 //              dropped, paused while covered and stopped once closed, the Buttons chips, the card and the chips
 //              whole at narrow widths and the largest text, and no command sent to the player; the log ends
 //              with settings checks n of m right -- PASS or FAIL, and the app exits with it
@@ -2284,7 +2284,7 @@ static BOOL fieldCovered(void) {
     return field.covered && fluid && fluid.hidden;
 }
 
-// Green above the last 3% of rows, a red left half and a blue right half within them: the foot must keep the
+// Green above the lower quarter, which has a red left half and a blue right half: the foot must keep the
 // clip's left and right, red at its left edge and blue at its right, opaque, never green, and blend between
 // them across the middle rather than meet in a hard edge as stretched pixel columns would.
 static BOOL motionFootAcross(NSURL *file, NSString **detail) {
@@ -2296,9 +2296,9 @@ static BOOL motionFootAcross(NSURL *file, NSString **detail) {
             [UIColor.greenColor setFill];
             UIRectFill(CGRectMake(0, 0, 32, 100));
             [UIColor.redColor setFill];
-            UIRectFill(CGRectMake(0, 97, 16, 3));
+            UIRectFill(CGRectMake(0, 75, 16, 25));
             [UIColor.blueColor setFill];
-            UIRectFill(CGRectMake(16, 97, 16, 3));
+            UIRectFill(CGRectMake(16, 75, 16, 25));
         }];
     SGRPlayerMotionView *probe = [[SGRPlayerMotionView alloc] initWithFrame:CGRectMake(0, 0, 32, 120)];
     [probe playFile:file poster:poster];
@@ -2367,14 +2367,14 @@ static BOOL motionDeepensDown(NSURL *file, NSString **detail) {
 
 - (void)runMotionChecks {
     BOOL mirrorOnly = [scenario() isEqual:@"motion-mirror"];
-    // The clip comes in before the player has laid out, as for the track restored at launch.
+    // The restored track is known before the player opens. Only a visible field requests its clip.
     NSMutableArray *script = [NSMutableArray array];
     void (^when)(id, dispatch_block_t) = ^(id ready, dispatch_block_t action) {
         [script addObject:@[ready, action]];
     };
-    if (!mirrorOnly) when(PLAYER_GATE(SGRPlayerMotionShowing()), ^{
-        [self expect:SGRPlayerMotionShowing() && !SGRPlayerField() step:@"before the player opened"
-              detail:[NSString stringWithFormat:@"clip %@, field %@", SGRPlayerMotionShowing() ? @"in" : @"missing", SGRPlayerField() ? @"made" : @"not made"]];
+    if (!mirrorOnly) when(PLAYER_GATE(self.window.isKeyWindow && SGPlayerState()), ^{
+        [self expect:!SGRPlayerMotionShowing() && !SGRPlayerField() && sg_canvasServed == 0 step:@"before the player opened"
+              detail:[NSString stringWithFormat:@"clips served %lu, field %@", (unsigned long)sg_canvasServed, SGRPlayerField() ? @"made" : @"not made"]];
     });
     when(@0, ^{
         [self->_list insertSubview:self->_plane atIndex:0];
@@ -2519,17 +2519,23 @@ static BOOL motionDeepensDown(NSURL *file, NSString **detail) {
         UIView *plane = [[UIView alloc] initWithFrame:self->_plane.frame];
         UIViewController *background = [_TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController new];
         background.view = plane;
+        [self->_background viewWillDisappear:NO];
         [self->_plane removeFromSuperview];
+        [self->_background viewDidDisappear:NO];
         [self->_list insertSubview:plane atIndex:0];
         self->_plane = plane;
         NSMutableArray *units = [self->_units mutableCopy];
         [units replaceObjectAtIndex:[units indexOfObject:self->_background] withObject:background];
         self->_units = units;
         self->_background = background;
+        [background viewWillAppear:NO];
         [self layOut];
-        [self expect:SGRPlayerField() != old && motionView() != nil && fieldCovered() step:@"a field built again"
-              detail:[NSString stringWithFormat:@"%@, its Fluid copies %@", motionView() ? @"the clip moved onto it" : @"the clip left behind",
-                      fieldCovered() ? @"hidden" : @"drawn"]];
+        [background viewDidAppear:NO];
+        HARNESS_CHECK(SGRPlayerField() != old && SGRPlayerField().superview == plane);
+    });
+    when(PLAYER_GATE(motionView() && fieldCovered()), ^{
+        [self expect:motionView().superview == SGRPlayerField() step:@"a field built again"
+              detail:@"the clip is back on the replacement field, which is covered"];
     });
     // Switched off, the clip and the cover cross over: the clip's fade out and the cover's fade in start
     // together, over the same time.
@@ -2712,14 +2718,14 @@ static NSString *stillName(void) {
             *yellow = solidPixels(UIColor.yellowColor, 299), *thumb = solidPixels(UIColor.magentaColor, 120),
             *magenta = solidPixels(UIColor.magentaColor, 300), *cyan = solidPixels(UIColor.cyanColor, 600);
     runScript(@[
-        @[PLAYER_GATE(SGRPlayerField().window && SGRNowPlayingArtwork(NULL, NULL)), ^{
+        @[PLAYER_GATE(SGRPlayerField().window && SGRPlayerTrackHasNoClip() && SGRNowPlayingArtwork(NULL, NULL)), ^{
             [self expect:ordinary() && !SGRPlayerStillOn() && !scrimShown() step:@"switched off, a track with no clip"
                   detail:[NSString stringWithFormat:@"%@, scrim %@", ordinary() ? @"the ordinary cover over Fluid" : @"something over the cover",
                           scrimShown() ?: @"none"]];
             NSLog(@"[harness] still: screenshot the ordinary cover now");
         }],
-        @[@0, ^{
-            setStill(YES);
+        @[@0, ^{ setStill(YES); }],
+        @[PLAYER_GATE(stillView() && stillPicture()), ^{
             UIView *still = stillView();
             [still layoutIfNeeded];
             CALayer *picture = [still valueForKey:@"_still"];
@@ -3131,7 +3137,9 @@ static void installSettingsWorkProbes(void) {
     };
     SGModRow *(^noClip)(void) = ^{ return rowTitled(@"Song without a clip"); };
     // A choice of Song without a clip as its menu makes it: the row's block, then the page read again.
-    void (^choose)(NSInteger) = ^(NSInteger index) {
+    void (^choose)(NSString *) = ^(NSString *title) {
+        NSInteger index = [noClip().menu indexOfObject:title];
+        HARNESS_CHECK(index != NSNotFound);
         noClip().chosen(index);
         [table() reloadData];
     };
@@ -3273,8 +3281,8 @@ static void installSettingsWorkProbes(void) {
         [self expect:!toggle.hidden && (toggle.accessibilityTraits & UIAccessibilityTraitButton) && [toggle.accessibilityLabel isEqualToString:@"Preview without a clip"]
                      && [[card() valueForKey:@"_canvas"] isAccessibilityElement] && [[[card() valueForKey:@"_canvas"] accessibilityLabel] isEqualToString:@"Player preview"]
                 step:@"VoiceOver: the card one element, the demo a button" detail:[NSString stringWithFormat:@"button \"%@\" traits %llu", toggle.accessibilityLabel, toggle.accessibilityTraits]];
-        [self expect:[noClip().value() isEqualToString:@"Cover art"] && noClip().menu.count == 3 && pathOf(noClip()) && !rowTitled(@"Full-screen cover without a clip") && !rowTitled(@"Visualizer when there's no clip")
-                step:@"one Song without a clip choice, Cover art with both switches unset" detail:[NSString stringWithFormat:@"reads %@ of %@; %@", noClip().value(), noClip().menu, switches()]];
+        [self expect:[noClip().value() isEqualToString:@"Fluid"] && [noClip().menu isEqual:@[@"Still", @"Colors", @"Fluid", @"Full-screen cover", @"Visualizer"]] && pathOf(noClip()) && !rowTitled(@"Full-screen cover without a clip") && !rowTitled(@"Visualizer when there's no clip")
+                step:@"one Song without a clip choice, Fluid with both switches unset" detail:[NSString stringWithFormat:@"reads %@ of %@; %@", noClip().value(), noClip().menu, switches()]];
     });
     // Covered by another page, the card does nothing; the background's switches changed meanwhile, as elsewhere.
     step(0, ^{
@@ -3282,12 +3290,13 @@ static void installSettingsWorkProbes(void) {
         [nav pushViewController:[UIViewController new] animated:NO];
         [NSUserDefaults.standardUserDefaults setBool:YES forKey:SGRKeyPlayerAnimatedStill];
     });
-    when(^BOOL { return nav.topViewController != page() && !nav.transitionCoordinator; }, ^{
+    // UIKit updates the navigation stack before the covered page finishes disappearing.
+    when(^BOOL { return nav.topViewController != page() && !page().viewIfLoaded.window && !nav.transitionCoordinator; }, ^{
         [self expect:![[card() valueForKey:@"_active"] boolValue] && !motionOn() && !hillsOn() step:@"covered: no clip or hills on the card" detail:cardState()];
         [self expect:!closedDecoder step:@"covered: the preview decoder is released" detail:closedDecoder ? @"still retained" : @"released"];
         [nav popViewControllerAnimated:NO];
     });
-    when(^BOOL { return nav.topViewController == page() && !nav.transitionCoordinator && motionOn() != nil; }, ^{
+    when(^BOOL { return nav.topViewController == page() && page().viewIfLoaded.window && !nav.transitionCoordinator && motionOn() != nil; }, ^{
         UIButton *menu = (UIButton *)cellOf(noClip()).accessoryView;
         [self expect:[noClip().value() isEqualToString:@"Full-screen cover"] && [menu.accessibilityValue isEqualToString:@"Full-screen cover"] && motionOn()
                 step:@"back on the page: Full-screen cover from the switch stored meanwhile, the clip back" detail:[NSString stringWithFormat:@"row \"%@\", menu \"%@\"; %@", noClip().value(), menu.accessibilityValue, cardState()]];
@@ -3302,38 +3311,54 @@ static void installSettingsWorkProbes(void) {
         [NSUserDefaults.standardUserDefaults removeObjectForKey:SGRKeyPlayerAnimatedVisualiser];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:SGRKeyPlayerAnimatedStill];
         reread();
+        SGSetInt(SGRKeyPlayerNoClipBackground, -1);
+        BOOL invalidStored = SGRPlayerNoClipBackground() == SGRPlayerBackgroundFluid;
+        SGRSetPlayerNoClipBackground(SGRPlayerBackgroundAnimated);
+        [self expect:invalidStored && SGInt(SGRKeyPlayerNoClipBackground, -1) == SGRPlayerBackgroundFluid
+                step:@"invalid stored and selected artwork backgrounds resolve to Fluid" detail:noClip().value()];
         sg_bothOn = 0;
     });
     // Each choice through the menu's own block: the other switch off at every write, and the card shows it.
     step(0, ^{
-        choose(1);
-        [self expect:stored(SGRKeyPlayerAnimatedStill) && !stored(SGRKeyPlayerAnimatedVisualiser) && demo() && stillShown() && !motionOn() && !hillsOn()
+        choose(@"Full-screen cover");
+        [self expect:!pathOf(rowTitled(@"Keep background still")) && stored(SGRKeyPlayerAnimatedStill) && !stored(SGRKeyPlayerAnimatedVisualiser) && demo() && stillShown() && !motionOn() && !hillsOn()
                      && [playerNow() isEqualToString:playerBefore] && SGRHarnessPlayerCommands() == 0
                 step:@"Full-screen cover chosen: its switch alone on, the card shows it" detail:[NSString stringWithFormat:@"%@; %@", switches(), cardState()]];
     });
     step(0, ^{
-        choose(2);
+        choose(@"Visualizer");
         [self expect:!stored(SGRKeyPlayerAnimatedStill) && stored(SGRKeyPlayerAnimatedVisualiser) && demo() && hillsOn() && !stillShown() && !motionOn()
                 step:@"Visualizer chosen: its switch alone on, the hills on the card" detail:[NSString stringWithFormat:@"%@; %@", switches(), cardState()]];
     });
     step(0, ^{
-        choose(1);
+        choose(@"Full-screen cover");
         BOOL fullScreen = stored(SGRKeyPlayerAnimatedStill) && !stored(SGRKeyPlayerAnimatedVisualiser);
-        choose(0);
+        choose(@"Fluid");
         [self expect:fullScreen && !stored(SGRKeyPlayerAnimatedStill) && !stored(SGRKeyPlayerAnimatedVisualiser) && demo() && !hillsOn() && !stillShown() && !motionOn()
-                step:@"Visualizer to Full-screen cover to Cover art: one switch on at most, then none" detail:[NSString stringWithFormat:@"%@; %@", switches(), cardState()]];
+                step:@"Visualizer to Full-screen cover to Fluid: one switch on at most, then none" detail:[NSString stringWithFormat:@"%@; %@", switches(), cardState()]];
         SGModRow *hold = rowTitled(@"Keep background still");
         SGRArtworkField *field = (SGRArtworkField *)firstOfClass(card(), @"SGRArtworkField");
         BOOL offered = pathOf(hold) && !hold.defaultOn && !field.motionHeld;
         SGSetEnabled(SGRKeyPlayerHoldNoClip, YES);
         if (hold.changed) hold.changed(YES);
         BOOL held = field.motionHeld;
+        for (NSString *name in @[@"Still", @"Colors", @"Fluid"]) {
+            choose(name);
+            BOOL flows = [name isEqual:@"Colors"], fluid = [name isEqual:@"Fluid"];
+            SGRArtworkField *player = SGRPlayerField();
+            [self expect:player && field && !player.flows && player.fluid &&
+                         field.flows == flows && field.fluid == fluid && !stillShown() && !hillsOn() &&
+                         [noClip().value() isEqual:name] && demo() && !motionOn() && SGRPlayerMotionShowing() &&
+                         (pathOf(hold) != nil) == (flows || fluid) && SGRPlayerNoClipHoldEnabled() == (flows || fluid) &&
+                         field.motionHeld == (flows || fluid)
+                    step:[@"demo fallback while the player keeps its clip: " stringByAppendingString:name] detail:cardState()];
+        }
         SGSetEnabled(SGRKeyPlayerHoldNoClip, NO);
         if (hold.changed) hold.changed(NO);
         BOOL resumed = !field.motionHeld;
-        choose(2);
+        choose(@"Visualizer");
         [self expect:offered && held && resumed && !pathOf(hold)
-                step:@"Cover art can hold and release Fluid live; Visualizer has no still switch" detail:cardState()];
+                step:@"Fluid can hold and release live; Visualizer has no still switch" detail:cardState()];
         [self expect:sg_bothOn == 0 step:@"the two switches never stored on together" detail:[NSString stringWithFormat:@"%lu writes left both on", (unsigned long)sg_bothOn]];
     });
     // A tap on the card shows the song as it is again; its button shows it without a clip.
@@ -3361,24 +3386,36 @@ static void installSettingsWorkProbes(void) {
         [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
     });
     when(^BOOL {
-        return [(SGRArtworkField *)firstOfClass(card(), @"SGRArtworkField") motionHeld];
+        return !hillsOn() && [(SGRArtworkField *)firstOfClass(card(), @"SGRArtworkField") motionHeld];
     }, ^{
         SGRArtworkField *field = (SGRArtworkField *)firstOfClass(card(), @"SGRArtworkField");
         [self expect:demo() && !hillsOn() && !stillShown() && !motionOn() && field.motionHeld step:@"Low Power Mode: the cover art held still, as the player shows" detail:cardState()];
         sg_lowPower = NO;
         [NSNotificationCenter.defaultCenter postNotificationName:NSProcessInfoPowerStateDidChangeNotification object:nil];
     });
+    __block BOOL backgroundRowsUpdated = NO;
     when(^BOOL { return hillsOn() != nil; }, ^{
         BOOL back = demo() && hillsOn();
-        choose(0);   // The upcoming track transitions exercise the Cover art fallback.
+        [CATransaction begin];
+        [CATransaction setCompletionBlock:^{ backgroundRowsUpdated = YES; }];
+        choose(@"Colors");   // The actual track lookup decides between Colors and Fluid.
         pick(SGRPlayerBackgroundFluid);
         BOOL ended = !demo() && !hillsOn() && !motionOn();
         pick(SGRPlayerBackgroundAnimated);
+        [CATransaction commit];
         [self expect:back && ended && !demo() && [playerNow() isEqualToString:playerBefore] && SGRHarnessPlayerCommands() == 0
                 step:@"Fluid ends the demo, and Animated again does not bring it back" detail:cardState()];
     });
     // Scrolled: compact, still under the bar, whole; the rows go under it.
-    step(0, ^{
+    __block CGPoint savedOffset;
+    __block NSIndexPath *markerPath;
+    __block UIView *marker;
+    when(^BOOL {
+        if (!backgroundRowsUpdated || table().hasUncommittedUpdates) return NO;
+        // The batch completion may scroll to the newly inserted rows.
+        if (@available(iOS 17.4, *)) { if (table().scrollAnimating) return NO; }
+        return YES;
+    }, ^{
         // Choosing the fallback reloads the table. Resolve that reload's row estimates
         // and inset adjustments before setting either measurement offset.
         [page().view layoutIfNeeded];
@@ -3396,30 +3433,50 @@ static void installSettingsWorkProbes(void) {
         [self expect:card().window && fabs(half - 358) < 1 && !halfway && fabs(height - 236) < 1 && fabs(cardTop() - barFoot() - 8) < 1 && !clipping
                 step:@"scrolled: the card shrinking whole, then compact under the bar" detail:[NSString stringWithFormat:@"halfway %.0f (%@); %@, height %.0f; %@", half,
                                                        halfway ?: @"whole", pinned(), height, clipping ?: @"every part in its band"]];
-        CGPoint savedOffset = table().contentOffset;
-        SGModRow *row = rowTitled(@"Header glass");
-        UITableViewCell *cell = cellOf(row);
-        CGRect rowFrame = [table() rectForRowAtIndexPath:pathOf(row)];
-        // A visible-color marker on an actual row, scrolled under the status/navigation region.
-        UIView *marker = [[UIView alloc] initWithFrame:CGRectMake(20, 0, 80, cell.contentView.bounds.size.height)];
+        savedOffset = table().contentOffset;
+        markerPath = pathOf(rowTitled(@"Header glass"));
+        HARNESS_CHECK(markerPath);
+        CGRect rowFrame = [table() rectForRowAtIndexPath:markerPath];
+        CGFloat belowPreview = CGRectGetMaxY(card().superview.frame) - table().bounds.origin.y + 40;
+        [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - belowPreview) animated:NO];
+        [page().view setNeedsLayout];
+        [page().view layoutIfNeeded];
+        [table() layoutIfNeeded];
+        // cellOf scrolls to the bottom; resolve the cell at the measurement offset instead.
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
+        HARNESS_CHECK(cell.window);
+        marker = [[UIView alloc] initWithFrame:CGRectMake(20, 0, 80, cell.contentView.bounds.size.height)];
         marker.backgroundColor = UIColor.magentaColor;
         [cell.contentView addSubview:marker];
-        CGFloat belowPreview = CGRectGetMaxY([card() convertRect:card().bounds toView:table()]) - table().bounds.origin.y + 40;
-        [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - belowPreview) animated:NO];
-        [table() layoutIfNeeded];
+    });
+    when(^BOOL {
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
+        if (!cell.window || marker.superview != cell.contentView) return NO;
+        for (CALayer *layer = marker.layer; layer; layer = layer.superlayer) {
+            if (layer.animationKeys.count || layer.presentationLayer.opacity < 0.999) return NO;
+            if (layer == table().layer) return YES;
+        }
+        return NO;
+    }, ^{
+        UITableViewCell *cell = [table() cellForRowAtIndexPath:markerPath];
         CGPoint exposedPoint = [marker convertPoint:CGPointMake(40, marker.bounds.size.height / 2) toView:table()];
+        HARNESS_CHECK(CGRectContainsPoint(table().bounds, exposedPoint) && exposedPoint.y > CGRectGetMaxY(card().superview.frame));
         NSString *exposed = pixelAtPoint(table(), exposedPoint);
+        CGRect rowFrame = [table() rectForRowAtIndexPath:markerPath];
         [table() setContentOffset:CGPointMake(0, CGRectGetMidY(rowFrame) - 50) animated:NO];
+        [page().view setNeedsLayout];
+        [page().view layoutIfNeeded];
         [table() layoutIfNeeded];
         CGPoint point = [marker convertPoint:CGPointMake(40, marker.bounds.size.height / 2) toView:table()];
         UIView *hit = [table() hitTest:point withEvent:nil];
         CGFloat screenY = point.y - table().bounds.origin.y;
         NSString *color = pixelAtPoint(table(), point);
-        [self expect:cell.window && screenY > 0 && screenY < 116 && [exposed isEqualToString:@"255,0,255,255"]
+        [self expect:cell.window && [table() cellForRowAtIndexPath:markerPath] == cell && screenY > 0 && screenY < 116 && [exposed isEqualToString:@"255,0,255,255"]
                      && [color isEqualToString:@"0,0,0,255"] && ![hit isDescendantOfView:cell]
                 step:@"scrolled rows above the preview bottom are neither visible nor hit-testable"
               detail:[NSString stringWithFormat:@"row y %.0f, exposed %@, covered %@, hit %@", screenY, exposed, color, NSStringFromClass(hit.class)]];
         [marker removeFromSuperview];
+        marker = nil;
         [table() setContentOffset:savedOffset animated:NO];
         [table() layoutIfNeeded];
     });
@@ -3477,6 +3534,10 @@ static void installSettingsWorkProbes(void) {
         [table() setContentOffset:CGPointMake(0, -table().adjustedContentInset.top) animated:NO];
         [table() layoutIfNeeded];
     });
+    SGRArtworkField *(^previewField)(void) = ^{ return (SGRArtworkField *)[card() valueForKey:@"_field"]; };
+    BOOL (^bothFluid)(void) = ^BOOL {
+        return SGRPlayerField().fluid && !SGRPlayerField().flows && previewField().fluid && !previewField().flows;
+    };
     // Deliver B only after C owns the card, then deliver C. No scheduler race decides their order.
     __block BOOL observedHandover = NO;
     when(^BOOL { return motionOn() && SGRPlayerMotionShowing(); }, ^{
@@ -3493,8 +3554,7 @@ static void installSettingsWorkProbes(void) {
         [self playTrack:@"spotify:track:harnessB" image:imageURI(@"bbbb")];
     });
     when(^BOOL { return observedHandover && SGRHarnessLookupReady(@"spotify:track:harnessB") && pictureReady(lateImageB); }, ^{
-        SGRArtworkField *previewField = [card() valueForKey:@"_field"];
-        [self expect:previewField && !previewField.motionHeld step:@"pending preview lookup leaves Fluid moving" detail:cardState()];
+        [self expect:bothFluid() && !previewField().motionHeld step:@"pending preview lookup leaves Fluid moving" detail:cardState()];
         SGRHarnessHoldLookups(@"spotify:track:harnessC");
         setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/square-%d.mp4", getpid()].UTF8String, 1);
         serve(imageURI(@"cccc"), solid(UIColor.greenColor), 0.2, NO);
@@ -3521,35 +3581,53 @@ static void installSettingsWorkProbes(void) {
         UIView *clip = firstOfClass(SGRPlayerShowingCover(), @"SGRPlayerMotionView");
         return [(AVPlayer *)[clip valueForKey:@"player"] rate] > 0;
     }, ^{
-        [self expect:SGRPlayerField() && !SGRPlayerField().motionHeld step:@"square clip in the cover leaves Fluid moving" detail:cardState()];
+        [self expect:SGRPlayerNoClipBackground() == SGRPlayerBackgroundColours && bothFluid() && !SGRPlayerField().motionHeld
+                step:@"square clip leaves Fluid behind the cover with Colors selected" detail:cardState()];
         unsetenv("HARNESS_CANVAS");
         SGRHarnessHoldLookups(@"spotify:track:noClip");
         [self playTrack:@"spotify:track:noClip" image:imageURI(@"cccc")];
     });
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:noClip"); }, ^{
+        [self expect:bothFluid() step:@"pending lookup keeps Fluid on both fields" detail:cardState()];
         SGRHarnessDeliverLookups(@"spotify:track:noClip");
     });
     [script addObject:@[^BOOL { return SGRPlayerField().motionHeld && [(SGRArtworkField *)[card() valueForKey:@"_field"] motionHeld]; }, ^{
-        [self expect:!SGRPlayerMotionShowing() && !SGRPlayerVisualiserShowing() && !SGPlayerState().isPaused
-                step:@"confirmed miss holds the playing field and preview" detail:cardState()];
-        SGRHarnessHoldLookups(@"spotify:track:pending");
-        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/pending-%d.mp4", getpid()].UTF8String, 1);
-        [self playTrack:@"spotify:track:pending" image:imageURI(@"cccc")];
+        [self expect:SGRPlayerTrackHasNoClip() && !SGRPlayerMotionShowing() && !SGRPlayerVisualiserShowing() && !SGPlayerState().isPaused &&
+                     SGRPlayerField().flows && !SGRPlayerField().fluid && previewField().flows && !previewField().fluid
+                step:@"confirmed miss shows Colors on the player and preview" detail:cardState()];
+        choose(@"Still");
+        [self expect:!SGRPlayerField().flows && !SGRPlayerField().fluid && !previewField().flows && !previewField().fluid
+                step:@"confirmed miss changes to Still live on both fields" detail:cardState()];
+        choose(@"Colors");
+        HARNESS_CHECK(SGRPlayerField().flows && previewField().flows);
+        pick(SGRPlayerBackgroundStill);
+        pick(SGRPlayerBackgroundFluid);
+        [self expect:bothFluid() step:@"Animated with Colors to Still to Fluid restores both Fluid fields" detail:cardState()];
+        pick(SGRPlayerBackgroundAnimated);
     }, ^{ return [NSString stringWithFormat:@"waiting for confirmed miss: trackMiss=%d holdEnabled=%d playerFieldHeld=%d; %@",
                     SGRPlayerTrackHasNoClip(), SGRPlayerNoClipHoldEnabled(), SGRPlayerField().motionHeld, cardState()]; }]];
+    when(^BOOL { return SGRPlayerTrackHasNoClip() && SGRPlayerField().flows && previewField().flows; }, ^{
+        SGRHarnessHoldLookups(@"spotify:track:pending");
+        setenv("HARNESS_CANVAS", [NSString stringWithFormat:@"https://canvas.harness/square-return-%d.mp4", getpid()].UTF8String, 1);
+        [self playTrack:@"spotify:track:pending" image:imageURI(@"cccc")];
+    });
     when(^BOOL { return SGRHarnessLookupReady(@"spotify:track:pending"); }, ^{
-        [self expect:!SGRPlayerField().motionHeld step:@"next track releases the hold before its clip answer" detail:cardState()];
+        [self expect:bothFluid() && !SGRPlayerField().motionHeld step:@"next track releases the hold before its clip answer" detail:cardState()];
         SGRHarnessDeliverLookups(@"spotify:track:pending");
         SGSetEnabled(SGRKeyPlayerHoldNoClip, NO);
     });
-    step(0, ^{
+    when(^BOOL {
+        UIView *clip = firstOfClass(SGRPlayerShowingCover(), @"SGRPlayerMotionView");
+        return [(AVPlayer *)[clip valueForKey:@"player"] rate] > 0 && motionOn() != nil;
+    }, ^{
+        [self expect:bothFluid() && !SGRPlayerTrackHasNoClip() step:@"returning to a square clip keeps both fields Fluid" detail:cardState()];
         checkScrollWork();
         pick(SGRPlayerBackgroundVisualiser);
     });
     when(^BOOL { return hillsOn() != nil; }, ^{
         checkScrollWork();
         pick(SGRPlayerBackgroundAnimated);
-        choose(2); // the preview's hills only; the real player still has its clip
+        choose(@"Visualizer"); // the preview's hills only; the real player still has its clip
     });
     when(^BOOL { return hillsOn() != nil; }, ^{
         closedVisualiser = hillsOn();
@@ -3755,7 +3833,9 @@ static void installSettingsWorkProbes(void) {
     @[PLAYER_GATE(!clipIn()), ^{
         [self expect:!clipIn() step:@"Fluid picked, the clip out" detail:card()];
         pick(3);
-        [self expect:clipIn() && sg_canvasServed == 1 step:@"Animated again, the clip at once" detail:card()];
+    }],
+    @[PLAYER_GATE(clipIn()), ^{
+        [self expect:sg_canvasServed == 1 step:@"Animated again, the stored clip without a second download" detail:card()];
         NSLog(@"[harness] preview checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
               self->_failures ? @"FAIL" : @"PASS");
     }]], 0);
@@ -4004,6 +4084,8 @@ static NSString *finishChecks(NSUInteger checks, NSUInteger failures, NSString *
             [self expect:SGRPlayerStillOn() && !SGRPlayerAnimatedVisualiserOn() && ![store boolForKey:SGRKeyPlayerAnimatedVisualiser]
                     step:@"both saved on: the cover stays, the Visualizer switch is off"
                   detail:[NSString stringWithFormat:@"still %d, switch %d", SGRPlayerStillOn(), [store boolForKey:SGRKeyPlayerAnimatedVisualiser]]];
+            // Restored preferences take effect as the next track's lookup confirms a miss.
+            [self playTrack:@"spotify:track:restored" image:imageURI(@"cccc")];
         }],
         @[PLAYER_GATE(SGRPlayerMotionShowing()), ^{
             [self expect:!visualiserView() && !SGRPlayerVisualiserShowing() step:@"both saved on: no Visualizer after the cover" detail:state()];
@@ -5941,7 +6023,13 @@ static NSUInteger metalLayersIn(CALayer *layer) {
 }
 
 static __weak CAMetalLayer *captureLayer;
-static char failUpright;
+static char failUpright, preparationCountKey;
+static NSUInteger fluidPreparations(CALayer *fluid) {
+    return [objc_getAssociatedObject(fluid, &preparationCountKey) unsignedIntegerValue];
+}
+void SGRProbeFluidPreparation(SGRFluidLayer *fluid) {
+    objc_setAssociatedObject(fluid, &preparationCountKey, @(fluidPreparations(fluid) + 1), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
 BOOL SGRProbeFailUprightCover(UIImage *cover) { return objc_getAssociatedObject(cover, &failUpright) != nil; }
 extern NSUInteger SGRHarnessSpectrumReaders(void);
 static int presentedPixel[3];
@@ -6082,6 +6170,7 @@ static double bandDiff(NSData *a, NSData *b) {
     Method appState = class_getInstanceMethod(UIApplication.class, @selector(applicationState));
     __block IMP originalState, simulatedState;
     __block UIApplicationState lifecycleState;
+    __block id snapshotTexture;
     __block UIView *card;
     step(0, ^{
         SGRSetFluidRenderer(SGRFluidRendererSmooth);
@@ -6089,10 +6178,8 @@ static double bandDiff(NSData *a, NSData *b) {
         [probe layoutIfNeeded];
         gpu = (SGRFluidGPULayer *)fluidLayerIn(probe.layer).sublayers.firstObject;
         [probe setArtwork:solid(UIColor.redColor) identity:@"detached" animated:YES];
-    });
-    when(PLAYER_GATE([gpu valueForKey:@"toPicture"]), ^{
-        [self expect:[gpu valueForKey:@"toPicture"] != nil && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
-                step:@"detached artwork prepared without a Metal texture or ticker" detail:state()];
+        [self expect:![gpu valueForKey:@"toPicture"] && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+                step:@"detached artwork awaits attachment without a texture or ticker" detail:state()];
         captureNextFrame(gpu);
         [self.window addSubview:probe];
     });
@@ -6113,17 +6200,18 @@ static double bandDiff(NSData *a, NSData *b) {
         [self expect:captureLayer == gpu step:@"settled field does not submit another frame" detail:state()];
         captureNextFrame(gpu);
         [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+        snapshotTexture = [gpu valueForKey:@"to"];
         lifecycleState = UIApplicationStateInactive;
         simulatedState = imp_implementationWithBlock(^UIApplicationState(id app) { return lifecycleState; });
         originalState = method_setImplementation(appState, simulatedState);
         [probe setArtwork:solid(UIColor.blueColor) identity:@"inactive" animated:YES];
     });
     step(1, ^{
-        [self expect:!gpu.superlayer.hidden && !gpu.hidden && captureLayer == gpu && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+        [self expect:!gpu.superlayer.hidden && !gpu.hidden && captureLayer == gpu && [gpu valueForKey:@"to"] == snapshotTexture && ![gpu valueForKey:@"link"]
                 step:@"inactive field keeps its frame without a submission or ticker" detail:state()];
         lifecycleState = UIApplicationStateBackground;
         [probe setArtwork:solid(UIColor.blueColor) identity:@"background" animated:YES];
-        [self expect:captureLayer == gpu && ![gpu valueForKey:@"to"] && ![gpu valueForKey:@"link"]
+        [self expect:captureLayer == gpu && [gpu valueForKey:@"to"] == snapshotTexture && ![gpu valueForKey:@"link"]
                 step:@"background artwork submits no frame or ticker" detail:state()];
         method_setImplementation(appState, originalState);
         imp_removeBlock(simulatedState);
@@ -6149,6 +6237,9 @@ static double bandDiff(NSData *a, NSData *b) {
         // Hold Metal submissions through the screenshot so a later drawable cannot satisfy it.
         [NSNotificationCenter.defaultCenter postNotificationName:UIApplicationWillResignActiveNotification object:nil];
         probe.covered = NO;
+        [self expect:gpu.superlayer.hidden step:@"old cover stays concealed during preparation" detail:state()];
+    });
+    when(PLAYER_GATE(!gpu.superlayer.hidden), ^{
         NSData *surface = fieldBand(probe);
         const uint8_t *pixel = (const uint8_t *)surface.bytes + 4 * (40 + 28 * 80);
         [self expect:pixel[0] > pixel[1] && pixel[0] > pixel[2]
@@ -6248,6 +6339,63 @@ static double bandDiff(NSData *a, NSData *b) {
         captureLayer = nil;
         [card setValue:@NO forKey:@"active"];
         [card removeFromSuperview];
+    });
+    step(0, ^{
+        SGRSetPlayerBackground(SGRPlayerBackgroundFluid);
+        [self->_background viewWillAppear:NO];
+        [self->_background viewDidLayoutSubviews];
+        [self->_background viewDidAppear:NO];
+        HARNESS_CHECK(SGRPlayerIsVisible() && !SGRPlayerField().covered);
+        SGRPlayerShowLandscape(YES);
+    });
+    __block CALayer *portraitFluid;
+    __block NSUInteger portraitBefore;
+    when(PLAYER_GATE(SGRPlayerLandscapeCovers(self.window)), ^{
+        portraitFluid = fluidLayerIn(SGRPlayerField().layer);
+        portraitBefore = fluidPreparations(portraitFluid);
+        SGRHarnessSetTrack(@"spotify:track:landscapeB", nil, YES);
+        SGRSetNowPlayingArtwork(solid(UIColor.greenColor), @"spotify:track:landscapeB", SGRArtworkQualityHigh);
+        SGRHarnessSetTrack(@"spotify:track:landscapeC", nil, YES);
+        SGRSetNowPlayingArtwork(solid(UIColor.blueColor), @"spotify:track:landscapeC", SGRArtworkQualityHigh);
+    });
+    when(PLAYER_GATE([colorName([portraitFluid valueForKey:@"source"]) isEqual:@"blue"]), ^{
+        [self expect:portraitFluid.hidden && fluidPreparations(portraitFluid) == portraitBefore
+                step:@"opaque landscape skips portrait blur on track changes" detail:state()];
+        captureNextFrame((id)portraitFluid.sublayers.firstObject);
+        SGRPlayerShowLandscape(NO);
+        [self expect:fluidPreparations(portraitFluid) == portraitBefore + 1
+                step:@"closing landscape starts one portrait blur" detail:[NSString stringWithFormat:
+                    @"same field %d visible %d offscreen %d covered %d hidden %d deferred %@ before %lu after %lu window %@ field %@",
+                    portraitFluid == fluidLayerIn(SGRPlayerField().layer), SGRPlayerIsVisible(), SGRPlayerField().offscreen,
+                    SGRPlayerField().covered, portraitFluid.hidden, [portraitFluid valueForKey:@"deferredPrepare"],
+                    (unsigned long)portraitBefore, (unsigned long)fluidPreparations(portraitFluid), NSStringFromCGRect(self.window.bounds),
+                    NSStringFromCGRect([SGRPlayerField() convertRect:SGRPlayerField().bounds toView:self.window])]];
+    });
+    when(PLAYER_GATE(capturedPixel), ^{
+        [self expect:presentedPixel[2] > MAX(presentedPixel[0], presentedPixel[1]) && !portraitFluid.hidden &&
+                     fluidPreparations(portraitFluid) == portraitBefore + 1
+                step:@"portrait returns on the latest blue frame" detail:state()];
+    });
+    step(0, ^{
+        HARNESS_CHECK(SGRNowPlayingArtwork(NULL, NULL));
+        for (NSNumber *kind in @[@(SGRPlayerBackgroundBlack), @(SGRPlayerBackgroundPhoto)]) {
+            SGRSetPlayerBackground(kind.integerValue);
+            UIViewController *background = [_TtC21NowPlaying_ScrollImpl27NPVBackgroundViewController new];
+            background.view.frame = self.window.bounds;
+            [self.window addSubview:background.view];
+            [background viewWillAppear:NO];
+            [background viewDidLayoutSubviews];
+            [background viewDidAppear:NO];
+            SGRArtworkField *field = SGRPlayerField();
+            CALayer *fluid = fluidLayerIn(field.layer);
+            [self expect:field.superview == background.view && field.window && field.covered && fluid &&
+                         [fluid valueForKey:@"source"] && fluidPreparations(fluid) == 0
+                    step:kind.integerValue == SGRPlayerBackgroundBlack ? @"first black field skips blur" : @"first photo field skips blur"
+                  detail:[NSString stringWithFormat:@"own %d window %d covered %d source %d queued %lu",
+                          field.superview == background.view, field.window != nil, field.covered, [fluid valueForKey:@"source"] != nil,
+                          (unsigned long)fluidPreparations(fluid)]];
+            [background.view removeFromSuperview];
+        }
     });
     step(0, ^{
         NSLog(@"[harness] renderer checks: %lu of %lu right -- %@", (unsigned long)(self->_checks - self->_failures), (unsigned long)self->_checks,
@@ -6809,7 +6957,7 @@ __attribute__((constructor(101))) static void sgr_harnessDefaults(void) {
         harnessMotion = allowMotion;
         NSUserDefaults *store = NSUserDefaults.standardUserDefaults;
         [store setInteger:SGRPlayerBackgroundAnimated forKey:SGRKeyPlayerArtworkBackground];
-        for (NSString *key in @[SGRKeyPlayerAnimatedStill, SGRKeyPlayerAnimatedVisualiser, SGRKeyPlayerHoldNoClip, SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat,
+        for (NSString *key in @[SGRKeyPlayerAnimatedStill, SGRKeyPlayerAnimatedVisualiser, SGRKeyPlayerNoClipBackground, SGRKeyPlayerHoldNoClip, SGRKeyPlayerHideShuffle, SGRKeyPlayerHideRepeat,
                                 SGKeyHideVideoSwitch, SGRKeyPlayerHeaderGlass, SGRKeyPlayerStarAdd]) [store removeObjectForKey:key];
     }
     [NSUserDefaults.standardUserDefaults setBool:([scenario() hasPrefix:@"lyric-line"] || [scenario() isEqual:@"preview-tap"] || [scenario() isEqual:@"preview-pending"]) forKey:SGRKeyPlayerLyricLine];

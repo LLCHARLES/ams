@@ -39,6 +39,7 @@ NSNotificationName const SGNowPlayingInfoDidChangeNotification = @"spotifyglass.
 @end
 
 static BridgeState *state;
+static NSUInteger barReads;
 static NSMutableArray<id<SGPlayerStateObserver>> *observers;
 NSString *SGURIString(id uri) { return [uri isKindOfClass:NSURL.class] ? [uri absoluteString] : uri; }
 SPTPlayerState *SGPlayerState(void) { return (SPTPlayerState *)state; }
@@ -50,7 +51,15 @@ BOOL SGRedesignedUI(void) { return YES; }
 void SGRequireClasses(NSArray<NSString *> *names) {
     for (NSString *name in names) CHECK(NSClassFromString(name));
 }
-UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *key) { return nil; }
+UIView *SGRFindByIdentifier(UIView *root, NSString *identifier, const void *key) {
+    if ([identifier isEqual:@"SPTNowPlayingBar"] && [root.accessibilityIdentifier isEqual:@"bridge.bar.root"]) barReads++;
+    if ([root.accessibilityIdentifier isEqualToString:identifier]) return root;
+    for (UIView *child in root.subviews) {
+        UIView *match = SGRFindByIdentifier(child, identifier, key);
+        if (match) return match;
+    }
+    return nil;
+}
 NSString *const SGPlayerTransitionNotification = @"bridge.transition";
 NSString *const SGPlayerTransitionEndedNotification = @"bridge.transitionEnded";
 CFTimeInterval SGPlayerTransitionEnds(void) { return 0; }
@@ -101,6 +110,140 @@ static BOOL fieldIs(SGRArtworkField *field, CGFloat red, CGFloat blue) {
     CGFloat r, g, b, a;
     return [field.fieldColor getRed:&r green:&g blue:&b alpha:&a] &&
         r == red && g == 0 && b == blue && a == 1;
+}
+
+static void reportTrack(void) {
+    for (id<SGPlayerStateObserver> observer in observers.copy) [observer playerStateDidChange:SGPlayerState()];
+}
+
+static void checkArtworkResume(UIImage *red, UIImage *blue) {
+    NSString *directory = SGLocalFileCoversDirectory();
+    CHECK([NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:nil]);
+    NSString *pathA = [directory stringByAppendingPathComponent:@"resume-a.png"];
+    NSString *pathB = [directory stringByAppendingPathComponent:@"resume-b.png"];
+    CHECK([UIImagePNGRepresentation(blue) writeToFile:pathA atomically:YES]);
+    CHECK([UIImagePNGRepresentation(red) writeToFile:pathB atomically:YES]);
+    BridgeTrack *a = [BridgeTrack new], *b = [BridgeTrack new];
+    a.URI = [NSURL URLWithString:@"spotify:local:Artist:Album:A:60"];
+    b.URI = [NSURL URLWithString:@"spotify:local:Artist:Album:B:60"];
+    a.metadata = @{@"image_url": SGLocalFileCoverURL(pathA)};
+    b.metadata = @{@"image_url": SGLocalFileCoverURL(pathB)};
+
+    dispatch_semaphore_t firstRead = dispatch_semaphore_create(0);
+    dispatch_semaphore_t releaseRead = dispatch_semaphore_create(0);
+    dispatch_semaphore_t released = dispatch_semaphore_create(0);
+    __block NSUInteger reads = 0;
+    NSObject *lock = [NSObject new];
+    Method method = class_getClassMethod(UIImage.class, @selector(imageWithContentsOfFile:));
+    IMP original = method_getImplementation(method);
+    IMP replacement = imp_implementationWithBlock(^UIImage *(id owner, NSString *path) {
+        BOOL first = NO;
+        if ([path isEqual:pathA] || [path isEqual:pathB]) {
+            @synchronized (lock) { first = ++reads == 1; }
+        }
+        if (first) {
+            dispatch_semaphore_signal(firstRead);
+            CHECK(dispatch_semaphore_wait(releaseRead, dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC)) == 0);
+            dispatch_semaphore_signal(released);
+            return red;
+        }
+        return ((UIImage *(*)(id, SEL, NSString *))original)(owner, @selector(imageWithContentsOfFile:), path);
+    });
+    method_setImplementation(method, replacement);
+
+    UIImage *previous = SGRNowPlayingArtwork(NULL, NULL);
+    state.track = a;
+    reportTrack();
+    CHECK(dispatch_semaphore_wait(firstRead, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    state.track = b;
+    reportTrack();
+    state.track = a;
+    reportTrack();
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    @synchronized (lock) { CHECK(reads == 1); }
+    CHECK(SGRNowPlayingArtwork(NULL, NULL) == previous);
+
+    [center postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    NSString *uri = nil;
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    while (deadline.timeIntervalSinceNow > 0) {
+        SGRNowPlayingArtwork(&uri, NULL);
+        if ([uri isEqual:a.URI.absoluteString]) break;
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    }
+    UIImage *current = SGRNowPlayingArtwork(&uri, NULL);
+    CHECK([uri isEqual:a.URI.absoluteString] && current != previous && current != red);
+    @synchronized (lock) { CHECK(reads == 2); }
+    dispatch_semaphore_signal(releaseRead);
+    CHECK(dispatch_semaphore_wait(released, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+    [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    CHECK(SGRNowPlayingArtwork(NULL, NULL) == current);
+    method_setImplementation(method, original);
+    imp_removeBlock(replacement);
+    [NSFileManager.defaultManager removeItemAtPath:pathA error:nil];
+    [NSFileManager.defaultManager removeItemAtPath:pathB error:nil];
+    puts("PASS: inactive A -> B -> A defers cover reads, resumes once and rejects the old A");
+}
+
+static void checkBarArtworkResume(void) {
+    UIViewController *bar __attribute__((objc_precise_lifetime)) = [_TtC18NowPlaying_BarImpl27NowPlayingBarViewController new];
+    UIView *card = [UIView new], *holder = [UIView new];
+    card.accessibilityIdentifier = @"SPTNowPlayingBar";
+    holder.accessibilityIdentifier = @"Encore.ImageView";
+    UIImageView *imageView = [UIImageView new];
+    bar.view.accessibilityIdentifier = @"bridge.bar.root";
+    [bar.view addSubview:card];
+    [card addSubview:holder];
+    [holder addSubview:imageView];
+
+    BridgeTrack *a = [BridgeTrack new], *b = [BridgeTrack new];
+    a.URI = [NSURL URLWithString:@"spotify:track:barA"];
+    b.URI = [NSURL URLWithString:@"spotify:track:barB"];
+    a.metadata = b.metadata = @{};
+    state.track = a;
+    UIImage *previous = square(UIColor.yellowColor), *current = square(UIColor.greenColor);
+    imageView.image = previous;
+    [bar viewDidLayoutSubviews];
+    CHECK(SGRNowPlayingArtwork(NULL, NULL) == previous);
+    reportTrack();
+    NSNotificationCenter *center = NSNotificationCenter.defaultCenter;
+    [center postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    state.track = b;
+    reportTrack();
+    barReads = 0;
+    [center postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    // Wait for the first read while the bar still shows A, then install B without a layout or report.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    while (barReads == 0 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    CHECK(barReads > 0 && SGRNowPlayingArtwork(NULL, NULL) == previous);
+    imageView.image = current;
+    deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    while (SGRNowPlayingArtwork(NULL, NULL) != current && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    NSString *uri = nil;
+    CHECK(SGRNowPlayingArtwork(&uri, NULL) == current && [uri isEqual:b.URI.absoluteString]);
+
+    // Schedule a fresh set for B before locking. When B is still current on activation, only the
+    // four new reads should run. The URI and foreground checks alone would let the old set run too.
+    state.track = a;
+    reportTrack();
+    state.track = b;
+    reportTrack();
+    [center postNotificationName:UIApplicationWillResignActiveNotification object:nil];
+    barReads = 0;
+    [center postNotificationName:UIApplicationDidBecomeActiveNotification object:nil];
+    __block BOOL drained = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        drained = YES;
+    });
+    deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    while (!drained && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.mainRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    CHECK(drained && barReads == 4 && SGRNowPlayingArtwork(&uri, NULL) == current && [uri isEqual:b.URI.absoluteString]);
+    puts("PASS: retry reads late bar artwork without layout and only the current activation's four reads run");
 }
 
 int main(void) { @autoreleasepool {
@@ -170,6 +313,8 @@ int main(void) { @autoreleasepool {
     NSString *retainedIdentity;
     CHECK(SGRNowPlayingArtwork(NULL, &retainedIdentity) == exact);
     CHECK([retainedIdentity isEqual:exactIdentity] && fieldIs(field, 0, 1));
+    checkArtworkResume(red, blue);
+    checkBarArtworkResume();
     [NSNotificationCenter.defaultCenter removeObserver:token];
     method_setImplementation(getter, original);
     imp_removeBlock(replacement);

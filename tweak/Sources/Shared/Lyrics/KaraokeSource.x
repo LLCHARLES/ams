@@ -587,6 +587,10 @@ static void retrySourcesLater(NSString *trackID) {
     askAgainLater(trackID, YES);
 }
 
+BOOL SGKaraokeSourceRetryPaused(NSString *trackID) {
+    return requested(trackID) && (sg_sourceRetries[trackID] || sg_losses[trackID]) && !SGKaraokeLooking(trackID);
+}
+
 // Recovery releases only an exhausted source retry budget, never an ask or a backoff still in flight.
 static BOOL resumeSourceRetries(NSString *trackID) {
     if (!trackID || sg_sourceRetries[trackID].unsignedIntegerValue <= kSourceRetries) return NO;

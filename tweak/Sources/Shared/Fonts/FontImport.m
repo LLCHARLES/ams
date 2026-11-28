@@ -195,7 +195,7 @@ static void removeImportedFiles(NSArray<NSURL *> *urls) {
         CTFontManagerUnregisterFontsForURL((__bridge CFURLRef)url, kCTFontManagerScopeProcess, NULL);
         unlink(url.fileSystemRepresentation);
     }
-    for (NSString *key in @[SGKeyAppFontFiles, SGKeyAppFontName]) [store removeObjectForKey:key];
+    for (NSString *key in @[SGKeyAppFontFiles, SGKeyAppFontName, SGKeyAppFontFilesRevision]) [store removeObjectForKey:key];
 }
 
 static void resetCustomSelection(void) {
@@ -319,6 +319,8 @@ static void import(NSArray<NSURL *> *picked, dispatch_block_t done) {
         }
         [store setObject:copied forKey:SGKeyAppFontFiles];
         if (family) {
+            // This staging UUID identifies the entire installed batch, even when every filename is reused.
+            [store setObject:incoming.lastPathComponent forKey:SGKeyAppFontFilesRevision];
             [store setObject:family forKey:SGKeyAppFontName];
             registered = registerCustom();
         }
